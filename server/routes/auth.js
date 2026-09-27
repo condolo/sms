@@ -16,12 +16,18 @@ const { provisionIdentityForUser } = require('../utils/provision-identities');
 const { isIdentityCutoverEnabled } = require('../utils/identity-cutover');
 const { MODULE_REGISTRY } = require('../config/moduleRegistry');
 const { _mergeUserOverrides } = require('../middleware/rbac');
+const { issueCsrfCookie, clearCsrfCookie } = require('../utils/csrf');
 
 const router = express.Router();
 
 /* ── Auth cookie helper ──────────────────────────────────
    Sets the JWT as an HttpOnly cookie so JS (and XSS) cannot
-   read it. Uses SameSite=Strict to block CSRF.
+   read it. Uses SameSite=Strict to reduce CSRF exposure — NOT to fully
+   block it (see utils/csrf.js: a sibling *.msingi.io subdomain is
+   same-site, so SameSite=Strict alone doesn't block a forged request
+   from one). issueCsrfCookie() sets the actual CSRF defense — a second,
+   readable-by-JS cookie every state-changing request must also echo back
+   in a header, checked in middleware/auth.js.
    maxAge mirrors absoluteExpiry when available (8 h default). */
 function _setAuthCookie(res, token, absoluteExpiry) {
   const maxAge = absoluteExpiry
@@ -33,6 +39,7 @@ function _setAuthCookie(res, token, absoluteExpiry) {
     sameSite: 'strict',
     maxAge,
   });
+  issueCsrfCookie(res, maxAge);
 }
 
 /* ── OAuth exchange-code store ───────────────────────────
@@ -847,10 +854,12 @@ router.post('/logout', authMiddleware, async (req, res) => {
     const { sessionId } = req.jwtUser;
     await SessionService.terminateCurrentSession(sessionId);
     res.clearCookie('token', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict' });
+    clearCsrfCookie(res);
     return res.json({ success: true });
   } catch (err) {
     console.error('[auth/logout]', err);
     res.clearCookie('token', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict' });
+    clearCsrfCookie(res);
     return res.json({ success: true }); // client clears session regardless
   }
 });

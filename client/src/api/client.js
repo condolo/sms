@@ -32,10 +32,25 @@ function isSessionActive() {
   }
 }
 
+// CSRF double-submit (security review, 2026-09) — csrf_token is issued
+// alongside the school-tenant `token` cookie at login (server/routes/
+// auth.js's _setAuthCookie), deliberately NOT httpOnly so this can read
+// it back and echo it in a header on every state-changing request. See
+// server/utils/csrf.js for why SameSite=Strict alone isn't sufficient
+// (a sibling *.msingi.io subdomain is same-site, not cross-site).
+function _csrfToken() {
+  const m = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
 // ─── Core fetch ───────────────────────────────────────────────────────────────
 
 async function _req(method, path, body = null, params = null, opts = {}) {
   const headers = { 'Content-Type': 'application/json' };
+  if (method !== 'GET') {
+    const csrf = _csrfToken();
+    if (csrf) headers['X-CSRF-Token'] = csrf;
+  }
 
   // Auto-send the school slug on every request so the server can resolve
   // the tenant without the user typing it. Detected from subdomain first,
@@ -141,6 +156,8 @@ async function _postFile(path, file, contentType, params) {
   const { slug } = detectSchool();
   const headers = { 'Content-Type': contentType };
   if (slug) headers['X-School-Slug'] = slug;
+  const csrf = _csrfToken();
+  if (csrf) headers['X-CSRF-Token'] = csrf;
   const qs = params
     ? new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))).toString()
     : '';

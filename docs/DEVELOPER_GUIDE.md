@@ -5057,3 +5057,40 @@ Fixed two pre-existing tests this change legitimately altered the behavior of, n
 - `server/routes/settings.js` — `_canManagePermissions`, `_actorEffectivePerms`, `_capToActorCeiling`, wired into `PUT /school` and `POST /custom-roles`
 - `server/__tests__/routes/settings-permission-escalation.test.js` (new)
 - `server/__tests__/routes/settings-per-user-override-integration.test.js`, `settings-audit.test.js` — fixture/mock fixes
+
+## 74. CORS + CSRF Compounding — Consolidated Security Review, Items #6 and #9 (v5.134.0)
+
+Directly requested: "Fix the CORS and CSRF compounding next." The review's own synthesis (§72): the `*.msingi.io` wildcard CORS rule and "SameSite=Strict blocks CSRF" are not independent risks — SameSite's own "site" concept is the registrable domain (`msingi.io`), not the subdomain, so a compromised or attacker-registered sibling subdomain is same-site, not cross-site, and its requests carry the real auth cookie exactly like a legitimate school portal's would. Investigated first, then fixed: a perfect CORS allowlist does NOT close this — CORS only controls whether JS can *read* a cross-origin response, never whether a browser *sends* a request with cookies attached (a plain HTML form POST isn't subject to CORS at all). The two needed separate fixes.
+
+### CORS (`server/index.js` → extracted to `server/utils/corsOrigin.js`)
+Two real gaps, both confirmed against the actual code before fixing:
+1. **Fail-open bug**: the old check was `process.env.NODE_ENV !== 'production'` — any value other than the exact string `'production'` (unset, `'staging'`, wrong-case `'Production'`) disabled the entire origin allowlist. Now only `'development'`/`'test'` relax it; everything else, including a misconfigured env var, fails closed.
+2. **Wildcard hardening**: `*.msingi.io` only ever proved an origin *looked like* a school portal (regex shape match), never that it *was* one — the review's own "review subdomain ownership... for abandoned or user-controlled subdomains." Backed now by a real, 5-minute-cached set of this platform's actual school slugs (`_model('schools').find().select('slug')`). Deliberately fails OPEN (shape-match only) while the cache has *never* successfully loaded — a DB hiccup must never lock every real school out at once — but once warmed, a shape-correct-but-not-real subdomain (`ghost-school.msingi.io`) is rejected. A *stale* (past-TTL) cache still enforces against its last-known data rather than reverting to shape-only, while a background refresh runs for the next request.
+
+### CSRF (new `server/utils/csrf.js`)
+Classic double-submit cookie, chosen specifically because it survives the sibling-subdomain threat model: a second cookie (`csrf_token`), deliberately **not** httpOnly (must be readable by legitimate same-origin JS), issued alongside every real login cookie. Every state-changing request must repeat that value in an `X-CSRF-Token` header. This works against the exact attack described because the auth cookie and this app's cookies are all **host-only** (no explicit `Domain` attribute is ever set) — a page on a sibling subdomain can cause the cookie to be *sent* (same-site, so the browser attaches it) but cannot *read* its value via `document.cookie` (host-only cookies are invisible outside their exact issuing host) to also produce the matching header. A plain HTML form — the classic CSRF vector — can't set a custom header at all, so it's blocked regardless.
+
+Wired into both session types at their single real choke points:
+- `middleware/auth.js`'s `authMiddleware` — checks `csrf_token` for school-tenant sessions.
+- `middleware/auth.js`'s `platformSession` — checks a **separate** `platform_csrf_token` cookie for platform-operator sessions (kept distinct from the school-tenant one, even though double-submit itself wouldn't require it) — platform actions (school deletion, impersonation, entitlement changes) are exactly the high-value targets the review names for this defense.
+- Cookie issuance: `routes/auth.js`'s `_setAuthCookie` (the one function every login path — password, OTP, force-change, OAuth exchange, org-login — already funneled through, confirmed by grep before touching anything) and `routes/platform.js`'s two `platform_token` login sites plus its impersonation cookie site (which sets the *school-tenant* `token` cookie directly, so it needs the school-tenant `csrf_token`, not the platform one). Logout routes (`auth.js`, `platform.js`) clear the matching CSRF cookie alongside the session cookie.
+- Client wiring: `client/src/api/client.js`'s `_req`/`_postFile` (the React SPA's only fetch choke points) and `platform.html`'s `api`/`apiFetch` (the platform console's own two wrappers — a separate static page, not part of the React bundle) all read the relevant cookie via `document.cookie` and attach `X-CSRF-Token` automatically for any non-GET request.
+
+### Rollout without breaking live sessions
+A request whose CSRF cookie is **entirely absent** passes through unchecked — the same "missing claim passes through" convention `authMiddleware` already used for `tv`/`itv`/`absoluteExpiry`. An existing session issued before this shipped (or a non-browser Bearer-token caller, which never gets this cookie) isn't held to a check it never had the chance to satisfy; every login from here on gets the cookie, so coverage completes within one absolute-session-lifetime (8h for school sessions, 2h for platform) of deploying this — no forced mass logout. Once the cookie *is* present, a missing or mismatched header is rejected outright (403, `CSRF_TOKEN_MISMATCH`) — that combination only happens for a forged request or a client bug, never an old session.
+
+### A pre-existing, unrelated finding surfaced while verifying
+Running `scripts/verify-rbac-coverage.js` to sanity-check this work turned up a real regression already on `main` before any of these changes — `timetable.js` is missing `rbac()` on 17 routes (coverage 100% → 94.51%), blocking that CI gate. Confirmed via `git stash` that this predates this work entirely (identical failure on a clean checkout) — recorded here, not fixed, since it's unrelated to CORS/CSRF and touching `timetable.js`'s authorization needs its own investigation, not a drive-by fix.
+
+### Verified
+34 new tests (`csrf.test.js`, `corsOrigin.test.js`, `middleware/csrf-protection.test.js`) covering both the pure double-submit logic and the real `authMiddleware`/`platformSession` integration with real `sign()`/`jwt.verify()`. `scripts/security-scan.js` and `scripts/verify-tenant-coverage.js` both pass unchanged. Full suite: 2559/2559 passing, zero regressions.
+
+### Files
+- `server/utils/csrf.js`, `server/utils/corsOrigin.js` (new)
+- `server/middleware/auth.js` — CSRF check in `authMiddleware` and `platformSession`
+- `server/routes/auth.js` — `_setAuthCookie` issues/clears the CSRF cookie
+- `server/routes/platform.js` — both `platform_token` login sites, the impersonation cookie site, logout
+- `server/index.js` — CORS origin check now delegates to `utils/corsOrigin.js`
+- `client/src/api/client.js` — `_csrfToken()`, wired into `_req`/`_postFile`
+- `platform.html` — `_platformCsrfToken()`, wired into `api`/`apiFetch`
+- `server/__tests__/csrf.test.js`, `corsOrigin.test.js`, `middleware/csrf-protection.test.js` (new)

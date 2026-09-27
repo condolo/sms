@@ -5,6 +5,7 @@ const { getTokenVersion, getIdentityTokenVersion } = require('../utils/token-ver
 const { _model }           = require('../utils/model');
 const SessionService       = require('../services/sessionService');
 const AuditService         = require('../services/audit');
+const { csrfOk, PLATFORM_CSRF_COOKIE_NAME } = require('../utils/csrf');
 
 /* Standard error envelope — matches { success, error: { code, message } } used everywhere */
 function _unauth(res, code, message) {
@@ -37,6 +38,13 @@ async function authMiddleware(req, res, next) {
 
     const payload = verify(token);
     if (!payload) return _unauth(res, 'UNAUTHENTICATED', 'Invalid or expired token');
+
+    // CSRF double-submit check (security review, 2026-09) — see
+    // utils/csrf.js's own header comment for why SameSite=Strict alone
+    // isn't sufficient given the *.msingi.io subdomain CORS trust.
+    if (!csrfOk(req)) {
+      return res.status(403).json({ success: false, error: { code: 'CSRF_TOKEN_MISMATCH', message: 'Request could not be verified. Please refresh and try again.' } });
+    }
 
     // Absolute session lifetime — issued at login, never extended by pings.
     // Tokens without absoluteExpiry (pre-v4.53) pass through and rely solely on JWT exp.
@@ -149,6 +157,13 @@ function platformSession(req, res, next) {
   }
   if (!token) {
     return res.status(401).json({ success: false, error: { code: 'PLATFORM_UNAUTHENTICATED', message: 'Platform session required.' } });
+  }
+  // CSRF double-submit check (security review, 2026-09) — same rationale
+  // as authMiddleware's; platform-admin actions (school deletion,
+  // impersonation, entitlement changes) are exactly the high-value
+  // targets the review calls out by name for this defense.
+  if (!csrfOk(req, PLATFORM_CSRF_COOKIE_NAME)) {
+    return res.status(403).json({ success: false, error: { code: 'CSRF_TOKEN_MISMATCH', message: 'Request could not be verified. Please refresh and try again.' } });
   }
   try {
     const payload = jwt.verify(token, secret);

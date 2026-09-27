@@ -6,6 +6,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.134.0] — 2026-09-27 — fix(security): CORS + CSRF compounding
+
+Closes review items #6 and #9, which the review itself scored as compounding: the `*.msingi.io` wildcard CORS rule and "SameSite=Strict blocks CSRF" aren't independent — SameSite's own "site" is the registrable domain, not the subdomain, so a compromised or attacker-registered sibling subdomain is same-site and its requests carry the real auth cookie like a legitimate school portal's would. A perfect CORS allowlist doesn't close this on its own (CORS only gates whether JS can *read* a response, not whether a browser *sends* a request), so this needed two separate fixes.
+
+CORS (`server/utils/corsOrigin.js`, new): fixed a fail-open bug where any `NODE_ENV` value other than the exact string `'production'` disabled the entire origin allowlist; and backed the `*.msingi.io` wildcard with a real, cached set of this platform's actual school slugs, so a shape-correct-but-abandoned/attacker-registered subdomain is now rejected once the cache has loaded (fails open only on a cold cache or DB hiccup, never locking every real school out at once).
+
+CSRF (`server/utils/csrf.js`, new): classic double-submit cookie, chosen because it survives the sibling-subdomain threat model specifically — every auth cookie in this app is host-only (no `Domain` attribute), so a sibling subdomain can cause it to be sent but can't read its value to also produce a matching `X-CSRF-Token` header, and a plain HTML form (the classic CSRF vector) can't set custom headers at all. Wired into both session types (school-tenant and platform-operator, separate cookies) at their real login/logout choke points, both API clients (the React SPA and the standalone platform console), with a rollout that never force-logs-out an existing session: a request with no CSRF cookie at all passes through unchecked, same convention already used for other optional token claims.
+
+34 new tests. Full suite: 2559/2559 passing, zero regressions. Also recorded (not fixed, unrelated): `scripts/verify-rbac-coverage.js` found a pre-existing gap on `main` — `timetable.js` is missing `rbac()` on 17 routes — confirmed via `git stash` to predate this work.
+
+Full details: [Developer Guide §74](docs/DEVELOPER_GUIDE.md#74-cors--csrf-compounding--consolidated-security-review-items-6-and-9-v51340).
+
+---
+
 ## [v5.133.0] — 2026-09-27 — fix(security): permission self-escalation guard
 
 Closes the highest-ranked open item from the consolidated 14-category security review: role and per-user permission writes (`PUT /api/settings/school`, `POST /api/settings/custom-roles`) were gated by the same generic `settings:update` as trivial fields, with no check that the granting admin's own permissions covered what they were handing out, and `POST /custom-roles` copied any named `baseRole`'s permissions as-is — an admin could name `baseRole:'admin'` and get a full copy.

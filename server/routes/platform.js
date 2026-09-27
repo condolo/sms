@@ -16,6 +16,7 @@ const { revokeUserTokens, revokeIdentityTokens } = require('../utils/token-versi
 const AuditService      = require('../services/audit');
 const SessionService    = require('../services/sessionService');
 const { sign } = require('../utils/jwt');
+const { issueCsrfCookie, clearCsrfCookie, PLATFORM_CSRF_COOKIE_NAME } = require('../utils/csrf');
 const email    = require('../utils/email');
 const { dispatchNotification } = require('../utils/notify-dispatch');
 const { tenantModel } = require('../utils/tenant-model');
@@ -146,6 +147,7 @@ router.post('/auth/login', _loginLimiter, async (req, res) => {
 
     const token = jwt.sign({ sub: 'platform-admin' }, secret, { expiresIn: '2h' });
     res.cookie('platform_token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 2 * 60 * 60 * 1000 });
+    issueCsrfCookie(res, 2 * 60 * 60 * 1000, PLATFORM_CSRF_COOKIE_NAME);
     AuditService.log({ action: 'platform.login.success', actor: { userId: 'platform', role: 'platform', email: null }, schoolId: null, target: { type: 'platform', id: null, label: 'platform-admin' }, details: { authPath: 'legacy-env-credential' }, req });
     return res.json({ success: true });
   }
@@ -161,6 +163,7 @@ router.post('/auth/login', _loginLimiter, async (req, res) => {
 
   const token = jwt.sign({ sub: 'platform-operator', operatorId: operator.id, name: operator.name, email: operator.email, tier: operator.tier }, secret, { expiresIn: '2h' });
   res.cookie('platform_token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 2 * 60 * 60 * 1000 });
+  issueCsrfCookie(res, 2 * 60 * 60 * 1000, PLATFORM_CSRF_COOKIE_NAME);
   await Operators.updateOne({ id: operator.id }, { $set: { lastLoginAt: new Date().toISOString() } });
 
   AuditService.log({ action: 'platform.login.success', actor: { userId: operator.id, role: `platform_${operator.tier}`, email: operator.email }, schoolId: null, target: { type: 'platform', id: null, label: 'platform-admin' }, details: { authPath: 'operator', tier: operator.tier }, req });
@@ -170,6 +173,7 @@ router.post('/auth/login', _loginLimiter, async (req, res) => {
 /* POST /api/platform/auth/logout */
 router.post('/auth/logout', (req, res) => {
   res.clearCookie('platform_token', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict' });
+  clearCsrfCookie(res, PLATFORM_CSRF_COOKIE_NAME);
   return res.json({ success: true });
 });
 
@@ -1442,6 +1446,10 @@ router.post('/schools/:id/impersonate', async (req, res) => {
       sameSite: 'strict',
       maxAge:   IMPERSONATION_TIMEOUT_MS,
     });
+    // Same school-tenant CSRF cookie a normal login issues (this sets the
+    // 'token' cookie authMiddleware checks, so it needs the matching
+    // csrf_token too — see utils/csrf.js).
+    issueCsrfCookie(res, IMPERSONATION_TIMEOUT_MS);
 
     /* Merge schoolName into the user object so the React SPA sidebar can display it.
        Also return the full school doc — mirrors /api/auth/login's `school: req.school`

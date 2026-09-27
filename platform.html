@@ -237,12 +237,25 @@ function togglePasswordVis(btn) {
 }
 
 /* ── API helpers ────────────────────────────────────────── */
+// CSRF double-submit (security review, 2026-09) — platform_csrf_token is
+// issued alongside platform_token at login (server/routes/platform.js),
+// deliberately NOT httpOnly so this can read it back and echo it in a
+// header on every state-changing call. See server/utils/csrf.js for why
+// SameSite=Strict alone isn't enough here.
+function _platformCsrfToken() {
+  const m = document.cookie.match(/(?:^|;\s*)platform_csrf_token=([^;]+)/);
+  return m ? decodeURIComponent(m[1]) : null;
+}
 async function api(method, path, body) {
   const opts = {
     method,
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
   };
+  if (method && method.toUpperCase() !== 'GET') {
+    const csrf = _platformCsrfToken();
+    if (csrf) opts.headers['X-CSRF-Token'] = csrf;
+  }
   if (body) opts.body = JSON.stringify(body);
   const res  = await fetch('/api/platform' + path, opts);
   const data = await res.json().catch(() => ({}));
@@ -280,6 +293,11 @@ function _apiErrorMessage(err) {
 async function apiFetch(url, opts = {}) {
   opts.credentials = 'include';
   opts.headers     = opts.headers || {};
+  const method = (opts.method || 'GET').toUpperCase();
+  if (method !== 'GET') {
+    const csrf = _platformCsrfToken();
+    if (csrf) opts.headers['X-CSRF-Token'] = csrf;
+  }
   return fetch(url, opts);
 }
 

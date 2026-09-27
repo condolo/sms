@@ -113,32 +113,19 @@ try {
   console.warn('[Security] helmet not installed — run: npm install helmet');
 }
 
-/* ── CORS ───────────────────────────────────────────────────── */
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '').split(',').map(o => o.trim()).filter(Boolean);
-ALLOWED_ORIGINS.push(
-  'https://school-management-ecosystem.onrender.com',
-  'https://msingi.io',
-  'https://www.msingi.io',
-  'http://localhost:3005',
-  'http://localhost:3000',
-  'http://127.0.0.1:3005'
-);
-
-// Regex: allow any *.msingi.io subdomain (school portals live here)
-const MSINGI_SUBDOMAIN_RE = /^https:\/\/[a-z0-9][a-z0-9-]*\.msingi\.io$/;
+/* ── CORS (security review, 2026-09) ─────────────────────────
+   Origin validation itself lives in utils/corsOrigin.js (extracted so
+   it's independently testable) — see that file's header for the two
+   real gaps this closes (the NODE_ENV fail-open bug, and the *.msingi.io
+   wildcard now being backed by a real school-slug check) and why this is
+   a separate defense from CSRF (utils/csrf.js), not a substitute for it. */
+const { isAllowedOrigin } = require('./utils/corsOrigin');
 
 app.use(cors({
   origin: (origin, cb) => {
     // Allow requests with no origin (mobile apps, Postman, server-to-server)
     if (!origin) return cb(null, true);
-    // Allow explicit list OR any *.msingi.io subdomain OR non-production
-    if (
-      ALLOWED_ORIGINS.includes(origin) ||
-      MSINGI_SUBDOMAIN_RE.test(origin) ||
-      process.env.NODE_ENV !== 'production'
-    ) {
-      return cb(null, true);
-    }
+    if (isAllowedOrigin(origin)) return cb(null, true);
     console.warn(`[CORS] Blocked origin: ${origin}`);
     cb(new Error('Not allowed by CORS'));
   },
