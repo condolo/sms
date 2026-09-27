@@ -19,6 +19,7 @@ import {
 import {
   exams as examsApi,
   classes as classesApi,
+  streams as streamsApi,
   academicConfig as academicConfigApi,
   subjects as subjectsApi,
   assessment as assessmentApi,
@@ -503,6 +504,7 @@ function MarkbookTab({ years }) {
   const [yearId,     setYearId]     = useState('');
   const [termNumber, setTermNumber] = useState('');
   const [classId,    setClassId]    = useState('');
+  const [streamId,   setStreamId]   = useState('');
   const [subjectId,  setSubjectId]  = useState('');
   const [scheduleId, setScheduleId] = useState('');
   const [scores,     setScores]     = useState({});
@@ -570,17 +572,43 @@ function MarkbookTab({ years }) {
     enabled:  !isTeacher,
   });
 
+  /* ── Streams: raised directly — "if lets say Year 3 which have 3
+     streams taught by different teachers, have been assigned Mathematics,
+     when updating results, the teacher sees only his stream, if a teacher
+     is teaching more than one stream, the teacher selects the stream one
+     by one." A stream-specific teaching assignment (teaching-
+     assignments.js) never contributes to a teacher's whole-class scope —
+     only classesApi.students'/streamsApi.students' own server-side
+     narrowing already correctly scopes the roster to exactly the
+     assignment's stream(s) (classes.js's own attendanceScope-independent
+     fallback). What was missing is purely the picker: with two or more
+     assigned streams in the same class, the old code fetched them ALL
+     merged in one roster instead of forcing one stream at a time — the
+     exact same "class vs stream" distinction AttendancePage.jsx already
+     draws for the daily register. Derived from `assignments` (already
+     fetched, already self-scoped server-side) — no new endpoint needed. */
+  const myStreamsForClass = useMemo(() => {
+    if (!isTeacher || !classId) return [];
+    const seen = new Set();
+    return assignments
+      .filter(a => a.classId === classId && a.streamId)
+      .map(a => ({ id: a.streamId, name: a.streamName }))
+      .filter(s => s.id && !seen.has(s.id) && seen.add(s.id));
+  }, [isTeacher, assignments, classId]);
+  const needsStreamSelection = myStreamsForClass.length > 1;
+
   const subjectsList = useMemo(() => {
     if (isTeacher) {
       if (!classId) return [];
+      if (needsStreamSelection && !streamId) return [];
       const seen = new Set();
       return assignments
-        .filter(a => a.classId === classId)
+        .filter(a => a.classId === classId && (!needsStreamSelection || a.streamId === streamId))
         .map(a => ({ id: a.subjectId, name: a.subjectName }))
         .filter(s => s.id && !seen.has(s.id) && seen.add(s.id));
     }
     return allSubjectsData?.data ?? [];
-  }, [isTeacher, assignments, classId, allSubjectsData]);
+  }, [isTeacher, assignments, classId, needsStreamSelection, streamId, allSubjectsData]);
 
   /* ── Assessment schedule ── */
   const { data: scheduleData } = useQuery({
@@ -620,16 +648,23 @@ function MarkbookTab({ years }) {
     }));
   }, [selectedEntry, customTypes]);
 
-  /* ── Students ── */
+  /* ── Students — per-stream once this class has 2+ of the teacher's own
+     assigned streams, same reasoning as the picker above; classesApi's own
+     fallback for a single (or no) stream assignment already narrows
+     correctly server-side, so no stream flag is needed there. ── */
   const { data: studentsData, isLoading: studentsLoading } = useQuery({
-    queryKey: ['classes', classId, 'students'],
-    queryFn:  () => classesApi.students(classId, { limit: 500, status: 'active' }),
-    enabled:  !!classId,
+    queryKey: needsStreamSelection
+      ? ['streams', streamId, 'students']
+      : ['classes', classId, 'students'],
+    queryFn: () => needsStreamSelection
+      ? streamsApi.students(streamId, { limit: 500, status: 'active' })
+      : classesApi.students(classId, { limit: 500, status: 'active' }),
+    enabled:  needsStreamSelection ? !!streamId : !!classId,
     staleTime: 5 * 60_000,
   });
   const students = studentsData?.data ?? [];
 
-  const canQuery = !!(classId && subjectId && selectedEntry);
+  const canQuery = !!(classId && (!needsStreamSelection || streamId) && subjectId && selectedEntry);
 
   /* ── Existing marks ──
      academicYearId included in both the fetch and the query key — Academic
@@ -677,7 +712,7 @@ function MarkbookTab({ years }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [existingData]);
 
-  useEffect(() => { setScores({}); setVersions({}); setConflicts([]); setDirty(false); }, [classId, subjectId, scheduleId]);
+  useEffect(() => { setScores({}); setVersions({}); setConflicts([]); setDirty(false); }, [classId, streamId, subjectId, scheduleId]);
 
   const setCell = useCallback((studentId, colId, value) => {
     setScores(prev => ({ ...prev, [studentId]: { ...(prev[studentId] ?? {}), [colId]: value } }));
@@ -879,13 +914,31 @@ function MarkbookTab({ years }) {
             </label>
             <select
               value={classId}
-              onChange={e => { setClassId(e.target.value); setSubjectId(''); }}
+              onChange={e => { setClassId(e.target.value); setStreamId(''); setSubjectId(''); }}
               className={selCls}
             >
               <option value="">Select class…</option>
               {classesList.map(c => <option key={c.id ?? c._id} value={c.id ?? c._id}>{c.name}</option>)}
             </select>
           </div>
+
+          {/* Stream — only when this class has 2+ of the teacher's own
+             assigned streams (see myStreamsForClass's own comment above);
+             a single assigned stream, or a whole-class grant, needs no
+             picker — the roster fetch already narrows correctly either way. */}
+          {needsStreamSelection && (
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1.5">Stream</label>
+              <select
+                value={streamId}
+                onChange={e => { setStreamId(e.target.value); setSubjectId(''); }}
+                className={selCls}
+              >
+                <option value="">Select stream…</option>
+                {myStreamsForClass.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+          )}
         </div>
 
         {/* Row 2: Subject · Assessment */}
@@ -897,7 +950,7 @@ function MarkbookTab({ years }) {
             <select
               value={subjectId}
               onChange={e => setSubjectId(e.target.value)}
-              disabled={!classId}
+              disabled={!classId || (needsStreamSelection && !streamId)}
               className={`${selCls} disabled:opacity-50`}
             >
               <option value="">Select subject…</option>
@@ -1388,6 +1441,7 @@ function ResultsSlideOver({ exam, onClose, onChanged }) {
   const role = useAuthStore(s => s.session?.user?.role ?? '');
   const can  = useAuthStore(s => s.can);
   const isAdmin = ['admin', 'superadmin'].includes(role);
+  const isTeacher = role === 'teacher';
   // Exams Officer has full exams:RCUD (server/utils/repairPermissions.js) and
   // can now drive the exam status lifecycle just like admin — EXCEPT lock/
   // unlock, which stay deliberately more restrictive (see below): locking
@@ -1407,10 +1461,42 @@ function ResultsSlideOver({ exam, onClose, onChanged }) {
 
   const readOnly = ['locked', 'published', 'archived'].includes(exam.status);
 
+  /* ── Stream picker — exams are shared class-wide (exams.js's own
+     _examClassScope comment: "there is only one exam for the class"), so
+     entering RESULTS for a teacher assigned to 2+ streams of this exam's
+     subject/class is where the per-stream boundary actually needs to be
+     drawn — same reasoning and same derivation as MarkbookTab's own
+     myStreamsForClass, just scoped to this one exam's class+subject
+     instead of a live class/subject picker. A teacher assigned to exactly
+     one stream (or a whole-class grant) needs no picker — classesApi.
+     students' own server-side narrowing already scopes correctly either
+     way. */
+  const { data: taData } = useQuery({
+    queryKey: ['teaching-assignments', 'mine'],
+    queryFn:  () => taApi.list(),
+    staleTime: 10 * 60_000,
+    enabled:  isTeacher,
+  });
+  const myAssignments = taData?.data ?? [];
+  const myStreamsForExam = useMemo(() => {
+    if (!isTeacher) return [];
+    const seen = new Set();
+    return myAssignments
+      .filter(a => a.classId === exam.classId && a.subjectId === exam.subjectId && a.streamId)
+      .map(a => ({ id: a.streamId, name: a.streamName }))
+      .filter(s => s.id && !seen.has(s.id) && seen.add(s.id));
+  }, [isTeacher, myAssignments, exam.classId, exam.subjectId]);
+  const needsStreamSelection = myStreamsForExam.length > 1;
+  const [streamId, setStreamId] = useState('');
+
   const { data: studentsData, isLoading: loadingStudents } = useQuery({
-    queryKey: ['classes', exam.classId, 'students'],
-    queryFn:  () => classesApi.students(exam.classId),
-    enabled:  !!exam.classId,
+    queryKey: needsStreamSelection
+      ? ['streams', streamId, 'students']
+      : ['classes', exam.classId, 'students'],
+    queryFn: () => needsStreamSelection
+      ? streamsApi.students(streamId, { limit: 500 })
+      : classesApi.students(exam.classId),
+    enabled:  needsStreamSelection ? !!streamId : !!exam.classId,
     staleTime: 5 * 60_000,
   });
   const students = studentsData?.data ?? [];
@@ -1599,9 +1685,28 @@ function ResultsSlideOver({ exam, onClose, onChanged }) {
           </div>
         )}
 
+        {/* Stream picker — this class has 2+ of the teacher's own assigned
+           streams for this exam's subject; enter results one stream at a
+           time (see myStreamsForExam's own comment above). */}
+        {needsStreamSelection && (
+          <div className="mx-6 mt-3 shrink-0">
+            <label className="block text-xs font-medium text-slate-600 mb-1.5">Stream</label>
+            <select
+              value={streamId}
+              onChange={e => setStreamId(e.target.value)}
+              className="w-full text-sm px-3 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400"
+            >
+              <option value="">Select stream…</option>
+              {myStreamsForExam.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </div>
+        )}
+
         {/* Results grid */}
         <div className="flex-1 overflow-y-auto px-6 py-4">
-          {loadingStudents || loadingResults ? (
+          {needsStreamSelection && !streamId ? (
+            <p className="text-sm text-slate-400 text-center py-8">Select a stream above — you teach {myStreamsForExam.length} streams of this class.</p>
+          ) : loadingStudents || loadingResults ? (
             <div className="space-y-2">{[...Array(6)].map((_, i) => <div key={i} className="h-10 rounded-lg bg-slate-100 animate-pulse" />)}</div>
           ) : students.length === 0 ? (
             <p className="text-sm text-slate-400 text-center py-8">No students found in this class.</p>
