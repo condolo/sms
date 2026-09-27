@@ -34,9 +34,16 @@ const { rbac, hasExplicitSubGrant } = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
-const { ok, created, paginate, parsePagination, E } = require('../utils/response');
+const { ok, created, paginate, parsePagination, E, fail } = require('../utils/response');
 const { resolveAcademicPeriod } = require('../utils/academic-period');
 const { resolveTeacher } = require('../utils/resolveTeacher');
+const AuditService = require('../services/audit');
+const { extractDocxRows, extractLessonBlocks } = require('../utils/lesson-plan-docx-parser');
+const { extractCsvLessonBlocks } = require('../utils/lesson-plan-csv-parser');
+const {
+  getTopicAndSubtopic, resolveLessonDate, matchByName,
+  resolveStreamFromAssignments, computeContentHash,
+} = require('../utils/lesson-plan-import-resolver');
 
 const router = express.Router();
 const PLAN   = planGate('lessons');
@@ -1462,6 +1469,353 @@ router.get('/pending-teachers', authMiddleware, PLAN, MODGATE, async (req, res) 
 
     return ok(res, results.filter(t => t.hasPending));
   } catch (err) { console.error('[lessons/pending-teachers GET]', err); return E.serverError(res); }
+});
+
+/* ═══════════════════════════════════════════════════════════════
+   LESSON PLAN IMPORT  (.docx / .csv, 2026-09)
+
+   Two-step, explicit-commit only — PREVIEW never writes a lesson_plans
+   document; it resolves entities and classifies every row so the
+   operator can review before anything is created. Gated by its own
+   lessons__import permission (hasExplicitSubGrant, no coarse lessons:
+   create fallback) — bulk-creating many plans from a document is a
+   materially different, higher-blast-radius action than authoring one
+   through the form, same reasoning as lessons__template.
+
+   Teacher/class/subject/stream are all explicit pre-selection (query
+   params referencing real records this teacher is actually assigned to)
+   — never inferred from document text. Topic/Subtopic ARE free text on
+   the created plan (topicId/subtopicId are left unset for imported
+   plans) — approved decision: imports are not blocked on a pre-existing
+   syllabus_topics entry, and the existing manual-entry topic picker is
+   untouched (POST /plans's required-topicId behavior is unchanged).
+
+   Idempotency: see computeContentHash in utils/lesson-plan-import-
+   resolver.js for why date alone is NOT the identity key (double
+   periods are real, confirmed directly by the user) — identity is
+   (teacherId, classId, subjectId, streamId, date) + content hash. Same
+   identity + same hash → duplicate (skipped, safe to re-run). Same
+   identity + different hash → conflict (skipped, surfaced for a human
+   decision — never silently overwritten, never silently duplicated).
+   ═══════════════════════════════════════════════════════════════ */
+
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const importDocxBody = express.raw({ type: DOCX_MIME, limit: '10mb' });
+const importCsvBody  = express.text({ type: 'text/csv', limit: '5mb' });
+
+async function _hasBulkImportGrant(req) {
+  const effectiveRoles = new Set([req.jwtUser?.role, ...(req.jwtUser?.roles ?? [])]);
+  if ([...effectiveRoles].some(r => TEMPLATE_FLOOR.has(r))) return true;
+  return hasExplicitSubGrant(req, 'lessons', 'import', 'create');
+}
+
+// Real teaching_assignments rows for (teacherId, classId, subjectId) — the
+// only legitimate source of which stream(s) an import may target. Whole-
+// class (no stream split) assignments come back with streamId undefined.
+async function _importAssignments(schoolId, teacherId, classId, subjectId) {
+  return tenantModel('teaching_assignments', { schoolId })
+    .find({ schoolId, teacherId, classId, subjectId })
+    .select('classId subjectId streamId streamName')
+    .lean();
+}
+
+/* Resolves which stream(s) this import targets. Returns
+   { streamTargets: [{streamId, streamName}], error }. Never guesses:
+   explicit streamIds are validated against real assignments; with none
+   given, auto-resolves ONLY the single-stream and whole-class cases —
+   anything ambiguous is an error naming the real choices, per "no stream
+   is assumed" (multi-stream requires the operator to say so explicitly). */
+async function _resolveStreamTargets(assignments, streamIdsParam) {
+  if (streamIdsParam) {
+    const requested = streamIdsParam.split(',').map(s => s.trim()).filter(Boolean);
+    const targets = [];
+    const invalid = [];
+    for (const sid of requested) {
+      const match = assignments.find(a => a.streamId === sid);
+      if (match) targets.push({ streamId: match.streamId, streamName: match.streamName });
+      else invalid.push(sid);
+    }
+    if (invalid.length) return { error: `Not a real stream you teach for this class+subject: ${invalid.join(', ')}` };
+    return { streamTargets: targets };
+  }
+
+  const withStream = assignments.filter(a => a.streamId);
+  const wholeClass = assignments.find(a => !a.streamId);
+  if (withStream.length === 0 && wholeClass) return { streamTargets: [{ streamId: null, streamName: null }] };
+  if (withStream.length === 1) return { streamTargets: [{ streamId: withStream[0].streamId, streamName: withStream[0].streamName }] };
+  if (withStream.length > 1) {
+    return {
+      error: 'You teach more than one stream of this class+subject — specify which stream(s) this document is for.',
+      availableStreams: withStream.map(a => ({ streamId: a.streamId, streamName: a.streamName })),
+    };
+  }
+  return { error: 'No teaching assignment found for this class+subject.' };
+}
+
+async function _resolveImportTerm(schoolId, academicYearId, termId) {
+  const year = await tenantModel('academic_years', { schoolId }).findOne({ schoolId, id: academicYearId }).lean();
+  if (!year) return { error: `academicYearId "${academicYearId}" does not match any academic year for this school.` };
+  const term = (year.terms || []).find(t => t.id === termId);
+  if (!term) return { error: `termId "${termId}" does not match any term in academic year "${year.name}".` };
+  if (!term.startDate || !term.endDate) return { error: `Term "${term.name || termId}" has no start/end date configured — set this under Settings → Academic Config first.` };
+  return { term, academicYear: year };
+}
+
+/* Builds one candidate row per (parsed block × target stream) — never
+   auto-fans a single lesson across streams unless the operator explicitly
+   selected more than one, matching "no silently copying to another
+   stream" (multi-stream is an explicit choice, not an assumption). */
+function _buildImportRows(blocks, streamTargets, { schoolId, teacherId, classId, subjectId, term }) {
+  const rows = [];
+  blocks.forEach((block, blockIdx) => {
+    const { topicTitle, subtopicTitle } = getTopicAndSubtopic(block);
+    const dateResult = resolveLessonDate(block.dateRaw, term);
+
+    streamTargets.forEach(target => {
+      const row = {
+        sourceRowRef: `block:${blockIdx}${target.streamId ? `:stream:${target.streamId}` : ''}`,
+        streamId: target.streamId, streamName: target.streamName,
+        topicTitle, subtopicTitle,
+        objectives: block.objectivesRaw || '', activities: block.activitiesRaw || '',
+        resources: block.resourcesRaw || '', remarks: block.remarksRaw || '',
+        differentiation: block.differentiation || { low: '', middle: '', high: '' },
+        assessment: block.assessmentRaw || '', homework: block.homeworkRaw || '',
+        dateRaw: block.dateRaw || '',
+      };
+
+      if (dateResult.error) {
+        row.status = 'invalid';
+        row.error = dateResult.error;
+        rows.push(row);
+        return;
+      }
+      row.date = dateResult.date;
+      row.contentHash = computeContentHash(row);
+      rows.push(row);
+    });
+  });
+  return rows;
+}
+
+// Attaches duplicate/conflict/ready status by checking real existing
+// lesson_plans — mutates each already-dated row in place.
+//
+// Matched by sourceRowRef (this exact position in the source document),
+// NOT by date+identity alone — a genuine double period is a second,
+// independent lesson block (its own sourceRowRef) at the same date, and
+// must never be compared against a sibling block just because they share
+// a date. sourceRowRef is what makes "re-run the same file" and "fix one
+// lesson's typo and re-upload" both resolve correctly: unchanged blocks
+// keep matching their own prior row and are (correctly) duplicates;
+// a changed block's hash no longer matches its own prior row and
+// surfaces as a conflict; a block that never existed in a prior import
+// (different sourceRowRef, even at a shared date) is simply new.
+// Known limitation: inserting/removing a lesson earlier in the document
+// shifts every later block's position-based sourceRowRef, so a
+// resubmission after doing that will not match its old rows — accepted,
+// since the source format has no other stable per-lesson identifier.
+async function _classifyAgainstExisting(rows, ctx) {
+  const { schoolId, teacherId, classId, subjectId } = ctx;
+  const datedRows = rows.filter(r => r.status !== 'invalid');
+  if (!datedRows.length) return;
+
+  const existing = await tenantModel('lesson_plans', { schoolId }).find({
+    schoolId, teacherId, classId, subjectId,
+    date: { $in: [...new Set(datedRows.map(r => r.date))] },
+  }).select('id date streamId topicTitle subtopicTitle importBatch.sourceRowRef importBatch.contentHash').lean();
+
+  datedRows.forEach(row => {
+    const match = existing.find(e => e.date === row.date && e.importBatch?.sourceRowRef === row.sourceRowRef);
+    if (!match) { row.status = 'ready'; return; }
+    if (match.importBatch?.contentHash === row.contentHash) {
+      row.status = 'duplicate';
+      row.existingPlanId = match.id;
+    } else {
+      row.status = 'conflict';
+      row.existingPlanId = match.id;
+      row.existingTopicTitle = match.topicTitle;
+    }
+  });
+}
+
+/* ── POST /api/lessons/plans/import/preview ─ parse + resolve, no writes ── */
+router.post('/plans/import/preview', authMiddleware, PLAN, MODGATE, importDocxBody, importCsvBody, async (req, res) => {
+  try {
+    if (!(await _hasBulkImportGrant(req))) return E.forbidden(res, 'You do not have permission to bulk-import lesson plans.');
+
+    const { schoolId, userId } = req.jwtUser;
+    const { classId, subjectId, academicYearId, termId, streamIds, teacherId: teacherIdParam } = req.query;
+    if (!classId || !subjectId || !academicYearId || !termId) {
+      return E.validation(res, [{ field: 'classId', message: 'classId, subjectId, academicYearId, and termId are all required (pre-selected before upload).' }]);
+    }
+    const effectiveTeacherId = (isAdmin(req) && teacherIdParam) ? teacherIdParam : userId;
+
+    // Ownership check: real teaching_assignments rows for THIS exact
+    // teacher+class+subject, queried once and reused below to resolve the
+    // stream target(s) too. Not ScopeEngine.isClassInScope here — that
+    // check needs a specific streamId up front to correctly recognize a
+    // stream-scoped assignment (a class a teacher only teaches one stream
+    // of never appears in scope.classIds by design — see
+    // scopeMiddleware.js's _loadAssigned), which isn't known yet at this
+    // point in the flow (resolving it is the very next step, from these
+    // same assignment rows) — checking "at least one real assignment
+    // exists for this class+subject" against the same underlying
+    // teaching_assignments data achieves the identical guarantee without
+    // a second, differently-shaped query.
+    const assignments = await _importAssignments(schoolId, effectiveTeacherId, classId, subjectId);
+    if (!isAdmin(req) && !assignments.length) return E.forbidden(res, 'This class is not in your teaching assignments.');
+
+    const termResult = await _resolveImportTerm(schoolId, academicYearId, termId);
+    if (termResult.error) return E.badRequest(res, termResult.error);
+
+    const streamResult = await _resolveStreamTargets(assignments, streamIds);
+    if (streamResult.error) return fail(res, 'BAD_REQUEST', streamResult.error, 400, { availableStreams: streamResult.availableStreams });
+
+    let blocks, parseWarnings;
+    if (Buffer.isBuffer(req.body)) {
+      const tableRows = await extractDocxRows(req.body);
+      ({ blocks, warnings: parseWarnings } = extractLessonBlocks(tableRows));
+    } else if (typeof req.body === 'string' && req.body) {
+      ({ blocks, warnings: parseWarnings } = extractCsvLessonBlocks(req.body));
+    } else {
+      return E.badRequest(res, `Unsupported or missing file body — send Content-Type: ${DOCX_MIME} or text/csv.`);
+    }
+    if (!blocks.length) return fail(res, 'BAD_REQUEST', 'No lesson blocks could be read from this file.', 400, { warnings: parseWarnings });
+
+    const rows = _buildImportRows(blocks, streamResult.streamTargets, { schoolId, teacherId: effectiveTeacherId, classId, subjectId, term: termResult.term });
+    await _classifyAgainstExisting(rows, { schoolId, teacherId: effectiveTeacherId, classId, subjectId });
+
+    const batchId = uuidv4();
+    const summary = rows.reduce((acc, r) => { acc[r.status] = (acc[r.status] || 0) + 1; return acc; }, {});
+    return ok(res, { batchId, rows, warnings: parseWarnings, summary });
+  } catch (err) { console.error('[lessons/plans/import/preview POST]', err); return E.serverError(res); }
+});
+
+/* ── POST /api/lessons/plans/import/commit ─ the only route that writes ── */
+router.post('/plans/import/commit', authMiddleware, PLAN, MODGATE, async (req, res) => {
+  try {
+    if (!(await _hasBulkImportGrant(req))) return E.forbidden(res, 'You do not have permission to bulk-import lesson plans.');
+
+    const { schoolId, userId } = req.jwtUser;
+    const { batchId, sourceFileName, classId, subjectId, academicYearId, termId, teacherId: teacherIdParam, rows } = req.body || {};
+    if (!batchId || !classId || !subjectId || !academicYearId || !termId || !Array.isArray(rows) || !rows.length) {
+      return E.validation(res, [{ field: 'rows', message: 'batchId, classId, subjectId, academicYearId, termId, and a non-empty rows array are required.' }]);
+    }
+    const effectiveTeacherId = (isAdmin(req) && teacherIdParam) ? teacherIdParam : userId;
+
+    // Re-validate every row's streamId against real assignments server-
+    // side — never trust a streamId the client sends back unexamined,
+    // even though the preview step already checked it once. Same
+    // ownership reasoning as the preview route above: checked directly
+    // against teaching_assignments rather than ScopeEngine.isClassInScope
+    // (which needs a specific streamId up front — not yet known/relevant
+    // here, since a commit batch can mix whole-class and per-stream rows).
+    const assignments = await _importAssignments(schoolId, effectiveTeacherId, classId, subjectId);
+    if (!isAdmin(req) && !assignments.length) return E.forbidden(res, 'This class is not in your teaching assignments.');
+    const validStreamIds = new Set(assignments.filter(a => a.streamId).map(a => a.streamId));
+    const allowWholeClass = assignments.some(a => !a.streamId);
+
+    const termResult = await _resolveImportTerm(schoolId, academicYearId, termId);
+    if (termResult.error) return E.badRequest(res, termResult.error);
+    const { term } = termResult;
+
+    const [cls, subject] = await Promise.all([
+      tenantModel('classes', tenantContext(req)).findOne({ id: classId, schoolId }).select('name').lean(),
+      tenantModel('subjects', tenantContext(req)).findOne({ id: subjectId, schoolId }).select('name').lean(),
+    ]);
+    const streamNameById = Object.fromEntries(assignments.filter(a => a.streamId).map(a => [a.streamId, a.streamName]));
+
+    let teacherName = req.jwtUser.name ?? '';
+    if (effectiveTeacherId !== userId) {
+      const t = await tenantModel('users', tenantContext(req)).findOne({ id: effectiveTeacherId, schoolId }).select('name').lean();
+      teacherName = t?.name ?? teacherName;
+    }
+
+    const schoolDoc = await _model('schools').findOne({ id: schoolId }, { lessonPlanTemplate: 1 }).lean();
+    const template = _mergeTemplate(schoolDoc?.lessonPlanTemplate);
+    const fieldLabels = Object.fromEntries(template.fields.filter(f => f.builtin).map(f => [f.key, f.label]));
+
+    const importedAt = new Date().toISOString();
+    const created = [];
+    const skippedDuplicate = [];
+    const conflicts = [];
+    const invalid = [];
+
+    for (const row of rows) {
+      if (row.streamId && !validStreamIds.has(row.streamId)) {
+        invalid.push({ sourceRowRef: row.sourceRowRef, error: 'streamId is not a real stream you teach for this class+subject.' });
+        continue;
+      }
+      if (!row.streamId && !allowWholeClass && validStreamIds.size > 0) {
+        invalid.push({ sourceRowRef: row.sourceRowRef, error: 'This class+subject is stream-split — a streamId is required.' });
+        continue;
+      }
+      if (!row.date || row.date < term.startDate || row.date > term.endDate) {
+        invalid.push({ sourceRowRef: row.sourceRowRef, error: `date "${row.date}" is missing or outside the selected term.` });
+        continue;
+      }
+
+      // Matched by sourceRowRef, not date+identity alone — see
+      // _classifyAgainstExisting's comment for why: a double period is a
+      // second, independent block at the same date and must never be
+      // compared against its sibling just because they share a date.
+      const contentHash = computeContentHash(row);
+      const existing = await tenantModel('lesson_plans', tenantContext(req)).findOne({
+        schoolId, teacherId: effectiveTeacherId, classId, subjectId, date: row.date, 'importBatch.sourceRowRef': row.sourceRowRef,
+      }).select('id importBatch.contentHash').lean();
+
+      if (existing) {
+        if (existing.importBatch?.contentHash === contentHash) {
+          skippedDuplicate.push({ sourceRowRef: row.sourceRowRef, existingPlanId: existing.id });
+        } else {
+          conflicts.push({ sourceRowRef: row.sourceRowRef, existingPlanId: existing.id });
+        }
+        continue;
+      }
+
+      const doc = await tenantModel('lesson_plans', tenantContext(req)).create({
+        id: uuidv4(),
+        schoolId,
+        teacherId: effectiveTeacherId,
+        teacherName,
+        classId,
+        className: cls?.name ?? '',
+        ...(row.streamId ? { streamId: row.streamId, streamName: streamNameById[row.streamId] ?? row.streamName ?? '' } : {}),
+        subjectId,
+        subjectName: subject?.name ?? '',
+        date: row.date,
+        academicYearId,
+        termId,
+        topicTitle: row.topicTitle || '',
+        ...(row.subtopicTitle ? { subtopicTitle: row.subtopicTitle } : {}),
+        objectives: row.objectives || '',
+        activities: row.activities || '',
+        resources: row.resources || '',
+        remarks: row.remarks || '',
+        differentiation: row.differentiation || { low: '', middle: '', high: '' },
+        assessment: row.assessment || '',
+        homework: row.homework || '',
+        reflection: { wentWell: '', betterIf: '', improvement: '' },
+        customFields: [],
+        fieldLabels,
+        importBatch: { batchId, sourceFileName: sourceFileName || '', sourceRowRef: row.sourceRowRef || '', contentHash, importedBy: userId, importedAt },
+        createdBy: userId,
+        updatedBy: userId,
+      });
+      created.push({ sourceRowRef: row.sourceRowRef, id: doc.id });
+    }
+
+    if (created.length > 0) {
+      AuditService.log({
+        action: 'lessons.plans_imported', actor: req.jwtUser, schoolId,
+        target: { type: 'import', id: batchId, label: `Lesson plan import — ${subject?.name ?? subjectId}, ${cls?.name ?? classId}` },
+        details: { batchId, sourceFileName: sourceFileName || '', created: created.length, skippedDuplicate: skippedDuplicate.length, conflicts: conflicts.length, invalid: invalid.length },
+        req,
+      });
+    }
+
+    return ok(res, { batchId, created, skippedDuplicate, conflicts, invalid });
+  } catch (err) { console.error('[lessons/plans/import/commit POST]', err); return E.serverError(res); }
 });
 
 module.exports = router;

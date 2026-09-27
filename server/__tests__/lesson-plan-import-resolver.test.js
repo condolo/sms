@@ -8,6 +8,7 @@ const {
   resolveLessonDate,
   matchByName,
   resolveStreamFromAssignments,
+  computeContentHash,
 } = require('../utils/lesson-plan-import-resolver');
 const { extractDocxRows, extractLessonBlocks } = require('../utils/lesson-plan-docx-parser');
 
@@ -157,5 +158,31 @@ describe('getTopicAndSubtopic — format-agnostic entry point used by the route 
     expect(getTopicAndSubtopic({ topicRaw: 'Unit 1: Adventure - Part A', subtopicRaw: 'Conventions' })).toEqual({
       topicTitle: 'Unit 1: Adventure - Part A', subtopicTitle: 'Conventions',
     });
+  });
+});
+
+describe('computeContentHash — the double-period-safe half of idempotency', () => {
+  const base = {
+    date: '2026-09-03', topicTitle: 'Unit 1: Adventure', subtopicTitle: 'Pacing',
+    objectives: 'Identify pacing', activities: 'Read two passages', resources: 'Extract sheets',
+    remarks: '', differentiation: { low: 'Simplified text', middle: '', high: 'Extension task' },
+    assessment: 'Group presentation', homework: 'Rewrite a passage',
+  };
+
+  test('identical fields produce an identical hash (re-running the same import is detectable)', () => {
+    expect(computeContentHash(base)).toBe(computeContentHash({ ...base }));
+  });
+
+  test('whitespace-only differences do not change the hash', () => {
+    expect(computeContentHash(base)).toBe(computeContentHash({ ...base, objectives: '  Identify   pacing  ' }));
+  });
+
+  test('a real double period — same date, DIFFERENT content — hashes differently, never flagged as a duplicate of the other', () => {
+    const secondPeriod = { ...base, topicTitle: 'Unit 1: Adventure', subtopicTitle: 'Cliffhangers', objectives: 'Locate cliffhangers' };
+    expect(computeContentHash(base)).not.toBe(computeContentHash(secondPeriod));
+  });
+
+  test('editing one field (e.g. fixing a typo in objectives) changes the hash — surfaces as a conflict, not a silent overwrite', () => {
+    expect(computeContentHash(base)).not.toBe(computeContentHash({ ...base, objectives: 'Identify pacing techniques' }));
   });
 });

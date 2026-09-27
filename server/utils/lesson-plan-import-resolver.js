@@ -19,8 +19,24 @@
      and never blocks on a missing curriculum topic, per the explicit
      "topics/subtopics are part of the lesson plan, not a separate
      lookup" decision.
+
+   Idempotency key (evidence-based, see computeContentHash below):
+   date is NOT part of "same lesson" identity. Confirmed directly by the
+   user: double periods are real — the same teacher can legitimately have
+   two DIFFERENT lesson plans for the same class+subject+stream on the
+   same calendar date. A (teacherId, classId, subjectId, streamId, date)
+   key would wrongly treat the second real lesson as a duplicate of the
+   first. Instead, "same lesson" = same identity tuple AND same CONTENT
+   (topic/objectives/activities/etc. hashed together) — re-running the
+   identical import is a safe no-op; a genuine double period has
+   different content and is never flagged; editing one lesson and
+   re-importing produces a new hash for that lesson only, surfaced to the
+   operator as a conflict rather than silently overwritten or silently
+   duplicated (see COMMIT route's "conflict" vs "duplicate" statuses).
    ============================================================ */
 'use strict';
+
+const crypto = require('crypto');
 
 const MONTHS = {
   january: 1, february: 2, march: 3, april: 4, may: 5, june: 6,
@@ -88,6 +104,25 @@ function resolveLessonDate(dateRaw, term) {
 }
 
 /**
+ * Identity for duplicate/conflict detection — see the module header for
+ * why date is deliberately excluded from the CONTENT hash (it's part of
+ * the identity tuple the caller filters by, alongside teacherId/classId/
+ * subjectId/streamId, but two lessons on the same identity+date are only
+ * "the same lesson" if their content also matches).
+ */
+function computeContentHash(fields) {
+  const normalized = [
+    fields.date || '',
+    fields.topicTitle || '', fields.subtopicTitle || '',
+    fields.objectives || '', fields.activities || '',
+    fields.resources || '', fields.remarks || '',
+    fields.differentiation?.low || '', fields.differentiation?.middle || '', fields.differentiation?.high || '',
+    fields.assessment || '', fields.homework || '',
+  ].map(s => s.replace(/\s+/g, ' ').trim().toLowerCase()).join('\u0001');
+  return crypto.createHash('sha256').update(normalized).digest('hex');
+}
+
+/**
  * Matches free text like "YEAR 7" / "Year 7" against a list of real
  * classes/subjects ({id, name}). Exact case-insensitive match only — no
  * fuzzy scoring, since a wrong guess here silently misfiles a whole
@@ -119,4 +154,5 @@ module.exports = {
   resolveLessonDate,
   matchByName,
   resolveStreamFromAssignments,
+  computeContentHash,
 };

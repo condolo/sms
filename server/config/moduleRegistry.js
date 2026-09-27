@@ -166,6 +166,13 @@ const MODULE_REGISTRY = [
     // school sees on every future lesson plan is a materially more
     // sensitive, school-wide action than editing one's own lesson plan.
     { key: 'template', label: 'Configure Lesson Plan Template' },
+    // Also hasExplicitSubGrant-gated, not covered by plain 'create' — a
+    // teacher who can create ONE lesson plan through the form doesn't
+    // automatically get to bulk-create many at once from an uploaded
+    // document (2026-09 lesson-plan import feature). Same admin-floor
+    // bypass as 'template' above (this school is mid historical-import
+    // project — admin importing on a teacher's behalf is a real case).
+    { key: 'import', label: 'Bulk Import Lesson Plans' },
   ]},
   { key: 'grades', label: 'Grades & Marks', section: 'Academic Management', icon: 'FileText', navRoute: '/exams', navLabel: 'Exams', navOrder: 5, subs: [
     { key: 'view_grades',      label: 'View Grades & Marks' },
