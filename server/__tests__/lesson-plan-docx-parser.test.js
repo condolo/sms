@@ -134,3 +134,18 @@ describe('extractLessonBlocks — defensive behavior', () => {
     expect(warnings[0]).toMatch(/no data row found/);
   });
 });
+
+describe('extractDocxRows — decompression-bomb guard (security review, 2026-09)', () => {
+  test('rejects a document.xml whose declared uncompressed size is absurd, before fully decompressing it', async () => {
+    const JSZip = require('jszip');
+    const zip = new JSZip();
+    // Highly repetitive text compresses to a tiny zip while still
+    // declaring a huge uncompressed size in the central directory —
+    // exactly the shape of a real zip-bomb payload.
+    const bomb = '<w:document><w:body>' + 'A'.repeat(60 * 1024 * 1024) + '</w:body></w:document>';
+    zip.file('word/document.xml', bomb, { compression: 'DEFLATE' });
+    const buffer = await zip.generateAsync({ type: 'nodebuffer' });
+
+    await expect(extractDocxRows(buffer)).rejects.toThrow(/too large to process/);
+  });
+});

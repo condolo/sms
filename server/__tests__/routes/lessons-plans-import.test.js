@@ -439,3 +439,55 @@ describe('POST .../import/commit — the only route that writes', () => {
     expect(res.body.data.skippedDuplicate).toHaveLength(0);
   });
 });
+
+describe('POST .../import/commit — row shape validation (security review, 2026-09)', () => {
+  test('a row missing sourceRowRef is rejected as invalid, not stored or crashed on', async () => {
+    const row = { date: '2026-09-03', objectives: 'x' }; // no sourceRowRef
+    const res = await supertest(buildApp())
+      .post('/api/lessons/plans/import/commit')
+      .send({ batchId: 'b1', classId: 'cls_yr7', subjectId: 'subj_eng', academicYearId: 'ay_2026', termId: 'term_1', rows: [row] });
+    expect(res.status).toBe(200);
+    expect(res.body.data.created).toHaveLength(0);
+    expect(res.body.data.invalid).toHaveLength(1);
+    expect(mockLessonPlans._docs()).toHaveLength(0);
+  });
+
+  test('a non-object differentiation is rejected rather than stored as the wrong type', async () => {
+    const row = { sourceRowRef: 'block:0', date: '2026-09-03', objectives: 'x', differentiation: 'not an object' };
+    const res = await supertest(buildApp())
+      .post('/api/lessons/plans/import/commit')
+      .send({ batchId: 'b1', classId: 'cls_yr7', subjectId: 'subj_eng', academicYearId: 'ay_2026', termId: 'term_1', rows: [row] });
+    expect(res.body.data.created).toHaveLength(0);
+    expect(res.body.data.invalid[0].sourceRowRef).toBe('block:0');
+  });
+
+  test('an oversized objectives field is rejected rather than silently truncated or stored raw', async () => {
+    const row = { sourceRowRef: 'block:0', date: '2026-09-03', objectives: 'x'.repeat(5000) };
+    const res = await supertest(buildApp())
+      .post('/api/lessons/plans/import/commit')
+      .send({ batchId: 'b1', classId: 'cls_yr7', subjectId: 'subj_eng', academicYearId: 'ay_2026', termId: 'term_1', rows: [row] });
+    expect(res.body.data.created).toHaveLength(0);
+    expect(res.body.data.invalid).toHaveLength(1);
+  });
+
+  test('an object masquerading as a date string (NoSQL-injection-shaped payload) is rejected by the schema, never reaches a DB filter', async () => {
+    const row = { sourceRowRef: 'block:0', date: { $gt: '' }, objectives: 'x' };
+    const res = await supertest(buildApp())
+      .post('/api/lessons/plans/import/commit')
+      .send({ batchId: 'b1', classId: 'cls_yr7', subjectId: 'subj_eng', academicYearId: 'ay_2026', termId: 'term_1', rows: [row] });
+    expect(res.body.data.created).toHaveLength(0);
+    expect(res.body.data.invalid).toHaveLength(1);
+    expect(mockLessonPlans.findOne).not.toHaveBeenCalledWith(expect.objectContaining({ date: expect.objectContaining({ $gt: '' }) }));
+  });
+
+  test('one bad row among several valid ones is rejected on its own — does not fail the whole batch', async () => {
+    const good = { sourceRowRef: 'block:0', date: '2026-09-03', objectives: 'Fine' };
+    const bad  = { sourceRowRef: 'block:1', date: '2026-09-04', differentiation: 12345 };
+    const res = await supertest(buildApp())
+      .post('/api/lessons/plans/import/commit')
+      .send({ batchId: 'b1', classId: 'cls_yr7', subjectId: 'subj_eng', academicYearId: 'ay_2026', termId: 'term_1', rows: [good, bad] });
+    expect(res.body.data.created).toHaveLength(1);
+    expect(res.body.data.invalid).toHaveLength(1);
+    expect(res.body.data.invalid[0].sourceRowRef).toBe('block:1');
+  });
+});

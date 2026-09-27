@@ -1648,6 +1648,34 @@ const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingm
 const importDocxBody = express.raw({ type: DOCX_MIME, limit: '10mb' });
 const importCsvBody  = express.text({ type: 'text/csv', limit: '5mb' });
 
+// Security review (2026-09) finding: unlike every other write route in
+// this file, /import/commit originally trusted the shape of client-
+// submitted rows outright (no _validate call) — a row's `differentiation`
+// could arrive as a non-object, string fields had no length cap, and
+// `date` had no guaranteed type before being used in a comparison and a
+// DB filter. Same field limits as LessonPlanSchema; a row that fails this
+// is reported as 'invalid' with the real reason, exactly like a bad date
+// already was — never a 500, never silently coerced.
+const ImportRowSchema = z.object({
+  sourceRowRef: z.string().min(1).max(200),
+  streamId:     z.string().max(100).optional(),
+  streamName:   z.string().max(200).optional(),
+  date:         z.string().min(1).max(20),
+  topicTitle:    z.string().max(300).trim().optional().default(''),
+  subtopicTitle: z.string().max(300).trim().optional().default(''),
+  objectives: z.string().max(2000).trim().optional().default(''),
+  activities: z.string().max(2000).trim().optional().default(''),
+  resources:  z.string().max(1000).trim().optional().default(''),
+  remarks:    z.string().max(1000).trim().optional().default(''),
+  differentiation: z.object({
+    low:    z.string().max(1000).trim().optional().default(''),
+    middle: z.string().max(1000).trim().optional().default(''),
+    high:   z.string().max(1000).trim().optional().default(''),
+  }).optional().default({ low: '', middle: '', high: '' }),
+  assessment: z.string().max(2000).trim().optional().default(''),
+  homework:   z.string().max(1000).trim().optional().default(''),
+});
+
 async function _hasBulkImportGrant(req) {
   const effectiveRoles = new Set([req.jwtUser?.role, ...(req.jwtUser?.roles ?? [])]);
   if ([...effectiveRoles].some(r => TEMPLATE_FLOOR.has(r))) return true;
@@ -1886,7 +1914,12 @@ router.post('/plans/import/commit', authMiddleware, PLAN, MODGATE, async (req, r
     const conflicts = [];
     const invalid = [];
 
-    for (const row of rows) {
+    for (const rawRow of rows) {
+      const { data: row, error: rowError } = _validate(ImportRowSchema, rawRow);
+      if (rowError) {
+        invalid.push({ sourceRowRef: typeof rawRow?.sourceRowRef === 'string' ? rawRow.sourceRowRef : '(unknown)', error: rowError.map(e => e.message).join('; ') });
+        continue;
+      }
       if (row.streamId && !validStreamIds.has(row.streamId)) {
         invalid.push({ sourceRowRef: row.sourceRowRef, error: 'streamId is not a real stream you teach for this class+subject.' });
         continue;
@@ -1895,8 +1928,8 @@ router.post('/plans/import/commit', authMiddleware, PLAN, MODGATE, async (req, r
         invalid.push({ sourceRowRef: row.sourceRowRef, error: 'This class+subject is stream-split — a streamId is required.' });
         continue;
       }
-      if (!row.date || row.date < term.startDate || row.date > term.endDate) {
-        invalid.push({ sourceRowRef: row.sourceRowRef, error: `date "${row.date}" is missing or outside the selected term.` });
+      if (row.date < term.startDate || row.date > term.endDate) {
+        invalid.push({ sourceRowRef: row.sourceRowRef, error: `date "${row.date}" is outside the selected term.` });
         continue;
       }
 

@@ -13,6 +13,7 @@
 'use strict';
 
 const SCHOOL_A = 'school_A';
+const SCHOOL_B = 'school_B';
 
 function mockChainArr(arr) {
   const c = { sort: () => c, skip: () => c, limit: () => c, select: () => c, lean: () => Promise.resolve(arr) };
@@ -225,5 +226,23 @@ describe('POST /api/lessons/plans/:id/copy', () => {
     asTeacherA();
     const res = await supertest(buildApp()).post('/api/lessons/plans/plan_ghost/copy').send({ targetStreamId: 'strm_a' });
     expect(res.status).toBe(404);
+  });
+
+  test('tenant isolation: cannot copy a plan belonging to another school, even with the exact real id', async () => {
+    mockSchoolDoc.lessonPlanSharing = { mode: 'shared_within_class' };
+    mockLessonPlans = mockMakeFakeCollection([{ ...SHARED_PLAN_B, schoolId: SCHOOL_B }]);
+    asTeacherA({ streamId: 'strm_a' });
+    const res = await supertest(buildApp()).post('/api/lessons/plans/plan_b/copy').send({ targetStreamId: 'strm_a' });
+    expect(res.status).toBe(404); // looks exactly like "doesn't exist" — never leaks that it belongs to another school
+  });
+});
+
+describe('GET /api/lessons/plans/shareable — tenant isolation', () => {
+  test('a same-class-and-subject plan from another school never appears, even by ID coincidence', async () => {
+    mockSchoolDoc.lessonPlanSharing = { mode: 'shared_within_class' };
+    mockLessonPlans = mockMakeFakeCollection([{ ...SHARED_PLAN_B, id: 'plan_cross', schoolId: SCHOOL_B }]);
+    asTeacherA();
+    const res = await supertest(buildApp()).get('/api/lessons/plans/shareable?classId=cls_yr6&subjectId=subj_eng');
+    expect(res.body.data).toEqual([]);
   });
 });

@@ -114,10 +114,27 @@ function _flattenRows(bodyChildren) {
   return rows;
 }
 
+// Security review (2026-09): the 10MB cap on the raw upload
+// (express.raw({limit:'10mb'}) in lessons.js) only bounds the COMPRESSED
+// size — a specially crafted docx (a "zip bomb") can decompress to many
+// times that in memory. JSZip's central-directory metadata exposes the
+// declared uncompressed size before the expensive decompression runs, so
+// this rejects anything absurd up front. 50MB is generous — the two real
+// Trinitas sample documents used to validate this parser were under 4MB
+// including embedded logo images. This is defense in depth, not the only
+// safeguard: `_data` is a jszip internal, not a stable public API, so if
+// a future version removes it this check silently no-ops (`??`) rather
+// than breaking ordinary imports — the raw-size cap upstream still holds.
+const MAX_DECOMPRESSED_BYTES = 50 * 1024 * 1024;
+
 async function extractDocxRows(buffer) {
   const zip = await JSZip.loadAsync(buffer);
   const entry = zip.file('word/document.xml');
   if (!entry) throw new Error('Not a valid .docx file (missing word/document.xml)');
+  const declaredSize = entry._data?.uncompressedSize ?? 0;
+  if (declaredSize > MAX_DECOMPRESSED_BYTES) {
+    throw new Error(`This document's content is too large to process (${Math.round(declaredSize / 1024 / 1024)}MB uncompressed).`);
+  }
   const xml = await entry.async('string');
   return _flattenRows(_parseBody(xml));
 }

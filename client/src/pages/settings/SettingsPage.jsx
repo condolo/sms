@@ -3505,6 +3505,7 @@ const PERM_MODULES = [
     { key: 'delete',   label: 'Delete Lesson Plan' },
     { key: 'coverage', label: 'Mark Lesson Coverage' },
     { key: 'template', label: 'Configure Lesson Plan Template' },
+    { key: 'import',   label: 'Bulk Import Lesson Plans' }, // mirrors moduleRegistry.js — hasExplicitSubGrant, no coarse 'create' fallback (2026-09 lesson-plan import)
   ]},
   { key: 'elearning', label: 'eLearning', subs: [
     { key: 'view',   label: 'View Courses & Resources' },
