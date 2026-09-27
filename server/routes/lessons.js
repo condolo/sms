@@ -365,6 +365,51 @@ router.put('/template', authMiddleware, PLAN, MODGATE, rbac('lessons', 'update')
   }
 });
 
+/* ═══════════════════════════════════════════════════════════════
+   LESSON PLAN SHARING SETTINGS  (per-school, 2026-09)
+
+   User's explicit design intent: "some schools want each teacher to have
+   their own lesson plan, some schools don't mind if the same lesson plan
+   is used across [streams] within the same class" — a per-school toggle,
+   not a fixed platform behavior. Default 'own' preserves today's exact
+   behavior (GET /plans is always the caller's own records — untouched by
+   this feature). 'shared_within_class' additionally lets a teacher see
+   and copy a COLLEAGUE's plan for the same class+subject (any stream) via
+   GET /plans/shareable + POST /plans/:id/copy below — copying always
+   creates a new, independently-owned plan; it never grants write access
+   to someone else's plan, and never auto-applies a colleague's plan to
+   another stream without that stream's own teacher explicitly copying it.
+
+   Reuses the SAME lessons__template grant as the field-customization
+   settings above rather than a new sub-permission — both are "configure
+   how lesson plans work at this school" actions of the same sensitivity.
+   ═══════════════════════════════════════════════════════════════ */
+const SharingSettingsSchema = z.object({ mode: z.enum(['own', 'shared_within_class']) });
+
+router.get('/sharing-settings', authMiddleware, PLAN, MODGATE, rbac('lessons', 'read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const school = await _model('schools').findOne({ id: schoolId }, { lessonPlanSharing: 1 }).lean();
+    return ok(res, { mode: school?.lessonPlanSharing?.mode ?? 'own' });
+  } catch (err) { console.error('[lessons/sharing-settings GET]', err); return E.serverError(res); }
+});
+
+router.put('/sharing-settings', authMiddleware, PLAN, MODGATE, rbac('lessons', 'update'), async (req, res) => {
+  try {
+    const { schoolId, userId, role, roles = [] } = req.jwtUser;
+    const effectiveRoles = new Set([role, ...roles]);
+    const isFloor = [...effectiveRoles].some(r => TEMPLATE_FLOOR.has(r));
+    if (!isFloor && !(await hasExplicitSubGrant(req, 'lessons', 'template', 'update'))) {
+      return E.forbidden(res, 'You do not have permission to configure Lesson Plan sharing.');
+    }
+    const { data, error } = _validate(SharingSettingsSchema, req.body);
+    if (error) return E.validation(res, error);
+
+    await _model('schools').updateOne({ id: schoolId }, { $set: { lessonPlanSharing: { mode: data.mode, updatedBy: userId, updatedAt: new Date().toISOString() } } });
+    return ok(res, { mode: data.mode });
+  } catch (err) { console.error('[lessons/sharing-settings PUT]', err); return E.serverError(res); }
+});
+
 // Monday of the week containing `dateStr` — computed at read time from the
 // lesson's own date rather than stored, so there's one source of truth
 // instead of a separately-typed "Week" field that can drift from the date.
@@ -921,6 +966,106 @@ router.get('/plans', authMiddleware, PLAN, MODGATE, rbac('lessons', 'read'), asy
     const enriched = docs.map(d => _enrichPlan(d, labels[(d.academicYearId || '') + '__' + (d.termId || '')]));
     return ok(res, enriched);
   } catch (err) { console.error('[lessons/plans GET]', err); return E.serverError(res); }
+});
+
+/* ── GET /api/lessons/plans/shareable ─ a colleague's plan, same class+subject ──
+   Empty (not an error) whenever sharing is off — a client checking
+   availability just sees nothing to offer. GET /plans itself is
+   completely untouched by this: it still only ever returns the caller's
+   own records, exactly as before this feature existed. */
+router.get('/plans/shareable', authMiddleware, PLAN, MODGATE, rbac('lessons', 'read'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const { classId, subjectId } = req.query;
+    if (!classId || !subjectId) {
+      return E.validation(res, [{ field: 'classId', message: 'classId and subjectId are required.' }]);
+    }
+
+    const school = await _model('schools').findOne({ id: schoolId }, { lessonPlanSharing: 1 }).lean();
+    if ((school?.lessonPlanSharing?.mode ?? 'own') !== 'shared_within_class') return ok(res, []);
+
+    if (!isAdmin(req)) {
+      const assignments = await _importAssignments(schoolId, userId, classId, subjectId);
+      if (!assignments.length) return E.forbidden(res, 'This class is not in your teaching assignments.');
+    }
+
+    const docs = await tenantModel('lesson_plans', tenantContext(req))
+      .find({ schoolId, classId, subjectId, teacherId: { $ne: userId } })
+      .select('id teacherId teacherName classId className streamId streamName subjectId subjectName date topicTitle subtopicTitle objectives')
+      .sort({ date: -1 })
+      .lean();
+    return ok(res, docs);
+  } catch (err) { console.error('[lessons/plans/shareable GET]', err); return E.serverError(res); }
+});
+
+/* ── POST /api/lessons/plans/:id/copy ─ adopt a colleague's plan as your own ──
+   Creates a brand-new, independently-owned plan with the source's content
+   — never modifies the source, never grants write access to it, and never
+   auto-applies to a stream the copying teacher isn't actually assigned to.
+   "review and publish for his or her stream" (the user's own phrasing) —
+   the copy is a normal editable draft from here, not a shared live
+   document. Gated by plain lessons:create (mirrors the existing
+   /topics/copy-from precedent — copying is just an alternate way to
+   populate a normal create, not a bulk/sensitive action). */
+router.post('/plans/:id/copy', authMiddleware, PLAN, MODGATE, rbac('lessons', 'create'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const { targetStreamId, date: dateOverride } = req.body || {};
+
+    const school = await _model('schools').findOne({ id: schoolId }, { lessonPlanSharing: 1 }).lean();
+    if ((school?.lessonPlanSharing?.mode ?? 'own') !== 'shared_within_class' && !isAdmin(req)) {
+      return E.forbidden(res, 'Lesson plan sharing is not enabled for this school.');
+    }
+
+    const source = await tenantModel('lesson_plans', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
+    if (!source) return E.notFound(res, 'Lesson plan not found');
+
+    let streamName = '';
+    if (!isAdmin(req)) {
+      const assignments = await _importAssignments(schoolId, userId, source.classId, source.subjectId);
+      if (targetStreamId) {
+        const match = assignments.find(a => a.streamId === targetStreamId);
+        if (!match) return E.forbidden(res, 'You are not assigned to that stream for this class+subject.');
+        streamName = match.streamName ?? '';
+      } else if (!assignments.some(a => !a.streamId)) {
+        return E.forbidden(res, 'You are not assigned to this class+subject as a whole class — specify targetStreamId.');
+      }
+    }
+
+    const doc = await tenantModel('lesson_plans', tenantContext(req)).create({
+      id: uuidv4(),
+      schoolId,
+      teacherId: userId,
+      teacherName: req.jwtUser.name ?? '',
+      classId: source.classId,
+      className: source.className ?? '',
+      ...(targetStreamId ? { streamId: targetStreamId, streamName } : {}),
+      subjectId: source.subjectId,
+      subjectName: source.subjectName ?? '',
+      date: dateOverride || source.date,
+      academicYearId: source.academicYearId,
+      termId: source.termId,
+      ...(source.topicId ? { topicId: source.topicId } : {}),
+      topicTitle: source.topicTitle || '',
+      ...(source.subtopicId ? { subtopicId: source.subtopicId } : {}),
+      ...(source.subtopicTitle ? { subtopicTitle: source.subtopicTitle } : {}),
+      objectives: source.objectives || '',
+      activities: source.activities || '',
+      resources: source.resources || '',
+      remarks: source.remarks || '',
+      differentiation: source.differentiation || { low: '', middle: '', high: '' },
+      assessment: source.assessment || '',
+      homework: source.homework || '',
+      reflection: { wentWell: '', betterIf: '', improvement: '' },
+      customFields: [],
+      fieldLabels: source.fieldLabels || {},
+      copiedFrom: { planId: source.id, teacherId: source.teacherId, teacherName: source.teacherName ?? '' },
+      createdBy: userId,
+      updatedBy: userId,
+    });
+    const plain = doc.toObject ? doc.toObject() : doc;
+    return created(res, _enrichPlan(plain, ''));
+  } catch (err) { console.error('[lessons/plans/:id/copy POST]', err); return E.serverError(res); }
 });
 
 /* ── GET /api/lessons/plans/week-status ─ timetable-aware reminder ─
