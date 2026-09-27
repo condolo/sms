@@ -6,6 +6,39 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.130.0] — 2026-09-27 — fix(exams): results entry merged every stream when a teacher taught more than one
+
+Raised directly, with a concrete example: "if lets say Year 3 which have 3 streams taught by different teachers, have been assigned Mathematics, when updating results, the teacher sees only his stream, if a teacher is teaching more than one stream, the teacher selects the stream one by one to update the results."
+
+### Root cause
+Exams themselves are deliberately class-wide, not split per stream (`exams.js`'s own `_examClassScope` comment: "there is only one exam for the class") — that part is correct and unchanged. But the two places that actually load a ROSTER to enter marks against — Markbook's CA/HW/MT/ET grid and the exam Results slide-over — fetched the whole class's students with no stream awareness at all. A teacher with a stream-specific `teaching_assignments` row (e.g. Year 3-Stream 1's Maths only) was already correctly narrowed to just that stream server-side (`classes.js`'s own scope narrowing), so a single-stream assignment worked fine. A teacher assigned to TWO OR MORE streams of the same class+subject, however, had both streams' rosters merged into one grid — exactly the "class vs stream" distinction `AttendancePage.jsx` already draws for the daily register, just missing here.
+
+### Fix
+Both Markbook and the Results slide-over now derive the teacher's own assigned streams for the selected class (Markbook) or the exam's class+subject (Results) from `teaching-assignments` data already being fetched — no new endpoint. When a teacher has 2+ assigned streams, a Stream picker appears and the roster loads one stream at a time via `streamsApi.students`; a single assigned stream (or a whole-class grant) needs no picker, since the existing server-side narrowing already scopes it correctly either way.
+
+### Verified
+Build clean; smoke-tested Markbook renders correctly with no console errors for a teacher account. The underlying server-side roster narrowing this relies on was already live-verified against real accounts earlier this cycle (§62, §67).
+
+### Files
+- `client/src/pages/exams/ExamsPage.jsx`
+
+---
+
+## [v5.129.0] — 2026-09-27 — fix(academic-config): a new/edited academic year's term dates were invisible everywhere that reads them
+
+Raised directly: "in the exam, i had updated the term dates and not appearing- or invisible."
+
+### Root cause
+Two academic years in the real school had genuinely different shapes for their `terms` array: the auto-seeded 2025-2026 year uses `{id, name, startDate, endDate}` (the shape `_seedBaseData` has always used, and the shape Exams/Finance/Students all read); the 2026-2027 year — created and later edited through Settings → Academic Year — used `{term, label, startDate, endDate}` instead, because that panel's own create/edit form has always built terms in that shape. Every consumer reading `.id`/`.name` saw nothing for that year's terms — not an error, just silently blank dropdown rows.
+
+### Fix
+Settings' term editor (`handleCreate`, `startEdit`) now includes `id`/`name` alongside its own `term`/`label` fields on every term — additive, so its own internal editing logic (keyed off `term`) is untouched, but a year created or edited there now matches the shape every other consumer already expects. Also patched the real, already-broken 2026-2027 year directly (added the missing `id`/`name` to its 3 existing term records — no dates or other data touched) so it's fixed immediately rather than waiting for a re-save.
+
+### Files
+- `client/src/pages/settings/SettingsPage.jsx`
+
+---
+
 ## [v5.128.0] — 2026-09-25 — ops(auth): login rate limit raised for a real ~100-person concurrent training session
 
 Raised directly ahead of a live teacher-training session: "am meeting to training teachers and they will be accessing the system at the same time about 100, just confirming that the system can handle that login at ago concurrently?"

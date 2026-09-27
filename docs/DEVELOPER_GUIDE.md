@@ -4929,3 +4929,34 @@ Raised `authLimiter` (index.js, 20→300) and `loginIpLimiter` (auth.js, 100→3
 
 ### Verified
 Full server test suite: 238 suites, 2417/2417 passing, including `auth-session.test.js`'s full login-flow coverage (updated one stale comment there referencing the old limit value — no assertion depended on it).
+
+## 69. A New/Edited Academic Year's Term Dates Were Invisible Everywhere That Reads Them (v5.129.0)
+
+Raised directly: "in the exam, i had updated the term dates and not appearing- or invisible." Read the real data first, not assumed: the real school has two academic years with genuinely different `terms` array shapes. 2025-2026 (auto-seeded by `_seedBaseData`, platform.js) uses `{id, name, startDate, endDate, isCurrent}` — the shape Exams (`ExamsPage.jsx`), Finance (`AcademicPeriodPicker.jsx`, `FeeStructureTab.jsx`), and Students (`StudentList.jsx`) all read via `.id`/`.name`. 2026-2027 — created and later edited through Settings → Academic Year — has `{term, label, startDate, endDate}` instead, because that panel's own `handleCreate`/`startEdit`/`saveTerms` have always built terms in that shape. Every consumer reading `.name` got `undefined`, rendering as blank dropdown rows — not an error, just silently invisible, exactly matching the report.
+
+Worth noting for anyone touching this panel again: `startEdit`'s old normalisation actively DROPPED `id`/`name` even from an already-correct year's terms the moment its dates were edited here — meaning the bug could have silently spread to 2025-2026 too, the first time anyone used this same panel to adjust ITS term dates.
+
+### Fix
+Added `id`/`name` alongside the existing `term`/`label` fields in `handleCreate` (new terms get a fresh `id` via `crypto.randomUUID()`) and `startEdit` (preserves or backfills `id`/`name` from the original term, never drops them). `updateTermDate`'s own internal keying (`t.term === termNum`) is untouched — this is purely additive, so the panel's own UI behavior is unaffected.
+
+Also patched the real, already-broken 2026-2027 year directly in the database — added the missing `id`/`name` to its 3 existing term records (`t1_<schoolId>_2026` etc.), no dates or other fields touched — so it displays correctly immediately rather than needing an admin to re-save it once the code fix ships.
+
+### Files
+- `client/src/pages/settings/SettingsPage.jsx`
+
+## 70. Exam Results Entry Merged Every Stream When a Teacher Taught More Than One (v5.130.0)
+
+Raised directly with a concrete example: "if lets say Year 3 which have 3 streams taught by different teachers, have been assigned Mathematics, when updating results, the teacher sees only his stream, if a teacher is teaching more than one stream, the teacher selects the stream one by one to update the results."
+
+Checked `exams.js`'s own scoping first — `_examClassScope`'s comment is explicit and correct as designed: "exam_results carries no streamId... exams aren't split per stream," so a shared class-wide exam having no stream picker of its OWN is deliberate, not a bug (confirmed this to the user directly rather than "fixing" something that wasn't broken). The real gap was one layer down: the two places that load a roster to actually ENTER marks against — `MarkbookTab`'s CA/HW/MT/ET grid, and `ResultsSlideOver`'s exam-results grid — fetched the whole class with zero stream awareness. A teacher with exactly one stream-specific `teaching_assignments` row was already correctly narrowed server-side (`classes.js`'s own scope narrowing, §67); a teacher assigned to TWO OR MORE streams of the same class+subject saw them merged into one grid — the same class-vs-stream distinction `AttendancePage.jsx` already draws for the daily register, just missing here.
+
+Live-checked every teacher-facing subject/stream surface in Exams against a real account (Gailey Miliza, real multi-subject assignments) before concluding anything: Markbook's own Subject dropdown, `AnnounceSittingSlideOver`'s Subject dropdown, `GET /exams`'s own list scoping (`_applySubjectScope`), and `GET /teaching-assignments`'s self-scoping all came back correctly narrowed already — the earlier-reported "teacher sees all subjects" could not be reproduced anywhere in this module and was left unresolved pending more specific reproduction steps, rather than guessed at.
+
+### Fix
+Both `MarkbookTab` and `ResultsSlideOver` now derive the teacher's own assigned streams for the relevant class (Markbook: the selected class; Results: the exam's own class+subject) from `teaching-assignments` data already being fetched for other purposes — no new endpoint. Two or more assigned streams shows a Stream picker and narrows the roster fetch to `streamsApi.students(streamId)`, one at a time; a single assigned stream (or a whole-class grant) shows no picker, since the existing server-side narrowing (classesApi.students' own fallback) already scopes it correctly either way — this mirrors AttendancePage.jsx's `needsStreamSelection` pattern exactly, reusing an already-proven mechanism rather than inventing a second one.
+
+### Verified
+Build clean; smoke-tested in the browser (Markbook renders with no console errors, no regression for the common single/no-stream case). The underlying server-side roster narrowing this depends on was already live-verified against real accounts in §62 and §67; no synthetic multi-stream teacher exists in the demo school to exercise the new picker branch directly, so that specific UI path is verified by code-review and pattern-match against the already-proven Attendance implementation, not a live click-through.
+
+### Files
+- `client/src/pages/exams/ExamsPage.jsx`
