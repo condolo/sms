@@ -1858,6 +1858,24 @@ router.post('/plans/import/preview', authMiddleware, PLAN, MODGATE, importDocxBo
     const rows = _buildImportRows(blocks, streamResult.streamTargets, { schoolId, teacherId: effectiveTeacherId, classId, subjectId, term: termResult.term });
     await _classifyAgainstExisting(rows, { schoolId, teacherId: effectiveTeacherId, classId, subjectId });
 
+    // Same required-field rules manual entry already enforces (this
+    // school's own lessonPlanTemplate) — applied to imports too, decided
+    // directly rather than left as a silent inconsistency: a school that
+    // requires "Objectives" for a plan typed by hand requires it for one
+    // that arrived by import just as much. Only touches rows that were
+    // otherwise 'ready' — a row already invalid/duplicate/conflict keeps
+    // that status, since a missing-field note would be redundant there.
+    const schoolDocForReq = await _model('schools').findOne({ id: schoolId }, { lessonPlanTemplate: 1 }).lean();
+    const templateForReq = _mergeTemplate(schoolDocForReq?.lessonPlanTemplate);
+    rows.forEach(row => {
+      if (row.status !== 'ready') return;
+      const missing = _missingRequiredFields(row, templateForReq);
+      if (missing.length) {
+        row.status = 'invalid';
+        row.error = `Missing required field${missing.length !== 1 ? 's' : ''}: ${missing.join(', ')}`;
+      }
+    });
+
     const batchId = uuidv4();
     const summary = rows.reduce((acc, r) => { acc[r.status] = (acc[r.status] || 0) + 1; return acc; }, {});
     return ok(res, { batchId, rows, warnings: parseWarnings, summary });
@@ -1930,6 +1948,14 @@ router.post('/plans/import/commit', authMiddleware, PLAN, MODGATE, async (req, r
       }
       if (row.date < term.startDate || row.date > term.endDate) {
         invalid.push({ sourceRowRef: row.sourceRowRef, error: `date "${row.date}" is outside the selected term.` });
+        continue;
+      }
+      // Same required-field rules manual entry enforces — checked again
+      // here (not just in preview) since commit must never trust the
+      // client to only resubmit what preview blessed.
+      const missingRequired = _missingRequiredFields(row, template);
+      if (missingRequired.length) {
+        invalid.push({ sourceRowRef: row.sourceRowRef, error: `Missing required field${missingRequired.length !== 1 ? 's' : ''}: ${missingRequired.join(', ')}` });
         continue;
       }
 

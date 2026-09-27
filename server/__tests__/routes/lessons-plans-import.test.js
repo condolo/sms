@@ -491,3 +491,52 @@ describe('POST .../import/commit — row shape validation (security review, 2026
     expect(res.body.data.invalid[0].sourceRowRef).toBe('block:1');
   });
 });
+
+describe('Required fields — imports enforce the same lessonPlanTemplate rules manual entry does (2026-09 decision)', () => {
+  beforeEach(() => {
+    // Objectives required; every other builtin field backfills to
+    // required:false via _mergeTemplate's own defaulting — see its
+    // comment in lessons.js.
+    mockSchoolDoc.lessonPlanTemplate = { fields: [
+      { key: 'objectives', label: 'Lesson Objectives', enabled: true, required: true, order: 0 },
+    ] };
+  });
+
+  test('preview flags a "ready" row missing a required field as invalid, with the real reason', async () => {
+    const buf = await buildMinimalDocxBuffer({ objectives: '' });
+    const res = await supertest(buildApp())
+      .post(`/api/lessons/plans/import/preview?${PREVIEW_QS}`)
+      .set('Content-Type', DOCX_MIME)
+      .send(buf);
+    expect(res.body.data.rows[0].status).toBe('invalid');
+    expect(res.body.data.rows[0].error).toMatch(/Missing required field.*Lesson Objectives/);
+  });
+
+  test('preview does not touch a row that already has a different problem (e.g. a bad date)', async () => {
+    const buf = await buildMinimalDocxBuffer({ date: '25 December 2026', objectives: '' }); // outside term AND missing objectives
+    const res = await supertest(buildApp())
+      .post(`/api/lessons/plans/import/preview?${PREVIEW_QS}`)
+      .set('Content-Type', DOCX_MIME)
+      .send(buf);
+    expect(res.body.data.rows[0].status).toBe('invalid');
+    expect(res.body.data.rows[0].error).toMatch(/does not fall within the selected term/); // the date error, not overwritten by the required-field one
+  });
+
+  test('a row that DOES have the required field is unaffected and still "ready"', async () => {
+    const buf = await buildMinimalDocxBuffer({ objectives: 'Identify themes' });
+    const res = await supertest(buildApp())
+      .post(`/api/lessons/plans/import/preview?${PREVIEW_QS}`)
+      .set('Content-Type', DOCX_MIME)
+      .send(buf);
+    expect(res.body.data.rows[0].status).toBe('ready');
+  });
+
+  test('commit independently re-checks required fields — never trusts the client to only resubmit rows preview blessed', async () => {
+    const row = { sourceRowRef: 'block:0', date: '2026-09-03', objectives: '' }; // blank, as if a client bypassed the preview step's own filtering
+    const res = await supertest(buildApp())
+      .post('/api/lessons/plans/import/commit')
+      .send({ batchId: 'b1', classId: 'cls_yr7', subjectId: 'subj_eng', academicYearId: 'ay_2026', termId: 'term_1', rows: [row] });
+    expect(res.body.data.created).toHaveLength(0);
+    expect(res.body.data.invalid[0].error).toMatch(/Missing required field/);
+  });
+});
