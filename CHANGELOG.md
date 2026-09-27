@@ -6,6 +6,16 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.132.0] — 2026-09-27 — fix(lessons): security review fixes + weekly reminder's dead-end
+
+Self-requested security/integration review of v5.131.0 found and fixed 3 real issues: `POST /plans/import/commit` had no schema validation on client-submitted rows (added, matching every other write route in the file); the docx parser only capped compressed upload size, not decompressed size (added a zip-bomb guard against JSZip's declared uncompressed size); and `SettingsPage.jsx`'s permission-list fallback was missing the new `lessons__import` entry (the live registry was already correct, this was a stale-fallback bug). Also resolved the review's one open question: imports now enforce the same required-field rules manual entry does.
+
+Separately, traced a real screenshot ("This class is not in your teaching assignments") to a genuine UX dead-end: the Lesson Plans tab's weekly reminder is deliberately timetable-derived (so a real timetabled lesson never gets hidden just because its assignment record drifted), but clicking it opened the create form with no ownership pre-check — so a class on the timetable but missing its `teaching_assignments` row would let a teacher fill out a form that was always going to be rejected on submit. Fixed by cross-referencing against data the tab already has before deciding whether to open the form or explain why it can't be planned yet.
+
+Full details: [Developer Guide §72](docs/DEVELOPER_GUIDE.md#72-security-review-follow-ups-on-71-and-the-plan-this-lesson-reminders-dead-end-v51320).
+
+---
+
 ## [v5.131.0] — 2026-09-27 — feat(lessons): lesson plan import (.docx/.csv) + cross-stream sharing
 
 Full 20-phase spec: import a completed term's lesson plans from a real Word document into native Msingi lesson-plan records. Analyzed the user's own two real documents (not the blank template alone, per their explicit gate) before writing any parser code — this found the actual table-packing variance (one table per lesson vs. several stacked in one table), confirmed this school's real Topic/Subtopic text has zero matches in `syllabus_topics` (so imports carry free-text `topicTitle`/`subtopicTitle` instead of requiring a pre-existing syllabus topic — manual entry via `POST /plans` is unchanged), and surfaced a real edge case (one sample lesson's date fell a day before the real term start).

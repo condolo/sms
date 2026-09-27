@@ -5002,3 +5002,30 @@ Server: 40+ new tests across parser/resolver/CSV/import-routes/sharing-routes su
 - `server/routes/lessons.js`, `server/routes/import-export.js`, `server/config/moduleRegistry.js`
 - `client/src/pages/lessons/LessonsPage.jsx`, `client/src/api/client.js`
 - `server/__tests__/lesson-plan-docx-parser.test.js`, `lesson-plan-import-resolver.test.js`, `lesson-plan-csv-parser.test.js`, `routes/lessons-plans-import.test.js`, `routes/lessons-plans-sharing.test.js` (new)
+
+## 72. Security Review Follow-Ups on §71, and the "Plan This Lesson" Reminder's Dead-End (v5.132.0)
+
+Two arcs, both raised directly by the user after §71 shipped.
+
+### Security review (self-requested: "security, all dependent modules connected, workflow seamless")
+Found and fixed 3 real issues, none of them live-exploited in what had shipped:
+1. `POST /plans/import/commit` trusted the shape of client-submitted rows with zero schema validation — every other write route in `lessons.js` validates, this one didn't. Added `ImportRowSchema` (same limits as `LessonPlanSchema`); a malformed row is now rejected as `invalid` with the real reason, never a 500, never silently coerced into the wrong type. Confirmed the one field that WAS query-relevant (`date`) happened to be protected from object-injection by incidental JS string-coercion in the existing range check — relying on that was fragile, not a substitute for real validation, so it's validated properly now regardless.
+2. `extractDocxRows` only bounded the *compressed* upload size (`express.raw`'s 10MB limit) — a crafted docx (zip bomb) can decompress to far more in memory. Added a check against JSZip's central-directory-declared uncompressed size (50MB cap) before the expensive decompression runs.
+3. `SettingsPage.jsx`'s `PERM_MODULES` — a hardcoded fallback copy of the permission list used only before `GET /settings/modules` (the real source of truth) resolves — was missing the new `lessons__import` entry. The live Roles & Permissions screen was already correct (it reads the real registry); this was a stale-fallback consistency bug, not a "feature unreachable" bug as initially reported to the user before double-checking.
+
+Also added tenant-isolation regression tests for the sharing routes (already correct in code, previously untested) and resolved the one open design question from the review: **imports now enforce the same required-field rules manual entry does** (`_missingRequiredFields`, reused as-is, checked in both preview and commit) — decided in favor of consistency after the user asked for the decision to be made rather than left open.
+
+### The "Plan this lesson" dead-end (traced from a real screenshot: "This class is not in your teaching assignments")
+User asked directly: did a teacher access someone else's class? Checked the real data first, not assumed — the class in question had **zero `teaching_assignments` rows for any teacher, any subject**. No access occurred; the block was correct. But asked to trace *how* the teacher got to a doomed form in the first place.
+
+Root cause: `LessonPlansTab`'s weekly reminder (`GET /plans/week-status`) is deliberately timetable-derived, not `teaching_assignments`-derived — its own header comment explains why (§51/§52's finding: a lesson genuinely on a teacher's timetable must stay visible even if the assignment record is missing or drifted, not silently hidden). Clicking an unplanned pill opened `LessonPlanSlideOver` directly from that timetable-only data, with no ownership check — but `POST /plans`'s own ownership check IS `teaching_assignments`-based, so a timetable-only entry could never actually save. Real drift between timetable and assignments (as in this case) turned "helpful reminder" into "type content, submit, get rejected."
+
+### Fix
+Preserves the original intent (never hide a real timetabled lesson from the reminder) while removing the dead-end: `LessonPlansTab` now cross-references each `week.unplanned` entry against `items` (the same `teaching_assignments`-backed list the tab already fetches for its class cards — no new query). An assigned entry behaves exactly as before (amber pill, opens the create form). An unassigned entry gets a distinct grey pill with a warning icon and, on click, a clear explanatory dialog ("on your timetable, but no matching teaching assignment yet — ask your administrator") instead of a form that was always going to fail. The "N of M planned this week" count is untouched — it still counts the real timetable requirement, exactly as designed.
+
+### Files
+- `server/routes/lessons.js` — `ImportRowSchema`, required-field check in preview + commit
+- `server/utils/lesson-plan-docx-parser.js` — decompression-size guard
+- `client/src/pages/settings/SettingsPage.jsx` — `PERM_MODULES` fallback fix
+- `client/src/pages/lessons/LessonsPage.jsx` — `isAssigned()` check + unassigned-notice dialog in `LessonPlansTab`
+- `server/__tests__/routes/lessons-plans-import.test.js`, `lessons-plans-sharing.test.js`, `server/__tests__/lesson-plan-docx-parser.test.js` — new tests for all of the above

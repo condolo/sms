@@ -1511,9 +1511,29 @@ function LessonPlansTab() {
     return map;
   }, [week]);
 
+  // week-status is deliberately timetable-derived, not teaching_assignments-
+  // derived (see that route's own comment) — a real lesson on the teacher's
+  // timetable must still show up here even if the assignment record behind
+  // it is missing or drifted. That's correct for the REMINDER. It is NOT
+  // correct for silently opening a create form that the server will then
+  // reject: POST /plans' own ownership check IS teaching_assignments-based
+  // (ScopeEngine), so a timetable-only entry can never actually be saved.
+  // Checked against `items` — the same assignment-backed list this tab
+  // already fetches — before the click is allowed to open anything, so the
+  // dead-end (type content, submit, get blocked) never happens; the
+  // reminder itself, and its "N of M planned" count, are untouched.
+  const assignedKeys = useMemo(
+    () => new Set(items.map(i => `${i.classId}__${i.subjectId}__${i.streamId ?? ''}`)),
+    [items],
+  );
+  function isAssigned(u) {
+    return assignedKeys.has(`${u.classId}__${u.subjectId}__${u.streamId ?? ''}`);
+  }
+
   // Plan directly from the week-status reminder, bypassing the class-card
   // picker entirely — see quickPlan below for why this matters.
   const [quickPlan, setQuickPlan] = useState(null); // null | one entry from week.unplanned
+  const [unassignedNotice, setUnassignedNotice] = useState(null); // null | one entry from week.unplanned
 
   if (drilldown) {
     return <PlansDrillDown item={drilldown} onBack={() => setDrilldown(null)} />;
@@ -1558,10 +1578,15 @@ function LessonPlansTab() {
               {week.unplanned.map(u => (
                 <button
                   key={`${u.classId}-${u.subjectId}-${u.streamId ?? ''}-${u.date}`}
-                  onClick={() => setQuickPlan(u)}
-                  className="flex items-center gap-1 text-xs bg-white border border-amber-300 text-amber-800 hover:bg-amber-100 px-2.5 py-1 rounded-full"
+                  onClick={() => (isAssigned(u) ? setQuickPlan(u) : setUnassignedNotice(u))}
+                  title={isAssigned(u) ? undefined : "On your timetable, but there's no matching teaching assignment yet"}
+                  className={`flex items-center gap-1 text-xs border px-2.5 py-1 rounded-full ${
+                    isAssigned(u)
+                      ? 'bg-white border-amber-300 text-amber-800 hover:bg-amber-100'
+                      : 'bg-white border-slate-300 text-slate-500 hover:bg-slate-50'
+                  }`}
                 >
-                  <Plus size={11} />
+                  {isAssigned(u) ? <Plus size={11} /> : <AlertTriangle size={11} />}
                   {u.subjectName} · {new Date(`${u.date}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}
                 </button>
               ))}
@@ -1585,7 +1610,7 @@ function LessonPlansTab() {
         </>
       )}
 
-      {quickPlan && (
+      {quickPlan && isAssigned(quickPlan) && (
         <LessonPlanSlideOver
           classId={quickPlan.classId} className={quickPlan.className}
           subjectId={quickPlan.subjectId} subjectName={quickPlan.subjectName}
@@ -1594,6 +1619,27 @@ function LessonPlansTab() {
           onClose={() => setQuickPlan(null)}
           onSaved={() => setQuickPlan(null)}
         />
+      )}
+
+      {unassignedNotice && (
+        <>
+          <div className="fixed inset-0 bg-slate-900/30 backdrop-blur-sm z-40" onClick={() => setUnassignedNotice(null)} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 text-center">
+              <AlertTriangle size={28} className="mx-auto mb-3 text-amber-500" />
+              <h3 className="text-sm font-semibold text-slate-900">No teaching assignment for this lesson</h3>
+              <p className="text-xs text-slate-500 mt-2">
+                {unassignedNotice.subjectName} · {unassignedNotice.className}{unassignedNotice.streamName ? ` · ${unassignedNotice.streamName}` : ''} is on your timetable, but you don't have a matching teaching assignment yet — the system can't let you save a lesson plan for it until that's set up. Ask your administrator to add it under Teaching Assignments.
+              </p>
+              <button
+                onClick={() => setUnassignedNotice(null)}
+                className="mt-4 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-4 py-2 rounded-lg"
+              >
+                Got it
+              </button>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
