@@ -26,7 +26,7 @@ import { billing as billingApi, mpesa as mpesaApi } from '@/api/client.js';
 import { students as studentsApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 import { deriveNavModules, buildModuleConfigMap } from '@/config/moduleNav.js';
-import { SYSTEM_ROLE_LABELS, roleLabel } from '@/utils/roleLabels.js';
+import { SYSTEM_ROLE_LABELS, roleLabel, STAFF_ROLE_KEYS } from '@/utils/roleLabels.js';
 import { useCurrentAcademicPeriod } from '@/hooks/useCurrentAcademicPeriod.js';
 import { BUILTIN_STAFF_RESPONSIBILITIES } from '@/config/staffResponsibilities.js';
 import { resizeImageToDataUrl } from '@/utils/imageResize.js';
@@ -1877,14 +1877,15 @@ function SmtpCard({ school = {}, onSaved }) {
    ══════════════════════════════════════════════════════════════ */
 /* ── Canonical system role list ─────────────────────────────────
    Single source of truth — filter, invite form, and R&P all derive
-   from this. `deputy` kept below as a legacy alias (backward compat)
-   but does NOT appear in the UI — it is merged with deputy_principal.
+   from this. Built on roleLabels.js's STAFF_ROLE_KEYS (the same list
+   HR and Payroll use) plus the account types that aren't staff but
+   still need a row here: 'superadmin' (platform-granted, still shown
+   so it can be filtered/invited... see exclusions below) and the
+   portal-only 'parent'/'student' roles. `deputy` kept as a legacy
+   alias (backward compat) but does NOT appear in the UI — it is
+   merged with deputy_principal.
    ─────────────────────────────────────────────────────────────── */
-const SYSTEM_ROLES = [
-  'superadmin', 'admin', 'principal', 'deputy_principal', 'section_head', 'teacher',
-  'exams_officer', 'timetabler', 'admissions_officer', 'finance', 'hr',
-  'discipline_committee', 'parent', 'student',
-];
+const SYSTEM_ROLES = ['superadmin', ...STAFF_ROLE_KEYS, 'parent', 'student'];
 
 // Roles that can never be deleted from the school (safety guard)
 const PROTECTED_ROLES = new Set(['superadmin', 'admin']);

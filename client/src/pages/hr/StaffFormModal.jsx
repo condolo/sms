@@ -47,16 +47,23 @@ function Section({ icon: Icon, title, children }) {
   );
 }
 
-export default function StaffFormModal({ mode, teacher, departments = [], subjects = [], responsibilities, staffRoles = [], isHR, onClose, onSave, saving }) {
+export default function StaffFormModal({ mode, teacher, prefill, departments = [], subjects = [], responsibilities, staffRoles = [], isHR, onClose, onSave, saving }) {
   const roleOptions = (Array.isArray(responsibilities) && responsibilities.length > 0) ? responsibilities : DEFAULT_RESPONSIBILITIES;
   const isEdit = mode === 'edit';
+  // "Activate Existing User" flow (HRPage's unlinked-accounts picker): a
+  // NEW staff record (mode:'add'), but the person already has a real
+  // login — name/email come pre-filled from that account, and email is
+  // locked the same way an edit's is, since POST /teachers auto-links by
+  // exact email match and an admin editing it here would silently break
+  // that link (creating a second, unlinked login-less record instead).
+  const emailLocked = isEdit || !!prefill?.email;
 
   const [form, setForm] = useState({
     title:          teacher?.title          ?? '',
-    firstName:      teacher?.firstName      ?? '',
-    lastName:       teacher?.lastName       ?? '',
+    firstName:      teacher?.firstName      ?? prefill?.firstName ?? '',
+    lastName:       teacher?.lastName       ?? prefill?.lastName  ?? '',
     middleName:     teacher?.middleName     ?? '',
-    email:          teacher?.email          ?? '',
+    email:          teacher?.email          ?? prefill?.email     ?? '',
     phone:          teacher?.phone          ?? '',
     gender:         teacher?.gender         ?? '',
     dateOfBirth:    teacher?.dateOfBirth    ?? '',
@@ -207,10 +214,11 @@ export default function StaffFormModal({ mode, teacher, departments = [], subjec
               <div>
                 <label className={lbl}>Email *</label>
                 <input required type="email" value={form.email} onChange={e => set('email', e.target.value)}
-                  readOnly={isEdit}
-                  className={`${fCls} ${isEdit ? 'bg-slate-50 text-slate-500 cursor-not-allowed' : ''}`}
+                  readOnly={emailLocked}
+                  className={`${fCls} ${emailLocked ? 'bg-slate-50 text-slate-500 cursor-not-allowed' : ''}`}
                   placeholder="staff@school.com" />
                 {isEdit && <p className="text-[10px] text-slate-400 mt-0.5">Email cannot be changed here</p>}
+                {!isEdit && prefill?.email && <p className="text-[10px] text-slate-400 mt-0.5">Matches their existing login — this is how the two get linked.</p>}
               </div>
               <div>
                 <label className={lbl}>Staff Type / Job Title *</label>

@@ -22,22 +22,15 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { X, Plus, Trash2, Save, Loader2, ShieldCheck, Info } from 'lucide-react';
 import { hr as hrApi } from '@/api/client.js';
 import { useToast } from '@/hooks/useToast.jsx';
+import { STAFF_ROLE_KEYS, SYSTEM_ROLE_LABELS } from '@/utils/roleLabels.js';
 
-// Mirrors HRPage.jsx's own BUILT_IN_STAFF_ROLES (kept local — this modal
-// only needs {key,label}, not the color classes HRPage's staff cards use).
-const BUILT_IN_STAFF_ROLES = [
-  { key: 'admin',                label: 'Admin' },
-  { key: 'deputy_principal',     label: 'Deputy Principal' },
-  { key: 'section_head',         label: 'Section Head' },
-  { key: 'teacher',              label: 'Teacher' },
-  { key: 'exams_officer',        label: 'Exams Officer' },
-  { key: 'timetabler',           label: 'Timetabler' },
-  { key: 'admissions_officer',   label: 'Admissions Officer' },
-  { key: 'finance',              label: 'Finance' },
-  { key: 'hr',                   label: 'HR' },
-  { key: 'discipline_committee', label: 'Discipline Committee' },
-  { key: 'front_office',         label: 'Front Office' },
-];
+// Built from the same canonical list HRPage.jsx's Add Staff dropdown uses
+// (this modal only needs {key,label}, not HRPage's card color classes) —
+// see roleLabels.js's STAFF_ROLE_KEYS comment for why this exists.
+const BUILT_IN_STAFF_ROLES = STAFF_ROLE_KEYS.map(key => ({
+  key,
+  label: SYSTEM_ROLE_LABELS[key] || key,
+}));
 
 function slugify(label) {
   const base = label.toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');

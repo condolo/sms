@@ -19,23 +19,36 @@ import PayrollSettingsModal from './PayrollSettingsModal.jsx';
 import BulkImportSlideOver from '@/components/import/BulkImportSlideOver.jsx';
 import { useToast } from '@/hooks/useToast.jsx';
 import { BUILTIN_STAFF_RESPONSIBILITIES } from '@/config/staffResponsibilities.js';
+import { STAFF_ROLE_KEYS, SYSTEM_ROLE_LABELS } from '@/utils/roleLabels.js';
 
 /* ── Constants ──────────────────────────────────────────── */
 
-// Built-in staff roles — mirrors the Roles & Permissions system (excludes superadmin/parent/student)
-const BUILT_IN_STAFF_ROLES = [
-  { key: 'admin',                label: 'Admin',                color: 'bg-blue-100 text-blue-700'     },
-  { key: 'deputy_principal',     label: 'Deputy Principal',     color: 'bg-indigo-100 text-indigo-700'  },
-  { key: 'section_head',         label: 'Section Head',         color: 'bg-violet-100 text-violet-700'  },
-  { key: 'teacher',              label: 'Teacher',              color: 'bg-emerald-100 text-emerald-700' },
-  { key: 'exams_officer',        label: 'Exams Officer',        color: 'bg-amber-100 text-amber-700'   },
-  { key: 'timetabler',           label: 'Timetabler',           color: 'bg-orange-100 text-orange-700'  },
-  { key: 'admissions_officer',   label: 'Admissions Officer',   color: 'bg-pink-100 text-pink-700'     },
-  { key: 'finance',              label: 'Finance',              color: 'bg-yellow-100 text-yellow-700'  },
-  { key: 'hr',                   label: 'HR',                   color: 'bg-rose-100 text-rose-700'     },
-  { key: 'discipline_committee', label: 'Discipline Committee', color: 'bg-red-100 text-red-700'       },
-  { key: 'front_office',         label: 'Front Office',         color: 'bg-slate-100 text-slate-700'   },
-];
+// Built-in staff roles — built from the single shared STAFF_ROLE_KEYS list
+// (utils/roleLabels.js) instead of an independently hand-maintained copy.
+// This used to be its own hardcoded array, missing 'principal' entirely
+// (a real school's own Principal had no way to be entered into HR — see
+// that file's header comment for the full incident) and carrying a
+// 'front_office' entry that ISN'T a real system role at all — selecting
+// it in "Create Login Account" would always fail server-side. Colors
+// stay local (presentation-only, not part of the shared role identity).
+const ROLE_COLORS = {
+  admin:                'bg-blue-100 text-blue-700',
+  principal:            'bg-indigo-800 text-white',
+  deputy_principal:     'bg-indigo-100 text-indigo-700',
+  section_head:         'bg-violet-100 text-violet-700',
+  teacher:              'bg-emerald-100 text-emerald-700',
+  exams_officer:        'bg-amber-100 text-amber-700',
+  timetabler:           'bg-orange-100 text-orange-700',
+  admissions_officer:   'bg-pink-100 text-pink-700',
+  finance:              'bg-yellow-100 text-yellow-700',
+  hr:                   'bg-rose-100 text-rose-700',
+  discipline_committee: 'bg-red-100 text-red-700',
+};
+const BUILT_IN_STAFF_ROLES = STAFF_ROLE_KEYS.map(key => ({
+  key,
+  label: SYSTEM_ROLE_LABELS[key] || key,
+  color: ROLE_COLORS[key] || 'bg-slate-100 text-slate-700',
+}));
 const DEFAULT_RESPONSIBILITIES = BUILTIN_STAFF_RESPONSIBILITIES;
 const DOC_TYPES   = { contract:'Contract', appraisal:'Appraisal', certificate:'Certificate', id_copy:'ID / Document', other:'Other' };
 const DOC_COLORS  = { contract:'bg-blue-100 text-blue-700', appraisal:'bg-purple-100 text-purple-700', certificate:'bg-emerald-100 text-emerald-700', id_copy:'bg-amber-100 text-amber-700', other:'bg-slate-100 text-slate-600' };
@@ -618,6 +631,97 @@ function CreateLoginModal({ staff, allStaffRoles = [], onClose, onConfirm, savin
   );
 }
 
+/* ── Activate Existing User ────────────────────────────────────
+   Real gap this closes: HR (teachers collection) and login accounts
+   (users/Settings) are two independent systems with no guarantee every
+   staff-type login has a matching HR profile — confirmed live for a
+   school's own superadmin, who had a working login but zero HR
+   presence. Picks from GET /teachers/unlinked-accounts (active,
+   non-parent/student logins with no linked teacher record yet) and
+   hands the pick to StaffFormModal as a `prefill` — no re-typing a name/
+   email that already exists, and the email stays locked so it can't
+   drift from the login it's meant to link to. */
+function ActivateExistingUserModal({ onClose, onPick }) {
+  const [search, setSearch] = useState('');
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['teachers', 'unlinked-accounts'],
+    queryFn:  () => teachersApi.unlinkedAccounts(),
+  });
+  const accounts = data?.data ?? [];
+  const filtered = accounts.filter(u => {
+    if (!search) return true;
+    const s = search.toLowerCase();
+    return (u.name ?? '').toLowerCase().includes(s) || (u.email ?? '').toLowerCase().includes(s);
+  });
+
+  function pick(u) {
+    const parts = (u.name ?? '').trim().split(/\s+/);
+    onPick({
+      firstName: parts[0] ?? '',
+      lastName:  parts.slice(1).join(' ') || parts[0] || '',
+      email:     u.email ?? '',
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] flex flex-col">
+        <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-slate-100">
+          <div className="flex items-center gap-2.5">
+            <div className="h-8 w-8 rounded-lg bg-violet-50 flex items-center justify-center">
+              <UserCheck size={15} className="text-violet-600" />
+            </div>
+            <div>
+              <h2 className="font-bold text-slate-900 text-sm">Activate Existing User</h2>
+              <p className="text-[11px] text-slate-500">Give a login-only account a real HR staff profile</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 p-1"><X size={15} /></button>
+        </div>
+
+        <div className="px-5 pt-4">
+          <input
+            value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Search by name or email…"
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400/40"
+          />
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-1.5">
+          {isLoading ? (
+            <div className="flex justify-center py-8"><Loader2 size={20} className="animate-spin text-violet-400" /></div>
+          ) : isError ? (
+            <p className="text-sm text-red-600 text-center py-8">Failed to load accounts.</p>
+          ) : filtered.length === 0 ? (
+            <p className="text-sm text-slate-400 text-center py-8">
+              {accounts.length === 0
+                ? 'Every active login at this school already has an HR staff profile.'
+                : 'No match for that search.'}
+            </p>
+          ) : (
+            filtered.map(u => (
+              <button
+                key={u.id}
+                onClick={() => pick(u)}
+                className="w-full flex items-center justify-between gap-3 rounded-xl border border-slate-100 hover:border-violet-200 hover:bg-violet-50/50 px-3 py-2.5 text-left transition"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-slate-800 truncate">{u.name || '—'}</p>
+                  <p className="text-xs text-slate-400 truncate">{u.email}</p>
+                </div>
+                <span className="shrink-0 text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 capitalize">
+                  {(u.role ?? '').replace(/_/g, ' ')}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function HRPage() {
   const qc     = useQueryClient();
   const user   = useAuthStore(s => s.session?.user);
@@ -640,8 +744,9 @@ export default function HRPage() {
   const [payrollModal, setPayrollModal]     = useState(null);  // null | { mode:'add'|'edit', record:null|{...} }
   const [deletingPayroll, setDeletingPayroll] = useState(null);  // null | { id }
   const [downloadingPayslip, setDownloadingPayslip] = useState(null); // null | payroll record id
-  const [staffModal, setStaffModal]           = useState(null);  // null | { mode:'add'|'edit' }
+  const [staffModal, setStaffModal]           = useState(null);  // null | { mode:'add'|'edit', prefill?:{firstName,lastName,email,userId} }
   const [selectedStaff, setSelectedStaff]     = useState(null);  // null | teacher doc (for detail panel)
+  const [showActivatePicker, setShowActivatePicker] = useState(false);
   const [staffSearch, setStaffSearch]         = useState('');
   const [createLoginStaff, setCreateLoginStaff] = useState(null); // null | teacher doc
   const [selectedStaffIds, setSelectedStaffIds] = useState(() => new Set());
@@ -1082,6 +1187,14 @@ export default function HRPage() {
                 onClick={() => setShowStaffImport(true)}
                 className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition">
                 <Upload size={14} /> Import Staff
+              </button>
+            )}
+            {isHR && (
+              <button
+                onClick={() => setShowActivatePicker(true)}
+                title="Give an existing login account (e.g. a superadmin added before HR existed for them) a real HR staff profile — no re-typing their name/email, and it links to their existing login instead of risking a duplicate."
+                className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition">
+                <UserCheck size={14} /> Activate Existing User
               </button>
             )}
             {isHR && (
@@ -1791,11 +1904,23 @@ export default function HRPage() {
         />
       )}
 
+      {/* ── Activate Existing User picker ── */}
+      {showActivatePicker && (
+        <ActivateExistingUserModal
+          onClose={() => setShowActivatePicker(false)}
+          onPick={prefill => {
+            setShowActivatePicker(false);
+            setStaffModal({ mode: 'add', prefill });
+          }}
+        />
+      )}
+
       {/* ── Add / Edit Staff modal ── */}
       {staffModal && (
         <StaffFormModal
           mode={staffModal.mode}
           teacher={staffModal.mode === 'edit' ? selectedStaff : null}
+          prefill={staffModal.mode === 'add' ? staffModal.prefill : null}
           departments={departments}
           subjects={subjectsList}
           responsibilities={responsibilities}
