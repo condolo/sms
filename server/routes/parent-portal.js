@@ -218,8 +218,13 @@ router.get('/dashboard/:childId', authMiddleware, async (req, res) => {
       const subjectDocs = await Subjects.find({ id: { $in: subjectIds }, schoolId }).select('id name code').lean();
       const subjectMap  = Object.fromEntries(subjectDocs.map(s => [s.id, s]));
 
+      // Class-scoped, same as lessons.js's _topicClassFilterPart (2026-09
+      // fix): a pre-migration topic with no classId still counts for every
+      // class, but a topic scoped to a DIFFERENT class must not inflate
+      // this child's own class total.
+      const topicClassOr = [{ classId: student.classId }, { classId: { $exists: false } }];
       for (const subjectId of subjectIds) {
-        const totalTopics   = await Topics.countDocuments({ schoolId, subjectId, academicYear });
+        const totalTopics   = await Topics.countDocuments({ schoolId, subjectId, academicYear, $or: topicClassOr });
         const coveredTopics = await Coverage.countDocuments({ schoolId, classId: student.classId, subjectId, academicYear, $or: streamOr });
         if (totalTopics === 0) continue;
         lessonsCoverage.push({

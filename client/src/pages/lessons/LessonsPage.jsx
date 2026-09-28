@@ -91,7 +91,7 @@ function ClassCard({ item, onClick }) {
 }
 
 /* ── Add / Edit Topic slide-over ─────────────────────────────── */
-function TopicSlideOver({ subjectId, subjectName, academicYear, existing, onClose, onSaved }) {
+function TopicSlideOver({ classId, subjectId, subjectName, academicYear, existing, onClose, onSaved }) {
   const qc = useQueryClient();
   const [title,       setTitle]       = useState(existing?.title ?? '');
   const [description, setDescription] = useState(existing?.description ?? '');
@@ -116,7 +116,7 @@ function TopicSlideOver({ subjectId, subjectName, academicYear, existing, onClos
     if (!title.trim()) { setError('Topic title is required'); return; }
     const validSubs = subtopics.map(s => s.trim()).filter(Boolean);
     mutation.mutate({
-      subjectId, subjectName, academicYear,
+      classId, subjectId, subjectName, academicYear,
       title: title.trim(),
       description: description.trim() || undefined,
       subtopics: validSubs.map((t, i) => ({ title: t, order: i })),
@@ -458,6 +458,7 @@ function DrillDown({ item, onBack, canManage }) {
 
       {showSlider && (
         <TopicSlideOver
+          classId={classId}
           subjectId={subjectId}
           subjectName={subjectName}
           academicYear={academicYear}
@@ -759,8 +760,8 @@ function LessonPlanSlideOver({ classId, className, subjectId, subjectName, strea
   const [error, setError] = useState('');
 
   const { data: topicsResp, isLoading: topicsLoading } = useQuery({
-    queryKey: ['lessons', 'topics', subjectId],
-    queryFn:  () => lessonsApi.topics.list({ subjectId }),
+    queryKey: ['lessons', 'topics', subjectId, classId],
+    queryFn:  () => lessonsApi.topics.list({ subjectId, classId }),
     staleTime: 60_000,
   });
   const topics = topicsResp?.data ?? [];

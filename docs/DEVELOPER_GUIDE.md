@@ -5094,3 +5094,37 @@ Running `scripts/verify-rbac-coverage.js` to sanity-check this work turned up a 
 - `client/src/api/client.js` — `_csrfToken()`, wired into `_req`/`_postFile`
 - `platform.html` — `_platformCsrfToken()`, wired into `api`/`apiFetch`
 - `server/__tests__/csrf.test.js`, `corsOrigin.test.js`, `middleware/csrf-protection.test.js` (new)
+
+---
+
+## 75. Syllabus Topics — Class Scoping (v5.135.0)
+
+A real teacher report: updating topics for a Year 7 stream made those same topics immediately appear as ready-to-teach in Year 8 too. Investigated directly against production data (not assumed): confirmed this is **not** the lesson-plan-sharing feature added in v5.131.0 (`schools.lessonPlanSharing.mode` is unset — i.e. `'own'`, the default — for every real school: demo, mla, trinitas-tis, trinity-tis, ghis). The actual cause is much older: `syllabus_topics` has always been scoped only by `{schoolId, subjectId, academicYear}`. A subject like "English" is a single shared record across every grade that teaches it (confirmed: Trinitas's "English" subject is used by Year 2 through Year 8 alike) — so its topics were never separated by class in the first place. `lesson_coverage` (what's actually been taught) was already correctly scoped by `{classId, subjectId, topicId, academicYear, streamId}`; it was only the topic *definitions* that leaked across classes.
+
+### Fix: backward-compatible class scoping, not a forced migration
+`classId` is now **required** on every newly-created topic (`TopicSchema` in `server/routes/lessons.js`). Existing topics keep `classId` unset rather than being force-migrated — a new helper, `_topicClassFilterPart(classId)`, treats an unset `classId` as "legacy, still shown for every class":
+```js
+function _topicClassFilterPart(classId) {
+  return classId ? { $or: [{ classId }, { classId: { $exists: false } }] } : {};
+}
+```
+This mirrors the same "backfill missing keys, never overwrite existing" philosophy `_mergeTemplate` already uses elsewhere in this file. Nothing a real school already relies on disappears; only topics created after this fix are actually scoped to one class, and an existing topic can be assigned a class later via `PUT /topics/:id` (its schema is `TopicSchema.partial()`, so the new field flows through automatically).
+
+### Every read AND write path that touches topics is now class-aware
+Read paths (`lessons.js`): `GET /topics`, `GET /coverage`, `GET /my-classes`, `GET /summary` (admin/HOD overview — now keyed by `subjectId__classId`, not `subjectId` alone, so a Year 7 row's topic count is never inflated by Year 8's topics), `GET /class-summary/:classId` (student/parent portal). Write/validation paths: `POST /coverage` and `POST /plans` now resolve the referenced topic with `subjectId` + `_topicClassFilterPart(classId)` (previously `POST /plans` only checked `subjectId`, and `POST /coverage` checked neither) — so a teacher can no longer mark a Year 8-scoped topic as covered, or plan a lesson around it, from a Year 7 class. `PUT /plans/:id`'s topic-change validation gained the same two filters (`subjectId`, `classId`) it was previously missing entirely.
+
+The same leak existed independently in three portal dashboard widgets that each run their own `syllabus_topics.countDocuments()` for a curriculum-coverage percentage — `server/routes/teacher-portal.js` (`GET /dashboard`), `server/routes/student-portal.js` and `server/routes/parent-portal.js` (both `GET /dashboard`). Each gained the identical inline `$or` class filter (these files don't share a helper with `lessons.js`, so the fix is duplicated locally rather than introducing a cross-file dependency for one filter object).
+
+### Client
+`client/src/pages/lessons/LessonsPage.jsx`: `TopicSlideOver` now takes and sends `classId` (was missing the prop entirely); its caller `DrillDown` passes its own `classId` through; `LessonPlanSlideOver`'s topic picker (`lessonsApi.topics.list`) now sends `classId` alongside `subjectId` and includes it in the query key, so switching between classes with the same subject doesn't serve a stale, wrongly-scoped topic list from cache.
+
+`POST /topics/copy-from` (academic-year rollover, not class-to-class) was deliberately left unchanged — it's a different feature (copying a subject's topics forward into a new academic year) from the bug reported, which was about cross-**class** leakage within the same year.
+
+### Verified
+New `server/__tests__/routes/lessons-topics-class-scope.test.js` (10 tests): a class-scoped topic never appears for a sibling class in `GET /topics` or `GET /coverage`; a legacy (classId-unset) topic still appears for every class; `POST /topics` rejects a missing `classId`; `POST /coverage` refuses marking a topic scoped to a different class. Plus 2 new tests in `lessons-plans.test.js` covering the same refusal for `POST /plans` and `PUT /plans/:id`. Full suite: 2571/2571 passing, zero regressions. `scripts/verify-tenant-coverage.js` held at ceiling (35), unaffected. `scripts/verify-rbac-coverage.js` still shows only the pre-existing `timetable.js` gap recorded in §74 — re-confirmed via `git stash` that this fix doesn't touch it.
+
+### Files
+- `server/routes/lessons.js` — `TopicSchema` (`classId` required), `_topicClassFilterPart()`, `GET /topics`, `POST /topics`, `GET /coverage`, `GET /my-classes`, `GET /summary`, `GET /class-summary/:classId`, `POST /coverage`, `POST /plans`, `PUT /plans/:id`
+- `server/routes/teacher-portal.js`, `server/routes/student-portal.js`, `server/routes/parent-portal.js` — dashboard curriculum-coverage widgets, same class filter inlined
+- `client/src/pages/lessons/LessonsPage.jsx` — `TopicSlideOver`, `DrillDown`, `LessonPlanSlideOver`
+- `server/__tests__/routes/lessons-topics-class-scope.test.js` (new), `lessons-plans.test.js` (2 new tests)

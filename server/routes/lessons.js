@@ -89,6 +89,20 @@ const SubtopicSchema = z.object({
 });
 
 const TopicSchema = z.object({
+  // Class scoping (2026-09): a real teacher report — updating "English"
+  // topics for a Year 7 stream made them immediately visible as ready-to-
+  // teach in Year 8 too. Root cause confirmed against real data: topics
+  // were scoped ONLY by {subjectId, academicYear} — "English" is a
+  // single subject record shared by every grade that teaches it, so its
+  // topics were never separated by class in the first place; this was
+  // never related to the lessonPlanSharing toggle (confirmed unset for
+  // every real school). classId is now required for every NEW topic.
+  // Existing (pre-migration) topics keep classId unset rather than being
+  // force-migrated — GET /topics and GET /coverage treat an unset classId
+  // as "legacy, still shown for every class" so nothing a real school
+  // already relies on disappears; only newly created topics are actually
+  // scoped, and an existing topic can be assigned a class later via PUT.
+  classId:      z.string().min(1),
   subjectId:    z.string().min(1),
   subjectName:  z.string().max(200).trim().optional(),
   academicYear: z.string().max(20).trim().optional(),
@@ -456,6 +470,20 @@ function _streamFilterPart(streamId) {
   return streamId ? { streamId } : { streamId: { $exists: false } };
 }
 
+/* ── Helper: class-scoped topic filter (2026-09 class-scoping fix) ──
+   Deliberately INCLUSIVE, unlike _streamFilterPart above: a topic with no
+   classId at all is a pre-migration/legacy record, shown for every class
+   rather than hidden, so nothing a school already relies on disappears
+   the moment class-scoping shipped. Only topics created after that point
+   are ever actually scoped to one class. When classId itself isn't
+   supplied by the caller (e.g. a not-yet-updated client), this is a
+   no-op — the caller gets the old, unscoped behavior rather than an
+   error, since omitting classId is a caller choice, not a claim about
+   which class a topic belongs to. */
+function _topicClassFilterPart(classId) {
+  return classId ? { $or: [{ classId }, { classId: { $exists: false } }] } : {};
+}
+
 /* ── Helper: build coverage map for a set of class-subjects ─── */
 async function _coverageMap(schoolId, classId, subjectId, academicYear) {
   const filter = { schoolId, classId, subjectId };
@@ -478,10 +506,10 @@ async function _coverageMap(schoolId, classId, subjectId, academicYear) {
 router.get('/topics', authMiddleware, PLAN, MODGATE, async (req, res) => { // rbac: intentionally open to every authenticated user — curriculum reference data
   try {
     const { schoolId } = req.jwtUser;
-    const { subjectId, academicYear } = req.query;
+    const { subjectId, academicYear, classId } = req.query;
     if (!subjectId) return E.validation(res, [{ field: 'subjectId', message: 'subjectId is required' }]);
 
-    const filter = { schoolId, subjectId };
+    const filter = { schoolId, subjectId, ..._topicClassFilterPart(classId) };
     if (academicYear) filter.academicYear = academicYear;
 
     const topics = await tenantModel('syllabus_topics', tenantContext(req))
@@ -524,6 +552,7 @@ router.post('/topics', authMiddleware, PLAN, MODGATE, rbac('lessons', 'create'),
     const doc = await tenantModel('syllabus_topics', tenantContext(req)).create({
       id: uuidv4(),
       schoolId,
+      classId:      data.classId,
       subjectId:    data.subjectId,
       subjectName,
       academicYear,
@@ -665,7 +694,7 @@ router.get('/my-classes', authMiddleware, PLAN, MODGATE, async (req, res) => {
     const results = await Promise.all(assignments.map(async (a) => {
       // Total subtopic items for this subject/year
       const topics = await tenantModel('syllabus_topics', tenantContext(req))
-        .find({ schoolId, subjectId: a.subjectId, academicYear })
+        .find({ schoolId, subjectId: a.subjectId, academicYear, ..._topicClassFilterPart(a.classId) })
         .select('id subtopics')
         .lean();
 
@@ -744,7 +773,7 @@ router.get('/coverage', authMiddleware, PLAN, MODGATE, scopeMiddleware, async (r
 
     const [topics, coverageRecords] = await Promise.all([
       tenantModel('syllabus_topics', tenantContext(req))
-        .find({ schoolId, subjectId, academicYear: year })
+        .find({ schoolId, subjectId, academicYear: year, ..._topicClassFilterPart(classId) })
         .sort({ order: 1, createdAt: 1 })
         .lean(),
       tenantModel('lesson_coverage', tenantContext(req))
@@ -817,8 +846,11 @@ router.post('/coverage', authMiddleware, PLAN, MODGATE, rbac('lessons', 'create'
     const school = await _model('schools').findOne({ id: schoolId }, { academicYear: 1 }).lean();
     const academicYear = school?.academicYear ?? String(new Date().getFullYear());
 
-    // Validate topic exists
-    const topic = await tenantModel('syllabus_topics', tenantContext(req)).findOne({ id: data.topicId, schoolId }).lean();
+    // Validate topic exists (and belongs to this class, per the 2026-09
+    // class-scoping fix — a Year 7-scoped topic must not be markable as
+    // covered against a Year 8 class just because they share a subjectId)
+    const topic = await tenantModel('syllabus_topics', tenantContext(req))
+      .findOne({ id: data.topicId, schoolId, subjectId: data.subjectId, ..._topicClassFilterPart(data.classId) }).lean();
     if (!topic) return E.notFound(res, 'Topic not found');
 
     // If subtopicId provided, validate it belongs to the topic
@@ -1229,7 +1261,8 @@ router.post('/plans', authMiddleware, PLAN, MODGATE, rbac('lessons', 'create'), 
     // updated first" — isn't a separate check, it falls out of topicId
     // being required and validated here: a subject with zero topics has
     // nothing a client picker could have sent.
-    const topic = await tenantModel('syllabus_topics', tenantContext(req)).findOne({ id: data.topicId, schoolId, subjectId: data.subjectId }).lean();
+    const topic = await tenantModel('syllabus_topics', tenantContext(req))
+      .findOne({ id: data.topicId, schoolId, subjectId: data.subjectId, ..._topicClassFilterPart(data.classId) }).lean();
     if (!topic) return E.notFound(res, 'Topic not found for this subject — add topics under Lessons → Topics first.');
     if (data.subtopicId && !(topic.subtopics || []).some(st => st.id === data.subtopicId)) {
       return E.notFound(res, 'Subtopic not found on this topic');
@@ -1331,7 +1364,8 @@ router.put('/plans/:id', authMiddleware, PLAN, MODGATE, rbac('lessons', 'update'
     // avoids a redundant lookup on the common case (editing Reflection
     // weeks later, topicId untouched).
     if (data.topicId && data.topicId !== existing.topicId) {
-      const topic = await tenantModel('syllabus_topics', tenantContext(req)).findOne({ id: data.topicId, schoolId }).lean();
+      const topic = await tenantModel('syllabus_topics', tenantContext(req))
+        .findOne({ id: data.topicId, schoolId, subjectId: existing.subjectId, ..._topicClassFilterPart(existing.classId) }).lean();
       if (!topic) return E.notFound(res, 'Topic not found');
       update.topicTitle = topic.title;
       if (data.subtopicId) {
@@ -1433,14 +1467,19 @@ router.get('/summary', authMiddleware, PLAN, MODGATE, async (req, res) => { // r
 
     const assignments = await tenantModel('teaching_assignments', tenantContext(req)).find(assignFilter).lean();
 
-    // Aggregate topics count per subject
+    // Aggregate topics count per subject[-class] — grouped by classId too
+    // (not just subjectId) so a Year 7-scoped topic set never inflates a
+    // Year 8 row's total, matching the same class-scoping fix as GET
+    // /coverage above.
     const topicCounts = {};
-    const uniqueSubjects = [...new Set(assignments.map(a => a.subjectId))];
-    await Promise.all(uniqueSubjects.map(async sid => {
-      const topics = await tenantModel('syllabus_topics', tenantContext(req)).find({ schoolId, subjectId: sid, academicYear }).select('id subtopics').lean();
+    const uniqueSubjectClass = [...new Set(assignments.map(a => `${a.subjectId}__${a.classId}`))];
+    await Promise.all(uniqueSubjectClass.map(async key => {
+      const [sid, cid] = key.split('__');
+      const topics = await tenantModel('syllabus_topics', tenantContext(req))
+        .find({ schoolId, subjectId: sid, academicYear, ..._topicClassFilterPart(cid) }).select('id subtopics').lean();
       let total = 0;
       topics.forEach(t => { total += t.subtopics?.length ? t.subtopics.length : 1; });
-      topicCounts[sid] = total;
+      topicCounts[key] = total;
     }));
 
     // Coverage per class-subject[-stream] — a stream-scoped assignment's
@@ -1456,7 +1495,7 @@ router.get('/summary', authMiddleware, PLAN, MODGATE, async (req, res) => { // r
     }));
 
     const rows = assignments.map(a => {
-      const totalItems   = topicCounts[a.subjectId] || 0;
+      const totalItems   = topicCounts[`${a.subjectId}__${a.classId}`] || 0;
       const covered      = coverageCounts[`${a.classId}__${a.subjectId}__${a.streamId ?? ''}`] || 0;
       const pct          = totalItems > 0 ? Math.round((Math.min(covered, totalItems) / totalItems) * 100) : 0;
       return {
@@ -1505,7 +1544,7 @@ router.get('/class-summary/:classId', authMiddleware, PLAN, MODGATE, async (req,
 
     const rows = await Promise.all(uniqueBySubject.map(async (a) => {
       const topics = await tenantModel('syllabus_topics', tenantContext(req))
-        .find({ schoolId, subjectId: a.subjectId, academicYear })
+        .find({ schoolId, subjectId: a.subjectId, academicYear, ..._topicClassFilterPart(classId) })
         .select('id title subtopics order')
         .sort({ order: 1 })
         .lean();
@@ -1598,7 +1637,7 @@ router.get('/pending-teachers', authMiddleware, PLAN, MODGATE, async (req, res) 
       let totalItems = 0, coveredItems = 0;
       await Promise.all(t.classes.map(async (c) => {
         const topics = await tenantModel('syllabus_topics', tenantContext(req))
-          .find({ schoolId, subjectId: c.subjectId, academicYear })
+          .find({ schoolId, subjectId: c.subjectId, academicYear, ..._topicClassFilterPart(c.classId) })
           .select('id subtopics').lean();
         topics.forEach(tp => { totalItems += tp.subtopics?.length ? tp.subtopics.length : 1; });
 

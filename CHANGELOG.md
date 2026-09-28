@@ -6,6 +6,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.135.0] — 2026-09-28 — fix(lessons): syllabus topics leaked across classes within the same subject
+
+A real teacher report: topics updated for a Year 7 stream showed up as ready-to-teach in Year 8 too. Confirmed directly against production data this is **not** the lesson-plan-sharing feature (`lessonPlanSharing.mode` is unset — off — for every real school) but a much older gap: `syllabus_topics` was scoped only by `{schoolId, subjectId, academicYear}` — "English" is one shared record across every grade that teaches it, so its topics were never separated by class at all.
+
+`classId` is now required on every new topic; existing topics keep it unset and are treated as legacy — shown for every class, same backward-compatible philosophy `_mergeTemplate` already uses — via a new `_topicClassFilterPart()` helper. Every read path that lists or counts topics (`GET /topics`, `/coverage`, `/my-classes`, `/summary`, `/class-summary/:classId`, plus the teacher/student/parent portal dashboard widgets) and every write path that validates a `topicId` (`POST /coverage`, `POST /plans`, `PUT /plans/:id`) is now class-aware — a Year 8-scoped topic can no longer be listed, marked covered, or planned around from a Year 7 class.
+
+12 new tests (`lessons-topics-class-scope.test.js` + 2 in `lessons-plans.test.js`). Full suite: 2571/2571 passing, zero regressions. `scripts/verify-tenant-coverage.js` held at ceiling (35). `scripts/verify-rbac-coverage.js` still shows the pre-existing, unrelated `timetable.js` gap recorded in v5.134.0 — confirmed via `git stash` there too, untouched by this fix.
+
+Full details: [Developer Guide §75](docs/DEVELOPER_GUIDE.md#75-syllabus-topics--class-scoping-v51350).
+
+---
+
 ## [v5.134.0] — 2026-09-27 — fix(security): CORS + CSRF compounding
 
 Closes review items #6 and #9, which the review itself scored as compounding: the `*.msingi.io` wildcard CORS rule and "SameSite=Strict blocks CSRF" aren't independent — SameSite's own "site" is the registrable domain, not the subdomain, so a compromised or attacker-registered sibling subdomain is same-site and its requests carry the real auth cookie like a legitimate school portal's would. A perfect CORS allowlist doesn't close this on its own (CORS only gates whether JS can *read* a response, not whether a browser *sends* a request), so this needed two separate fixes.

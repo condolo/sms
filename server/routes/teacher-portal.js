@@ -337,8 +337,13 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     if (topAssignments.length) {
       curriculumCoverage = await Promise.all(topAssignments.map(async a => {
         const streamFilter = a.streamId ? { streamId: a.streamId } : { streamId: { $exists: false } };
+        // Class-scoped, same as lessons.js's _topicClassFilterPart (2026-09
+        // fix): a pre-migration topic with no classId is still counted for
+        // every class, but a topic scoped to a DIFFERENT class must not
+        // inflate this assignment's total.
+        const topicClassFilter = { $or: [{ classId: a.classId }, { classId: { $exists: false } }] };
         const [total, covered] = await Promise.all([
-          Topics.countDocuments({ schoolId, subjectId: a.subjectId, academicYear }).catch(() => 0),
+          Topics.countDocuments({ schoolId, subjectId: a.subjectId, academicYear, ...topicClassFilter }).catch(() => 0),
           Coverage.countDocuments({ schoolId, classId: a.classId, subjectId: a.subjectId, academicYear, ...streamFilter }).catch(() => 0),
         ]);
         if (total === 0) return null;

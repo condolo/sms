@@ -41,6 +41,7 @@ function mockChainObj(obj) {
 }
 function mockMatchesFilter(doc, filter) {
   return Object.entries(filter || {}).every(([k, v]) => {
+    if (k === '$or') return v.some(sub => mockMatchesFilter(doc, sub));
     if (v && typeof v === 'object' && !Array.isArray(v)) {
       if ('$in' in v) return v.$in.includes(doc[k]);
       if ('$exists' in v) {
@@ -168,6 +169,29 @@ describe('POST /api/lessons/plans — the "update topics first" precondition', (
     expect(res.status).toBe(201);
     expect(res.body.data.topicTitle).toBe('Grammar');
     expect(res.body.data.subtopicTitle).toBe('Nouns');
+  });
+});
+
+describe('POST/PUT /api/lessons/plans — topic class-scoping (2026-09 fix)', () => {
+  const TOPIC_OTHER_CLASS = {
+    id: 'topic_yr8', schoolId: SCHOOL_A, classId: 'cls_yr8', subjectId: 'subj_eng',
+    subjectName: 'English', title: 'Advanced Grammar', subtopics: [],
+  };
+
+  test('POST refuses a topic scoped to a DIFFERENT class, even for the same subject', async () => {
+    asTeacherOf(); // teaches cls_yr2
+    mockSyllabusTopics = mockMakeFakeCollection([TOPIC, TOPIC_OTHER_CLASS]);
+    const res = await supertest(buildApp()).post('/api/lessons/plans').send({ ...BASE_BODY, topicId: 'topic_yr8', subtopicId: undefined });
+    expect(res.status).toBe(404);
+  });
+
+  test('PUT refuses changing topicId to one scoped to a DIFFERENT class than the existing plan', async () => {
+    asTeacherOf(); // teaches cls_yr2
+    mockSyllabusTopics = mockMakeFakeCollection([TOPIC, TOPIC_OTHER_CLASS]);
+    const created = await supertest(buildApp()).post('/api/lessons/plans').send(BASE_BODY); // classId: cls_yr2, topic_1
+    expect(created.status).toBe(201);
+    const res = await supertest(buildApp()).put(`/api/lessons/plans/${created.body.data.id}`).send({ topicId: 'topic_yr8' });
+    expect(res.status).toBe(404);
   });
 });
 
