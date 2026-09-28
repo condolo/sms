@@ -6,6 +6,16 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.143.0] — 2026-09-28 — fix(platform): "Staff" count on the Registered Schools dashboard counted every login account, not staff
+
+Real customer report: Trinitas International School showed "372 staff" — obviously wrong for a school with 311 students. Confirmed live: `GET /api/platform/schools`'s `staff` stat was `countDocuments` against the `users` collection (every login account, any role) filtered only by `isActive: true` — no role filter at all. Broken down, those 372 were 313 student logins, 5 parent logins, and only 54 actual staff.
+
+Fixed to count from the `teachers` collection (the real HR staff directory) instead, excluding `terminated` status — the same "currently employed" semantic the HR module itself uses. Verified against all 5 real schools: Trinitas now correctly shows 54, not 372; every other school's number also dropped to something plausible (11, 22, 31, 0) instead of its own inflated login-account total.
+
+3 new tests. Full suite passing, zero regressions.
+
+---
+
 ## [v5.142.0] — 2026-09-28 — fix(security): organization portal subdomains were rejected by the CORS origin allowlist
 
 Real production incident, actual root cause after two disproven theories (a suspected stale deploy, ruled out by running the code directly against production data; a suspected DNS/custom-domain gap, ruled out because no subdomain has ever needed individual hosting registration): `tis.msingi.io` kept blank-paging and its API calls kept 500ing, on and off, unrelated to its branding data's size (confirmed after the images were removed and the problem persisted). Reproduced cleanly: `curl -H "Origin: https://tis.msingi.io" .../assets/index-*.js` returned 500; the identical request with no Origin header, or for `https://demo.msingi.io`, returned 200 — the CORS origin check itself, not the deployed code or DNS, was rejecting a legitimate, currently-live production origin.

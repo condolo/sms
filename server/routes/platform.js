@@ -234,9 +234,18 @@ router.get('/schools', async (req, res) => {
       // field (or undefined for schools provisioned before this fix).
       // Fall back to _id.toString() so stats still work for legacy docs.
       const sid = s.id || s._id?.toString();
+      // Real customer report: Trinitas showed "372 staff" on this
+      // dashboard — confirmed live that `staff` was counting EVERY active
+      // `users` login account regardless of role (313 of the 372 were
+      // students' own logins, plus parents, plus 58 actual staff). The
+      // real staff headcount is the HR staff directory (`teachers`
+      // collection — see check-docs' collection reference), not the
+      // login-account table those staff happen to also have accounts in.
+      // `status !== 'terminated'` matches "currently employed" — on_leave
+      // staff still count, a terminated one no longer does.
       const [students, staff] = await Promise.all([
         tenantModel('students', { schoolId: sid }).countDocuments({ schoolId: sid, status: 'active' }),
-        tenantModel('users', { schoolId: sid }).countDocuments({ schoolId: sid, isActive: true })
+        tenantModel('teachers', { schoolId: sid }).countDocuments({ schoolId: sid, status: { $ne: 'terminated' } })
       ]);
       return { ...s, _stats: { students, staff } };
     }));

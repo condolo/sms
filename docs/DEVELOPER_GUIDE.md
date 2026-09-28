@@ -5331,3 +5331,25 @@ Re-ran the exact `curl -H "Origin: ..."` reproduction directly against the real 
 ### Files
 - `server/utils/corsOrigin.js` — `_refreshKnownSchoolSlugs` (now queries both collections)
 - `server/__tests__/corsOrigin.test.js` — mock extended for `organizations`; 3 new tests
+
+---
+
+## 83. "Staff" on the Registered Schools Dashboard Counted Every Login Account (v5.143.0)
+
+Real customer report, screenshot in hand: Trinitas International School showed **372 staff** next to 311 students on the platform console's Registered Schools list — obviously implausible (more staff than students at a K-12 school). Confirmed live against the real database before touching anything: `GET /api/platform/schools`'s stats block did
+
+```js
+tenantModel('users', { schoolId: sid }).countDocuments({ schoolId: sid, isActive: true })
+```
+
+— every row in the `users` collection (every login account, of ANY role) with no role filter at all. `users` holds student logins, parent logins, and staff logins side by side (this app's normal shape — see `check-docs`' collection reference), so this was never "staff," it was "everyone with an active login." Broken down for Trinitas: 313 `student`, 5 `parent`, and only 54 actual staff roles (teacher/principal/finance/etc.) — the other 4 real schools showed the identical pattern at smaller scale, just never big enough to look obviously wrong until Trinitas's enrollment made the gap impossible to miss.
+
+### Fix
+Count from `teachers` — the real HR staff directory (see `check-docs`' collection reference: `Students` → `teachers`/`students` are separate collections from `users` on purpose) — filtered by `status: { $ne: 'terminated' }`, the same "currently employed" semantic (`on_leave` staff still count; a terminated one no longer does) the HR module itself already uses for headcount purposes elsewhere.
+
+### Verified
+Re-ran the corrected query directly against the real production database for all 5 real schools: Trinitas 54 (was 372), Trinity 31, Mascit Lab Academy 22, Msingi Demo School 11, Green Hills International School Nairobi 0 (a genuinely new, empty school — 0 students too, consistent). 3 new tests in `server/__tests__/routes/platform-schools-list-stats.test.js`: staff count comes from `teachers` and ignores the hundreds of student/parent login accounts that vastly outnumber them (mirrors the real incident's exact shape); a `terminated` staff member is excluded while `on_leave` still counts; a school with zero HR staff records shows `0`, not an inflated login-account total. Full suite passing, zero regressions. `scripts/verify-tenant-coverage.js` unaffected — `teachers` access already goes through the exempt `tenantModel`, same as the `users` call it replaced.
+
+### Files
+- `server/routes/platform.js` — `GET /schools`'s stats block
+- `server/__tests__/routes/platform-schools-list-stats.test.js` (new)
