@@ -44,6 +44,12 @@ const mockStudents = {
   updateOne: mockUpdateOne,
 };
 
+// Portal-login cascade (deactivate/reactivate now touch `users` too —
+// see students-portal-cascade.test.js for dedicated coverage) needs a
+// non-throwing `users` collection here so it's a real no-op, not a
+// silently-caught error, for tests that aren't about that behavior.
+const mockUsersNoop = { find: () => mockChainObj([]), updateMany: jest.fn().mockResolvedValue({ modifiedCount: 0 }) };
+
 jest.mock('../../utils/model', () => ({
   _model: jest.fn(() => ({ find: () => mockChainObj([]), findOne: () => mockChainObj(null) })),
 }));
@@ -51,6 +57,7 @@ jest.mock('../../utils/tenant-model', () => ({
   tenantContext: (req) => ({ schoolId: req.jwtUser.schoolId }),
   tenantModel: (collection) => {
     if (collection === 'students') return mockStudents;
+    if (collection === 'users') return mockUsersNoop;
     return { find: () => mockChainObj([]), findOne: () => mockChainObj(null) };
   },
 }));

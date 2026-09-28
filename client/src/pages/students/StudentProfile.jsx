@@ -1392,6 +1392,24 @@ function pctColor(pct) {
   return 'text-red-500';
 }
 
+/* `has*Account` only ever means "a login was created at some point" —
+   nothing ever unset it, so it kept reading "Active" even after the
+   login was disabled (student deactivation now cascades to it; see
+   server/routes/students.js's _cascadePortalOnDeactivate). The matching
+   `*AccountActive` field GET /students/:id now sends reports whether
+   that login can actually sign in right now — `false`/`null` (no
+   matching login at all) both mean "not working", so both render the
+   same "Inactive" state rather than a misleading green "Active". */
+function PortalBadge({ has, active }) {
+  const label = !has ? 'Not created' : active === true ? 'Active' : 'Inactive';
+  const cls   = !has
+    ? 'bg-slate-100 text-slate-500'
+    : active === true
+      ? 'bg-emerald-50 text-emerald-700'
+      : 'bg-amber-50 text-amber-700';
+  return <span className={`ml-auto text-[10px] font-semibold px-2 py-0.5 rounded-full ${cls}`}>{label}</span>;
+}
+
 /* ══════════════════════════════════════════════════════════════
    PORTAL TAB — Create / manage student & parent portal accounts
    ══════════════════════════════════════════════════════════════ */
@@ -1489,9 +1507,7 @@ function PortalTab({ student, canEdit }) {
             <h3 className="text-sm font-semibold text-slate-800">Student Portal Account</h3>
             <p className="text-[11px] text-slate-400">Login: admission number · Student tier required</p>
           </div>
-          <span className={`ml-auto text-[10px] font-semibold px-2 py-0.5 rounded-full ${student.hasPortalAccount ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-            {student.hasPortalAccount ? 'Active' : 'Not created'}
-          </span>
+          <PortalBadge has={student.hasPortalAccount} active={student.portalAccountActive} />
         </div>
 
         {studentAccResult && (
@@ -1548,9 +1564,7 @@ function PortalTab({ student, canEdit }) {
                     {' · Family tier required'}
                   </p>
                 </div>
-                <span className={`ml-auto text-[10px] font-semibold px-2 py-0.5 rounded-full ${student.hasMotherAccount ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                  {student.hasMotherAccount ? 'Active' : 'Not created'}
-                </span>
+                <PortalBadge has={student.hasMotherAccount} active={student.motherAccountActive} />
               </div>
 
               {motherAccResult && (
@@ -1588,9 +1602,7 @@ function PortalTab({ student, canEdit }) {
                     {' · Family tier required'}
                   </p>
                 </div>
-                <span className={`ml-auto text-[10px] font-semibold px-2 py-0.5 rounded-full ${student.hasFatherAccount ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                  {student.hasFatherAccount ? 'Active' : 'Not created'}
-                </span>
+                <PortalBadge has={student.hasFatherAccount} active={student.fatherAccountActive} />
               </div>
 
               {fatherAccResult && (
@@ -1628,9 +1640,7 @@ function PortalTab({ student, canEdit }) {
                 {' · Family tier required'}
               </p>
             </div>
-            <span className={`ml-auto text-[10px] font-semibold px-2 py-0.5 rounded-full ${student.hasParentAccount ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-              {student.hasParentAccount ? 'Active' : 'Not created'}
-            </span>
+            <PortalBadge has={student.hasParentAccount} active={student.parentAccountActive} />
           </div>
 
           {parentAccResult && (

@@ -52,7 +52,13 @@ const mockPaymentsAggregate  = jest.fn().mockResolvedValue([]);
 const mockPaymentsDeleteMany = jest.fn().mockResolvedValue({ deletedCount: 0 });
 const mockPaymentsUpdateMany = jest.fn().mockResolvedValue({ modifiedCount: 0 });
 const mockUsersFind     = jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) });
-const mockUsersFindOne  = jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) }); // default: no existing account
+// default: no existing account. GET /:id's live portal-status lookup
+// chains .select() before .lean() (unlike the plain-lean lookups
+// elsewhere in this file), so the default chain supports both.
+const mockUsersFindOne  = jest.fn().mockReturnValue({
+  select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) }),
+  lean:   jest.fn().mockResolvedValue(null),
+});
 const mockUsersUpdateOne = jest.fn().mockResolvedValue({});
 const mockUsersCreate    = jest.fn().mockResolvedValue({ id: 'usr_new', schoolId: 'school_test_001', role: 'student' });
 

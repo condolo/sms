@@ -640,6 +640,35 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('students', 'read'), scopeMi
 });
 
 /* ── GET /api/students/:id ─ Single student ─────────────────── */
+/* `hasPortalAccount`/`hasParentAccount`/`hasMotherAccount`/
+   `hasFatherAccount` only ever mean "an account was created at some
+   point" — nothing unsets them, so they kept showing "Active" on a
+   student's profile even after the login behind them was disabled
+   (deactivation cascade above, or a manual DELETE /:id/portal-account).
+   These extra `*AccountActive` fields report the login's REAL, current
+   state so the client can tell "Active" from "created but disabled"
+   instead of treating both as the same green badge. */
+async function _attachPortalAccountStatus(req, doc) {
+  const { schoolId } = req.jwtUser;
+  const Users = tenantModel('users', tenantContext(req));
+  const studentDocId = doc.id || String(doc._id);
+
+  const [studentUser, parentUser, motherUser, fatherUser] = await Promise.all([
+    Users.findOne({ schoolId, studentId: studentDocId, role: 'student' }).select('isActive').lean(),
+    doc.parentEmail ? Users.findOne({ schoolId, email: doc.parentEmail.toLowerCase().trim(), role: 'parent' }).select('isActive').lean() : null,
+    doc.motherEmail ? Users.findOne({ schoolId, email: doc.motherEmail.toLowerCase().trim(), role: 'parent' }).select('isActive').lean() : null,
+    doc.fatherEmail ? Users.findOne({ schoolId, email: doc.fatherEmail.toLowerCase().trim(), role: 'parent' }).select('isActive').lean() : null,
+  ]);
+
+  return {
+    ...doc,
+    portalAccountActive: studentUser ? studentUser.isActive !== false : null,
+    parentAccountActive: parentUser  ? parentUser.isActive  !== false : null,
+    motherAccountActive: motherUser  ? motherUser.isActive  !== false : null,
+    fatherAccountActive: fatherUser  ? fatherUser.isActive  !== false : null,
+  };
+}
+
 router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('students', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
@@ -656,7 +685,7 @@ router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('students', 'read'), asyn
     }
 
     if (!doc) return E.notFound(res, 'Student not found');
-    return ok(res, doc);
+    return ok(res, await _attachPortalAccountStatus(req, doc));
   } catch (err) {
     console.error('[students GET/:id]', err);
     return E.serverError(res);
@@ -914,6 +943,62 @@ router.delete('/purge', authMiddleware, PLAN, MODGATE, rbac('students', 'delete'
   }
 });
 
+/* ── Portal-login cascade for single-student deactivate/reactivate ───
+   Real gap: deactivating one student (via this route or PATCH
+   /:id/deactivate) never touched their portal login at all — only the
+   bulk year-end graduation path (POST /promote) ever did. A withdrawn,
+   suspended, or expelled student — and their parent — kept full working
+   portal access indefinitely. Confirmed live: 2 of 6 currently-inactive
+   students, and 1 linked parent, still had `isActive: true` logins.
+
+   Deactivating a parent's login is sibling-aware, per explicit
+   instruction: a parent with more than one child at the school must
+   never be locked out just because ONE sibling left — their login is
+   only deactivated once EVERY one of their linked children (`studentIds`
+   on the parent's own `users` document — the same field
+   POST /:id/parent-account maintains, sibling-aware, for legacy shared
+   and independent Mother/Father accounts alike) is itself inactive.
+   Reactivating a student restores their own login and reactivates any
+   linked parent login that was left inactive — symmetric with the
+   deactivate rule, since a child becoming active again always makes
+   "every sibling inactive" false.
+   ──────────────────────────────────────────────────────────────────── */
+async function _cascadePortalOnDeactivate(req, studentDocId) {
+  const { schoolId } = req.jwtUser;
+  const Users    = tenantModel('users', tenantContext(req));
+  const Students = tenantModel('students', tenantContext(req));
+
+  await Users.updateMany(
+    { schoolId, studentId: studentDocId, role: 'student' },
+    { $set: { isActive: false, updatedAt: new Date().toISOString() } }
+  );
+
+  const parents = await Users.find({ schoolId, role: 'parent', studentIds: studentDocId }).lean();
+  for (const parent of parents) {
+    const siblingIds = Array.isArray(parent.studentIds) ? parent.studentIds : [];
+    if (siblingIds.length === 0) continue;
+    const siblings = await Students.find({ schoolId, id: { $in: siblingIds } }).select('status').lean();
+    const anyStillActive = siblings.some(s => s.status === 'active');
+    if (!anyStillActive) {
+      await Users.updateOne({ _id: parent._id }, { $set: { isActive: false, updatedAt: new Date().toISOString() } });
+    }
+  }
+}
+
+async function _cascadePortalOnReactivate(req, studentDocId) {
+  const { schoolId } = req.jwtUser;
+  const Users = tenantModel('users', tenantContext(req));
+
+  await Users.updateMany(
+    { schoolId, studentId: studentDocId, role: 'student' },
+    { $set: { isActive: true, updatedAt: new Date().toISOString() } }
+  );
+  await Users.updateMany(
+    { schoolId, role: 'parent', studentIds: studentDocId, isActive: false },
+    { $set: { isActive: true, updatedAt: new Date().toISOString() } }
+  );
+}
+
 /* ── DELETE /api/students/:id ─ Soft-delete (status=inactive) ─ */
 router.delete('/:id', authMiddleware, PLAN, MODGATE, rbac('students', 'delete'), async (req, res) => {
   try {
@@ -937,6 +1022,9 @@ router.delete('/:id', authMiddleware, PLAN, MODGATE, rbac('students', 'delete'),
     }
 
     if (!doc) return E.notFound(res, 'Student not found');
+    const deletedDocId = doc.id || String(doc._id);
+    await _cascadePortalOnDeactivate(req, deletedDocId).catch(err =>
+      console.error('[students DELETE/:id] portal-login cascade failed:', err.message));
     AuditService.log({ action: 'student.deleted', actor: req.jwtUser, schoolId, target: { type: 'student', id: req.params.id, label: `${doc.firstName} ${doc.lastName}` }, req });
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) {
@@ -1555,6 +1643,9 @@ router.patch('/:id/deactivate', authMiddleware, PLAN, MODGATE, rbac('students', 
       }
     );
 
+    await _cascadePortalOnDeactivate(req, studentId).catch(err =>
+      console.error('[students PATCH/:id/deactivate] portal-login cascade failed:', err.message));
+
     console.log(`[students] Deactivated ${studentId} (${doc.firstName} ${doc.lastName}) → ${finalStatus} by ${userId}`);
     AuditService.log({ action: 'student.deactivated', actor: req.jwtUser, schoolId, target: { type: 'student', id: studentId, label: `${doc.firstName} ${doc.lastName}` }, details: { status: finalStatus, reason }, req });
     return ok(res, { id: studentId, status: finalStatus, reason, deactivatedAt: effectiveDate || now });
@@ -1589,6 +1680,9 @@ router.patch('/:id/reactivate', authMiddleware, PLAN, MODGATE, rbac('students', 
         $unset: { deactivatedAt: '', deactivatedBy: '', deactivationReason: '', deactivationNotes: '' },
       }
     );
+
+    await _cascadePortalOnReactivate(req, studentId).catch(err =>
+      console.error('[students PATCH/:id/reactivate] portal-login cascade failed:', err.message));
 
     console.log(`[students] Reactivated ${studentId} (${doc.firstName} ${doc.lastName}) by ${userId}`);
     return ok(res, { id: studentId, status: 'active' });
