@@ -7,10 +7,11 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Calendar, Plus, ChevronLeft, ChevronRight, List,
   LayoutGrid, MapPin, Users, Trash2, Edit2, X, Check, Download, Cake,
-  Video, Lock, ExternalLink,
+  Video, Lock, ExternalLink, Loader2,
 } from 'lucide-react';
-import { events as eventsApi } from '@/api/client.js';
+import { events as eventsApi, academicConfig } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
+import { Toast } from '../grades/components/GradesPrimitives.jsx';
 
 /* ── Constants ────────────────────────────────────────────── */
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -38,6 +39,21 @@ function fmtDate(iso) {
 
 function eventDotColor(evt) {
   return CATEGORIES[evt.category]?.color ?? evt.color ?? '#6b7280';
+}
+
+// Duplicate-title warning support: resolve which term (or, failing that,
+// which whole academic year) a given date falls in, so a same-title check
+// can be scoped to "this term" rather than the school's entire history.
+// Returns null when the school has no academic-year data covering the
+// date at all — callers must treat that as "skip the check", not an error.
+function findTermForDate(years, dateStr) {
+  if (!dateStr || !Array.isArray(years)) return null;
+  for (const y of years) {
+    const term = (y.terms || []).find(t => t.startDate <= dateStr && t.endDate >= dateStr);
+    if (term) return { label: term.name || `${y.name || 'this'} term`, startDate: term.startDate, endDate: term.endDate };
+  }
+  const year = years.find(y => y.startDate <= dateStr && y.endDate >= dateStr);
+  return year ? { label: year.name || 'this academic year', startDate: year.startDate, endDate: year.endDate } : null;
 }
 
 function initials(name = '') {
@@ -115,18 +131,18 @@ function BirthdayCard({ person, isToday }) {
 }
 
 /* ── Event Modal ────────────────────────────────────────────── */
-function EventModal({ event, onClose, onSave, onDelete, canEdit, canDelete }) {
+function EventModal({ event, onClose, onSave, onDelete, canEdit, canDelete, saving }) {
   const [editing, setEditing] = useState(!event?.id);
   const [form, setForm] = useState(
     event ?? { title:'', description:'', startDate:'', endDate:'', allDay:true, category:'general', location:'', audience:['all'], meetingLink:'', meetingPasscode:'', platform:'zoom' }
   );
 
   function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
-  function submit(e) { e.preventDefault(); onSave(form); }
+  function submit(e) { e.preventDefault(); if (!saving) onSave(form); }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
-      onClick={e => e.target === e.currentTarget && onClose()}>
+      onClick={e => e.target === e.currentTarget && !saving && onClose()}>
       <motion.div
         initial={{ opacity:0, scale:0.96 }} animate={{ opacity:1, scale:1 }} exit={{ opacity:0, scale:0.96 }}
         className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto"
@@ -148,8 +164,8 @@ function EventModal({ event, onClose, onSave, onDelete, canEdit, canDelete }) {
                 <Trash2 size={14} />
               </button>
             )}
-            <button onClick={onClose}
-              className="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-100 transition">
+            <button onClick={onClose} disabled={saving}
+              className="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-100 transition disabled:opacity-40">
               <X size={14} />
             </button>
           </div>
@@ -228,13 +244,14 @@ function EventModal({ event, onClose, onSave, onDelete, canEdit, canDelete }) {
                 className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400/40 resize-none" />
             </div>
             <div className="flex justify-end gap-2 pt-1">
-              <button type="button" onClick={event?.id ? () => setEditing(false) : onClose}
-                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition">
+              <button type="button" disabled={saving} onClick={event?.id ? () => setEditing(false) : onClose}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition disabled:opacity-50">
                 Cancel
               </button>
-              <button type="submit"
-                className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 transition flex items-center gap-1.5">
-                <Check size={13} /> Save Event
+              <button type="submit" disabled={saving}
+                className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 transition flex items-center gap-1.5 disabled:opacity-60">
+                {saving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                {saving ? 'Saving…' : 'Save Event'}
               </button>
             </div>
           </form>
@@ -308,8 +325,20 @@ export default function EventsPage() {
   const [current, setCurrent]   = useState(() => { const d = new Date(); return { year: d.getFullYear(), month: d.getMonth() }; });
   const [selected, setSelected] = useState(null);
   const [showNew, setShowNew]   = useState(false);
+  const [saving, setSaving]     = useState(false);
+  const [toast, setToast]       = useState(null);
 
   const today = new Date();
+
+  /* ── Academic years (terms embedded) — used only to scope the
+     duplicate-title warning to "this term" rather than the school's
+     entire history. ── */
+  const { data: yearsData } = useQuery({
+    queryKey: ['academic-years', 'for-events'],
+    queryFn:  () => academicConfig.years.list(),
+    staleTime: 300_000,
+  });
+  const academicYears = yearsData?.data ?? [];
 
   /* ── Events query (month view) ── */
   const { data, isLoading } = useQuery({
@@ -359,18 +388,62 @@ export default function EventsPage() {
   const updateMut  = useMutation({ mutationFn: ({ id, ...d }) => eventsApi.update(id, d), onSuccess: invalidate });
   const deleteMut  = useMutation({ mutationFn: eventsApi.remove, onSuccess: invalidate });
 
-  function handleSave(form) {
-    const color = CATEGORIES[form.category]?.color ?? '#4f46e5';
-    if (form.id) {
-      updateMut.mutate({ ...form, color }, { onSuccess: () => { setSelected(null); setShowNew(false); } });
-    } else {
-      createMut.mutate({ ...form, color }, { onSuccess: () => { setSelected(null); setShowNew(false); } });
-    }
+  async function handleSave(form) {
+    const title = (form.title || '').trim();
+    setSaving(true);
+
+    // Mild warning, not a hard block: same title already booked somewhere
+    // in this event's own term. A failed lookup here must never prevent a
+    // real save, so any error just skips the check silently.
+    try {
+      const term = title ? findTermForDate(academicYears, form.startDate) : null;
+      if (term) {
+        const resp  = await eventsApi.list({ from: term.startDate, to: term.endDate });
+        const clash = (resp?.events ?? []).find(e =>
+          e.id !== form.id && (e.title || '').trim().toLowerCase() === title.toLowerCase()
+        );
+        if (clash) {
+          const proceed = window.confirm(
+            `An event titled "${title}" already exists in ${term.label} (${fmtDate(clash.startDate)}). Save anyway?`
+          );
+          if (!proceed) { setSaving(false); return; }
+        }
+      }
+    } catch { /* courtesy check only — fall through to the real save */ }
+
+    const color    = CATEGORIES[form.category]?.color ?? '#4f46e5';
+    const isCreate = !form.id;
+    const callbacks = {
+      onSuccess: () => {
+        setSaving(false);
+        setSelected(null);
+        setShowNew(false);
+        setToast({ msg: 'Event saved.', type: 'success' });
+        // Deferred so the modal actually closes (and resets) before the
+        // confirm dialog fires — asked synchronously in the same tick, the
+        // reopened modal would still be showing the just-saved event's data.
+        if (isCreate) {
+          setTimeout(() => {
+            if (window.confirm('Event saved. Add another event?')) setShowNew(true);
+          }, 0);
+        }
+      },
+      onError: (err) => {
+        setSaving(false);
+        setToast({ msg: err?.message ?? 'Failed to save event.', type: 'error' });
+      },
+    };
+
+    if (form.id) updateMut.mutate({ ...form, color }, callbacks);
+    else         createMut.mutate({ ...form, color }, callbacks);
   }
 
   function handleDelete(id) {
     if (!confirm('Delete this event?')) return;
-    deleteMut.mutate(id, { onSuccess: () => setSelected(null) });
+    deleteMut.mutate(id, {
+      onSuccess: () => { setSelected(null); setToast({ msg: 'Event deleted.', type: 'success' }); },
+      onError:   (err) => setToast({ msg: err?.message ?? 'Failed to delete event.', type: 'error' }),
+    });
   }
 
   /* ── Calendar grid ── */
@@ -409,6 +482,10 @@ export default function EventsPage() {
   /* ────────────────────────────────────────────────────────── */
   return (
     <div className="p-6 space-y-5">
+
+      <AnimatePresence>
+        {toast && <Toast msg={toast.msg} type={toast.type} onDismiss={() => setToast(null)} />}
+      </AnimatePresence>
 
       {/* ── Header ── */}
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -693,6 +770,7 @@ export default function EventsPage() {
             onClose={() => { setSelected(null); setShowNew(false); }}
             onSave={handleSave}
             onDelete={handleDelete}
+            saving={saving}
           />
         )}
       </AnimatePresence>
