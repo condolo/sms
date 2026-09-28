@@ -6,6 +6,17 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.145.0] — 2026-09-28 — fix(exams): exam sitting times were collected by teachers but invisible to the exams officer's own form and to students
+
+Asked directly: when scheduling an exam, shouldn't there be a time range, not just a date — and shouldn't the assessment-type window (e.g. "Mid-Term next week") automatically be the active period, without blocking a teacher from entering results late? Investigated before building anything: the second half already existed exactly as asked — `assessment_schedule`'s `dateFrom`/`dateTo` window auto-computes `open`/`overdue`/`upcoming` status with zero manual "activate" step, and overdue never blocks mark entry; only an admin's explicit Lock does that, with an unlock-with-reason override already in place for late submission. That left two real, narrower gaps.
+
+1. The exams officer's own "Add Exam" form (`CreateExamSlideOver`) had a date field but no start/end time — even though the backend `ExamSchema` already supports both and the teacher-facing "Announce Sitting" form already collects them. Added matching `type="time"` Start Time / End Time fields.
+2. The student and staff dashboards' "Upcoming Exams" widgets already fetch `startTime` from the API (confirmed in both `student-portal.js` and `teacher-portal.js`) but never rendered it — `ParentDashboard.jsx` was the one dashboard that already showed it. Added the same `· HH:MM` display to `StudentDashboard.jsx` and the teacher-facing `Dashboard.jsx`.
+
+No backend or scheduling-logic changes — the automatic-active-window and never-block-teachers behavior the report asked about was already correct. Full suite passing, zero regressions (client-only change; verified by syntax-checking every edited file with esbuild and code review against the already-proven pattern already live in `ParentDashboard.jsx` and the "Announce Sitting" form).
+
+---
+
 ## [v5.144.0] — 2026-09-28 — feat(hr): "Activate Existing User" — give a login-only account a real HR staff profile, and close the HR/Settings role-list gap
 
 Real customer report: a school's own Principal — originally added as the very first account and later promoted to superadmin via the platform console — was invisible in HR's staff list and couldn't be assigned classes. Confirmed live: `users` (every login account) and `teachers` (the real HR staff directory) are entirely independent collections, and Settings → Invite, the platform console's "Add Superadmin"/"Promote Existing User"/"Change Role" all create or touch a login account without ever requiring a matching HR record. Pushed back on directly: *"i dont think the system should be that manuall... hr should be the funnel to all staff in the system except parents and students"* — re-typing the person's details into a brand-new HR record risked a duplicate, unlinked profile instead of actually fixing the gap.
