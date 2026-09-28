@@ -4,7 +4,7 @@ The detailed exam lifecycle and role exceptions are in the [Exams Officer Guide]
 
 1. Create/schedule an exam with class, subject, type, date, start/end time, and maximum mark.
 2. Move it through the permitted status transitions as it is sat and results are entered.
-3. Enter results in the markbook; use the system's explicit absent/exempt/missing states where appropriate.
+3. Enter results in the markbook; use the system's explicit absent/exempt/missing states where appropriate. If you teach more than one stream of the same class/subject, a stream picker appears — enter one stream's roster at a time rather than expecting them merged.
 4. Complete moderation and approval. Locking freezes entry; unlocking is deliberately more restricted.
 5. Publish only after verifying results and approval, then archive when the exam is complete.
 
@@ -23,4 +23,4 @@ Scheduling an assessment-type window (e.g. Mid-Term) in Assessment Scheduling (s
 
 **Sources:** `client/src/pages/exams/ExamsPage.jsx`; `server/routes/exams.js`, `exam-series.js`, `mark-submissions.js`.
 
-**Recent change notes:** see [CHANGELOG.md](../../CHANGELOG.md), especially v5.58.0, v5.106.0–v5.107.0 for exam lifecycle permissions and class/subject scope, and v5.145.0 for start/end time on the Add Exam form and its display on Upcoming Exams dashboards.
+**Recent change notes:** see [CHANGELOG.md](../../CHANGELOG.md), especially v5.58.0, v5.106.0–v5.107.0 for exam lifecycle permissions and class/subject scope, v5.130.0 for the per-stream picker when a teacher teaches more than one stream of a class, and v5.145.0 for start/end time on the Add Exam form and its display on Upcoming Exams dashboards.
