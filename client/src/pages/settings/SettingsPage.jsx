@@ -29,6 +29,7 @@ import { deriveNavModules, buildModuleConfigMap } from '@/config/moduleNav.js';
 import { SYSTEM_ROLE_LABELS, roleLabel } from '@/utils/roleLabels.js';
 import { useCurrentAcademicPeriod } from '@/hooks/useCurrentAcademicPeriod.js';
 import { BUILTIN_STAFF_RESPONSIBILITIES } from '@/config/staffResponsibilities.js';
+import { resizeImageToDataUrl } from '@/utils/imageResize.js';
 
 /* ── Tab config ─────────────────────────────────────────────── */
 const TABS = [
@@ -408,23 +409,35 @@ function SectionsPanel() {
 }
 
 /* ── Asset uploader — logo or favicon ───────────────────────── */
-function AssetUploader({ label, hint, currentUrl, maxKB, accept, onUpload, onDelete, uploading, square }) {
+// resize: passed straight to resizeImageToDataUrl (maxW/maxH/quality/
+// format) — downscales before it ever leaves the browser, instead of
+// uploading a multi-MB original just to have the server reject it (or,
+// worse, accept it — see DEVELOPER_GUIDE §80: an unprojected branding
+// document carrying a multi-MB image caused real production incidents
+// on every page load that read it). Omit `resize` to upload as-is
+// (used nowhere currently, kept as an escape hatch).
+function AssetUploader({ label, hint, currentUrl, maxKB, accept, onUpload, onDelete, uploading, square, resize }) {
   const inputRef  = useRef(null);
   const [preview, setPreview] = useState(null);
 
   function pickFile() { inputRef.current?.click(); }
 
-  function handleFile(e) {
+  async function handleFile(e) {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = ev => {
-      const b64 = ev.target.result;
+    e.target.value = '';
+    try {
+      const b64 = resize ? await resizeImageToDataUrl(file, resize) : await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('Could not read file'));
+        reader.onload = ev => resolve(ev.target.result);
+        reader.readAsDataURL(file);
+      });
       setPreview(b64);
       onUpload(b64);
-    };
-    reader.readAsDataURL(file);
-    e.target.value = '';
+    } catch (err) {
+      console.error('[AssetUploader] resize failed:', err);
+    }
   }
 
   const src = preview || currentUrl;
@@ -577,7 +590,7 @@ function BrandingCard({ schoolId, logoUrl, faviconUrl, loginBgUrl, onSaved }) {
 
       <AssetUploader
         label="School Logo"
-        hint="Displayed in the sidebar and login page. PNG, WebP or SVG recommended. Max 500 KB."
+        hint="Displayed in the sidebar and login page. Automatically resized on upload. PNG, WebP or SVG recommended. Max 500 KB."
         currentUrl={logoUrl}
         maxKB={500}
         accept="image/png,image/jpeg,image/webp,image/svg+xml"
@@ -585,12 +598,13 @@ function BrandingCard({ schoolId, logoUrl, faviconUrl, loginBgUrl, onSaved }) {
         onDelete={handleLogoDelete}
         uploading={logoUploading}
         square={false}
+        resize={{ maxW: 800, maxH: 800, format: 'png' }}
       />
 
       <div className="border-t border-slate-100 pt-4">
         <AssetUploader
           label="Favicon"
-          hint="Browser tab icon. Must be square (e.g. 32×32 or 64×64). PNG or ICO. Max 150 KB."
+          hint="Browser tab icon. Must be square (e.g. 32×32 or 64×64). Automatically resized on upload. PNG or ICO. Max 150 KB."
           currentUrl={faviconUrl}
           maxKB={150}
           accept="image/png,image/x-icon,image/vnd.microsoft.icon"
@@ -598,13 +612,14 @@ function BrandingCard({ schoolId, logoUrl, faviconUrl, loginBgUrl, onSaved }) {
           onDelete={handleFaviconDelete}
           uploading={faviconUploading}
           square={true}
+          resize={{ maxW: 256, maxH: 256, format: 'png' }}
         />
       </div>
 
       <div className="border-t border-slate-100 pt-4">
         <AssetUploader
           label="Login Page Background"
-          hint="Full-screen photo shown behind the login card. Landscape photo recommended (1920×1080+). JPEG or WebP. Max 2 MB."
+          hint="Full-screen photo shown behind the login card. Automatically resized and compressed on upload, however large the original. Landscape photo recommended. JPEG or WebP."
           currentUrl={loginBgUrl}
           maxKB={2048}
           accept="image/jpeg,image/webp,image/png"
@@ -612,6 +627,7 @@ function BrandingCard({ schoolId, logoUrl, faviconUrl, loginBgUrl, onSaved }) {
           onDelete={handleLoginBgDelete}
           uploading={loginBgUploading}
           square={false}
+          resize={{ maxW: 1920, maxH: 1080, format: 'jpeg', quality: 0.8 }}
         />
       </div>
     </div>

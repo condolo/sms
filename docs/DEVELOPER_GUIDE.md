@@ -5270,3 +5270,30 @@ No new tests added specifically for this fix — it changes performance characte
 ### Files
 - `server/routes/public.js` — `SCHOOL_INFO_FIELDS`, `ORG_PORTAL_FIELDS` (new constants); `/school-info`, `/resolve-portal`, `/school-asset/:type`, `/org-asset/:type`
 - `server/routes/platform.js` — `GET /organizations`, `POST /organizations`, `POST /organizations/:id/director`, `PATCH /organizations/:id`, `PUT/DELETE /organizations/:id/logo`, `PUT/DELETE /organizations/:id/login-bg`, `_findOrgOr404`, `POST /memberships`
+- Also required fixing 7 test files whose mocks didn't simulate Mongoose's `.select()` chaining and broke once the routes above started calling it: `platform-rename.test.js`, `public-org-asset.test.js`, `platform-organization-branding.test.js`, `platform-organizations.test.js`, `platform-director.test.js`, `platform-organizations-slug.test.js` (each mock's `findOne`/`findOneAndUpdate`/`find` chain now returns a `.select()` that passes through to the existing `.lean()`/`.sort()` resolution, not a real projection — the mocks don't model field-level projection at all, they just needed to not throw when the extra method is called)
+
+---
+
+## 81. Uploads Are Resized and Compressed in the Browser Before They Ever Reach the Server (v5.141.0)
+
+Direct follow-up to §80: that fix stopped the SERVER from dragging a large uploaded image through memory on every page load, but did nothing to stop someone from uploading a large image in the first place. Asked directly, correctly connecting the dots to prevention rather than just the cure: *"I have removed the images, if they cause loading time, can the system resize to fit the desired size, i have seen this implemented somewhere within the system"* — pointing at `client/src/utils/imageResize.js`, a canvas-based resize-before-upload helper that already existed and was already used by Inventory item photos and Library book covers, but had never been wired up to the THREE branding upload fields it exists to serve just as well (school logo, favicon, login background) or the newer organization logo/login-background uploads added in §77.
+
+### What was actually missing
+`AssetUploader` (Settings → School, `SettingsPage.jsx`) accepted a `maxKB` prop purely for display in its hint text — it was **never enforced or acted on client-side at all**. `handleFile` just read the picked file straight into a data URL via `FileReader` and uploaded it as-is, whatever its real size. The only actual size enforcement was server-side (`_validateBase64Image` in `settings.js`), which only ever REJECTS an oversized upload after the browser has already encoded and sent the whole thing — never resizes it down to something that would fit.
+
+### The fix
+`resizeImageToDataUrl` (already used by Inventory/Library) gained two additions, both backward-compatible (existing callers pass neither, keep their exact previous behavior):
+- **`format` option** (`'jpeg'` default, `'png'` new) — a school/org logo is commonly a PNG with a transparent background; JPEG has no alpha channel, so re-encoding one as JPEG would flatten it onto an opaque fill and visibly change how it looks against a non-white login page. `format: 'png'` keeps transparency; the dimension cap still does most of the size reduction.
+- **SVG/ICO pass-through** — rasterizing a vector logo onto a fixed-size canvas defeats the entire point of it being a vector (loses crispness at other sizes), for a format that's already tiny; both are returned unresized.
+
+Wired into `AssetUploader` (now resizes via `resizeImageToDataUrl` before calling `onUpload`, unless a caller omits the new `resize` prop entirely — kept as an unused escape hatch) with per-field settings: logo 800×800 PNG, favicon 256×256 PNG, login background 1920×1080 JPEG at 0.8 quality. The identical technique (down to the exact same canvas/FileReader logic) was reimplemented in vanilla JS as `_resizeImageToDataUrl` in `platform.html`'s own `<script>` block for the organization logo/login-background uploads — `platform.html` is a standalone page, not part of the React bundle, so it can't import the shared module; the two copies are deliberately kept in lockstep rather than sharing a runtime dependency across completely different build pipelines.
+
+A multi-MB original photo now becomes a compressed, correctly-sized JPEG (typically well under 200KB) the moment it's picked in the file dialog — the resize happens synchronously in the browser before any network request is made, so an admin never uploads the original multi-MB file at all, whatever its real size.
+
+### Verified
+Both changed files were syntax-checked (`esbuild` for the React component, `new Function(...)` on platform.html's extracted `<script>` body) and reviewed against the already-proven pattern already shipping successfully in `InventoryPage.jsx`/`LibraryPage.jsx`. No unit tests were added: this codebase has no client-side test runner (all `__tests__` coverage is server-side), consistent with how every other client-only change in this project has been verified. The full SERVER test suite passing confirms this client-side change introduced no server-side regression, which is the only thing server tests could tell us about it either way.
+
+### Files
+- `client/src/utils/imageResize.js` — `format` option, SVG/ICO pass-through
+- `client/src/pages/settings/SettingsPage.jsx` — `AssetUploader` now resizes before upload; `resize` props on the logo/favicon/login-background call sites
+- `platform.html` — `_resizeImageToDataUrl` (new, vanilla-JS port), wired into `uploadOrgImage`

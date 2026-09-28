@@ -6,6 +6,16 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.141.0] — 2026-09-28 — feat(branding): logo/login-background uploads are resized and compressed in the browser before upload
+
+Direct follow-up to v5.140.0's incident: that fix stopped the server from dragging a large uploaded image through memory on every page load, but did nothing to stop a large image from being uploaded in the first place — someone could still pick a 6000×4000, 8MB photo for a login background. Asked directly: "if they cause loading time, can the system resize to fit the desired size" — pointing at `client/src/utils/imageResize.js`, an existing canvas-based resize helper already used for inventory item photos and library book covers, but never wired up to the three branding upload fields it was built to also cover (school logo/favicon/login-background) or the newer organization logo/login-background uploads.
+
+Extended the shared resize helper with a `format` option (`'jpeg'` for photos, `'png'` to preserve a logo's transparency — JPEG has none, and would flatten a transparent logo onto an opaque fill) and a pass-through for SVG/ICO, which are already tiny and shouldn't be rasterized. Wired it into Settings → School's `AssetUploader` (logo: 800×800 PNG, favicon: 256×256 PNG, login background: 1920×1080 JPEG at 0.8 quality) and reimplemented the identical technique in vanilla JS for `platform.html`'s organization branding uploads, which can't import the React app's module. A photo is now downscaled and compressed in the browser the moment it's picked, before the upload request is even made — a multi-MB original typically becomes well under 200KB, regardless of how large the source file was.
+
+Full suite passing, zero regressions (server-side only — this is a client-side change; the codebase has no client-side test runner, verified by syntax-checking both files and code review against the already-proven pattern already used successfully elsewhere in the app).
+
+---
+
 ## [v5.140.0] — 2026-09-28 — fix(perf): public branding lookups were pulling multi-MB image blobs into memory on every request
 
 Real customer report: `tis.msingi.io` started intermittently failing to load — sometimes a blank page (its JS/CSS bundle 500ing), sometimes `/api/auth/org-login` returning a generic 500 — right after TIS Group's shared login portal got a real login-background image uploaded (§78). Investigated by running the actual org-login and resolve-portal logic directly against the real production database from a local process: every step completed cleanly, no application bug found in the credential-check or portal-resolution logic itself. The DNS/hosting layer was also ruled out — the same subdomain infrastructure that already serves every other school without per-domain configuration was confirmed working for this one too.
