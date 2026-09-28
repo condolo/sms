@@ -751,6 +751,7 @@ export default function StudentDashboard() {
                                   ? ` · ${days} days left`
                                   : ''}
                                 {ex.type ? ` · ${ex.type}` : ''}
+                                {ex.startTime ? ` · ${ex.startTime}` : ''}
                               </p>
                             </div>
                           </div>

@@ -1780,6 +1780,8 @@ const EMPTY_FORM = {
   classId:         '',
   title:           '',
   date:            '',
+  startTime:       '',
+  endTime:         '',
   maxScore:        '100',
   passMark:        '',
   weightPercent:   '',
@@ -2066,6 +2068,15 @@ function CreateExamSlideOver({ years, assessmentWeights, subjectsList, onClose, 
                     <option value="completed">Completed</option>
                     <option value="cancelled">Cancelled</option>
                   </select>
+                </FField>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <FField label="Start Time">
+                  <input type="time" value={form.startTime} onChange={e => set('startTime', e.target.value)} className={iCls()} />
+                </FField>
+                <FField label="End Time">
+                  <input type="time" value={form.endTime} onChange={e => set('endTime', e.target.value)} className={iCls()} />
                 </FField>
               </div>
 

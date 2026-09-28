@@ -2079,7 +2079,7 @@ function TeacherView({ data, loading, primary }) {
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold text-slate-800 truncate">{ex.subjectName}</p>
-                        <p className="text-[11px] text-slate-400">{ex.className} · {_weekday(ex.date)}, {_fmtD(ex.date)}</p>
+                        <p className="text-[11px] text-slate-400">{ex.className} · {_weekday(ex.date)}, {_fmtD(ex.date)}{ex.startTime ? ` · ${ex.startTime}` : ''}</p>
                       </div>
                     </div>
                   );
