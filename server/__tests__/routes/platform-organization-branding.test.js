@@ -45,14 +45,18 @@ jest.mock('../../utils/model', () => ({
     if (col !== 'organizations') return { find: () => ({ lean: () => Promise.resolve([]) }) };
     return {
       findOne: (filter) => ({
-        lean: () => Promise.resolve(mockOrgDoc && mockOrgDoc.id === filter.id ? { ...mockOrgDoc } : null),
+        select: () => ({
+          lean: () => Promise.resolve(mockOrgDoc && mockOrgDoc.id === filter.id ? { ...mockOrgDoc } : null),
+        }),
       }),
       findOneAndUpdate: (filter, update) => ({
-        lean: () => {
-          if (!mockOrgDoc || mockOrgDoc.id !== filter.id) return Promise.resolve(null);
-          if (update.$set) Object.assign(mockOrgDoc, update.$set);
-          return Promise.resolve({ ...mockOrgDoc });
-        },
+        select: () => ({
+          lean: () => {
+            if (!mockOrgDoc || mockOrgDoc.id !== filter.id) return Promise.resolve(null);
+            if (update.$set) Object.assign(mockOrgDoc, update.$set);
+            return Promise.resolve({ ...mockOrgDoc });
+          },
+        }),
       }),
       updateOne: jest.fn((filter, update) => {
         if (!mockOrgDoc || mockOrgDoc.id !== filter.id) return Promise.resolve({ matchedCount: 0 });

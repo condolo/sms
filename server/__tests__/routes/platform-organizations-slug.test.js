@@ -51,9 +51,9 @@ jest.mock('mongoose', () => {
     model: jest.fn((_name, _schema, col) => {
       if (col === 'organizations') {
         return {
-          find:    () => ({ sort: () => ({ lean: () => Promise.resolve(mockOrgDocs) }) }),
-          findOne: (filter) => ({
-            lean: () => {
+          find:    () => ({ select: () => ({ sort: () => ({ lean: () => Promise.resolve(mockOrgDocs) }) }) }),
+          findOne: (filter) => {
+            const resolve = () => {
               let matches = mockOrgDocs;
               if (filter.slug !== undefined) matches = matches.filter(o => o.slug === filter.slug);
               if (filter.id !== undefined) {
@@ -62,8 +62,9 @@ jest.mock('mongoose', () => {
                   : matches.filter(o => o.id === filter.id);
               }
               return Promise.resolve(matches[0] || null);
-            },
-          }),
+            };
+            return { select: () => ({ lean: resolve }), lean: resolve };
+          },
           create:    jest.fn((doc) => { mockOrgDocs.push(doc); return Promise.resolve(doc); }),
           updateOne: mockOrgUpdateOne,
         };

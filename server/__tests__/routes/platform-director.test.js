@@ -76,7 +76,7 @@ jest.mock('mongoose', () => {
     isValidObjectId: () => false,
     model: jest.fn((_name, _schema, col) => {
       if (col === 'organizations') {
-        return { findOne: () => ({ lean: () => Promise.resolve(mockOrgDoc) }) };
+        return { findOne: () => ({ select: () => ({ lean: () => Promise.resolve(mockOrgDoc) }) }) };
       }
       if (col === 'schools') {
         return {

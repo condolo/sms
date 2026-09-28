@@ -18,7 +18,11 @@ let mockOrgDoc = null;
 jest.mock('../../utils/model', () => ({
   _model: jest.fn((collection) => {
     if (collection === 'organizations') {
-      return { findOne: jest.fn((filter) => ({ lean: () => Promise.resolve(mockOrgDoc?.id === filter.id ? mockOrgDoc : null) })) };
+      return {
+        findOne: jest.fn((filter) => ({
+          select: () => ({ lean: () => Promise.resolve(mockOrgDoc?.id === filter.id ? mockOrgDoc : null) }),
+        })),
+      };
     }
     return { find: () => ({ lean: () => Promise.resolve([]) }) };
   }),

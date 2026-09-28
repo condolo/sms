@@ -48,13 +48,17 @@ jest.mock('mongoose', () => {
       }
       if (col === 'organizations') {
         return {
-          findOneAndUpdate: (filter, update) => ({
-            lean: () => {
-              if (filter.id !== mockOrgDoc.id) return Promise.resolve(null);
-              Object.assign(mockOrgDoc, update.$set);
-              return Promise.resolve({ ...mockOrgDoc });
-            },
-          }),
+          findOneAndUpdate: (filter, update) => {
+            const chain = {
+              select: () => chain,
+              lean: () => {
+                if (filter.id !== mockOrgDoc.id) return Promise.resolve(null);
+                Object.assign(mockOrgDoc, update.$set);
+                return Promise.resolve({ ...mockOrgDoc });
+              },
+            };
+            return chain;
+          },
         };
       }
       return { find: () => ({ lean: () => Promise.resolve([]) }) };
