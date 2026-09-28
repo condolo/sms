@@ -34,8 +34,16 @@ function mockMatches(doc, filter) {
     return doc[k] === v;
   });
 }
+let usersSort;
+let usersLimit;
 function mockFindChain(docs) {
-  return { select: () => ({ lean: () => Promise.resolve(docs) }) };
+  const chain = {
+    select: () => chain,
+    sort:   (...args) => { usersSort  = args; return chain; },
+    limit:  (...args) => { usersLimit = args; return chain; },
+    lean:   () => Promise.resolve(docs),
+  };
+  return chain;
 }
 
 jest.mock('../../utils/model', () => ({
@@ -71,6 +79,8 @@ beforeEach(() => {
   mockJwtUser = { userId: 'usr_hr_001', schoolId: SCHOOL_ID, role: 'hr', roles: ['hr'] };
   mockUsers = [];
   mockTeachers = [];
+  usersSort = undefined;
+  usersLimit = undefined;
 });
 
 describe('GET /api/teachers/unlinked-accounts', () => {
@@ -122,5 +132,13 @@ describe('GET /api/teachers/unlinked-accounts', () => {
     const res = await supertest(buildApp()).get('/api/teachers/unlinked-accounts');
     expect(res.status).toBe(200);
     expect(res.body.data).toEqual([]);
+  });
+
+  test('the users query is sorted by name and capped, so an unusually large school cannot return an unbounded list', async () => {
+    mockUsers = [{ id: 'usr_a', schoolId: SCHOOL_ID, name: 'A', email: 'a@x.com', role: 'admin' }];
+    const res = await supertest(buildApp()).get('/api/teachers/unlinked-accounts');
+    expect(res.status).toBe(200);
+    expect(usersSort).toEqual([{ name: 1 }]);
+    expect(usersLimit).toEqual([500]);
   });
 });

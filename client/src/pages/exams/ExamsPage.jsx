@@ -1197,6 +1197,9 @@ function AnnounceSittingSlideOver({ onClose, onCreated }) {
         errs.date = `Date must be within ${selectedEntry.dateFrom} – ${selectedEntry.dateTo}`;
       }
     }
+    if (form.startTime && form.endTime && form.endTime <= form.startTime) {
+      errs.endTime = 'End time must be after start time';
+    }
     return errs;
   }
 
@@ -1329,11 +1332,12 @@ function AnnounceSittingSlideOver({ onClose, onCreated }) {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1.5">Start Time</label>
-              <input type="time" value={form.startTime} onChange={e => set('startTime', e.target.value)} className={selCls} />
+              <input type="time" value={form.startTime} onChange={e => { set('startTime', e.target.value); setErrors(er => { const n = { ...er }; delete n.endTime; return n; }); }} className={selCls} />
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1.5">End Time</label>
               <input type="time" value={form.endTime} onChange={e => set('endTime', e.target.value)} className={selCls} />
+              {errors.endTime && <p className="mt-1 text-xs text-red-500">{errors.endTime}</p>}
             </div>
           </div>
 
@@ -1836,6 +1840,8 @@ function CreateExamSlideOver({ years, assessmentWeights, subjectsList, onClose, 
       maxScore:      d.maxScore      ? Number(d.maxScore)      : undefined,
       passMark:      d.passMark      ? Number(d.passMark)      : undefined,
       weightPercent: d.weightPercent ? Number(d.weightPercent) : undefined,
+      startTime:     d.startTime     || undefined,
+      endTime:       d.endTime       || undefined,
     }),
     onSuccess:  onCreated,
     onError:    err => setErrors({ _server: err?.message ?? 'Failed to create exam' }),
@@ -1896,6 +1902,9 @@ function CreateExamSlideOver({ years, assessmentWeights, subjectsList, onClose, 
     if (!form.title.trim())   e.title   = 'Exam title is required';
     if (!form.subjectId)      e.subjectId = 'Subject is required';
     if (!form.academicYearId) e.academicYearId = 'Academic year is required';
+    if (form.startTime && form.endTime && form.endTime <= form.startTime) {
+      e.endTime = 'End time must be after start time';
+    }
     return e;
   }
 
@@ -2073,10 +2082,10 @@ function CreateExamSlideOver({ years, assessmentWeights, subjectsList, onClose, 
 
               <div className="grid grid-cols-2 gap-3">
                 <FField label="Start Time">
-                  <input type="time" value={form.startTime} onChange={e => set('startTime', e.target.value)} className={iCls()} />
+                  <input type="time" value={form.startTime} onChange={e => { set('startTime', e.target.value); setErrors(er => { const n = { ...er }; delete n.endTime; return n; }); }} className={iCls()} />
                 </FField>
-                <FField label="End Time">
-                  <input type="time" value={form.endTime} onChange={e => set('endTime', e.target.value)} className={iCls()} />
+                <FField label="End Time" error={errors.endTime}>
+                  <input type="time" value={form.endTime} onChange={e => set('endTime', e.target.value)} className={iCls(errors.endTime)} />
                 </FField>
               </div>
 

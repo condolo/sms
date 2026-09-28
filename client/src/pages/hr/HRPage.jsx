@@ -655,10 +655,16 @@ function ActivateExistingUserModal({ onClose, onPick }) {
   });
 
   function pick(u) {
-    const parts = (u.name ?? '').trim().split(/\s+/);
+    // Best-effort split of a free-text name into firstName/lastName — the
+    // form's fields are required but NOT locked (only email is), so HR
+    // corrects this before saving rather than the guess being trusted as
+    // final. A single-word name is left with an empty lastName rather than
+    // duplicating the first name into it, so the required-field check
+    // forces a real decision instead of silently guessing wrong.
+    const parts = (u.name ?? '').trim().split(/\s+/).filter(Boolean);
     onPick({
       firstName: parts[0] ?? '',
-      lastName:  parts.slice(1).join(' ') || parts[0] || '',
+      lastName:  parts.slice(1).join(' '),
       email:     u.email ?? '',
     });
   }

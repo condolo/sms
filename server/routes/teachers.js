@@ -302,6 +302,8 @@ router.get('/unlinked-accounts', authMiddleware, PLAN, MODGATE, rbac('teachers',
       tenantModel('users', tenantContext(req))
         .find({ schoolId, isActive: { $ne: false }, role: { $nin: _NON_STAFF_ROLES } })
         .select('id name email role')
+        .sort({ name: 1 })
+        .limit(500)
         .lean(),
       tenantModel('teachers', tenantContext(req))
         .find({ schoolId, userId: { $ne: null } })
