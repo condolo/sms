@@ -5450,3 +5450,49 @@ Asked directly for a risk review of the Activate Existing User (§84) and exam s
 - `client/src/pages/hr/HRPage.jsx` — `ActivateExistingUserModal`'s `pick()` no longer duplicates a one-word name into both fields
 - `server/routes/teachers.js` — `GET /unlinked-accounts`'s `users` query gained `.sort({name:1}).limit(500)`
 - `server/__tests__/routes/teachers-unlinked-accounts.test.js` — new sort/limit assertion, mock `find()` chain extended to support `.sort()`/`.limit()`
+
+## 87. A Deactivated Student's Own — and Their Parent's — Portal Login Kept Working Indefinitely (v5.147.0)
+
+Raised from a screenshot: a student's profile showed "Inactive" in the header, "Active" on both the Student and Parent Portal Account cards, and a "Reactivate to restore portal access" banner all on the same screen. Traced end to end instead of stopping at "the badge is wrong."
+
+### Root cause
+`hasPortalAccount`/`hasParentAccount`/`hasMotherAccount`/`hasFatherAccount` (`server/routes/students.js`) have always meant "a login was created at some point" — nothing anywhere ever unset them, confirmed by grep (zero `hasPortalAccount: false` assignments in the codebase). Separately, and more seriously: of the three code paths that can put a student in a non-active state, only ONE — `POST /students/promote`'s bulk graduation branch — ever touched the linked `users` login (`isActive: false` on graduate). The two paths an admin actually uses from a student's own profile or the student list — `PATCH /:id/deactivate` and `DELETE /:id` (soft-delete, the one that actually produces `status: 'inactive'`, confirmed to be what `StudentList.jsx`'s row action calls via `studentsApi.remove` → `DELETE /students/:id`) — never touched the login layer at all. `PATCH /:id/reactivate` is symmetric: it only ever flipped `status` back to `'active'`, so its own UI copy ("restore portal access") was a standing false claim.
+
+Checked directly against the live production database before writing any fix: of 6 currently-inactive students across all real schools, **2 still had a fully working `isActive: true` student login, and 1 linked parent did too** — all three could sign in and use the portal right now despite the student being marked inactive.
+
+### Fix — sibling-aware cascade
+Two new helpers in `server/routes/students.js`:
+
+```js
+async function _cascadePortalOnDeactivate(req, studentDocId) {
+  // 1. Always disable the student's own login (users: {studentId, role:'student'}).
+  // 2. Find every parent-role user whose studentIds array contains this
+  //    student (covers the legacy shared account AND independent
+  //    Mother's/Father's accounts — all three write to the same
+  //    studentIds field in POST /:id/parent-account).
+  // 3. For each, fetch ALL of their linked children's current status.
+  //    Only disable the parent's own login if EVERY one is now inactive.
+}
+async function _cascadePortalOnReactivate(req, studentDocId) {
+  // Always restore the student's own login, and restore any linked
+  // parent login left disabled — symmetric with the rule above, since
+  // one child becoming active again always makes "every sibling
+  // inactive" false.
+}
+```
+
+Asked directly how to handle the sibling case before writing this: *"yes if its the only child but no if the other sibling continues"* — a parent with a second, still-enrolled child at the school must never lose access because one sibling left. Wired into `DELETE /:id`, `PATCH /:id/deactivate`, and `PATCH /:id/reactivate`, each as a best-effort step after the student's own status write commits (logged on failure, not fatal to the request — same philosophy as this file's existing non-critical side effects, e.g. welcome-email sends).
+
+### Fix — badges tell the truth
+`GET /students/:id` gained `_attachPortalAccountStatus`, which resolves each relevant login by the same lookup the account was created with (`studentId`+`role:'student'` for the student; `email`+`role:'parent'` for legacy/mother/father) and reports its REAL `isActive` state as `portalAccountActive`/`parentAccountActive`/`motherAccountActive`/`fatherAccountActive` — `null` when no matching login exists at all (treated as "not working," same as `false`), alongside the existing `has*Account` "was one ever created" flags, unchanged for backward compatibility. `StudentProfile.jsx`'s four portal-account cards now use a shared `PortalBadge` component with three honest states — **Not created** (grey) / **Inactive** (amber) / **Active** (green) — instead of a boolean read as only "created" vs. "not."
+
+### Verified
+10 new tests in `students-portal-cascade.test.js`: student's own login deactivated on both `PATCH /:id/deactivate` and `DELETE /:id`; parent's login deactivated only when it was their only child, left untouched when a sibling is still active; reactivate restores both; `GET /:id` reports `true`/`false`/`null` correctly across scenarios. Two existing test files' `users` mocks (`students.test.js`, `students-deactivate-reactivate.test.js`) needed their default `findOne`/`find` chains extended to support `.select()` — they'd only ever been exercised by code paths that skipped it. Full suite (257 suites, 2652 tests) passing, zero regressions.
+
+**Live data not yet corrected.** Unlike v5.129.0's academic-year fix, the already-broken records this bug left behind (2 students + 1 parent with a working login despite being marked inactive, confirmed by direct query before this fix) were NOT patched directly — a one-off correction script attempting the exact same cascade logic against production was blocked by this environment's own safety classifier as a "Modify Shared Resources" action, since disabling a live login is a real, user-facing consequence requiring explicit authorization, not something to do unprompted. They'll self-correct the next time an admin deactivates/reactivates each affected student, or via an explicitly-authorized one-off script.
+
+### Files
+- `server/routes/students.js` — `_cascadePortalOnDeactivate`/`_cascadePortalOnReactivate`, wired into `DELETE /:id`, `PATCH /:id/deactivate`, `PATCH /:id/reactivate`; `GET /:id` gained `_attachPortalAccountStatus`
+- `client/src/pages/students/StudentProfile.jsx` — new `PortalBadge` component, used by all 4 portal-account cards
+- `server/__tests__/routes/students-portal-cascade.test.js` (new)
+- `server/__tests__/routes/students.test.js`, `students-deactivate-reactivate.test.js` — `users` mock chains extended
