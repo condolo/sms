@@ -5353,3 +5353,64 @@ Re-ran the corrected query directly against the real production database for all
 ### Files
 - `server/routes/platform.js` — `GET /schools`'s stats block
 - `server/__tests__/routes/platform-schools-list-stats.test.js` (new)
+
+## 84. "Activate Existing User" — Bridging Login-Only Accounts Into HR, and Closing the HR/Settings Staff-Role-List Drift (v5.144.0)
+
+Real customer report: a school's own Principal — originally the very first account added, later promoted to superadmin through the platform console's role-reassignment flow (§79) — was completely invisible in HR's staff list and couldn't be assigned classes. Investigated directly against the real database: `users` (every login account) and `teachers` (the real HR staff directory, per `check-docs`' collection reference) are entirely independent collections, and nothing enforces that one implies the other. Every entry point that creates or promotes a login account — Settings → Invite, the platform console's Add Superadmin / Promote Existing User / Change Role (§79) — only ever touches `users`.
+
+Pushed back on directly when the first suggestion was "just re-add him via HR's Add Staff form": *"i dont think the system should be that manuall, such that a user is found under users in settings and not in hr....yet hr should be the funnel to all staff in the system except parents and students, right?!"* — re-typing an existing person's name/email into a brand-new HR record risks exactly the kind of duplicate, unlinked profile this system is supposed to avoid (the same failure mode as the soft-deleted-account email-link bug this session fixed earlier). The actual ask was a way to give an existing login account a real HR profile without retyping it and without risking a duplicate.
+
+### Fix — `GET /api/teachers/unlinked-accounts`
+New route in `server/routes/teachers.js`, placed **before** `GET /:id` specifically so Express never matches `unlinked-accounts` as an `:id` param (the same ordering hazard called out for `/me` above it). Returns this school's active (`isActive: { $ne: false }`), non-`parent`/`guardian`/`student` `users` documents that have no `teachers` document with a matching `userId`:
+
+```js
+const _NON_STAFF_ROLES = ['parent', 'guardian', 'student'];
+router.get('/unlinked-accounts', authMiddleware, PLAN, MODGATE, rbac('teachers', 'create'), async (req, res) => {
+  const [users, linkedTeachers] = await Promise.all([
+    tenantModel('users', tenantContext(req))
+      .find({ schoolId, isActive: { $ne: false }, role: { $nin: _NON_STAFF_ROLES } })
+      .select('id name email role').lean(),
+    tenantModel('teachers', tenantContext(req))
+      .find({ schoolId, userId: { $ne: null } }).select('userId').lean(),
+  ]);
+  const linkedIds = new Set(linkedTeachers.map(t => t.userId).filter(Boolean));
+  return ok(res, users.filter(u => !linkedIds.has(u.id)));
+});
+```
+
+Client: HR's staff list gained an "Activate Existing User" button (`HRPage.jsx`) that opens a new `ActivateExistingUserModal`, listing these candidates with a name/email search. Picking one opens the existing `StaffFormModal` in `'add'` mode with a new `prefill` prop (`{firstName, lastName, email}`) — the email field is locked read-only whenever a `prefill.email` is present, since it's exactly what `POST /teachers`'s existing auto-link-by-email logic (the isActive-guarded match from the soft-deleted-account fix, same session) uses to bind the new HR record back to the SAME login instead of creating a second, disconnected one. No new linking mechanism was built — this feature's entire job is pre-filling the form correctly and protecting the field the link depends on.
+
+### Fix — the HR/Settings staff-role-list drift
+The same bug report included a screenshot of HR's own "Add Staff" Staff Type dropdown, missing **Principal** entirely — the exact role the whole incident was about — while still offering `front_office`, a fake option with zero real usage (`teachers.countDocuments({staffType:'front_office'}) === 0`, confirmed live) that would fail server-side role validation if ever selected via "Create Login Account". Flagged directly: *"the roles in the hr are not linked to roles in settings, for instance principal is in the setting but not in the hr....this gap needs to be closed."*
+
+Audit found **five** independently hand-maintained staff-role arrays, matching neither each other nor the server's canonical `SYSTEM_ROLES` in `server/utils/role-validation.js`:
+- `HRPage.jsx`'s `BUILT_IN_STAFF_ROLES` (11 entries, missing `principal`, had fake `front_office`)
+- `PayrollSettingsModal.jsx`'s own copy of the same list (identical bugs — same purpose, same drift)
+- `SettingsPage.jsx`'s own `SYSTEM_ROLES` (already had `principal`, but was its own 6th independent copy)
+- `CategoriesTab.jsx` (behaviour-escalation assignees) and `reportcards/SettingsPanel.jsx` (report-comment approval chain) — both **deliberately** narrower, feature-specific subsets (not every system role makes sense as a behaviour-escalation step or a report-approval step); investigated and intentionally left alone.
+
+Added a single canonical export, `STAFF_ROLE_KEYS`, to the already-shared `client/src/utils/roleLabels.js` (mirrors the server's real assignable staff roles, minus `parent`/`guardian`/`student`/`superadmin`), and rebuilt the two identical-purpose lists from it:
+
+```js
+// roleLabels.js
+export const STAFF_ROLE_KEYS = [
+  'admin', 'principal', 'deputy_principal', 'section_head', 'teacher',
+  'exams_officer', 'timetabler', 'admissions_officer', 'finance', 'hr',
+  'discipline_committee',
+];
+```
+
+`HRPage.jsx` and `PayrollSettingsModal.jsx` now both do `STAFF_ROLE_KEYS.map(key => ({ key, label: SYSTEM_ROLE_LABELS[key] || key, ... }))` (HR keeps a local `ROLE_COLORS` map for its staff-card presentation; Payroll doesn't need colors). `SettingsPage.jsx`'s own `SYSTEM_ROLES` is now `['superadmin', ...STAFF_ROLE_KEYS, 'parent', 'student']` instead of a 14-entry literal it owned alone. All three can no longer drift from each other or from the server's own validation list; the two deliberately-narrower lists were left as literals since they're smaller than `STAFF_ROLE_KEYS` on purpose, not by omission.
+
+### Verified
+6 new tests in `server/__tests__/routes/teachers-unlinked-accounts.test.js`: an unlinked staff-role login is returned; one already linked via a `teachers.userId` is excluded; parent/guardian/student accounts are never returned even if unlinked; a deactivated login is excluded; a legacy user with `isActive` unset is still eligible; zero unlinked accounts returns an empty list, not an error. All three edited client files syntax-checked clean with `esbuild`. Full suite passing (256 suites, 2641 tests), zero regressions.
+
+### Files
+- `server/routes/teachers.js` — new `GET /unlinked-accounts` route
+- `server/__tests__/routes/teachers-unlinked-accounts.test.js` (new)
+- `client/src/api/client.js` — `teachers.unlinkedAccounts()`
+- `client/src/utils/roleLabels.js` — new `STAFF_ROLE_KEYS` export
+- `client/src/pages/hr/HRPage.jsx` — `ActivateExistingUserModal`, "Activate Existing User" button, `BUILT_IN_STAFF_ROLES` rebuilt from `STAFF_ROLE_KEYS`
+- `client/src/pages/hr/StaffFormModal.jsx` — new `prefill` prop, locked email field
+- `client/src/pages/hr/PayrollSettingsModal.jsx` — `BUILT_IN_STAFF_ROLES` rebuilt from `STAFF_ROLE_KEYS`
+- `client/src/pages/settings/SettingsPage.jsx` — `SYSTEM_ROLES` rebuilt from `STAFF_ROLE_KEYS`

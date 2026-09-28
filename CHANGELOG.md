@@ -6,6 +6,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.144.0] — 2026-09-28 — feat(hr): "Activate Existing User" — give a login-only account a real HR staff profile, and close the HR/Settings role-list gap
+
+Real customer report: a school's own Principal — originally added as the very first account and later promoted to superadmin via the platform console — was invisible in HR's staff list and couldn't be assigned classes. Confirmed live: `users` (every login account) and `teachers` (the real HR staff directory) are entirely independent collections, and Settings → Invite, the platform console's "Add Superadmin"/"Promote Existing User"/"Change Role" all create or touch a login account without ever requiring a matching HR record. Pushed back on directly: *"i dont think the system should be that manuall... hr should be the funnel to all staff in the system except parents and students"* — re-typing the person's details into a brand-new HR record risked a duplicate, unlinked profile instead of actually fixing the gap.
+
+Added `GET /api/teachers/unlinked-accounts` — returns this school's active, non-parent/guardian/student login accounts that have no `teachers` document linking back to them. HR's staff list gained an "Activate Existing User" button that lists these candidates and, on pick, opens the existing "Add Staff" form pre-filled with their name/email (email locked, since it's what links the new HR record back to their existing login via `POST /teachers`'s existing auto-link-by-email logic) — no re-typing, no duplicate account.
+
+Separately, but from the same report — a screenshot of HR's own Staff Type dropdown was missing "Principal" entirely, alongside a fake `front_office` option with zero real usage that would always fail server-side role validation if ever selected: *"the roles in the hr are not linked to roles in settings... this gap needs to be closed."* Five independent, hand-maintained staff-role lists existed across the client (`HRPage.jsx`, `PayrollSettingsModal.jsx`, `SettingsPage.jsx`, plus `CategoriesTab.jsx` and `reportcards/SettingsPanel.jsx`, whose lists are deliberately narrower feature-specific subsets and were left alone), none matching each other or the server's canonical `role-validation.js` list. Extracted a single `STAFF_ROLE_KEYS` export in `client/src/utils/roleLabels.js` (mirrors the server's real assignable staff roles) and rebuilt HR's, Payroll's, and Settings' own role lists from it — Principal now appears everywhere it should, and the three lists can no longer drift from each other or from the server.
+
+6 new tests for the new route. Full suite passing, zero regressions.
+
+---
+
 ## [v5.143.0] — 2026-09-28 — fix(platform): "Staff" count on the Registered Schools dashboard counted every login account, not staff
 
 Real customer report: Trinitas International School showed "372 staff" — obviously wrong for a school with 311 students. Confirmed live: `GET /api/platform/schools`'s `staff` stat was `countDocuments` against the `users` collection (every login account, any role) filtered only by `isActive: true` — no role filter at all. Broken down, those 372 were 313 student logins, 5 parent logins, and only 54 actual staff.
