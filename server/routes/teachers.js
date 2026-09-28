@@ -278,6 +278,45 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('teachers', 'read'), async (
   }
 });
 
+/* ── GET /api/teachers/unlinked-accounts ─────────────────────────
+   Real gap this closes: a login account for a staff-type role (invited
+   via Settings, or granted superadmin via the platform console) has
+   never been required to have a matching HR staff profile — the two
+   systems (users/settings vs. teachers/HR) are entirely independent,
+   and there was previously no way to find "who has a login but no HR
+   record" short of a manual database query. Confirmed live: a school's
+   own superadmin, added as the very first account when the school was
+   provisioned, had zero HR presence at all.
+
+   Returns active, non-parent/student/guardian users at this school who
+   have no `teachers` document linking back to them — candidates HR can
+   "activate" (give a real staff profile) without re-typing their name/
+   email from scratch or risking a duplicate login. Placed BEFORE
+   GET /:id in this file specifically so Express never matches this path
+   as an :id param. */
+const _NON_STAFF_ROLES = ['parent', 'guardian', 'student'];
+router.get('/unlinked-accounts', authMiddleware, PLAN, MODGATE, rbac('teachers', 'create'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const [users, linkedTeachers] = await Promise.all([
+      tenantModel('users', tenantContext(req))
+        .find({ schoolId, isActive: { $ne: false }, role: { $nin: _NON_STAFF_ROLES } })
+        .select('id name email role')
+        .lean(),
+      tenantModel('teachers', tenantContext(req))
+        .find({ schoolId, userId: { $ne: null } })
+        .select('userId')
+        .lean(),
+    ]);
+    const linkedIds = new Set(linkedTeachers.map(t => t.userId).filter(Boolean));
+    const unlinked = users.filter(u => !linkedIds.has(u.id));
+    return ok(res, unlinked);
+  } catch (err) {
+    console.error('[teachers GET/unlinked-accounts]', err);
+    return E.serverError(res);
+  }
+});
+
 /* ── GET /api/teachers/:id ───────────────────────────────────── */
 router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('teachers', 'read'), async (req, res) => {
   try {

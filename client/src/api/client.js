@@ -241,6 +241,7 @@ export const students = {
 export const teachers = {
   ..._resource('teachers'),
   bulkRemove: (ids) => _delete('/teachers/bulk', { ids }),
+  unlinkedAccounts: () => _get('/teachers/unlinked-accounts'),
 };
 
 export const classes = {
