@@ -1516,7 +1516,17 @@ function showSuperadmins(schoolId, schoolName) {
         </div>
         <button class="pa-btn primary" onclick="addSuperadmin('${schoolId}')"><i class="fas fa-plus"></i> Add</button>
       </div>
-      <p style="font-size:11px;color:#94a3b8;margin:0">A random temporary password is generated and shown once — the new admin must change it on first login.</p>
+      <p style="font-size:11px;color:#94a3b8;margin:0">Creates a brand-new login. A random temporary password is generated and shown once — the new admin must change it on first login.</p>
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;border-top:1px solid #e5e7eb;padding-top:12px">
+        <div style="flex:1;min-width:220px">
+          <label class="pa-label" style="font-size:11px">Promote an existing user (by email)</label>
+          <input id="sa-promote-email" type="email" class="pa-input" placeholder="jane@school.com" style="width:100%">
+        </div>
+        <button class="pa-btn primary" onclick="promoteSuperadmin('${schoolId}')"><i class="fas fa-arrow-up"></i> Promote</button>
+      </div>
+      <p style="font-size:11px;color:#94a3b8;margin:0">For someone who already has a login at this school — keeps their existing password, just grants superadmin. Ends their current session so the change takes effect immediately.</p>
+
       <div id="sa-result" style="display:none;padding:10px 12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;font-size:12px;color:#166534"></div>
       <div id="sa-error" style="display:none;padding:8px 12px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;font-size:12px;color:#b91c1c"></div>
     </div>`,
@@ -1621,6 +1631,35 @@ async function addSuperadmin(schoolId) {
       resEl.style.display = 'block';
     }
     toast(json.note || 'Superadmin added.', 'success');
+    loadSuperadmins(schoolId);
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.style.display = 'block';
+  }
+}
+
+async function promoteSuperadmin(schoolId) {
+  const email = document.getElementById('sa-promote-email')?.value.trim();
+  const errEl = document.getElementById('sa-error');
+  const resEl = document.getElementById('sa-result');
+  errEl.style.display = 'none';
+  resEl.style.display = 'none';
+
+  if (!email) {
+    errEl.textContent = 'Email is required.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  const confirmed = confirm(`Grant superadmin to ${email}?\n\nThey will be signed out of their current session and must log in again to see the change.`);
+  if (!confirmed) return;
+
+  try {
+    const json = await api('POST', `/schools/${schoolId}/superadmins/promote`, { email });
+    document.getElementById('sa-promote-email').value = '';
+    resEl.innerHTML = `<strong>${_esc(json.user?.email || email)}</strong> is now a superadmin.`;
+    resEl.style.display = 'block';
+    toast(json.note || 'Promoted to superadmin.', 'success');
     loadSuperadmins(schoolId);
   } catch (err) {
     errEl.textContent = err.message;

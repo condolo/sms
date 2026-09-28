@@ -5161,3 +5161,33 @@ Reactivating restores **login access only** — it does not touch `role`. Angela
 - `client/src/api/client.js` — `settingsApi.users.listRemoved()`, `.reactivate()`
 - `client/src/pages/settings/SettingsPage.jsx` — `UsersTab`'s "Removed" panel
 - `server/__tests__/routes/settings-user-reactivation.test.js`, `teachers-inactive-user-link.test.js` (new)
+
+---
+
+## 77. Promote an Existing User to Superadmin (v5.137.0)
+
+Requested directly: a way to grant superadmin to someone who already has a working login at a school, without creating a second, separate account for them. Before this, the platform console's "Manage Superadmins" panel (`platform.html`, per-school modal) could only ever `POST /api/platform/schools/:id/superadmins` — which unconditionally creates a **brand-new** account (name + email + a freshly generated password) and 409s if that email is already taken by anyone at the school, active or not. There was no promote-in-place path, and none could exist at the school's own Settings level either: `SettingsPage.jsx`'s `assignableRoles` deliberately excludes `superadmin` from the role-change dropdown ("only platform-level"), so this really was a hard gap, not an oversight anyone could work around from inside a school.
+
+Worth noting up front, since it came up while building this: **"who is superadmin" was already a real, live-fetched, per-school list** — `GET /api/platform/schools/:id/superadmins` and the same panel's table have existed since the 2026-07-21 orphan-purge incident (see `platform-superadmins.test.js`). Nothing here was hardcoded; the gap was specifically the one-way "create new only" limitation.
+
+### The new route
+`POST /api/platform/schools/:id/superadmins/promote`, body `{email}`:
+- Looks up an existing user at that school by email (`tenantModel('users', {schoolId})`).
+- 404 if no match — the error message points at "Add new superadmin" instead, since that's the right tool for a genuinely new person.
+- 409 if the match is a removed/inactive account (`isActive === false`) — points at reactivating it first (§76) rather than silently reactivating it as a side effect of promotion, keeping the two actions separate and each independently auditable.
+- 409 if already superadmin — no-op guard.
+- Otherwise: sets `role`/`primaryRole`/`roles` to `superadmin`, immediately revokes the user's tokens (and their linked identity's, if any) so the change takes effect on their very next request rather than waiting out up to 8 hours of an existing session — the exact convention `settings.js`'s own role-change route already established — sends them `email.sendRoleChanged` (old role → new role, "changedBy: Platform Admin"), and audits `platform.superadmin_promoted` with the old role in `details`.
+- The email notification is best-effort (non-fatal try/catch) — a down SMTP server must never block a promotion that already happened at the DB level.
+
+A naming note for future edits to this route: the local variable holding the target's email is named `targetEmail`, deliberately not `email` — this file's top-level `email` binding is `require('../utils/email')` (used a few lines later for `.sendRoleChanged`), and an early draft of this route shadowed it with the request's email string, which would have silently turned the notification email into a no-op (the `try/catch` around it would have swallowed the resulting `TypeError` as a normal "email failed" warning, with no crash and no obvious symptom).
+
+### UI
+`platform.html`'s existing `showSuperadmins()` modal gained a second small form directly below the existing "create new" one: an email field + "Promote" button (`promoteSuperadmin(schoolId)`), with its own confirm dialog warning that the target's current session will end. Both forms share the same result/error `<div>`s the existing panel already had.
+
+### Verified
+7 new tests in `server/__tests__/routes/platform-superadmin-promote.test.js`: successful promotion (role flip, token revocation, audit, email — all asserted), case-insensitive/whitespace-trimmed email matching, 404 on no match, 409 on an inactive account, 409 on an already-superadmin target, 400 on a missing email, 404 on a nonexistent school, and a non-fatal email-failure path. Full suite passing, zero regressions. `platform.html`'s inline script re-verified to parse (`new Function(...)` on the extracted `<script>` body) after the edit.
+
+### Files
+- `server/routes/platform.js` — `POST /schools/:id/superadmins/promote` (new)
+- `platform.html` — `showSuperadmins()`'s modal body, `promoteSuperadmin()` (new)
+- `server/__tests__/routes/platform-superadmin-promote.test.js` (new)

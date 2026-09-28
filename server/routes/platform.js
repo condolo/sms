@@ -442,6 +442,84 @@ router.post('/schools/:id/superadmins', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+/* POST /api/platform/schools/:id/superadmins/promote — grant superadmin
+   to a user who ALREADY has a login at this school, instead of creating
+   a brand new account. Distinct from POST /superadmins above (which only
+   ever creates a fresh account with a fresh password) — this is the
+   "make Jane superadmin too" case, keeping her existing password/history
+   intact. A non-superadmin school role can never grant superadmin itself
+   (Settings -> Users' assignableRoles deliberately excludes it — see
+   SettingsPage.jsx's own comment, "only platform-level"), so this route
+   is the one and only place that gap is closed, same as creating a new
+   superadmin already was. Body: { email }. */
+router.post('/schools/:id/superadmins/promote', async (req, res) => {
+  try {
+    const rawEmail = req.body?.email;
+    // Named targetEmail, not `email` — this file's top-level `email` is the
+    // require('../utils/email') module (used below); shadowing it with a
+    // local string would silently turn email.sendRoleChanged into a no-op.
+    const targetEmail = typeof rawEmail === 'string' ? rawEmail.trim().toLowerCase() : '';
+    if (!targetEmail) return res.status(400).json({ error: 'email is required' });
+
+    const School = _model('schools');
+    const rid = req.params.id;
+    const schoolQuery = mongoose.isValidObjectId(rid) ? { $or: [{ _id: rid }, { id: rid }] } : { id: rid };
+    const school = await School.findOne(schoolQuery).lean();
+    if (!school) return res.status(404).json({ error: 'School not found' });
+
+    const User = tenantModel('users', { schoolId: school.id });
+    const target = await User.findOne({ email: targetEmail }).lean();
+    if (!target) {
+      return res.status(404).json({ error: `No user with email '${targetEmail}' exists at this school. Use 'Add new superadmin' to create one instead.` });
+    }
+    if (target.isActive === false) {
+      return res.status(409).json({ error: `${targetEmail} is a removed/inactive account. Reactivate it first (Settings → Users → Removed, from within the school) before granting superadmin.` });
+    }
+    if (target.role === 'superadmin') {
+      return res.status(409).json({ error: `${targetEmail} is already a superadmin.` });
+    }
+
+    const oldRole = target.role;
+    const now = new Date().toISOString();
+    const targetId = target.id || target._id?.toString();
+    const updateFilter = target.id ? { id: target.id } : { _id: target._id };
+    await User.updateOne(updateFilter, {
+      $set: { role: 'superadmin', primaryRole: 'superadmin', roles: ['superadmin'], updatedAt: now },
+    });
+
+    // Role change must take effect immediately, same as settings.js's own
+    // role-change route — otherwise the promotion silently waits out
+    // whatever's left of their current 8-hour session.
+    try {
+      await revokeUserTokens(targetId);
+      if (target.identityId) await revokeIdentityTokens(target.identityId);
+    } catch (revokeErr) {
+      console.warn('[platform/schools/:id/superadmins/promote] token revocation failed (non-fatal):', revokeErr.message);
+    }
+
+    await AuditService.log({
+      action: 'platform.superadmin_promoted', actor: _platformActor(req),
+      schoolId: school.id, target: { type: 'user', id: targetId, label: targetEmail },
+      details: { email: targetEmail, oldRole, schoolName: school.name }, req,
+    });
+
+    try {
+      await email.sendRoleChanged({
+        name: target.name || targetEmail, email: targetEmail, schoolName: school.name,
+        schoolEmail: school.systemEmail || school.email || '', schoolId: school.id,
+        oldRole, newRole: 'superadmin', changedBy: 'Platform Admin',
+      });
+    } catch (emailErr) {
+      console.warn('[platform/schools/:id/superadmins/promote] notification email failed (non-fatal):', emailErr.message);
+    }
+
+    res.json({
+      user: { id: targetId, name: target.name, email: targetEmail, role: 'superadmin' },
+      note: `${target.name || targetEmail} is now a superadmin. They must log in again — their current session was ended.`,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 /* POST /api/platform/schools/:id/superadmins/:userId/reset-password
    Closes the exact gap that motivated this route: a platform admin adds
    a superadmin (above), the one-time temp password is lost before it's

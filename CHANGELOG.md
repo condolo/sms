@@ -6,6 +6,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.137.0] — 2026-09-28 — feat(platform): promote an existing user to superadmin
+
+The platform console could only ever grant superadmin by creating a brand-new account (name + email + fresh password) — there was no way to promote someone who already has a working login at that school, and no self-service path exists either (Settings → Users deliberately excludes superadmin from the assignable-roles list, since granting it is platform-level only). Requested directly: an existing user needed to become superadmin without losing their current account.
+
+New `POST /api/platform/schools/:id/superadmins/promote` (body: `{email}`) looks up the existing active user at that school, flips their role to `superadmin`, ends their current session immediately (same convention as `settings.js`'s own role-change route — a role change must take effect now, not whenever their 8-hour session naturally expires), sends them a role-changed notification email, and logs `platform.superadmin_promoted` to the audit trail. Refuses cleanly on a removed/inactive account (points at reactivating it first — see v5.136.0), an already-superadmin target, or no match at all. The existing "Manage Superadmins" panel in `platform.html` (already a real, live-fetched list per school, not hardcoded) gained a second small form for this, alongside its existing "create new" form.
+
+7 new tests. Full suite passing, zero regressions.
+
+Full details: [Developer Guide §77](docs/DEVELOPER_GUIDE.md#77-promote-an-existing-user-to-superadmin-v51370).
+
+---
+
 ## [v5.136.0] — 2026-09-28 — fix(settings): a removed account's email was stuck forever, with no way to see it or undo it
 
 A real customer report (Trinitas): a teacher was invited by mistake via Settings (which doesn't create an HR staff record — invite and HR staff are separate data models, so she never showed up in HR), then removed. Removing turned out to be a soft-delete only (`isActive:false`, the document and its email are never purged) — but re-inviting the same email afterward was blocked forever with a bare "already exists" error, and the blocking account was invisible in the Users list (which filters to active accounts only). There was no reactivate button anywhere, so the only way to actually get her working again was through HR's "Add Staff", which has its own quiet bug: creating a new staff record silently links to ANY matching-email `users` account regardless of whether it's active — so her new HR record ended up bound to the dead login, showing as "active" staff with no way to sign in.
