@@ -266,7 +266,7 @@ router.post('/schools', async (req, res) => {
     let org = null;
     let finalSlug = _sanitiseSlug(slug);
     if (organizationId) {
-      org = await Org.findOne({ id: organizationId }).lean();
+      org = await Org.findOne({ id: organizationId }).select('id slug').lean();
       if (!org) return res.status(404).json({ error: 'Organization not found' });
       finalSlug = _deriveSlugForOrg(org.slug, finalSlug);
     }
@@ -762,7 +762,9 @@ router.get('/organizations', async (req, res) => {
     const School = _model('schools');
 
     const [orgs, schools] = await Promise.all([
-      Org.find({}).sort({ createdAt: -1 }).lean(),
+      Org.find({})
+        .select('id name slug status multiSchoolEnabled logoUrl primaryColor tagline loginBgUrl createdAt')
+        .sort({ createdAt: -1 }).lean(),
       School.find({})
         .select('id _id organizationId name shortName slug plan isActive status trialEnds')
         .lean(),
@@ -865,7 +867,7 @@ router.post('/organizations', async (req, res) => {
 
     const Org    = _model('organizations');
     const School = _model('schools');
-    const exists = await Org.findOne({ slug: finalSlug }).lean();
+    const exists = await Org.findOne({ slug: finalSlug }).select('id').lean();
     if (exists) {
       return res.status(409).json({ error: `Slug '${finalSlug}' is already taken by another organization` });
     }
@@ -928,7 +930,7 @@ router.post('/organizations/:id/director', async (req, res) => {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Invalid email address' });
 
     const Org = _model('organizations');
-    const org = await Org.findOne({ id: req.params.id }).lean();
+    const org = await Org.findOne({ id: req.params.id }).select('id name').lean();
     if (!org) return res.status(404).json({ error: 'Organization not found' });
 
     const School = _model('schools');
@@ -1038,7 +1040,7 @@ router.patch('/organizations/:id', async (req, res) => {
       { id: req.params.id },
       { $set: update },
       { new: true }
-    ).lean();
+    ).select('id name slug status multiSchoolEnabled logoUrl primaryColor tagline loginBgUrl').lean();
     if (!doc) return res.status(404).json({ error: 'Organization not found' });
 
     await AuditService.log({
@@ -1080,7 +1082,7 @@ router.put('/organizations/:id/logo', async (req, res) => {
     if (err) return res.status(400).json({ error: err });
 
     const Org = _model('organizations');
-    const org = await Org.findOne({ id: req.params.id }).lean();
+    const org = await Org.findOne({ id: req.params.id }).select('id name').lean();
     if (!org) return res.status(404).json({ error: 'Organization not found' });
 
     const logoUrl = `/api/public/org-asset/logo?slug=${org.id}`;
@@ -1102,7 +1104,7 @@ router.put('/organizations/:id/logo', async (req, res) => {
 router.delete('/organizations/:id/logo', async (req, res) => {
   try {
     const Org = _model('organizations');
-    const org = await Org.findOne({ id: req.params.id }).lean();
+    const org = await Org.findOne({ id: req.params.id }).select('id name').lean();
     if (!org) return res.status(404).json({ error: 'Organization not found' });
 
     await Org.updateOne({ id: org.id }, { $unset: { logoBase64: '', logoUrl: '' }, $set: { updatedAt: new Date().toISOString() } });
@@ -1127,7 +1129,7 @@ router.put('/organizations/:id/login-bg', async (req, res) => {
     if (err) return res.status(400).json({ error: err });
 
     const Org = _model('organizations');
-    const org = await Org.findOne({ id: req.params.id }).lean();
+    const org = await Org.findOne({ id: req.params.id }).select('id name').lean();
     if (!org) return res.status(404).json({ error: 'Organization not found' });
 
     const loginBgUrl = `/api/public/org-asset/login-bg?slug=${org.id}`;
@@ -1149,7 +1151,7 @@ router.put('/organizations/:id/login-bg', async (req, res) => {
 router.delete('/organizations/:id/login-bg', async (req, res) => {
   try {
     const Org = _model('organizations');
-    const org = await Org.findOne({ id: req.params.id }).lean();
+    const org = await Org.findOne({ id: req.params.id }).select('id name').lean();
     if (!org) return res.status(404).json({ error: 'Organization not found' });
 
     await Org.updateOne({ id: org.id }, { $unset: { loginBgBase64: '', loginBgUrl: '' }, $set: { updatedAt: new Date().toISOString() } });
@@ -1178,7 +1180,9 @@ router.delete('/organizations/:id/login-bg', async (req, res) => {
 
 async function _findOrgOr404(id, res) {
   const Org = _model('organizations');
-  const org = await Org.findOne({ id }).lean();
+  const org = await Org.findOne({ id })
+    .select('id name slug status multiSchoolEnabled logoUrl primaryColor tagline loginBgUrl')
+    .lean();
   if (!org) { res.status(404).json({ error: 'Organization not found' }); return null; }
   return org;
 }

@@ -5242,3 +5242,31 @@ The Superadmins panel's table rows each gained an `id="sa-row-<userId>"` and the
 - `server/routes/platform.js` — `GET /schools/:id/roles`, `POST /schools/:id/superadmins/:userId/change-role` (new); imports `SYSTEM_ROLES` from `utils/role-validation`
 - `platform.html` — `loadSuperadmins` (fetches roles alongside the list, gives each row an id), `startChangeRole`, `saveChangeRole`, `_roleLabel` (all new)
 - `server/__tests__/routes/platform-superadmin-change-role.test.js` (new)
+
+---
+
+## 80. Unprojected Branding Lookups Were Pulling Multi-MB Blobs Into Memory (v5.140.0)
+
+Real production incident, investigated live: `tis.msingi.io` started intermittently blank-paging (its JS/CSS bundle failing with 500s) and `/api/auth/org-login` started returning a generic 500 — both starting right after TIS Group's shared portal got a real login-background image uploaded via §78's new branding feature. The user correctly pushed back on two wrong turns in the investigation before this was found:
+
+1. **First wrong theory: stale deploy.** Disproven by running the exact org-login logic — org lookup, account-lockout check, identity lookup, bcrypt compare, eligible-schools resolution — directly against the real production database from a local Node process, AND by running the same request through a local server instance's full Express middleware stack (CORS, sanitization, rate limiting, everything). Both completed cleanly every time; no crash, correct `401` for a bad password. The deployed code was never the problem.
+2. **Second wrong theory: this specific custom domain isn't properly registered with the host.** The user corrected this directly — every school subdomain works today without any per-domain registration step, and `tis.msingi.io` itself had been working before. If DNS/CDN routing were broken for this hostname specifically, it would never have worked at all, and every other school would need the same manual step they don't need. That ruled out an infrastructure/DNS explanation entirely and pointed back at something that changed in-app, correlated with a specific action (uploading the image).
+
+### The actual cause
+`GET /api/public/resolve-portal` — unauthenticated, hit on every single visitor's page load, for every school and organization — did `Org.findOne({slug}).lean()` and `School.findOne({slug}).lean()` with **no field projection at all**. Same for `/school-info`, both `school-asset`/`org-asset` binary-serving routes (which each pulled BOTH base64 fields even though only one is ever served per request), and half a dozen platform.js routes (`GET /organizations`'s list, `POST /organizations`'s slug-uniqueness check, the director/branding-upload/multi-school-toggle routes' existence checks). None of these needed `logoBase64`/`loginBgBase64`/`faviconBase64` — only the dedicated asset-serving routes ever read those fields — but Mongoose's `.lean()` with no `.select()` returns the WHOLE document regardless.
+
+Before TIS Group's branding was set, these documents were a few hundred bytes each, so the waste was invisible. The moment a real 1.3MB login-background image was uploaded (see §78), every single visit to that org's portal — and every render of the platform console's Organizations list — started pulling over a megabyte of base64 image data into Node's process memory, just to read a handful of short string fields. Under real (even modest) concurrent traffic, on a memory-constrained hosting tier, this is a very plausible trigger for intermittent process pressure and restarts — which would explain both symptoms as one root cause: a mid-restart request looks exactly like a blank page (static assets failing) or a generic 500 (an in-flight API request), and the server recovering explains why reloading sometimes "just worked."
+
+### Fix
+Explicit `.select(...)` projections added everywhere an organization or school document is read for public branding or platform-console listing purposes:
+- `server/routes/public.js`: `SCHOOL_INFO_FIELDS` / `ORG_PORTAL_FIELDS` constants applied to `/school-info` and both branches of `/resolve-portal`; `/school-asset/:type` and `/org-asset/:type` now each select only the ONE base64 field the request is actually for, never both.
+- `server/routes/platform.js`: `GET /organizations` (the list route), `POST /organizations` (slug uniqueness check), `POST /organizations/:id/director`, `PATCH /organizations/:id`, the four logo/login-bg upload/delete routes, `_findOrgOr404` (shared by enable/disable-multi-school), and `POST /memberships`'s org-slug lookup all now select only the fields they actually use.
+
+No response shape changed anywhere — verified directly against the real production database that `/resolve-portal` and both `org-asset` endpoints still return byte-identical, correct data (including the 1MB+ image itself, served correctly) after adding the projections.
+
+### Verified
+No new tests added specifically for this fix — it changes performance characteristics, not behavior or response shape, and every existing route test (which asserts on response bodies) continues to pass unchanged, confirming the projections don't drop any field any caller actually depends on. Full suite passing, zero regressions.
+
+### Files
+- `server/routes/public.js` — `SCHOOL_INFO_FIELDS`, `ORG_PORTAL_FIELDS` (new constants); `/school-info`, `/resolve-portal`, `/school-asset/:type`, `/org-asset/:type`
+- `server/routes/platform.js` — `GET /organizations`, `POST /organizations`, `POST /organizations/:id/director`, `PATCH /organizations/:id`, `PUT/DELETE /organizations/:id/logo`, `PUT/DELETE /organizations/:id/login-bg`, `_findOrgOr404`, `POST /memberships`

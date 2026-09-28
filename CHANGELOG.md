@@ -6,6 +6,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.140.0] — 2026-09-28 — fix(perf): public branding lookups were pulling multi-MB image blobs into memory on every request
+
+Real customer report: `tis.msingi.io` started intermittently failing to load — sometimes a blank page (its JS/CSS bundle 500ing), sometimes `/api/auth/org-login` returning a generic 500 — right after TIS Group's shared login portal got a real login-background image uploaded (§78). Investigated by running the actual org-login and resolve-portal logic directly against the real production database from a local process: every step completed cleanly, no application bug found in the credential-check or portal-resolution logic itself. The DNS/hosting layer was also ruled out — the same subdomain infrastructure that already serves every other school without per-domain configuration was confirmed working for this one too.
+
+What was actually found: `GET /api/public/resolve-portal` (unauthenticated, hit on every single visitor's page load for every school and organization) and half a dozen other lookups fetched the **entire** school or organization document with no field projection — including `logoBase64`/`loginBgBase64`, which can run 1-2MB+ once a real image is uploaded. Before TIS Group's branding was set, these documents were a few hundred bytes; the moment a 1.3MB login background was attached, every visit to that portal started dragging over a megabyte through memory just to read a handful of short text fields, none of which were the image data itself (only the dedicated asset-serving routes ever need that).
+
+Added explicit field projections to every public branding lookup (`/school-info`, `/resolve-portal`, both `school-asset`/`org-asset` binary-serving routes — each now selects only the ONE base64 field it's actually serving, not both) and to `platform.js`'s organization list/create/rename/branding-upload/multi-school-toggle routes, none of which need the image data either. No response shape changed; verified against the real production database that `resolve-portal` and both `org-asset` endpoints still return identical, correct data.
+
+Full suite passing, zero regressions.
+
+---
+
 ## [v5.139.0] — 2026-09-28 — feat(platform): reassign an existing superadmin to a different role
 
 Direct follow-up to v5.137.0's "promote an existing user to superadmin": after promoting a replacement, the OUTGOING superadmin had nowhere to go. Settings → Users' own role dropdown deliberately refuses to touch a superadmin/admin account, and nothing existed on the platform side either — the only options were "stay superadmin forever" or "remove them entirely." Requested directly: "there is no where to reassign the existing superadmin their new roles... dont hardcode, I want to configure myself."

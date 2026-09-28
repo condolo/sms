@@ -20,6 +20,21 @@ const router = express.Router();
 // Shared by /school-info and /resolve-portal's school branch — the two
 // response shapes must stay byte-identical, so both build off one mapper
 // rather than risking silent drift between two hand-maintained field lists.
+// Field lists for every unauthenticated, no-projection-by-default lookup
+// below. Found live (2026-09-28): once a school or organization actually
+// has a real logo/login-background image uploaded, `logoBase64`/
+// `loginBgBase64` on that document can run 1-2MB+ — and every one of
+// these routes is hit on EVERY visitor's page load, unauthenticated, with
+// no caching. An unprojected `.findOne().lean()` was pulling that entire
+// blob into memory on every single request just to read a handful of
+// short string fields, none of which are the base64 data itself (that's
+// only ever needed by school-asset/org-asset below). Confirmed as the
+// likely cause of intermittent request failures that started right after
+// TIS Group's shared portal got a real (1.3MB) login background image.
+const SCHOOL_INFO_FIELDS =
+  'slug name shortName logoUrl faviconUrl primaryColor accentColor themePreset tagline website loginBgUrl isActive status';
+const ORG_PORTAL_FIELDS = 'id slug name logoUrl primaryColor tagline loginBgUrl multiSchoolEnabled';
+
 function _mapPublicSchoolInfo(school) {
   return {
     slug:         school.slug,
@@ -58,7 +73,7 @@ router.get('/school-info', async (req, res) => {
     }
 
     const School = _model('schools');
-    const school = await School.findOne({ slug }).lean();
+    const school = await School.findOne({ slug }).select(SCHOOL_INFO_FIELDS).lean();
 
     if (!school) {
       return res.status(404).json({ error: `School '${slug}' not found` });
@@ -98,13 +113,13 @@ router.get('/resolve-portal', async (req, res) => {
     }
 
     const School = _model('schools');
-    const school = await School.findOne({ slug }).lean();
+    const school = await School.findOne({ slug }).select(SCHOOL_INFO_FIELDS).lean();
     if (school) {
       return res.json({ type: 'school', ..._mapPublicSchoolInfo(school) });
     }
 
     const Org = _model('organizations');
-    const org = await Org.findOne({ slug }).lean();
+    const org = await Org.findOne({ slug }).select(ORG_PORTAL_FIELDS).lean();
     if (org?.multiSchoolEnabled) {
       const schoolCount = await School.countDocuments({ organizationId: org.id });
       if (schoolCount >= 2) {
@@ -275,9 +290,9 @@ router.get('/school-asset/:type', async (req, res) => {
     const slug = (req.query.slug || '').toLowerCase().trim();
     if (!slug) return res.status(400).json({ error: 'slug required' });
 
-    const School = _model('schools');
-    const school = await School.findOne({ id: slug }).lean();
     const field  = type === 'logo' ? 'logoBase64' : type === 'favicon' ? 'faviconBase64' : 'loginBgBase64';
+    const School = _model('schools');
+    const school = await School.findOne({ id: slug }).select(field).lean();
     const b64    = school?.[field];
 
     if (!b64) return res.status(404).json({ error: `No ${type} set` });
@@ -315,9 +330,9 @@ router.get('/org-asset/:type', async (req, res) => {
     const slug = (req.query.slug || '').toLowerCase().trim();
     if (!slug) return res.status(400).json({ error: 'slug required' });
 
-    const Org = _model('organizations');
-    const org = await Org.findOne({ id: slug }).lean();
     const field = type === 'logo' ? 'logoBase64' : 'loginBgBase64';
+    const Org   = _model('organizations');
+    const org   = await Org.findOne({ id: slug }).select(field).lean();
     const b64   = org?.[field];
 
     if (!b64) return res.status(404).json({ error: `No ${type} set` });
