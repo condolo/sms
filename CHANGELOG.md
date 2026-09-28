@@ -6,6 +6,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.142.0] — 2026-09-28 — fix(security): organization portal subdomains were rejected by the CORS origin allowlist
+
+Real production incident, actual root cause after two disproven theories (a suspected stale deploy, ruled out by running the code directly against production data; a suspected DNS/custom-domain gap, ruled out because no subdomain has ever needed individual hosting registration): `tis.msingi.io` kept blank-paging and its API calls kept 500ing, on and off, unrelated to its branding data's size (confirmed after the images were removed and the problem persisted). Reproduced cleanly: `curl -H "Origin: https://tis.msingi.io" .../assets/index-*.js` returned 500; the identical request with no Origin header, or for `https://demo.msingi.io`, returned 200 — the CORS origin check itself, not the deployed code or DNS, was rejecting a legitimate, currently-live production origin.
+
+`utils/corsOrigin.js`'s `*.msingi.io` wildcard (hardened in v5.134.0 to require a real, currently-provisioned slug, not just a shape match) built its allow-cache from the `schools` collection only. A multi-school ORGANIZATION's own shared-portal slug — distinct from any of its member schools' slugs — was never in it. Real browsers send an `Origin` header even for same-origin asset requests when a script tag carries Vite's `crossorigin` attribute (standard on module entry scripts), so once the cache warmed up in production, every such request for TIS Group's real, active shared portal got rejected by the exact hardening meant to block an abandoned or attacker-registered subdomain — the opposite of what it exists to do.
+
+Fixed by also caching every organization slug with `multiSchoolEnabled: true` (the same gate `GET /api/public/resolve-portal` already uses to decide whether an org's shared portal is actually live) alongside school slugs. An org that merely exists, with the toggle still off, still gets no pass.
+
+3 new tests. Full suite passing, zero regressions.
+
+---
+
 ## [v5.141.0] — 2026-09-28 — feat(branding): logo/login-background uploads are resized and compressed in the browser before upload
 
 Direct follow-up to v5.140.0's incident: that fix stopped the server from dragging a large uploaded image through memory on every page load, but did nothing to stop a large image from being uploaded in the first place — someone could still pick a 6000×4000, 8MB photo for a login background. Asked directly: "if they cause loading time, can the system resize to fit the desired size" — pointing at `client/src/utils/imageResize.js`, an existing canvas-based resize helper already used for inventory item photos and library book covers, but never wired up to the three branding upload fields it was built to also cover (school logo/favicon/login-background) or the newer organization logo/login-background uploads.

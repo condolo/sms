@@ -4,12 +4,24 @@
 'use strict';
 
 let mockSchools;
+let mockOrgs;
 jest.mock('../utils/model', () => ({
   _model: jest.fn((collection) => {
     if (collection === 'schools') {
       return {
         find: () => ({
           select: () => ({ lean: () => Promise.resolve(mockSchools) }),
+        }),
+      };
+    }
+    if (collection === 'organizations') {
+      return {
+        // Real query filters { multiSchoolEnabled: true } server-side —
+        // mirror that here so a test seeding a non-multi-school org into
+        // mockOrgs would actually catch a regression, not just happen to
+        // pass because the mock ignores the filter.
+        find: (filter) => ({
+          select: () => ({ lean: () => Promise.resolve(mockOrgs.filter(o => o.multiSchoolEnabled === filter.multiSchoolEnabled)) }),
         }),
       };
     }
@@ -26,6 +38,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   _resetSlugCacheForTests();
   mockSchools = [{ slug: 'trinitas' }, { slug: 'trinity' }];
+  mockOrgs = [];
   process.env.NODE_ENV = 'production';
 });
 afterAll(() => { process.env.NODE_ENV = ORIGINAL_NODE_ENV; });
@@ -110,5 +123,38 @@ describe('_refreshKnownSchoolSlugs — the real DB-backed refresh', () => {
     model._model.mockImplementationOnce(() => ({ find: () => ({ select: () => ({ lean: () => Promise.reject(new Error('DB down')) }) }) }));
     await expect(_refreshKnownSchoolSlugs()).resolves.toBeUndefined();
     expect(isAllowedOrigin('https://anything-at-all.msingi.io')).toBe(true); // still cold — never locked every school out
+  });
+});
+
+/* 2026-09-28 real production incident — see this file's header comment
+   for the full story. A multi-school organization's own shared-portal
+   slug (distinct from any of its member schools' slugs) was never in
+   this cache, so once it warmed up in production, the org's real,
+   currently-active portal subdomain got REJECTED by the exact hardening
+   this file's own header describes as protecting against an ABANDONED
+   subdomain — the opposite of what it's for. Reproduced live via
+   `curl -H "Origin: https://tis.msingi.io"` against a real asset URL:
+   500 with the header present, 200 without it or for a real school's
+   origin — proving the origin check itself, not the deployed code or
+   DNS, was rejecting a legitimate, currently-live production origin. */
+describe('*.msingi.io subdomain — an ORGANIZATION\'s own shared-portal slug (2026-09-28 incident)', () => {
+  test('a multi-school-enabled organization\'s own slug is allowed, even though it is not any member school\'s slug', async () => {
+    mockOrgs = [{ slug: 'tis', multiSchoolEnabled: true }];
+    await _refreshKnownSchoolSlugs();
+    expect(isAllowedOrigin('https://tis.msingi.io')).toBe(true);
+  });
+
+  test('an organization that exists but has NOT opted into multiSchoolEnabled does not get a free pass at its slug', async () => {
+    mockOrgs = [{ slug: 'not-yet-activated', multiSchoolEnabled: false }];
+    await _refreshKnownSchoolSlugs();
+    expect(isAllowedOrigin('https://not-yet-activated.msingi.io')).toBe(false);
+  });
+
+  test('a real school slug and a real org-portal slug are BOTH allowed from the same warm cache', async () => {
+    mockOrgs = [{ slug: 'tis', multiSchoolEnabled: true }];
+    await _refreshKnownSchoolSlugs();
+    expect(isAllowedOrigin('https://trinitas.msingi.io')).toBe(true); // school
+    expect(isAllowedOrigin('https://tis.msingi.io')).toBe(true);      // org portal
+    expect(isAllowedOrigin('https://neither-one.msingi.io')).toBe(false);
   });
 });

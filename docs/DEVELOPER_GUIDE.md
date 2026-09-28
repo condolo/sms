@@ -5297,3 +5297,37 @@ Both changed files were syntax-checked (`esbuild` for the React component, `new 
 - `client/src/utils/imageResize.js` — `format` option, SVG/ICO pass-through
 - `client/src/pages/settings/SettingsPage.jsx` — `AssetUploader` now resizes before upload; `resize` props on the logo/favicon/login-background call sites
 - `platform.html` — `_resizeImageToDataUrl` (new, vanilla-JS port), wired into `uploadOrgImage`
+
+---
+
+## 82. Organization Portal Subdomains Were Rejected by the CORS Origin Allowlist (v5.142.0)
+
+The real conclusion to the `tis.msingi.io` investigation that ran through §80–81. Both of those were genuine bugs, genuinely worth fixing — but neither was the actual cause of the blank-page/500 symptom, and this session is a good example of why: each theory got disproven by direct testing rather than assumed away, and the user's own pushback ("render is live and deployed"; "I removed the images... it still goes blank") is what kept the investigation honest instead of settling for a plausible-sounding but wrong answer.
+
+### The chain of disproven theories, and what finally proved this one
+1. **Stale deploy** — disproven by running the exact request logic directly against the real production database from a local process, and through a full local server's real middleware stack. Both worked cleanly every time.
+2. **DNS/custom-domain registration gap** — disproven by the user directly: no school subdomain has ever needed individual registration, and this one had worked before. If routing itself were broken for this hostname, it would never have worked at all.
+3. **Oversized branding document (§80's actual, real bug)** — looked like a perfect fit at first: the timing lined up exactly with uploading a 1.3MB login background, and the fix (field projections) was itself correct and necessary. But the user removed the images, confirmed the organization's document was back down to a few hundred bytes, and the blank page **still happened**. That ruled this out as the cause of THIS symptom, even though it was a real, independently-worth-fixing bug.
+4. **The actual cause**: a controlled `curl` comparison — the same asset URL, with and without an `Origin` header, against `tis.msingi.io` and `demo.msingi.io` — isolated it in one test:
+   ```
+   curl -H "Origin: https://tis.msingi.io"  .../assets/index-*.js  → 500
+   curl                                     .../assets/index-*.js  → 200   (same URL, no Origin header)
+   curl -H "Origin: https://demo.msingi.io" .../assets/index-*.js  → 200   (different subdomain, real SCHOOL slug)
+   ```
+   Only the combination of (this specific subdomain) + (an Origin header present) failed. That pointed straight at `server/index.js`'s `cors()` middleware — global, runs before static file serving, and the ONE thing in the whole request pipeline that branches behavior on an `Origin` header specifically.
+
+### Why real browser traffic hit this constantly, and manual testing never did
+Vite's build output marks `<script type="module">` entry tags with a `crossorigin` attribute (standard behavior, enables full cross-origin-safe error reporting for module scripts) — which makes the BROWSER send a real `Origin` header for that script request, even though it's loading from the exact same origin the page itself came from. A plain `fetch()` call from a page's own console, or a `curl` request with no explicit header, never does this — which is exactly why every earlier direct test in this investigation (including several rounds of hitting the live site's own APIs) never reproduced the failure: none of those code paths naturally carry an `Origin` header the way the browser's own module-script loading does.
+
+### The actual gap
+`utils/corsOrigin.js`'s `*.msingi.io` wildcard (see §74 for its original hardening) validates a subdomain against a cached set of real, currently-provisioned slugs — but that cache was built from `_model('schools').find({}).select('slug')` only. A multi-school ORGANIZATION's own shared-portal slug (`tis`, distinct from either of its member schools' own slugs, `trinitas-tis`/`trinity-tis`) was never a candidate for that cache at all — not stale, not miscounted, structurally absent from the query. Once the cache successfully warmed in production (which it reliably does — that part of §74's fix works exactly as designed), `isAllowedOrigin('https://tis.msingi.io')` returned `false` for the one and only real, live, currently-active use of the multi-school portal feature (§ multi-school governance arc) that has ever run in production — the exact hardening meant to reject an *abandoned or attacker-registered* subdomain was instead rejecting the one legitimate one.
+
+### Fix
+`_refreshKnownSchoolSlugs` now also queries `_model('organizations').find({multiSchoolEnabled: true}).select('slug')` in parallel and merges both slug sets into the same cache. Gated on `multiSchoolEnabled` specifically — the same condition `GET /api/public/resolve-portal` already uses to decide an org's shared portal is actually live — so an organization that merely exists, with the toggle still off, gets no free pass at its slug. The exported function name and its cold/warm/stale/DB-failure semantics from §74 are all unchanged; this only widens what "known" means.
+
+### Verified
+Re-ran the exact `curl -H "Origin: ..."` reproduction directly against the real production database's data (via `_refreshKnownSchoolSlugs()` called from a local script, `NODE_ENV=production`): `tis.msingi.io` now resolves `true`; `demo.msingi.io` (real school) still `true`; confirmed a 1:1-genesis org's own school-slug-shared subdomain (`ghis`) is allowed via its SCHOOL slug specifically, not accidentally via the org check, by checking that no separate multi-school-enabled org shares that slug. 3 new tests in `server/__tests__/corsOrigin.test.js`: a multi-school org's own slug is allowed even though it isn't a school slug; an org that exists but hasn't opted into `multiSchoolEnabled` gets no pass; a school slug and an org-portal slug are both allowed from the same warm cache simultaneously. Full suite passing, zero regressions.
+
+### Files
+- `server/utils/corsOrigin.js` — `_refreshKnownSchoolSlugs` (now queries both collections)
+- `server/__tests__/corsOrigin.test.js` — mock extended for `organizations`; 3 new tests

@@ -25,6 +25,30 @@
       successfully loaded at least once, the subdomain must also be a
       real, currently-provisioned school slug, not just shape-correct.
 
+      2026-09-28 REAL PRODUCTION INCIDENT: this cache was built from
+      `schools` only — a multi-school ORGANIZATION's own shared-portal
+      slug (e.g. `tis.msingi.io` for a real customer, TIS Group) was
+      never in it, since an org is a different collection with a
+      different slug from any of its member schools. The moment the
+      cache warmed up in production, every asset/API request carrying an
+      `Origin` header for that subdomain (which real browsers send for
+      Vite's `crossorigin` module script tags, even for same-origin
+      requests) got REJECTED by this exact check, surfacing as a 500 on
+      static assets (blank page) and on any API call. Reproduced live:
+      `curl -H "Origin: https://tis.msingi.io" .../assets/index-*.js`
+      returned 500; the identical request with no Origin header, or for
+      `https://demo.msingi.io` (a real SCHOOL slug, so already in the
+      cache), returned 200. Confirmed as the actual root cause — earlier
+      theories in this same investigation (stale deploy, DNS/custom-
+      domain gap, oversized image documents) were each individually
+      disproven by direct testing; none of them explained why the
+      failure tracked the ORIGIN header's presence specifically. Fixed by
+      also caching every ORGANIZATION slug that has `multiSchoolEnabled`
+      true — the same gate `resolve-portal` already uses to decide
+      whether an org's shared portal is actually live — so only a real,
+      currently-active org portal gets the pass, not every org that
+      merely exists.
+
    Neither of these touches the CSRF gap (utils/csrf.js) — a perfect CORS
    allowlist does not stop a plain HTML form POST from a same-site
    origin; CORS only controls whether JS can READ a cross-origin
@@ -59,11 +83,18 @@ async function _refreshKnownSchoolSlugs() {
   _slugCacheRefreshing = true;
   try {
     const { _model } = require('./model');
-    const schools = await _model('schools').find({}).select('slug').lean();
-    _knownSchoolSlugs = new Set(schools.map(s => s.slug).filter(Boolean));
+    const [schools, orgs] = await Promise.all([
+      _model('schools').find({}).select('slug').lean(),
+      // Only a multi-school-enabled org actually has a LIVE shared portal
+      // at its own slug (same gate GET /api/public/resolve-portal already
+      // uses) — an org that merely exists, with the toggle still off,
+      // has nothing real at that subdomain and shouldn't pass this check.
+      _model('organizations').find({ multiSchoolEnabled: true }).select('slug').lean(),
+    ]);
+    _knownSchoolSlugs = new Set([...schools, ...orgs].map(s => s.slug).filter(Boolean));
     _slugCacheLoadedAt = Date.now();
   } catch (err) {
-    console.error('[CORS] Failed to refresh school slug cache (falling back to shape-only subdomain match):', err.message);
+    console.error('[CORS] Failed to refresh school/org slug cache (falling back to shape-only subdomain match):', err.message);
   } finally {
     _slugCacheRefreshing = false;
   }
