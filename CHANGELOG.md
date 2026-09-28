@@ -6,6 +6,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.139.0] — 2026-09-28 — feat(platform): reassign an existing superadmin to a different role
+
+Direct follow-up to v5.137.0's "promote an existing user to superadmin": after promoting a replacement, the OUTGOING superadmin had nowhere to go. Settings → Users' own role dropdown deliberately refuses to touch a superadmin/admin account, and nothing existed on the platform side either — the only options were "stay superadmin forever" or "remove them entirely." Requested directly: "there is no where to reassign the existing superadmin their new roles... dont hardcode, I want to configure myself."
+
+New `GET /api/platform/schools/:id/roles` returns the real, live set of roles a school's users can be reassigned to — the shared `SYSTEM_ROLES` constant every other role-assignment path in the app already uses, plus that specific school's own custom roles — never a hardcoded list. New `POST /api/platform/schools/:id/superadmins/:userId/change-role` applies it: keeps the same login/password/history, ends their current session immediately, notifies them by email, and audits `platform.user_role_changed`. Refuses `superadmin` as a target (that direction is the existing Promote action) and refuses a role that isn't real at that school. The Superadmins panel in `platform.html` gained a "Change Role" button per row that turns into an inline picker — populated from the new endpoint, not written into the page.
+
+12 new tests. Full suite passing, zero regressions.
+
+Full details: [Developer Guide §79](docs/DEVELOPER_GUIDE.md#79-reassign-an-existing-superadmin-to-a-different-role-v51390).
+
+---
+
 ## [v5.138.0] — 2026-09-28 — feat(platform): self-service organization branding (logo, color, tagline, login background)
 
 An organization's shared-portal branding (logo, primary color, tagline) could previously only ever be set once, at creation time, via a raw API call with no UI — and there was no field at all for a login background image, no way to edit anything afterward, and no upload mechanism for either image. Requested directly: "is there an option where I can configure these by myself, edit the color and upload or update the logos and images as required?"

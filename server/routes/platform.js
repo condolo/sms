@@ -24,6 +24,7 @@ const { provisionOrganizationForSchool } = require('../utils/provision-organizat
 const { provisionMembershipForUser } = require('../utils/provision-memberships');
 const { provisionIdentityForUser } = require('../utils/provision-identities');
 const { MODULE_REGISTRY } = require('../config/moduleRegistry');
+const { SYSTEM_ROLES } = require('../utils/role-validation');
 
 const router = express.Router();
 
@@ -516,6 +517,108 @@ router.post('/schools/:id/superadmins/promote', async (req, res) => {
     res.json({
       user: { id: targetId, name: target.name, email: targetEmail, role: 'superadmin' },
       note: `${target.name || targetEmail} is now a superadmin. They must log in again — their current session was ended.`,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* GET /api/platform/schools/:id/roles — the real, non-hardcoded set of
+   roles a user at this school could be reassigned to: the shared
+   SYSTEM_ROLES constant (the single source of truth every other role-
+   assignment path in the app already uses — settings.js's invite/
+   update routes, users.js — never duplicated here) plus this specific
+   school's own custom roles. Superadmin is deliberately excluded: that
+   direction has its own dedicated action (POST .../superadmins/promote)
+   with its own ceremony (session end, distinct audit action), not a
+   generic role picker. Powers the "Change Role" picker in the
+   Superadmins panel — added specifically so demoting the outgoing
+   superadmin after promoting a replacement doesn't need a one-off
+   database edit each time. */
+router.get('/schools/:id/roles', async (req, res) => {
+  try {
+    const School = _model('schools');
+    const rid = req.params.id;
+    const schoolQuery = mongoose.isValidObjectId(rid) ? { $or: [{ _id: rid }, { id: rid }] } : { id: rid };
+    const school = await School.findOne(schoolQuery).lean();
+    if (!school) return res.status(404).json({ error: 'School not found' });
+
+    const customRoles = await tenantModel('custom_roles', { schoolId: school.id })
+      .find({ schoolId: school.id }).select('key label').lean();
+
+    res.json({
+      systemRoles: [...SYSTEM_ROLES].filter(r => r !== 'superadmin'),
+      customRoles: customRoles.map(r => ({ key: r.key, label: r.label })),
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* POST /api/platform/schools/:id/superadmins/:userId/change-role —
+   reassign an existing account (superadmin or otherwise) to a DIFFERENT
+   role, keeping the same login/password/history. The gap this closes:
+   after promoting a replacement superadmin, the outgoing one had no way
+   back to a normal role — Settings -> Users' own role dropdown
+   deliberately refuses to touch a superadmin/admin account (see
+   SettingsPage.jsx's PROTECTED_ROLES), and nothing on the platform side
+   existed either. `role` must be a real system role or this school's
+   own custom role (see GET .../roles above) — never 'superadmin' here,
+   that direction is POST .../superadmins/promote instead. */
+router.post('/schools/:id/superadmins/:userId/change-role', async (req, res) => {
+  try {
+    const rawRole = req.body?.role;
+    const role = typeof rawRole === 'string' ? rawRole.trim() : '';
+    if (!role) return res.status(400).json({ error: 'role is required' });
+    if (role === 'superadmin') {
+      return res.status(400).json({ error: "To grant superadmin, use the 'Promote an existing user' action instead." });
+    }
+
+    const School = _model('schools');
+    const rid = req.params.id;
+    const schoolQuery = mongoose.isValidObjectId(rid) ? { $or: [{ _id: rid }, { id: rid }] } : { id: rid };
+    const school = await School.findOne(schoolQuery).lean();
+    if (!school) return res.status(404).json({ error: 'School not found' });
+
+    if (!SYSTEM_ROLES.has(role)) {
+      const customRole = await tenantModel('custom_roles', { schoolId: school.id })
+        .findOne({ schoolId: school.id, key: role }).lean();
+      if (!customRole) return res.status(400).json({ error: `'${role}' is not a real role at this school.` });
+    }
+
+    const User = tenantModel('users', { schoolId: school.id });
+    const target = await User.findOne({ id: req.params.userId }).lean();
+    if (!target) return res.status(404).json({ error: 'User not found at this school' });
+    if (target.role === role) return res.status(409).json({ error: `${target.email} already has that role.` });
+
+    const oldRole = target.role;
+    const now = new Date().toISOString();
+    await User.updateOne({ id: target.id }, {
+      $set: { role, primaryRole: role, roles: [role], updatedAt: now },
+    });
+
+    try {
+      await revokeUserTokens(target.id);
+      if (target.identityId) await revokeIdentityTokens(target.identityId);
+    } catch (revokeErr) {
+      console.warn('[platform/schools/:id/superadmins/:userId/change-role] token revocation failed (non-fatal):', revokeErr.message);
+    }
+
+    await AuditService.log({
+      action: 'platform.user_role_changed', actor: _platformActor(req),
+      schoolId: school.id, target: { type: 'user', id: target.id, label: target.email },
+      details: { email: target.email, oldRole, newRole: role, schoolName: school.name }, req,
+    });
+
+    try {
+      await email.sendRoleChanged({
+        name: target.name || target.email, email: target.email, schoolName: school.name,
+        schoolEmail: school.systemEmail || school.email || '', schoolId: school.id,
+        oldRole, newRole: role, changedBy: 'Platform Admin',
+      });
+    } catch (emailErr) {
+      console.warn('[platform/schools/:id/superadmins/:userId/change-role] notification email failed (non-fatal):', emailErr.message);
+    }
+
+    res.json({
+      user: { id: target.id, name: target.name, email: target.email, role },
+      note: `${target.name || target.email} is now ${role.replace(/_/g, ' ')}. They must log in again — their current session was ended.`,
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

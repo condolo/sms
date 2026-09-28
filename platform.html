@@ -1684,12 +1684,26 @@ function showSuperadmins(schoolId, schoolName) {
   loadSuperadmins(schoolId);
 }
 
+// Cached per open Superadmins modal — the real, non-hardcoded set of
+// roles this school could reassign someone to (SYSTEM_ROLES + this
+// school's own custom roles), fetched once per panel load and reused by
+// every row's "Change Role" picker rather than re-fetched per click.
+let _rolesCache = { systemRoles: [], customRoles: [] };
+
+function _roleLabel(key) {
+  return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
 async function loadSuperadmins(schoolId) {
   const listEl = document.getElementById('sa-list');
   if (!listEl) return;
   try {
-    const json  = await api('GET', `/schools/${schoolId}/superadmins`);
-    const items = json.superadmins || [];
+    const [saJson, rolesJson] = await Promise.all([
+      api('GET', `/schools/${schoolId}/superadmins`),
+      api('GET', `/schools/${schoolId}/roles`).catch(() => ({ systemRoles: [], customRoles: [] })),
+    ]);
+    _rolesCache = rolesJson;
+    const items = saJson.superadmins || [];
     if (!items.length) {
       listEl.innerHTML = '<p style="font-size:12px;color:#94a3b8;margin:0">No superadmins found for this school.</p>';
       return;
@@ -1704,11 +1718,16 @@ async function loadSuperadmins(schoolId) {
         </tr>
       </thead>
       <tbody>${items.map(u => `
-        <tr>
+        <tr id="sa-row-${u.id}">
           <td style="padding:6px 8px">${_esc(u.name) || '—'}</td>
           <td style="padding:6px 8px;color:#64748b">${_esc(u.email)}</td>
           <td style="padding:6px 8px">${u.isActive === false ? '<span style="color:#94a3b8">Inactive</span>' : '<span style="color:#22c55e">Active</span>'}${u.mustChangePassword ? ' <span style="color:#d97706">· must change password</span>' : ''}</td>
-          <td style="padding:6px 8px;text-align:right">
+          <td id="sa-actions-${u.id}" style="padding:6px 8px;text-align:right;white-space:nowrap">
+            <button class="pa-btn" style="font-size:11px;padding:4px 8px"
+              title="Move this account to a different role — keeps their login, just changes what they can access"
+              onclick="startChangeRole('${schoolId}','${u.id}','${(u.name || u.email || '').replace(/'/g, "\\'")}')">
+              <i class="fas fa-people-arrows"></i> Change Role
+            </button>
             <button class="pa-btn" style="font-size:11px;padding:4px 8px"
               title="Set a new temporary password — invalidates any current sessions for this account"
               onclick="resetSuperadminPassword('${schoolId}','${u.id}','${(u.email || '').replace(/'/g, "\\'")}')">
@@ -1720,6 +1739,58 @@ async function loadSuperadmins(schoolId) {
     </table>`;
   } catch (err) {
     listEl.innerHTML = `<p style="font-size:12px;color:#b91c1c;margin:0">Failed to load: ${err.message}</p>`;
+  }
+}
+
+/* ── Change an existing superadmin's role ─────────────────
+   Turns that row's action cell into a role picker in place — no modal
+   hop, no reload of the rest of the panel. Options come from
+   _rolesCache (fetched fresh every time the Superadmins panel opens),
+   never a hardcoded list here. Closes the gap left after "Promote": the
+   OUTGOING superadmin had nowhere to go afterward — Settings -> Users'
+   own role dropdown refuses to touch a superadmin account, and nothing
+   existed on the platform side either. */
+function startChangeRole(schoolId, userId, label) {
+  const cell = document.getElementById(`sa-actions-${userId}`);
+  if (!cell) return;
+
+  const allRoles = [
+    ...( _rolesCache.systemRoles || [] ).map(r => ({ value: r, label: _roleLabel(r) })),
+    ...( _rolesCache.customRoles || [] ).map(r => ({ value: r.key, label: r.label })),
+  ];
+
+  cell.innerHTML = `
+    <select id="role-select-${userId}" class="pa-input" style="font-size:11px;padding:4px 6px">
+      ${allRoles.map(r => `<option value="${_esc(r.value)}">${_esc(r.label)}</option>`).join('')}
+    </select>
+    <button class="pa-btn primary" style="font-size:11px;padding:4px 8px" onclick="saveChangeRole('${schoolId}','${userId}')">
+      <i class="fas fa-check"></i> Save
+    </button>
+    <button class="pa-btn" style="font-size:11px;padding:4px 8px" onclick="loadSuperadmins('${schoolId}')">
+      Cancel
+    </button>`;
+}
+
+async function saveChangeRole(schoolId, userId) {
+  const select = document.getElementById(`role-select-${userId}`);
+  const role = select?.value;
+  if (!role) return;
+
+  const confirmed = confirm(`Change this account's role to "${_roleLabel(role)}"?\n\nThey will be signed out of their current session and must log in again to see the change.`);
+  if (!confirmed) return;
+
+  const errEl = document.getElementById('sa-error');
+  const resEl = document.getElementById('sa-result');
+  if (errEl) errEl.style.display = 'none';
+  if (resEl) resEl.style.display = 'none';
+
+  try {
+    const json = await api('POST', `/schools/${schoolId}/superadmins/${userId}/change-role`, { role });
+    toast(json.note || 'Role changed.', 'success');
+    loadSuperadmins(schoolId);
+  } catch (err) {
+    if (errEl) { errEl.textContent = err.message; errEl.style.display = 'block'; }
+    else toast('Failed: ' + err.message, 'error');
   }
 }
 
