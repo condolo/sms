@@ -697,6 +697,7 @@ router.get('/organizations', async (req, res) => {
         logoUrl:             o.logoUrl || null,
         primaryColor:        o.primaryColor || null,
         tagline:             o.tagline || null,
+        loginBgUrl:          o.loginBgUrl || null,
         createdAt:           o.createdAt,
         schools:             memberSchools,
         _stats: {
@@ -890,10 +891,19 @@ router.post('/organizations/:id/director', async (req, res) => {
   }
 });
 
-/* PATCH /api/platform/organizations/:id — rename an organization.
-   `slug` is deliberately never accepted here, same reasoning as schools'
-   PATCH route: it's fixed at creation time (used in the shared portal URL)
-   and stays that way regardless of how the org's display name changes. */
+/* PATCH /api/platform/organizations/:id — rename an organization, and/or
+   update its branding (primaryColor, tagline). `slug` is deliberately
+   never accepted here, same reasoning as schools' PATCH route: it's fixed
+   at creation time (used in the shared portal URL) and stays that way
+   regardless of how the org's display name changes.
+
+   primaryColor/tagline used to only be settable once, at creation
+   (POST /organizations) — there was no way back to edit them afterward,
+   and no UI ever exposed the fields on that create form either. This is
+   the fix: name stays required (unchanged contract), primaryColor and
+   tagline are each optional and independently updatable. Logo and login
+   background have their own dedicated upload routes below (base64 image
+   data doesn't belong in a JSON rename/branding-text PATCH). */
 router.patch('/organizations/:id', async (req, res) => {
   try {
     if (typeof req.body.name !== 'string' || !req.body.name.trim()) {
@@ -901,17 +911,155 @@ router.patch('/organizations/:id', async (req, res) => {
     }
     const name = req.body.name.trim();
 
+    const update = { name, updatedAt: new Date().toISOString() };
+
+    if (req.body.primaryColor !== undefined) {
+      const color = typeof req.body.primaryColor === 'string' ? req.body.primaryColor.trim() : '';
+      if (color === '') {
+        update.primaryColor = null;
+      } else if (/^#[0-9a-fA-F]{6}$/.test(color)) {
+        update.primaryColor = color;
+      } else {
+        return res.status(400).json({ error: 'primaryColor must be a hex color like #059669' });
+      }
+    }
+
+    if (req.body.tagline !== undefined) {
+      const tagline = typeof req.body.tagline === 'string' ? req.body.tagline.trim() : '';
+      if (tagline.length > 200) return res.status(400).json({ error: 'tagline must be 200 characters or fewer' });
+      update.tagline = tagline || null;
+    }
+
     const Org = _model('organizations');
     const doc = await Org.findOneAndUpdate(
       { id: req.params.id },
-      { $set: { name, updatedAt: new Date().toISOString() } },
+      { $set: update },
       { new: true }
     ).lean();
     if (!doc) return res.status(404).json({ error: 'Organization not found' });
+
+    await AuditService.log({
+      action: 'platform.organization_updated', actor: _platformActor(req),
+      schoolId: null, target: { type: 'organization', id: doc.id, label: doc.name },
+      details: { name, primaryColor: update.primaryColor, tagline: update.tagline }, req,
+    });
+
     res.json({ organization: doc });
   } catch (err) {
     console.error('[platform/organizations/:id PATCH]', err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   Organization logo / login background — mirrors settings.js's
+   school-branding uploads exactly (base64 data URL, validated, stored
+   directly on the document, served back through a public no-auth route
+   so a login page can show it before anyone signs in). Distinct storage
+   field from a school's own logoBase64/loginBgBase64 — an org and one of
+   its member schools can have completely different branding.
+   ══════════════════════════════════════════════════════════════ */
+function _validateOrgImage(b64, maxKB) {
+  if (!/^data:image\/(jpeg|jpg|png|webp|gif|svg\+xml);base64,/.test(b64)) {
+    return 'Invalid image. Use JPEG, PNG, WebP, GIF, or SVG.';
+  }
+  const data = b64.split(',')[1] || '';
+  const sizeBytes = Math.ceil(data.length * 0.75);
+  if (sizeBytes > maxKB * 1024) return `Image too large. Maximum size is ${maxKB} KB.`;
+  return null;
+}
+
+router.put('/organizations/:id/logo', async (req, res) => {
+  try {
+    const { logoBase64 } = req.body || {};
+    if (!logoBase64) return res.status(400).json({ error: 'logoBase64 is required.' });
+    const err = _validateOrgImage(logoBase64, 500);
+    if (err) return res.status(400).json({ error: err });
+
+    const Org = _model('organizations');
+    const org = await Org.findOne({ id: req.params.id }).lean();
+    if (!org) return res.status(404).json({ error: 'Organization not found' });
+
+    const logoUrl = `/api/public/org-asset/logo?slug=${org.id}`;
+    await Org.updateOne({ id: org.id }, { $set: { logoBase64, logoUrl, updatedAt: new Date().toISOString() } });
+
+    await AuditService.log({
+      action: 'platform.organization_branding_updated', actor: _platformActor(req),
+      schoolId: null, target: { type: 'organization', id: org.id, label: org.name },
+      details: { field: 'logo', op: 'uploaded' }, req,
+    });
+
+    res.json({ logoUrl });
+  } catch (err) {
+    console.error('[platform/organizations/:id/logo PUT]', err);
+    res.status(500).json({ error: 'Failed to upload logo.' });
+  }
+});
+
+router.delete('/organizations/:id/logo', async (req, res) => {
+  try {
+    const Org = _model('organizations');
+    const org = await Org.findOne({ id: req.params.id }).lean();
+    if (!org) return res.status(404).json({ error: 'Organization not found' });
+
+    await Org.updateOne({ id: org.id }, { $unset: { logoBase64: '', logoUrl: '' }, $set: { updatedAt: new Date().toISOString() } });
+
+    await AuditService.log({
+      action: 'platform.organization_branding_updated', actor: _platformActor(req),
+      schoolId: null, target: { type: 'organization', id: org.id, label: org.name },
+      details: { field: 'logo', op: 'removed' }, req,
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to remove logo.' });
+  }
+});
+
+router.put('/organizations/:id/login-bg', async (req, res) => {
+  try {
+    const { loginBgBase64 } = req.body || {};
+    if (!loginBgBase64) return res.status(400).json({ error: 'loginBgBase64 is required.' });
+    const err = _validateOrgImage(loginBgBase64, 2048);
+    if (err) return res.status(400).json({ error: err });
+
+    const Org = _model('organizations');
+    const org = await Org.findOne({ id: req.params.id }).lean();
+    if (!org) return res.status(404).json({ error: 'Organization not found' });
+
+    const loginBgUrl = `/api/public/org-asset/login-bg?slug=${org.id}`;
+    await Org.updateOne({ id: org.id }, { $set: { loginBgBase64, loginBgUrl, updatedAt: new Date().toISOString() } });
+
+    await AuditService.log({
+      action: 'platform.organization_branding_updated', actor: _platformActor(req),
+      schoolId: null, target: { type: 'organization', id: org.id, label: org.name },
+      details: { field: 'loginBg', op: 'uploaded' }, req,
+    });
+
+    res.json({ loginBgUrl });
+  } catch (err) {
+    console.error('[platform/organizations/:id/login-bg PUT]', err);
+    res.status(500).json({ error: 'Failed to upload login background.' });
+  }
+});
+
+router.delete('/organizations/:id/login-bg', async (req, res) => {
+  try {
+    const Org = _model('organizations');
+    const org = await Org.findOne({ id: req.params.id }).lean();
+    if (!org) return res.status(404).json({ error: 'Organization not found' });
+
+    await Org.updateOne({ id: org.id }, { $unset: { loginBgBase64: '', loginBgUrl: '' }, $set: { updatedAt: new Date().toISOString() } });
+
+    await AuditService.log({
+      action: 'platform.organization_branding_updated', actor: _platformActor(req),
+      schoolId: null, target: { type: 'organization', id: org.id, label: org.name },
+      details: { field: 'loginBg', op: 'removed' }, req,
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to remove login background.' });
   }
 });
 

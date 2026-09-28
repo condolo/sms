@@ -757,6 +757,9 @@ function _orgRow(o) {
         <button class="pa-btn" title="Edit organization name (slug is fixed and cannot be changed)" onclick="editOrgName('${o.id}','${o.name.replace(/'/g,"\\'")}')">
           <i class="fas fa-pen"></i> Rename
         </button>
+        <button class="pa-btn" title="Logo, color, tagline, and login background for this org's shared portal" onclick="showOrgBranding('${o.id}')">
+          <i class="fas fa-palette"></i> Branding
+        </button>
         <button class="pa-btn" title="Add a read-only Group Director/CEO account — sees a merged analytics view across every school in this org, nothing else" onclick="showAddDirector('${o.id}','${o.name.replace(/'/g,"\\'")}')" ${o._stats.activeCount === 0 ? 'disabled' : ''}>
           <i class="fas fa-chart-line"></i> Add Director
         </button>
@@ -1376,6 +1379,152 @@ async function doRenameOrg(orgId) {
   } catch (err) {
     toast('Failed: ' + err.message, 'error');
   }
+}
+
+/* ── Organization branding — logo, primary color, tagline, login
+   background for the shared multi-school portal. Self-service (no code
+   change, no one-off DB write needed) — the gap this closes: these
+   fields could previously only ever be set ONCE, at creation time, via a
+   raw API call with no UI at all; there was no way back to edit or
+   upload anything afterward. ── */
+function showOrgBranding(orgId) {
+  const org = _orgsCache.find(o => o.id === orgId);
+  if (!org) { toast('Organization not found in the current list — refresh and try again.', 'error'); return; }
+
+  const color = org.primaryColor || '#4f46e5';
+  showModal(
+    `Branding — ${_esc(org.name)}`,
+    `<div style="display:flex;flex-direction:column;gap:14px;text-align:left">
+      <p style="font-size:12px;color:#64748b;margin:0">
+        Shown on the shared login portal (<code>${_esc(org.slug || '')}.msingi.io</code>) when Multi-School is enabled for this org.
+        Independent of any one member school's own branding.
+      </p>
+
+      <div>
+        <label class="pa-label" style="font-size:11px">Primary Color</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="color" id="brand-color-picker" value="${color}" style="width:40px;height:34px;padding:2px;border:1.5px solid #e5e7eb;border-radius:6px;cursor:pointer">
+          <input type="text" id="brand-color-hex" class="pa-input" value="${color}" placeholder="#4f46e5" style="width:120px" maxlength="7">
+        </div>
+      </div>
+
+      <div>
+        <label class="pa-label" style="font-size:11px">Tagline (optional)</label>
+        <input type="text" id="brand-tagline" class="pa-input" value="${_esc(org.tagline || '')}" placeholder="e.g. Excellence Across Every Campus" style="width:100%" maxlength="200">
+      </div>
+
+      <button class="pa-btn primary" onclick="saveOrgBranding('${orgId}')" style="align-self:flex-start">
+        <i class="fas fa-save"></i> Save Color &amp; Tagline
+      </button>
+
+      <div style="border-top:1px solid #e5e7eb;padding-top:14px">
+        <label class="pa-label" style="font-size:11px">Logo</label>
+        <div style="display:flex;gap:10px;align-items:center;margin-top:4px">
+          <div id="brand-logo-preview" style="width:56px;height:56px;border:1.5px dashed #e5e7eb;border-radius:8px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#f8fafc">
+            ${org.logoUrl ? `<img src="${org.logoUrl}" alt="" style="max-width:100%;max-height:100%;object-fit:contain">` : '<i class="fas fa-image" style="color:#cbd5e1"></i>'}
+          </div>
+          <div style="display:flex;gap:6px">
+            <button class="pa-btn" onclick="document.getElementById('brand-logo-file').click()"><i class="fas fa-upload"></i> ${org.logoUrl ? 'Replace' : 'Upload'}</button>
+            ${org.logoUrl ? `<button class="pa-btn" onclick="removeOrgImage('${orgId}','logo')"><i class="fas fa-trash"></i> Remove</button>` : ''}
+          </div>
+          <input type="file" id="brand-logo-file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml" style="display:none" onchange="uploadOrgImage('${orgId}','logo',this)">
+        </div>
+        <p style="font-size:11px;color:#94a3b8;margin:6px 0 0">PNG, JPEG, WebP, GIF, or SVG — max 500 KB.</p>
+      </div>
+
+      <div>
+        <label class="pa-label" style="font-size:11px">Login Page Background</label>
+        <div style="display:flex;gap:10px;align-items:center;margin-top:4px">
+          <div id="brand-loginbg-preview" style="width:90px;height:56px;border:1.5px dashed #e5e7eb;border-radius:8px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#f8fafc">
+            ${org.loginBgUrl ? `<img src="${org.loginBgUrl}" alt="" style="max-width:100%;max-height:100%;object-fit:cover">` : '<i class="fas fa-image" style="color:#cbd5e1"></i>'}
+          </div>
+          <div style="display:flex;gap:6px">
+            <button class="pa-btn" onclick="document.getElementById('brand-loginbg-file').click()"><i class="fas fa-upload"></i> ${org.loginBgUrl ? 'Replace' : 'Upload'}</button>
+            ${org.loginBgUrl ? `<button class="pa-btn" onclick="removeOrgImage('${orgId}','login-bg')"><i class="fas fa-trash"></i> Remove</button>` : ''}
+          </div>
+          <input type="file" id="brand-loginbg-file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml" style="display:none" onchange="uploadOrgImage('${orgId}','login-bg',this)">
+        </div>
+        <p style="font-size:11px;color:#94a3b8;margin:6px 0 0">PNG, JPEG, WebP, GIF, or SVG — max 2 MB.</p>
+      </div>
+    </div>`,
+    [{ label: 'Close', cls: 'pa-btn', action: 'closeModal(); renderOrganizations();' }]
+  );
+
+  // Keep the color picker and hex text field in sync with each other.
+  const picker = document.getElementById('brand-color-picker');
+  const hex    = document.getElementById('brand-color-hex');
+  picker?.addEventListener('input', () => { hex.value = picker.value; });
+  hex?.addEventListener('input', () => {
+    if (/^#[0-9a-fA-F]{6}$/.test(hex.value)) picker.value = hex.value;
+  });
+}
+
+async function saveOrgBranding(orgId) {
+  const org  = _orgsCache.find(o => o.id === orgId);
+  const hex  = document.getElementById('brand-color-hex')?.value.trim();
+  const tagline = document.getElementById('brand-tagline')?.value.trim();
+
+  if (hex && !/^#[0-9a-fA-F]{6}$/.test(hex)) {
+    toast('Color must be a hex value like #4f46e5', 'error');
+    return;
+  }
+
+  try {
+    await api('PATCH', `/organizations/${orgId}`, { name: org.name, primaryColor: hex || '', tagline: tagline || '' });
+    toast('Branding saved.', 'success');
+    closeModal();
+    await renderOrganizations();
+  } catch (err) {
+    toast('Failed: ' + err.message, 'error');
+  }
+}
+
+async function uploadOrgImage(orgId, kind, inputEl) {
+  const file = inputEl.files?.[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = async (ev) => {
+    const b64 = ev.target.result;
+    const field = kind === 'logo' ? 'logoBase64' : 'loginBgBase64';
+    try {
+      await api('PUT', `/organizations/${orgId}/${kind}`, { [field]: b64 });
+      toast(`${kind === 'logo' ? 'Logo' : 'Login background'} updated.`, 'success');
+      // Refresh the cache + modal in place so the new image shows immediately
+      // without the admin having to reopen the panel.
+      await _refreshOrgsCache();
+      closeModal();
+      showOrgBranding(orgId);
+    } catch (err) {
+      toast('Upload failed: ' + err.message, 'error');
+    }
+  };
+  reader.readAsDataURL(file);
+  inputEl.value = '';
+}
+
+async function removeOrgImage(orgId, kind) {
+  const label = kind === 'logo' ? 'logo' : 'login background';
+  if (!confirm(`Remove this organization's ${label}?`)) return;
+  try {
+    await api('DELETE', `/organizations/${orgId}/${kind}`);
+    toast(`${label === 'logo' ? 'Logo' : 'Login background'} removed.`, 'success');
+    await _refreshOrgsCache();
+    closeModal();
+    showOrgBranding(orgId);
+  } catch (err) {
+    toast('Failed: ' + err.message, 'error');
+  }
+}
+
+/* Re-fetch organizations into _orgsCache without re-rendering the whole
+   panel — used by the branding modal so it can refresh its own preview
+   images in place after an upload/remove. */
+async function _refreshOrgsCache() {
+  try {
+    const json = await api('GET', '/organizations');
+    _orgsCache = json.organizations || [];
+  } catch { /* keep the stale cache rather than throw mid-flow */ }
 }
 
 /* ── Entitlements (C3) ────────────────────────────────────

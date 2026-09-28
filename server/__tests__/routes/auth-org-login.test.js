@@ -175,6 +175,29 @@ describe('GET /api/public/resolve-portal', () => {
     expect(res.body.slug).toBe('green-valley');
   });
 
+  // 2026-09-28: loginBgUrl was missing from this response entirely — the
+  // login page's own code already read branding.loginBgUrl identically
+  // for a school or an org portal, so an uploaded org login background
+  // (PUT /api/platform/organizations/:id/login-bg) silently never
+  // rendered. logoUrl/primaryColor/tagline were already covered by the
+  // test above; this isolates the specific field that was missing.
+  test('includes loginBgUrl when the org has one set', async () => {
+    setupOptedInOrg();
+    mockOrgDocs.org_x.loginBgUrl = '/api/public/org-asset/login-bg?slug=org_x';
+    const app = buildApp();
+    const res = await supertest(app).get('/api/public/resolve-portal?slug=green-valley');
+    expect(res.status).toBe(200);
+    expect(res.body.loginBgUrl).toBe('/api/public/org-asset/login-bg?slug=org_x');
+  });
+
+  test('loginBgUrl is null when the org has none set (not undefined/omitted)', async () => {
+    setupOptedInOrg();
+    const app = buildApp();
+    const res = await supertest(app).get('/api/public/resolve-portal?slug=green-valley');
+    expect(res.status).toBe(200);
+    expect(res.body.loginBgUrl).toBeNull();
+  });
+
   test('404s with the SAME shape at the SAME slug whether an org exists there unopted-in or nothing exists there at all (no existence leakage)', async () => {
     const app = buildApp();
 

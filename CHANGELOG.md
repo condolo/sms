@@ -6,6 +6,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.138.0] — 2026-09-28 — feat(platform): self-service organization branding (logo, color, tagline, login background)
+
+An organization's shared-portal branding (logo, primary color, tagline) could previously only ever be set once, at creation time, via a raw API call with no UI — and there was no field at all for a login background image, no way to edit anything afterward, and no upload mechanism for either image. Requested directly: "is there an option where I can configure these by myself, edit the color and upload or update the logos and images as required?"
+
+`PATCH /api/platform/organizations/:id` now also accepts `primaryColor` (hex-validated) and `tagline` (200-char max) alongside the existing required `name`. Two new upload routes, `PUT/DELETE /api/platform/organizations/:id/logo` and `.../login-bg`, mirror `settings.js`'s school-branding uploads exactly — base64 image data, validated (JPEG/PNG/WebP/GIF/SVG, 500KB/2MB ceilings), stored on the document, served back through a new public no-auth route (`GET /api/public/org-asset/:type`) so the shared login portal can show it before anyone signs in. Also fixed: `GET /api/public/resolve-portal`'s organization branch was missing `loginBgUrl` from its response entirely — the login page's own rendering code already read that field identically for a school or an org portal, so an org's login background could never have actually appeared even after this fix's upload route existed, until this was added.
+
+The platform console's existing "Manage Superadmins"-style per-org panel gained a matching "Branding" modal: a color picker synced with a hex text field, a tagline input, and upload/replace/remove controls for both images with live previews — all self-service, no code change or one-off database write needed for the next organization.
+
+23 new tests. Full suite passing, zero regressions.
+
+Full details: [Developer Guide §78](docs/DEVELOPER_GUIDE.md#78-self-service-organization-branding-v51380).
+
+---
+
 ## [v5.137.0] — 2026-09-28 — feat(platform): promote an existing user to superadmin
 
 The platform console could only ever grant superadmin by creating a brand-new account (name + email + fresh password) — there was no way to promote someone who already has a working login at that school, and no self-service path exists either (Settings → Users deliberately excludes superadmin from the assignable-roles list, since granting it is platform-level only). Requested directly: an existing user needed to become superadmin without losing their current account.

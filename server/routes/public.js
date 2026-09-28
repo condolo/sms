@@ -115,6 +115,12 @@ router.get('/resolve-portal', async (req, res) => {
           logoUrl:      org.logoUrl    || null,
           primaryColor: org.primaryColor || null,
           tagline:      org.tagline    || null,
+          // Login.jsx reads branding.loginBgUrl identically for a school
+          // or an organization portal — this was the one field missing
+          // here, so an org's login background (once set via
+          // PUT /api/platform/organizations/:id/login-bg) never actually
+          // rendered even though the frontend was already ready for it.
+          loginBgUrl:   org.loginBgUrl || null,
         });
       }
     }
@@ -285,6 +291,46 @@ router.get('/school-asset/:type', async (req, res) => {
     res.send(Buffer.from(data, 'base64'));
   } catch (err) {
     console.error('[public/school-asset]', err.message);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+/* GET /api/public/org-asset/logo?slug=...
+   GET /api/public/org-asset/login-bg?slug=...
+   Serves an ORGANIZATION's logo or shared-portal login background as a
+   binary image — mirrors school-asset above exactly, just against the
+   organizations collection instead of schools. No auth needed so the
+   shared multi-school login portal can display it before anyone signs
+   in. `slug` here is actually the org's own `id` (same query-param-name-
+   vs-actual-field-used mismatch school-asset already has — kept
+   consistent rather than "fixed" in only one of the two).
+*/
+router.get('/org-asset/:type', async (req, res) => {
+  try {
+    const { type } = req.params;
+    if (type !== 'logo' && type !== 'login-bg') {
+      return res.status(400).json({ error: 'type must be logo or login-bg' });
+    }
+
+    const slug = (req.query.slug || '').toLowerCase().trim();
+    if (!slug) return res.status(400).json({ error: 'slug required' });
+
+    const Org = _model('organizations');
+    const org = await Org.findOne({ id: slug }).lean();
+    const field = type === 'logo' ? 'logoBase64' : 'loginBgBase64';
+    const b64   = org?.[field];
+
+    if (!b64) return res.status(404).json({ error: `No ${type} set` });
+
+    const [header, data] = b64.split(',');
+    const mimeMatch = header?.match(/data:(image\/[\w+.-]+);base64/);
+    const mime = mimeMatch?.[1] || 'image/png';
+
+    res.set('Content-Type', mime);
+    res.set('Cache-Control', 'public, max-age=3600');
+    res.send(Buffer.from(data, 'base64'));
+  } catch (err) {
+    console.error('[public/org-asset]', err.message);
     res.status(500).json({ error: 'Server error' });
   }
 });
