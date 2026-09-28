@@ -1893,6 +1893,7 @@ function UsersTab() {
   const [editingUserId, setEditingUserId] = useState(null);
   const [editNameVal,   setEditNameVal]   = useState('');
   const [editingRoleId, setEditingRoleId] = useState(null);
+  const [showRemoved, setShowRemoved] = useState(false);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['settings', 'users'],
@@ -1900,6 +1901,33 @@ function UsersTab() {
     staleTime: 60_000,
   });
   const allUsers = data?.data ?? [];
+
+  // Removed (soft-deleted) accounts — fetched only when the panel is
+  // opened, since most admins will never need it. A removed account's
+  // email still blocks a fresh invite forever (see POST /invite's
+  // INACTIVE_ACCOUNT_EXISTS error) with no other way to find or undo it.
+  const { data: removedData, isLoading: removedLoading } = useQuery({
+    queryKey: ['settings', 'users', 'removed'],
+    queryFn:  () => settingsApi.users.listRemoved(),
+    enabled:  showRemoved,
+    staleTime: 30_000,
+  });
+  const removedUsers = removedData?.data ?? [];
+
+  const { mutate: reactivateUser, isPending: reactivating } = useMutation({
+    mutationFn: id => settingsApi.users.reactivate(id),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['settings', 'users'] });
+      const d = res?.data;
+      setToast({
+        msg: d?.emailSent
+          ? `${d.name} reactivated — a new temporary password was emailed to them.`
+          : `${d?.name ?? 'User'} reactivated. New temporary password: ${d?.password} (email failed to send — share this manually).`,
+        type: 'success',
+      });
+    },
+    onError: err => setToast({ msg: err?.message ?? 'Reactivate failed.', type: 'error' }),
+  });
 
   /* Fetch school doc — needed for hiddenSystemRoles */
   const { data: schoolData } = useQuery({
@@ -2001,14 +2029,56 @@ function UsersTab() {
             {isLoading ? 'Loading…' : `${users.length} of ${allUsers.length} user${allUsers.length !== 1 ? 's' : ''}`}
           </p>
           {canManage && (
-            <button
-              onClick={() => setShowInvite(true)}
-              className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium px-3 py-2 rounded-lg transition"
-            >
-              <UserPlus size={13} /> Invite user
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowRemoved(v => !v)}
+                className={`flex items-center gap-1.5 border text-sm font-medium px-3 py-2 rounded-lg transition ${
+                  showRemoved ? 'border-slate-300 bg-slate-100 text-slate-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                <Archive size={13} /> Removed
+              </button>
+              <button
+                onClick={() => setShowInvite(true)}
+                className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium px-3 py-2 rounded-lg transition"
+              >
+                <UserPlus size={13} /> Invite user
+              </button>
+            </div>
           )}
         </div>
+
+        {/* Removed accounts — collapsed by default */}
+        {showRemoved && (
+          <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3 space-y-2">
+            <p className="text-xs font-medium text-slate-500">
+              Removed accounts still hold their email — reactivate one instead of inviting the same address again.
+            </p>
+            {removedLoading ? (
+              <div className="h-10 bg-slate-100 rounded-lg animate-pulse" />
+            ) : removedUsers.length === 0 ? (
+              <p className="text-xs text-slate-400 py-1">No removed accounts.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {removedUsers.map(u => (
+                  <div key={u.id ?? u._id} className="flex items-center justify-between bg-white border border-slate-200 rounded-lg px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-800 truncate">{u.name ?? u.email}</p>
+                      <p className="text-xs text-slate-400 truncate">{u.email} · removed {u.updatedAt ? new Date(u.updatedAt).toLocaleDateString() : ''}</p>
+                    </div>
+                    <button
+                      onClick={() => reactivateUser(u.id ?? u._id)}
+                      disabled={reactivating}
+                      className="shrink-0 flex items-center gap-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 disabled:opacity-50 px-2.5 py-1.5 rounded-lg transition"
+                    >
+                      <RefreshCcw size={12} /> Reactivate
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         <div className="flex flex-wrap gap-2">
           {/* Search */}
           <input

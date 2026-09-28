@@ -6,6 +6,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.136.0] — 2026-09-28 — fix(settings): a removed account's email was stuck forever, with no way to see it or undo it
+
+A real customer report (Trinitas): a teacher was invited by mistake via Settings (which doesn't create an HR staff record — invite and HR staff are separate data models, so she never showed up in HR), then removed. Removing turned out to be a soft-delete only (`isActive:false`, the document and its email are never purged) — but re-inviting the same email afterward was blocked forever with a bare "already exists" error, and the blocking account was invisible in the Users list (which filters to active accounts only). There was no reactivate button anywhere, so the only way to actually get her working again was through HR's "Add Staff", which has its own quiet bug: creating a new staff record silently links to ANY matching-email `users` account regardless of whether it's active — so her new HR record ended up bound to the dead login, showing as "active" staff with no way to sign in.
+
+Three fixes: (1) `POST /users/invite`'s conflict check now tells the truth — a distinct `INACTIVE_ACCOUNT_EXISTS` error names the removed account and says to reactivate it instead of a dead-end generic conflict; (2) a new `POST /users/:id/reactivate` (+ `GET /users?status=removed` to actually find it) restores login with a fresh temp password, a symmetric teacher-status cascade, and a real audit entry — the undo that never existed; (3) `POST /teachers`'s userId auto-link now requires `isActive: {$ne: false}`, so a fresh staff record never silently binds to a dead login again. Settings → Users gained a "Removed" panel with one-click reactivate.
+
+14 new tests across two files. Full suite passing, zero regressions.
+
+Full details: [Developer Guide §76](docs/DEVELOPER_GUIDE.md#76-removed-account-emails-were-stuck-forever-v51360).
+
+---
+
 ## [v5.135.0] — 2026-09-28 — fix(lessons): syllabus topics leaked across classes within the same subject
 
 A real teacher report: topics updated for a Year 7 stream showed up as ready-to-teach in Year 8 too. Confirmed directly against production data this is **not** the lesson-plan-sharing feature (`lessonPlanSharing.mode` is unset — off — for every real school) but a much older gap: `syllabus_topics` was scoped only by `{schoolId, subjectId, academicYear}` — "English" is one shared record across every grade that teaches it, so its topics were never separated by class at all.

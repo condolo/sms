@@ -323,11 +323,20 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('teachers', 'create'), asyn
 
     const staffId = await nextStaffId(schoolId);
 
-    // Bind userId from the linked user account (if a user with this email already exists).
-    // This is required for timetable slot resolution and meeting-link lookups.
+    // Bind userId from the linked user account (if an ACTIVE user with this
+    // email already exists). This is required for timetable slot resolution
+    // and meeting-link lookups. isActive is deliberately checked: a
+    // soft-deleted (DELETE /settings/users/:id) account's email is never
+    // purged, so an unfiltered match here silently bound a brand-new staff
+    // record to a dead login — the record looked "active" in HR while the
+    // person it belonged to couldn't sign in at all, with nothing surfacing
+    // the mismatch. Leaving linkedUserId null (same as today's "no match at
+    // all" case) means the admin explicitly grants login via HR's own
+    // "Create Login Account" flow instead.
     let linkedUserId = null;
     if (data.email) {
-      const userDoc = await tenantModel('users', tenantContext(req)).findOne({ schoolId, email: data.email }).select('id').lean();
+      const userDoc = await tenantModel('users', tenantContext(req))
+        .findOne({ schoolId, email: data.email, isActive: { $ne: false } }).select('id').lean();
       if (userDoc) linkedUserId = userDoc.id;
     }
 

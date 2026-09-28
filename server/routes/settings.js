@@ -802,12 +802,19 @@ router.delete('/school/login-bg', authMiddleware, rbac('settings', 'update'), as
    USER MANAGEMENT
    ══════════════════════════════════════════════════════════════ */
 
-/* GET /api/settings/users — list users in this school (admin only) */
+/* GET /api/settings/users — list users in this school (admin only)
+   ?status=removed returns ONLY deactivated accounts instead of active
+   ones — a soft-deleted user (DELETE /users/:id) never disappears from
+   the database, but was previously invisible from EVERY list view, which
+   is exactly what made a stuck email address look like it had vanished
+   without a trace. Default (no param) keeps the original active-only
+   behavior so nothing else that depends on this route changes. */
 router.get('/users', authMiddleware, rbac('settings', 'read'), async (req, res) => {
   try {
+    const wantRemoved = req.query.status === 'removed';
     const Users = tenantModel('users', tenantContext(req));
     const users = await Users.find(
-      { schoolId: req.jwtUser.schoolId, isActive: { $ne: false } },
+      { schoolId: req.jwtUser.schoolId, isActive: wantRemoved ? false : { $ne: false } },
       { password: 0, passwordHash: 0 }   // exclude both field names
     ).sort({ name: 1 }).lean();
     // Normalize: ensure every user document has a string `id` field so
@@ -835,6 +842,22 @@ router.post('/users/invite', authMiddleware, rbac('settings', 'create'), async (
     const Users = tenantModel('users', tenantContext(req));
     const existing = await Users.findOne({ schoolId: req.jwtUser.schoolId, email: userEmail.toLowerCase().trim() }).lean();
     if (existing) {
+      // A soft-deleted (isActive:false) account still owns this email
+      // forever — it was previously reported as a flat "already exists"
+      // with no way to tell it apart from a genuinely active duplicate,
+      // and the account itself is invisible in the default GET /users
+      // list, so an admin had no way to find or resolve it. Name the real
+      // cause and point at the fix (reactivate) instead of a dead end.
+      if (existing.isActive === false) {
+        return res.status(409).json({
+          success: false,
+          error: {
+            code: 'INACTIVE_ACCOUNT_EXISTS',
+            message: `A removed account for ${existing.email} still exists (removed ${existing.updatedAt?.slice(0, 10) || 'previously'}). Reactivate it from Settings → Users → Removed instead of inviting again.`,
+            userId: existing.id || existing._id?.toString(),
+          },
+        });
+      }
       return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: 'A user with this email already exists in this school.' } });
     }
 
@@ -1182,6 +1205,93 @@ router.delete('/users/:id', authMiddleware, rbac('settings', 'delete'), async (r
   } catch (err) {
     console.error('[settings] DELETE /users/:id error:', err);
     res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Failed to remove user' } });
+  }
+});
+
+/* POST /api/settings/users/:id/reactivate — undo a DELETE (admin only).
+   Before this route existed there was NO way back: a soft-deleted user's
+   email was invisible in GET /users (which filters isActive:true) yet
+   still blocked a fresh invite with that same email forever (see the
+   INACTIVE_ACCOUNT_EXISTS case in POST /invite above) — a permanent,
+   silent dead end an admin had no way to discover or fix themselves.
+   Issues a fresh temp password rather than restoring the old one (we
+   don't know how long the account sat deactivated, or who else might
+   have seen the old credentials) and forces a change on next login. */
+router.post('/users/:id/reactivate', authMiddleware, rbac('settings', 'update'), async (req, res) => {
+  try {
+    const Users  = tenantModel('users', tenantContext(req));
+    const isOid  = /^[0-9a-f]{24}$/i.test(req.params.id);
+    const filter = isOid
+      ? { schoolId: req.jwtUser.schoolId, $or: [{ id: req.params.id }, { _id: req.params.id }] }
+      : { id: req.params.id, schoolId: req.jwtUser.schoolId };
+
+    const target = await Users.findOne(filter).lean();
+    if (!target) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'User not found.' } });
+    if (target.isActive !== false) {
+      return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: 'This account is already active.' } });
+    }
+
+    const tempPassword = _genTempPassword();
+    const hash = await bcrypt.hash(tempPassword, 12);
+    const now  = new Date().toISOString();
+
+    await Users.updateOne(filter, {
+      $set: { isActive: true, password: hash, passwordChangedAt: now, mustChangePassword: true, updatedAt: now },
+    });
+
+    // Symmetric inverse of DELETE's cascade: only touch a teacher record
+    // this SAME deactivation put to sleep — never resurrect a status that
+    // was set independently (e.g. a replacement staff record created
+    // after this account was removed, which may already be 'active' for
+    // its own reasons and must not be clobbered here).
+    try {
+      await tenantModel('teachers', tenantContext(req)).updateOne(
+        { schoolId: req.jwtUser.schoolId, status: 'inactive', $or: [{ userId: target.id }, { email: target.email }] },
+        { $set: { status: 'active', updatedAt: now } }
+      );
+    } catch (cascErr) {
+      console.warn('[settings] teacher reactivation cascade (non-fatal):', cascErr.message);
+    }
+
+    const targetId = target.id || target._id?.toString();
+    try {
+      if (target.identityId) {
+        await _model('identities').updateOne(
+          { id: target.identityId },
+          { $set: { passwordHash: hash, status: 'active', updatedAt: now } }
+        );
+      }
+    } catch (idErr) {
+      console.warn('[settings] reactivate identity dual-write (non-fatal):', idErr.message);
+    }
+
+    AuditService.log({
+      action: 'user.reactivated', actor: req.jwtUser, schoolId: req.jwtUser.schoolId,
+      target: { type: 'user', id: targetId, label: target.email }, req,
+    });
+
+    const school = await _model('schools').findOne({ id: req.jwtUser.schoolId }).lean();
+    let emailSent = false;
+    try {
+      await emailUtil.sendWelcomeCredentials({
+        email:       target.email,
+        name:        target.name || target.email,
+        schoolName:  school?.name || 'Your School',
+        schoolEmail: school?.systemEmail || school?.email || '',
+        schoolId:    req.jwtUser.schoolId,
+        tempPassword,
+        role:        target.role,
+        slug:        school?.slug,
+      });
+      emailSent = true;
+    } catch (emailErr) {
+      console.warn('[settings] reactivate email failed:', emailErr.message);
+    }
+
+    res.json({ success: true, data: { password: tempPassword, name: target.name || target.email, email: target.email, emailSent } });
+  } catch (err) {
+    console.error('[settings] POST /users/:id/reactivate error:', err);
+    res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Failed to reactivate user' } });
   }
 });
 

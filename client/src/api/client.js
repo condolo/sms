@@ -570,10 +570,12 @@ export const settings = {
   },
   users: {
     list:        ()         => _get('/settings/users'),
+    listRemoved: ()         => _get('/settings/users', { status: 'removed' }),
     invite:      (data)     => _post('/settings/users/invite', data),
     bulkInvite:  (staff)    => _post('/settings/users/bulk-invite', { staff }),
     update:      (id, data) => _put(`/settings/users/${id}`, data),
     remove:        (id)       => _delete(`/settings/users/${id}`),
+    reactivate:    (id)       => _post(`/settings/users/${id}/reactivate`, {}),
     resetPassword: (id, data = {}) => _post(`/settings/users/${id}/reset-password`, data),
   },
   notifications: {

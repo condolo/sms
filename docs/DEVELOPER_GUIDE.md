@@ -5128,3 +5128,36 @@ New `server/__tests__/routes/lessons-topics-class-scope.test.js` (10 tests): a c
 - `server/routes/teacher-portal.js`, `server/routes/student-portal.js`, `server/routes/parent-portal.js` — dashboard curriculum-coverage widgets, same class filter inlined
 - `client/src/pages/lessons/LessonsPage.jsx` — `TopicSlideOver`, `DrillDown`, `LessonPlanSlideOver`
 - `server/__tests__/routes/lessons-topics-class-scope.test.js` (new), `lessons-plans.test.js` (2 new tests)
+
+---
+
+## 76. Removed Account Emails Were Stuck Forever (v5.136.0)
+
+Real customer report (Trinitas): an admin invited a teacher (Angela Gitau) via Settings by mistake — the invite flow (`POST /users/invite`) only ever creates a `users` + `identities` record, never an HR `teachers` record, so she correctly never showed up in HR staff. The admin then removed the account via `DELETE /users/:id`. That route has always been a **soft-delete only**: it sets `isActive:false` and cascades to a linked `teachers` record if one exists, but the `users` document — including its email — is never purged.
+
+### The two gaps this surfaced
+Confirmed directly against the school's real data, in this order:
+1. **`GET /users` and the invite conflict check disagree about what "exists" means.** The list (`GET /api/settings/users`) filters `isActive: { $ne: false }`, so a removed account is completely invisible in the UI. But `POST /users/invite`'s duplicate-email check (`Users.findOne({schoolId, email})`) has no `isActive` filter at all — so re-inviting the exact same email was rejected forever with a bare `"A user with this email already exists in this school."`, pointing at nothing the admin could actually see or act on.
+2. **`POST /teachers`'s userId auto-link doesn't check `isActive` either.** Blocked from re-inviting, the admin instead added Angela properly through HR → Add Staff, which succeeded (that route only checks the `teachers` collection for email conflicts, not `users`) — but its own `userId` backfill (`tenantModel('users').findOne({schoolId, email})`, "required for timetable slot resolution and meeting-link lookups") matched the same dead account with no activity check, and bound the brand-new HR record to it. Result, confirmed live: a `teachers` doc showing `status:'active'` with `extraRoles:['acting_deputy']`, whose linked login was still `isActive:false` — she could not actually sign in, and nothing anywhere said why.
+
+There was also, simply, **no way back**: no reactivate route existed anywhere in the app, school-side or platform-side. A soft-deleted email was a permanent dead end short of a direct database edit.
+
+### Fix
+1. **`GET /api/settings/users`** — new `?status=removed` returns ONLY deactivated accounts (default behavior for no param is unchanged: active only). This is the only way an admin can now find what the invite conflict is talking about.
+2. **`POST /api/settings/users/invite`** — when the conflicting existing user is inactive, returns a distinct `INACTIVE_ACCOUNT_EXISTS` error (not a bare `CONFLICT`) naming the account's email, when it was removed, and its `userId`, and telling the admin to reactivate it instead.
+3. **`POST /api/settings/users/:id/reactivate`** (new) — sets `isActive:true`, issues a **fresh** temp password (never restores the old one — no guarantee of how long it sat deactivated or who saw it) with `mustChangePassword:true`, dual-writes the new hash to a linked `identities` doc if present, and — symmetric with `DELETE`'s own cascade — flips a linked `teachers` record from `status:'inactive'` back to `'active'`, but **only** if it's currently `'inactive'`: a replacement staff record created independently after the original deactivation (exactly Angela's actual state) is never clobbered. Audited as `user.reactivated`.
+4. **`server/routes/teachers.js`'s `POST /` userId auto-link** — the email match now requires `isActive: { $ne: false }`. A staff record created against a removed account's email gets `userId: null` (identical to "no match at all"), same as this route already behaved before any matching account existed — an admin must explicitly grant login via HR's own "Create Login Account" flow, which creates a fresh account rather than resurrecting a dead one.
+5. **Settings → Users** gained a "Removed" toggle revealing exactly the accounts `?status=removed` returns, each with a one-click Reactivate button (`client/src/pages/settings/SettingsPage.jsx`'s `UsersTab`).
+
+### What this does NOT fix
+Reactivating restores **login access only** — it does not touch `role`. Angela's original mistaken invite set `role:'deputy_principal'`; her real HR record now carries `staffType:'teacher'` with `extraRoles:['acting_deputy']` — two different, unrelated axes (login RBAC role vs. an HR responsibility tag). Reactivating her account brings back a `deputy_principal` login exactly as it was, and does not infer or correct a "should be teacher" role from the HR side. An admin must still check/fix the role explicitly via Settings → Users' role dropdown after reactivating, same as any other role correction.
+
+### Verified
+14 new tests: `server/__tests__/routes/settings-user-reactivation.test.js` (10 — invite conflict distinction, `?status=removed` filtering, reactivate's password/cascade/identity-dual-write/audit behavior, 409 on an already-active target, 404 on a missing one) and `server/__tests__/routes/teachers-inactive-user-link.test.js` (4 — inactive/active/legacy-unset/no-match userId-link cases). Full suite passing, zero regressions.
+
+### Files
+- `server/routes/settings.js` — `GET /users` (`?status=removed`), `POST /users/invite` (conflict distinction), `POST /users/:id/reactivate` (new)
+- `server/routes/teachers.js` — `POST /` userId auto-link now `isActive`-filtered
+- `client/src/api/client.js` — `settingsApi.users.listRemoved()`, `.reactivate()`
+- `client/src/pages/settings/SettingsPage.jsx` — `UsersTab`'s "Removed" panel
+- `server/__tests__/routes/settings-user-reactivation.test.js`, `teachers-inactive-user-link.test.js` (new)
