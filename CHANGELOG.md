@@ -6,6 +6,21 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.146.0] — 2026-09-28 — fix(exams,hr): self-review follow-ups on v5.144.0/v5.145.0
+
+Asked directly for a risk review of the last two changes before treating them as done, and to fix everything found with no hand-waving. Four real issues, verified against the actual code and the live database rather than assumed:
+
+1. **Exam sitting time sent as `''` instead of omitted.** The exams officer's Add Exam form (v5.145.0) spread its raw form state into the create payload, so leaving Start/End Time blank stored literal empty strings rather than an absent field — unlike the teacher's Announce Sitting form, which already converts blank to `undefined`. No live query depended on the distinction yet, but it was a real, silent inconsistency between two forms writing the same field. Both now behave identically.
+2. **No start-before-end check on either exam time form.** Announce Sitting already had this gap; the new Add Exam time fields copied it rather than closing it. Both forms now reject End Time at or before Start Time, with the error clearing the moment Start Time changes rather than lingering stale.
+3. **"Activate Existing User" name-splitting duplicated a one-word name into both fields.** `pick()` fell back to copying the first name into the last-name field when a picked account's name had no second word, so a single-word account name would have silently saved as e.g. "Cher Cher" unless HR happened to notice and fix it. Now a one-word name leaves Last Name genuinely empty, so the form's own required-field check forces a real answer instead of a wrong guess going unnoticed.
+4. **`GET /api/teachers/unlinked-accounts` had no cap.** Fine at every real school's actual scale, but nothing stopped a query from returning every active staff-role login unbounded. Added `.sort({name:1}).limit(500)` — high enough to never truncate a real school, bounded enough that a pathological case can't return an unbounded list.
+
+Also checked, and ruled out rather than assumed clear: a race between two admins activating the same account (already blocked by `POST /teachers`' existing duplicate-email check, since the email field is locked in this flow); and the two role-dropdowns dropping `front_office` breaking some other stored config (checked `workflow_configs` directly against the live database — zero references, not just `teachers.staffType`).
+
+8 new/updated tests. Full suite passing, zero regressions.
+
+---
+
 ## [v5.145.0] — 2026-09-28 — fix(exams): exam sitting times were collected by teachers but invisible to the exams officer's own form and to students
 
 Asked directly: when scheduling an exam, shouldn't there be a time range, not just a date — and shouldn't the assessment-type window (e.g. "Mid-Term next week") automatically be the active period, without blocking a teacher from entering results late? Investigated before building anything: the second half already existed exactly as asked — `assessment_schedule`'s `dateFrom`/`dateTo` window auto-computes `open`/`overdue`/`upcoming` status with zero manual "activate" step, and overdue never blocks mark entry; only an admin's explicit Lock does that, with an unlock-with-reason override already in place for late submission. That left two real, narrower gaps.
