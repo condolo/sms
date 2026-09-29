@@ -5880,3 +5880,42 @@ Attempted to also backfill the missing `id` field directly onto the two affected
 ### Files
 - `server/routes/settings.js` — `PUT /school`'s `byUser` validation now falls back to a `_id` match for ObjectId-shaped keys
 - `server/__tests__/routes/settings-permission-save-dual-id.test.js` — 4 new tests
+
+## 100. Non-Teaching Staff Were Showing Up in the Teachers List (v5.161.0)
+
+Raised directly, naming two specific real accounts at a real school: "Natalie and Ann from Mascit are not teachers, I don't know why they are appearing in the Teachers module or list?"
+
+### Root cause
+`teachers` (the collection) is the general staff directory — HR's own "Add Staff" (`StaffFormModal.jsx`, `POST /api/teachers`) writes every staff type here, using `staffType` values from `STAFF_ROLE_KEYS` (`admin`, `principal`, `hr`, `finance`, `admissions_officer`, `teacher`, etc. — see §95/roleLabels.js). The Teachers *module* page (`/teachers`, `TeacherList.jsx`), by contrast, is specifically meant for teaching staff — but its query (`GET /api/teachers`) never filtered the shared collection down to just that.
+
+Checked the real data at the reported school directly rather than guessing at a filter:
+```
+Total staff records: 19
+staffType breakdown: { admissions_officer: 1, teacher: 2, '(none)': 15, hr: 1 }
+```
+Of the 15 with no `staffType` at all, a per-record check of `subjects`/`teaching_assignments` showed most (11) had a real, populated `subjects` array — genuinely teaching staff whose `staffType` was simply never set at onboarding (schools rarely bother, since the overwhelming majority of staff ARE teachers). A distinct minority — 6 records, including both named accounts (`Ann Thuita`, `Natali Otieno`) — had `subjects: null`, no `staffType`, and zero `teaching_assignments`: no signal of ever functioning as a teacher at all.
+
+This directly ruled out the obvious naive fix: filtering on `staffType === 'teacher'` alone would have hidden those same 11 genuinely-teaching-but-unclassified records — a worse regression than the bug being fixed.
+
+### Fix
+`GET /api/teachers` (`teachers.js`) gained an opt-in `?teachingOnly=true` param:
+```js
+if (req.query.teachingOnly === 'true') {
+  const assignedTeacherIds = await tenantModel('teaching_assignments', tenantContext(req)).distinct('teacherId', { schoolId });
+  filter.$or = [
+    { staffType: 'teacher' },
+    { subjects: { $exists: true, $ne: [] } },
+    { id:     { $in: assignedTeacherIds } },
+    { userId: { $in: assignedTeacherIds } },
+  ];
+}
+```
+Inclusion requires ANY positive teaching signal — matching the same "assigned the role of a teacher, OR assigned classes" wording the report used. `TeacherList.jsx`'s query now always sends `teachingOnly: 'true'` (this page IS specifically "Teachers"). `HRPage.jsx`'s own `teachersApi.list({ limit: 100 })` call (the Staff tab, which deliberately wants every staff type — see §93-98's whole HR/Teachers permission thread) sends no such param and is completely unaffected.
+
+### Verified
+6 new tests in `server/__tests__/routes/teachers-teaching-only-filter.test.js`, seeded with the exact data shape found live: without the param, every staff type still shows (HR's Staff tab, unaffected); with it, an explicit non-teaching `staffType` is excluded; an account with zero teaching signal is excluded (the reported bug itself, reproduced); `staffType==='teacher'` is included; a record with subjects but no `staffType` is still included (must not require `staffType`); a record reachable only via a real `teaching_assignments` row is still included. One of these tests initially caught a bug in the TEST'S OWN mock (a naive `$ne`/`$exists` operator handler that checked only one operator per field instead of requiring both, same class of subtlety real MongoDB gets right automatically) — fixed the mock before trusting the result, not the production code. Full suite passing, zero regressions.
+
+### Files
+- `server/routes/teachers.js` — `GET /` gained the `?teachingOnly=true` filter
+- `client/src/pages/teachers/TeacherList.jsx` — sends `teachingOnly: 'true'` on its list query
+- `server/__tests__/routes/teachers-teaching-only-filter.test.js` — 6 new tests

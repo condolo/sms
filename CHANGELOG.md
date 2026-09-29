@@ -6,6 +6,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.161.0] — 2026-09-29 — fix(teachers): non-teaching staff (Admissions Officer, HR, unclassified accounts) were showing up in the Teachers list
+
+Raised directly, naming two specific accounts at a real school: "Natalie and Ann... are not teachers, I don't know why they are appearing in the Teachers module."
+
+### Root cause
+The `teachers` collection is the general staff directory — HR's own "Add Staff" writes here too, with `staffType` covering `admin`/`hr`/`finance`/`admissions_officer`/etc., not just `teacher` — but the Teachers *module* page is specifically meant for teaching staff. Checked the real data at the reported school directly: of 19 staff records, only 2 had `staffType: 'teacher'` explicitly set; 15 had no `staffType` at all. Of those 15, most had a real `subjects` array populated (genuinely teaching, just never explicitly tagged) — but a handful, including both named accounts, had neither a teaching `staffType`, nor any subjects, nor any `teaching_assignments` record. Zero signal of ever functioning as a teacher, yet visible in the Teachers list because nothing filtered the shared collection down to actual teaching staff.
+
+### Fix
+`GET /api/teachers` gained an opt-in `?teachingOnly=true` query param — when present, only includes a record if it has staffType `'teacher'`, a non-empty `subjects` list, or at least one `teaching_assignments` row. Filtering on `staffType==='teacher'` alone would have been wrong: it would have hidden the majority of the 15 unclassified-but-genuinely-teaching records found above, a worse regression than the bug being fixed. `TeacherList.jsx` (the Teachers module's own list) now sends this param; `HRPage.jsx`'s Staff tab (which correctly wants every staff type) does not, and is unaffected.
+
+### Verified
+6 new tests in `server/__tests__/routes/teachers-teaching-only-filter.test.js`: without the param every staff type still shows (HR's Staff tab, unaffected); with it, an explicit non-teaching `staffType` is excluded; an account with zero teaching signal is excluded (the exact reported bug, reproduced with the two named accounts' actual data shape); `staffType==='teacher'` is included; a record with subjects but no `staffType` is still included (must not require `staffType` to be set); a record reachable only via a real `teaching_assignments` row is still included. Full suite passing, zero regressions.
+
+### Files
+- `server/routes/teachers.js` — `GET /` gained the `?teachingOnly=true` filter
+- `client/src/pages/teachers/TeacherList.jsx` — now sends `teachingOnly: 'true'` on its list query
+- `server/__tests__/routes/teachers-teaching-only-filter.test.js` — 6 new tests
+
+---
+
 ## [v5.160.0] — 2026-09-29 — fix(settings): a user missing the standard id field could permanently block Roles & Permissions saves for a whole school
 
 Raised directly, via screenshot: saving Settings → Roles & Permissions failed with "Not a real, active user in this school: 6a26c33627ff61a6debb203d, 6a26bd01b5ae6942d1ae1dd8" — two raw, unresolved Mongo ObjectIds instead of names.
