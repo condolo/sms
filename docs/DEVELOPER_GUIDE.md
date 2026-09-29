@@ -5919,3 +5919,30 @@ Inclusion requires ANY positive teaching signal — matching the same "assigned 
 - `server/routes/teachers.js` — `GET /` gained the `?teachingOnly=true` filter
 - `client/src/pages/teachers/TeacherList.jsx` — sends `teachingOnly: 'true'` on its list query
 - `server/__tests__/routes/teachers-teaching-only-filter.test.js` — 6 new tests
+
+## 101. "All Roles" Filter Set to "Teacher" in HR & Staff Undercounted Real Teachers (v5.162.0)
+
+Direct follow-up to §100, same conversation. After the staffType/role-separation explanation above, the user tested it themselves: filtering HR & Staff's own staff list by role "Teacher" returned only 2 people at a school with well over a dozen real teachers.
+
+### Root cause
+Unlike the Teachers module's server-paginated list (§100), HR & Staff's "All roles" filter never reaches the server at all — it's a purely client-side predicate over the already-fetched `teachers` array, in `HRPage.jsx`:
+```js
+if (staffTypeFilter && t.staffType !== staffTypeFilter) return false;
+```
+The exact same data reality from §100 applies here: most staff never had `staffType` explicitly set, even when a populated `subjects` list proves they're genuinely teaching. A strict equality check against `'teacher'` only ever matched the small handful of records where an admin happened to type "teacher" into that specific field.
+
+### Fix
+```js
+const isTeacherMatch = staffTypeFilter === 'teacher'
+  ? (t.staffType === 'teacher' || (t.subjectIds ?? t.subjects ?? []).length > 0)
+  : t.staffType === staffTypeFilter;
+```
+Special-cased to `'teacher'` only — every other `staffType` value (admin, hr, finance, admissions_officer, ...) keeps the original exact match, since those aren't known to be under-recorded the way "teacher" is (schools rarely bother labeling the majority of their own staff who obviously teach, but a smaller, deliberately-added role like "Finance" or "Admissions Officer" is far more likely to have actually been set). Mirrors the identical inclusion logic §100 already established server-side for `teachers.js`'s `?teachingOnly=true`, applied here purely client-side since this filter never touches the server.
+
+Deliberately did not also check for a `teaching_assignments` record here (the third signal §100 uses) — `HRPage.jsx` doesn't fetch assignments in bulk anywhere, and every sampled record at the reporting school had zero assignments regardless, so adding a new bulk fetch just for this filter would be scope beyond what the data actually needs right now.
+
+### Verified
+`esbuild` syntax-check (no client test runner in this codebase). Pure client-side predicate change, no server route touched; full suite re-run to confirm no incidental impact.
+
+### Files
+- `client/src/pages/hr/HRPage.jsx` — the "All roles" filter's `'teacher'` case now also matches staff with a populated subjects list

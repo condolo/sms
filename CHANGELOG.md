@@ -6,6 +6,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.162.0] — 2026-09-29 — fix(hr): "All roles" filter set to "Teacher" in HR & Staff undercounted real teachers
+
+Direct follow-up to v5.161.0, same conversation: after explaining that `teachers.staffType` (HR's job-title label) and `users.role` (the real RBAC role) are deliberately separate fields, the user reported filtering HR & Staff's own staff list by role "Teacher" and getting only 2 results back at a school with well over a dozen real teachers.
+
+### Root cause
+Unlike the Teachers module's server-paginated list (v5.161.0's fix), HR & Staff's "All roles" filter is a purely client-side predicate over the already-fetched staff array (`HRPage.jsx`): `t.staffType !== staffTypeFilter`. The exact same data-quality reality applies here as in v5.161.0 — most staff at most schools never had `staffType` explicitly set even though they're genuinely teaching (a populated `subjects` list proves it) — so a strict equality check against `'teacher'` only ever matched the small handful of records where an admin happened to type "teacher" into that field.
+
+### Fix
+When the selected filter is specifically `'teacher'`, also match any staff record with a non-empty `subjects`/`subjectIds` list, regardless of what `staffType` (if anything) it carries — mirroring the same inclusive definition `teachers.js`'s `?teachingOnly=true` already uses server-side. Every other `staffType` filter value is untouched (exact match, as before) — this special-case only applies to `'teacher'`, the one value known to be under-recorded in practice.
+
+### Verified
+`esbuild` syntax-check (no client test runner in this codebase). This is a pure client-side predicate change with no server route touched; full suite re-run to confirm no incidental impact.
+
+### Files
+- `client/src/pages/hr/HRPage.jsx` — the "All roles" filter's `'teacher'` case now also matches staff with a populated subjects list
+
+---
+
 ## [v5.161.0] — 2026-09-29 — fix(teachers): non-teaching staff (Admissions Officer, HR, unclassified accounts) were showing up in the Teachers list
 
 Raised directly, naming two specific accounts at a real school: "Natalie and Ann... are not teachers, I don't know why they are appearing in the Teachers module."
