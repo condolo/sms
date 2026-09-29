@@ -6,6 +6,22 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.156.0] — 2026-09-29 — fix(hr): a role hidden in Settings could still be assigned to staff, or picked as a workflow-chain approver, from HR
+
+Raised directly: "the roles in Settings modules should be the only roles appearing in the HR module." Traced HR's role pickers (Add Staff's role dropdown, the staff-list "All roles" filter, the Leave and Payroll approval-chain assignee pickers) — all three build their built-in role list from `STAFF_ROLE_KEYS` (`client/src/utils/roleLabels.js`), independent of Settings' own per-school "hide this role" toggle (`school.hiddenSystemRoles`, the eye-off icon in Roles & Permissions). Hiding a role there — meant to stop it being handed out further — had no effect on any of these three pickers: an admin could still assign a hidden role to a new staff member, or pick it as a leave/payroll approval-chain step, with no checkbox anywhere showing that it was supposed to be off-limits.
+
+### Fix
+Added `assignableStaffRoles`/`assignableBuiltInRoles` in `HRPage.jsx` — the same combined built-in + custom role list already used for staff badges (`allStaffRoles`), filtered to exclude `school.hiddenSystemRoles`. Used only for **new assignment**: the Add Staff role picker (`StaffFormModal`'s `staffRoles` prop), the Leave workflow chain's assignee picker (`WorkflowConfigModal`'s `builtInRoles` prop), and the Payroll workflow chain's assignee picker (`PayrollSettingsModal`, which previously imported its own unfiltered copy of the built-in role list directly and had no way to receive a filtered one — added a `builtInRoles` prop, threaded through its internal `AssigneePicker`). The unfiltered `allStaffRoles` list is deliberately left alone everywhere else (staff-list role badges, the "All roles" search filter, and the read-only display of an already-configured chain step) — a staff member who already holds a hidden role, or a chain step already pointing at one, must keep showing its correct label instead of silently degrading, since hiding a role only means "stop assigning this further," not "erase it from history."
+
+### Verified
+`esbuild` syntax-check on all 3 changed files (no client test runner in this codebase). Full suite: 261 suites, 2706 tests, unaffected (this is a pure client change; no server route or permission-check logic was touched).
+
+### Files
+- `client/src/pages/hr/HRPage.jsx` — added `assignableStaffRoles`/`assignableBuiltInRoles`; wired into `StaffFormModal`, `WorkflowConfigModal`, and `PayrollSettingsModal`
+- `client/src/pages/hr/PayrollSettingsModal.jsx` — `builtInRoles` prop added (defaults to its previous unfiltered constant when not passed), threaded through `AssigneePicker`
+
+---
+
 ## [v5.155.0] — 2026-09-29 — fix(hr): a single narrow HR sub-permission silently unlocked the entire HR & Staff page and several unrelated write routes
 
 Raised directly, with screenshots: a role (Admissions Officer) with only "View Leave Requests" checked in Settings → Roles & Permissions → HR & Payroll could nonetheless open the full "HR & Staff" page — staff directory, Add Staff / Import Staff / Activate Existing User, Payroll tab, Documents tab, and aggregate stat cards (Total Staff, Net Payroll) — none of which that single checkbox should have granted.

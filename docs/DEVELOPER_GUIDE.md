@@ -5726,3 +5726,28 @@ function payrollManageAccess(action) {
 - `client/src/pages/hr/HRPage.jsx` — `isHR` narrowed to a role-floor check; 8 new capability-specific booleans; `TABS` built additively; every affected tab/button/query re-gated
 - `client/src/store/auth.js` — `can(feature, action, subKey)` gained the optional `subKey` parameter
 - `server/__tests__/routes/hr-coarse-permission-leak.test.js` — 10 new tests
+
+## 95. A Role Hidden in Settings Was Still Assignable From HR's Own Role Pickers (v5.156.0)
+
+Raised directly: "the roles in Settings modules should be the only roles appearing in the HR module." A role hidden in Settings → Roles & Permissions (`school.hiddenSystemRoles`, set via the eye-off icon next to a role — per its own tooltip, "Hide role from invite form") was still offered as an option in three separate places inside HR: the Add Staff role dropdown, the staff-list "All roles" filter, and both the Leave and Payroll approval-chain assignee pickers.
+
+### Root cause
+`STAFF_ROLE_KEYS` (`client/src/utils/roleLabels.js:66`) is the shared, deliberate single source of truth `HRPage.jsx` and `PayrollSettingsModal.jsx` both build their role lists from — itself a 2026-09 fix for a real gap (HR's role dropdown had independently drifted and was missing `principal` entirely). That fix correctly unified "which built-in roles are real, grantable system roles" across HR/Payroll, but it's a static list, unrelated to `hiddenSystemRoles` — a per-school runtime toggle that lives only in `school` state, checked nowhere outside `SettingsPage.jsx` itself. Hiding a role there stops it appearing in Settings' own R&P sidebar and the invite form, but every HR role picker kept offering it regardless.
+
+### Fix
+`HRPage.jsx` already computes `allStaffRoles` (built-in `STAFF_ROLE_KEYS`, through the school's `roleLabels` rename, plus custom roles) for staff-list badge rendering. Added two derived, **assignment-only** lists alongside it:
+```js
+const hiddenSystemRoles     = schoolSettingsData?.hiddenSystemRoles ?? [];
+const assignableStaffRoles  = allStaffRoles.filter(r => !hiddenSystemRoles.includes(r.key));
+const assignableBuiltInRoles = assignableStaffRoles.filter(r => BUILT_IN_STAFF_ROLES.some(b => b.key === r.key));
+```
+`assignableStaffRoles` now feeds `StaffFormModal`'s `staffRoles` prop (the Add/Edit Staff role select). `assignableBuiltInRoles` feeds `WorkflowConfigModal`'s `builtInRoles` prop (Leave chain) and a NEW `builtInRoles` prop on `PayrollSettingsModal` (Payroll chain) — that modal previously imported its own copy of the unfiltered built-in list directly with no way for a caller to override it; added the prop (defaulting to its old constant, so nothing breaks if ever mounted without it) and threaded it through to its internal `AssigneePicker`.
+
+Deliberately **left unfiltered**: `allStaffRoles` itself (staff-list role badges and the "All roles" search filter — an admin must still be able to find and correctly label an existing staff member who already holds a since-hidden role), and the read-only display of an already-saved workflow-chain step (`PayrollSettingsModal`'s summary view still resolves a step's role label from the raw, unfiltered constant) — hiding a role means "stop handing this out further," not "erase everyone who already has it or every chain already pointing at it."
+
+### Verified
+`esbuild` syntax-check on both changed files (no client test runner in this codebase — same verification posture as every other client-only change this session). Full suite: 261 suites, 2706 tests, unaffected — this touches only client-side option lists, no server route or permission-check logic.
+
+### Files
+- `client/src/pages/hr/HRPage.jsx` — `assignableStaffRoles`/`assignableBuiltInRoles` added; wired into `StaffFormModal`, `WorkflowConfigModal`, `PayrollSettingsModal`
+- `client/src/pages/hr/PayrollSettingsModal.jsx` — `builtInRoles` prop added (default: its previous unfiltered constant), threaded through `AssigneePicker`
