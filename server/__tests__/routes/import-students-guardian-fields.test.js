@@ -171,6 +171,21 @@ describe('Mother/Father derivation — same shared logic as Admissions', () => {
     expect(res.body.data.errors[0].field).toBe('motherEmail');
     expect(mockStores.students._docs()).toHaveLength(0);
   });
+
+  test('real incident: a trailing comma on an otherwise-valid email is rejected, not silently imported', async () => {
+    // The old regex ([^\s@]+@[^\s@]+\.[^\s@]+) only excludes whitespace and
+    // @ — a comma isn't whitespace, so "name@gmail.com," matched as
+    // "valid" and got imported as-is for a real school's CSV. The
+    // stricter z.string().email() every subsequent edit route validates
+    // with then rejected those same values on any future save, and since
+    // motherEmail/fatherEmail had no edit UI at all, the school had no way
+    // to self-correct them post-import.
+    const res = await supertest(buildApp()).post('/api/import-export/students').send({
+      rows: [{ ...BASE, motherName: 'Adjoa', motherPhone: '0700', motherEmail: 'adjoa.osei@example.com,' }],
+    });
+    expect(res.body.data.errors[0].field).toBe('motherEmail');
+    expect(mockStores.students._docs()).toHaveLength(0);
+  });
 });
 
 describe('Allergies / Emergency Contact — land under medical.*, matching the Student Profile Medical tab', () => {

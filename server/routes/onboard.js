@@ -131,7 +131,7 @@ router.post('/', onboardLimiter, async (req, res) => {
       return res.status(400).json({ error: `Missing required fields: ${missing.join(', ')}` });
     }
 
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adminEmail)) {
+    if (!/^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(adminEmail)) {
       return res.status(400).json({ error: 'Invalid email address' });
     }
 

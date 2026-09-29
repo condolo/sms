@@ -539,6 +539,12 @@ function OverviewTab({ student, houses, houseName, editing, saving, onSave, onCa
           <InfoRow label="Relationship" value={student.parentRelationship} />
           <InfoRow label="Phone"        value={student.parentPhone} />
           <InfoRow label="Email"        value={student.parentEmail} />
+          {(student.motherEmail || student.fatherEmail) && (
+            <>
+              <InfoRow label="Mother's email" value={student.motherEmail} />
+              <InfoRow label="Father's email" value={student.fatherEmail} />
+            </>
+          )}
         </InfoCard>
       </div>
     );
@@ -664,6 +670,20 @@ function OverviewTab({ student, houses, houseName, editing, saving, onSave, onCa
           </FField>
           <FField label="Guardian email">
             <input type="email" className={iCls()} value={form.parentEmail ?? ''} onChange={e => set('parentEmail', e.target.value)} />
+          </FField>
+          {/* Mother's/Father's email — previously only ever settable at
+              admission time (AddSlideOver.jsx); once a student existed
+              here, a bad value (e.g. a CSV import artifact) had no way to
+              be corrected at all, and — since this whole form resubmits
+              every field on save, not just the ones with a visible input —
+              silently blocked saving ANY other Overview change too, since
+              the stale bad value still failed the server's validation on
+              every submit. */}
+          <FField label="Mother's email">
+            <input type="email" className={iCls()} value={form.motherEmail ?? ''} onChange={e => set('motherEmail', e.target.value)} />
+          </FField>
+          <FField label="Father's email">
+            <input type="email" className={iCls()} value={form.fatherEmail ?? ''} onChange={e => set('fatherEmail', e.target.value)} />
           </FField>
         </div>
       </div>

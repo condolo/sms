@@ -401,7 +401,7 @@ router.post('/schools/:id/superadmins', async (req, res) => {
     const { name, email: rawEmail, password } = req.body || {};
     const email = typeof rawEmail === 'string' ? rawEmail.trim().toLowerCase() : '';
     if (!name || !email) return res.status(400).json({ error: 'name and email are required' });
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Invalid email address' });
+    if (!/^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(email)) return res.status(400).json({ error: 'Invalid email address' });
 
     const School = _model('schools');
     const rid = req.params.id;
@@ -936,7 +936,7 @@ router.post('/organizations/:id/director', async (req, res) => {
     const { name, email: rawEmail, password } = req.body || {};
     const email = typeof rawEmail === 'string' ? rawEmail.trim().toLowerCase() : '';
     if (!name || !email) return res.status(400).json({ error: 'name and email are required' });
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Invalid email address' });
+    if (!/^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(email)) return res.status(400).json({ error: 'Invalid email address' });
 
     const Org = _model('organizations');
     const org = await Org.findOne({ id: req.params.id }).select('id name').lean();

@@ -107,7 +107,13 @@ const StudentCreateSchema = z.object({
   enrollmentAcademicYearId: z.string().nullish(),
   enrollmentTermId:         z.string().nullish(),
   parentName:     z.string().max(200).trim().optional(),
-  parentEmail:    z.string().email().optional().or(z.literal('')),
+  // .trim() before .email() — a copy-pasted address with stray leading/
+  // trailing whitespace used to fail validation outright instead of being
+  // silently cleaned up first, same class of friction as the trailing-
+  // comma import bug these 3 fields hit in practice (fixed at the import
+  // source in import-export.js; this is the equivalent hygiene for direct
+  // edits through this route).
+  parentEmail:    z.string().trim().email().optional().or(z.literal('')),
   parentPhone:    z.string().max(30).optional(),
   parentRelationship: z.string().max(50).optional(),
   // Mother / Father — 2026-09 field update. Declared here (not just
@@ -119,11 +125,11 @@ const StudentCreateSchema = z.object({
   // it only accepts the raw values (import-export.js's _importStudents
   // does the derivation before these documents are ever built).
   motherName:      z.string().max(200).trim().optional(),
-  motherEmail:     z.string().email().optional().or(z.literal('')),
+  motherEmail:     z.string().trim().email().optional().or(z.literal('')),
   motherPhone:     z.string().max(30).optional(),
   motherIdNumber:  z.string().max(50).trim().optional(),
   fatherName:      z.string().max(200).trim().optional(),
-  fatherEmail:     z.string().email().optional().or(z.literal('')),
+  fatherEmail:     z.string().trim().email().optional().or(z.literal('')),
   fatherPhone:     z.string().max(30).optional(),
   fatherIdNumber:  z.string().max(50).trim().optional(),
   primaryContact:  z.enum(['mother', 'father']).optional(),

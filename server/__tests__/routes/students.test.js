@@ -686,6 +686,79 @@ describe('PUT /api/students/:id — medical field', () => {
 });
 
 /* ══════════════════════════════════════════════════════════════
+   PUT /api/students/:id — guardian email trim + comma rejection (2026-09)
+   Real incident: a bulk CSV import's own validation regex ([^\s@]+@...)
+   only excluded whitespace and @, so "name@gmail.com," slipped through
+   as "valid" for 8 real students. This route's stricter
+   z.string().email() correctly rejects that same value on any edit —
+   but until motherEmail/fatherEmail got edit fields in StudentProfile.jsx
+   (same fix), there was no way to correct them at all. Separately added
+   .trim() so a copy-pasted address with stray whitespace is cleaned up
+   instead of failing outright — trim never masks a real problem like a
+   trailing comma, which isn't whitespace.
+══════════════════════════════════════════════════════════════ */
+describe('PUT /api/students/:id — guardian email trim + validation', () => {
+  function mockExistingStudent(student) {
+    mockStudentsFindOne.mockReturnValue({ lean: jest.fn().mockResolvedValue(student) });
+  }
+
+  test('a parentEmail with leading/trailing whitespace is trimmed and accepted', async () => {
+    const student = makeStudent();
+    mockExistingStudent(student);
+    mockStudentsFindOneAndUpdate.mockReturnValue({ lean: jest.fn().mockResolvedValue(student) });
+
+    const res = await supertest(buildApp())
+      .put('/api/students/stu_demo_001')
+      .set('Authorization', 'Bearer fake-token')
+      .send({ parentEmail: '  parent@example.com  ' });
+
+    expect(res.status).toBe(200);
+    const [, updateOp] = mockStudentsFindOneAndUpdate.mock.calls[0];
+    expect(updateOp.$set.parentEmail).toBe('parent@example.com');
+  });
+
+  test('a motherEmail with a trailing comma is still rejected — trim only strips whitespace, not the actual bad character', async () => {
+    mockExistingStudent(makeStudent());
+
+    const res = await supertest(buildApp())
+      .put('/api/students/stu_demo_001')
+      .set('Authorization', 'Bearer fake-token')
+      .send({ motherEmail: 'mother@example.com,' });
+
+    expect(res.status).toBe(422);
+    expect(mockStudentsFindOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  test('a fatherEmail with a trailing comma is rejected the same way', async () => {
+    mockExistingStudent(makeStudent());
+
+    const res = await supertest(buildApp())
+      .put('/api/students/stu_demo_001')
+      .set('Authorization', 'Bearer fake-token')
+      .send({ fatherEmail: 'father@example.com,' });
+
+    expect(res.status).toBe(422);
+    expect(mockStudentsFindOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  test('motherEmail/fatherEmail can now be updated through this route at all (no edit UI reached them before this fix)', async () => {
+    const student = makeStudent();
+    mockExistingStudent(student);
+    mockStudentsFindOneAndUpdate.mockReturnValue({ lean: jest.fn().mockResolvedValue(student) });
+
+    const res = await supertest(buildApp())
+      .put('/api/students/stu_demo_001')
+      .set('Authorization', 'Bearer fake-token')
+      .send({ motherEmail: 'mother@example.com', fatherEmail: 'father@example.com' });
+
+    expect(res.status).toBe(200);
+    const [, updateOp] = mockStudentsFindOneAndUpdate.mock.calls[0];
+    expect(updateOp.$set.motherEmail).toBe('mother@example.com');
+    expect(updateOp.$set.fatherEmail).toBe('father@example.com');
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════
    PUT /api/students/:id — admission number edit (2026-09)
    Reported directly: "how do you edit admission number of a student,
    if the system picks automatically" — the edit form has always had

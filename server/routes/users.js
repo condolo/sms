@@ -86,7 +86,7 @@ router.post('/invite', authMiddleware, inviteLimiter, rbac('settings', 'create')
 
   const { name, email: userEmail, role, phone, staffId, ...extra } = req.body;
   if (!name || !userEmail) return res.status(400).json({ error: 'name and email are required' });
-  if (!userEmail.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) return res.status(400).json({ error: 'Invalid email address' });
+  if (!userEmail.match(/^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/)) return res.status(400).json({ error: 'Invalid email address' });
 
   // ROOT CAUSE this closes (staffType/role separation audit): this route
   // is a second, independent implementation of "create a login account
@@ -200,7 +200,7 @@ router.post('/bulk-invite', authMiddleware, inviteLimiter, rbac('settings', 'cre
   for (const row of rows) {
     const { name, email: userEmail, role, phone, staffId } = row;
     if (!name || !userEmail) { results.errors.push({ email: userEmail, reason: 'Missing name or email' }); continue; }
-    if (!userEmail.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) { results.errors.push({ email: userEmail, reason: 'Invalid email' }); continue; }
+    if (!userEmail.match(/^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/)) { results.errors.push({ email: userEmail, reason: 'Invalid email' }); continue; }
 
     // Same shared validator as POST /invite above — previously this row
     // silently downgraded an unauthorized 'superadmin' request to 'teacher'

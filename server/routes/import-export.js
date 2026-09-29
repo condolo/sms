@@ -654,13 +654,23 @@ async function _importStudents(rows, schoolId, userId, req) {
       }
     }
 
+    // Real incident: this regex (and its 4 siblings below/elsewhere in this
+    // file) used to allow a trailing comma — [^\s@]+ only excludes
+    // whitespace and @, so "name@gmail.com," matched as "valid" and got
+    // imported as-is. A real CSV import for one school did exactly that
+    // across 8 students' mother/father/parent email columns; the stricter
+    // z.string().email() every subsequent edit route validates with then
+    // rejected those same values, and since motherEmail/fatherEmail have
+    // no edit UI post-admission, the school had no way to self-correct
+    // them. Now excludes comma too — every other legal email character is
+    // still allowed.
     const motherEmail = r.motherEmail?.trim();
-    if (motherEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(motherEmail)) {
+    if (motherEmail && !/^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(motherEmail)) {
       results.errors.push({ row, field: 'motherEmail', message: `Invalid email '${motherEmail}'` });
       results.skipped++; continue;
     }
     const fatherEmail = r.fatherEmail?.trim();
-    if (fatherEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fatherEmail)) {
+    if (fatherEmail && !/^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(fatherEmail)) {
       results.errors.push({ row, field: 'fatherEmail', message: `Invalid email '${fatherEmail}'` });
       results.skipped++; continue;
     }
@@ -673,13 +683,13 @@ async function _importStudents(rows, schoolId, userId, req) {
 
     // Email validations
     const parentEmail = r.parentEmail?.trim();
-    if (parentEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(parentEmail)) {
+    if (parentEmail && !/^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(parentEmail)) {
       results.errors.push({ row, field: 'parentEmail', message: `Invalid email '${parentEmail}'` });
       results.skipped++; continue;
     }
 
     const schoolEmail = r.schoolEmail?.trim();
-    if (schoolEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(schoolEmail)) {
+    if (schoolEmail && !/^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(schoolEmail)) {
       results.errors.push({ row, field: 'schoolEmail', message: `Invalid school email '${schoolEmail}'` });
       results.skipped++; continue;
     }
@@ -1045,7 +1055,7 @@ async function _importTeachers(rows, schoolId, userId, req) {
 
     const email = r.email?.trim().toLowerCase();
     if (!email) { results.errors.push({ row, field: 'email', message: 'Email is required for teachers' }); results.skipped++; continue; }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { results.errors.push({ row, field: 'email', message: `Invalid email '${email}'` }); results.skipped++; continue; }
+    if (!/^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(email)) { results.errors.push({ row, field: 'email', message: `Invalid email '${email}'` }); results.skipped++; continue; }
     if (knownEmails.has(email)) { results.errors.push({ row, field: 'email', message: `Email '${email}' already exists in this school` }); results.skipped++; continue; }
     knownEmails.add(email);
 

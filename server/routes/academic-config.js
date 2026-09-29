@@ -843,7 +843,7 @@ router.patch('/school-profile', authMiddleware, async (req, res) => { // rbac: a
     // Validate systemEmail if provided
     if (req.body.systemEmail !== undefined) {
       const em = req.body.systemEmail;
-      if (em && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) {
+      if (em && !/^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(em)) {
         return E.badRequest(res, 'Invalid systemEmail address');
       }
     }
