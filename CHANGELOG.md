@@ -6,6 +6,31 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.158.0] — 2026-09-29 — fix(teachers): granting a role full "Edit Teacher" rights in Settings had zero effect
+
+Raised directly: "Admission Officer" was granted full rights to edit teachers, students, subjects, and classes in Settings, yet still couldn't tag a subject on a teacher's profile via the Edit button.
+
+### Root cause
+`TeacherList.jsx` gated its Edit/Create/Delete capabilities off a hardcoded role allowlist — `['admin','superadmin','principal','hr'].includes(role)` — completely independent of Settings → Roles & Permissions → Teachers, the same bug class as `HRPage.jsx`'s old `isHR` (already fixed this session, §93-96) and the documented v5.115.0/v5.115.1 precedent. The file's own comment explained *why* it avoided the permission system (`can('teachers')` with no action returns true for nearly every viewer) but drew the wrong conclusion — the fix was to pass the specific action (`can('teachers','create'|'update'|'delete')`), which the codebase already supports and which the server's own `PUT/POST/DELETE /api/teachers` routes already correctly check via `rbac('teachers', action)`. The client simply never asked.
+
+One further mismatch: the Edit button's own `canEdit` prop was wired to the `canCreate` variable, not a `canEdit`/update-specific one — a role granted Create but not Edit (or vice versa) would have gotten the wrong gate regardless of the array-vs-permission issue.
+
+### Fix
+Replaced the three hardcoded checks with `isAdminLevel || can('teachers', <action>)`, matching the server exactly. Fixed the `canEdit` prop to reference a real `canEditTeacher` (`can('teachers','update')`) instead of reusing `canCreate`.
+
+**Deliberately left unchanged**: `canViewFull`, which gates sensitive PII (contact details, DOB) and the Export button. The server's own `GET /api/teachers` independently redacts those same fields for anyone outside an identical hardcoded `FULL_ACCESS_ROLES` set (`teachers.js`) via a limited-projection query at read time — not a permission check. Making `canViewFull` Settings-grantable without also changing that server-side floor would only add a UI control with no effect (the fields simply aren't in the API response), so it stays a role floor matching the server's real privacy boundary.
+
+### Scope note
+Separately investigated the "Assignments" tab (assigning a teacher to a specific class+subject+room, which feeds Timetable) — this goes through a completely different collection (`teaching_assignments`) and a separate, non-Settings-driven server-side floor (`teaching-assignments.js`'s `canManage()`, hardcoded to `admin/superadmin/deputy/principal/acting_deputy/head_of_school` plus department-scoped HODs). That floor looks like a deliberate governance decision — restricting timetable-affecting teaching-load assignment to school leadership — rather than an oversight, so it was left untouched pending a decision on whether it should also become Settings-grantable.
+
+### Verified
+`esbuild` syntax-check (no client test runner in this codebase). `server/__tests__/routes/teachers-*.test.js` (28 tests, unaffected — pure client change, no server route touched).
+
+### Files
+- `client/src/pages/teachers/TeacherList.jsx` — `canCreate`/`canEditTeacher`/`canDelete` now check real Settings permissions instead of a hardcoded role list; `canViewFull` deliberately unchanged
+
+---
+
 ## [v5.157.0] — 2026-09-29 — fix(hr): a role with nothing granted under HR & Payroll could not even find "My HR" in the sidebar
 
 Raised directly: "when none is clicked some roles don't see the HR (my hr) at all." Confirmed against the live database: 102 of 135 real role documents across live schools have an empty or entirely absent coarse `hr` permission array, and every one of them lost the "HR & Staff"/"My HR" sidebar link entirely.

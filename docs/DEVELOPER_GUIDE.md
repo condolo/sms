@@ -5782,3 +5782,51 @@ Added `hr` as a named exception in `computeNav`'s permission filter — visible 
 ### Files
 - `client/src/components/layout/Sidebar.jsx` — `hr` added as an always-visible exception in `computeNav`
 - `client/src/pages/help/HelpPage.jsx` — same exception applied to the HR & Payroll help section
+
+## 97. Granting a Role Full "Edit Teacher" Rights in Settings Had Zero Effect (v5.158.0)
+
+Raised directly: "Admission Officer" was granted full rights to edit teachers/students/subjects/classes in Settings, yet still couldn't add a subject or assign classes to a teacher via the Edit button on their profile.
+
+### Root cause
+`TeacherList.jsx` (`client/src/pages/teachers/TeacherList.jsx:56-60`, before this fix):
+```js
+// Only privileged roles may edit or delete staff records.
+// can('teachers') is a module-level flag (true for every viewer including teachers)
+// so we gate write actions on explicit role membership instead.
+const canCreate   = ['admin', 'superadmin', 'principal', 'hr'].includes(role);
+const canDelete   = ['admin', 'superadmin', 'principal', 'hr'].includes(role);
+const canViewFull = ['admin', 'superadmin', 'principal', 'hr'].includes(role);
+```
+A hardcoded role allowlist, completely independent of Settings → Roles & Permissions → Teachers — the exact same bug class as `HRPage.jsx`'s old `isHR` (this session's §93-96) and the codebase's own documented v5.115.0/v5.115.1 precedent. The comment's diagnosis was half right: `can('teachers')` with no action argument does return true for nearly any viewer with even read access, which the author correctly identified as useless for gating writes — but the actual fix (`can(module, action)`, which checks the SPECIFIC action a role was granted, and which this codebase has supported since the sub-permission work landed) was never applied. The server's own `PUT/POST/DELETE /api/teachers` routes (`teachers.js:343,414,583`) already correctly check `rbac('teachers', action)` against the real Settings-driven permission — the client simply never asked the same question.
+
+A second, independent mismatch compounded it: `TeacherDetailSlideOver`'s `canEdit` prop was wired to the `canCreate` variable (`canEdit={canCreate}`), not an update-specific one — so even a role that WAS in the hardcoded list, but had e.g. Create without Edit (or vice versa) granted, would have gotten the wrong gate regardless.
+
+### Fix
+```js
+const isAdminLevel   = role === 'admin' || role === 'superadmin';
+const canCreate      = isAdminLevel || can('teachers', 'create');
+const canEditTeacher = isAdminLevel || can('teachers', 'update');
+const canDelete      = isAdminLevel || can('teachers', 'delete');
+```
+`canEdit={canCreate}` → `canEdit={canEditTeacher}` at the `TeacherDetailSlideOver` call site — this is what unlocks the Edit button, and with it `TeacherAssignmentsTab`'s subject-tagging field on the Profile tab (`teacher.subjectIds`, saved via the already-correctly-gated `PUT /api/teachers/:id`).
+
+**Deliberately unchanged**: `canViewFull`. It gates sensitive PII (contact details, date of birth) and the Export button, and the server's `GET /api/teachers` independently redacts those same fields for anyone outside an *identical* hardcoded `FULL_ACCESS_ROLES` set (`teachers.js:122`, `_canViewFullData`) via a limited-projection query at read time — a defense-in-depth privacy boundary, not a permission check ("Personal contact details, HR data, and IDs are excluded at query time so they are never loaded into Node.js memory," per that file's own comment). Making `canViewFull` Settings-grantable here without also loosening that server-side floor would be pure UI theater: the fields simply would not be present in the API response for anyone outside `FULL_ACCESS_ROLES`, no matter what the client shows. Left it as a role floor, matching the real boundary it mirrors.
+
+### A separate, deeper restriction found while investigating — left untouched pending a decision
+"Assign classes... to the teacher" turned out to route through a *different* mechanism than the Profile tab's subject tags: `TeacherAssignmentsTab`'s "Add assignment" button writes to the `teaching_assignments` collection (which also feeds Timetable — class + subject + room + periods/week), via `POST /teaching-assignments`. That route's authorization is not `rbac()` at all — it's a local `canManage()` (`server/routes/teaching-assignments.js:56,67-77`):
+```js
+const FULL_MANAGE = new Set(['admin', 'superadmin', 'deputy', 'principal', 'acting_deputy', 'head_of_school']);
+function canManage(req, subjectDepartmentId = null) {
+  const eff = _effectiveRoles(req);
+  if ([...FULL_MANAGE].some(r => eff.has(r))) return true;
+  if (eff.has('hod')) { /* department-scoped only */ }
+  return false;
+}
+```
+No Settings permission of any kind can satisfy this — it's a hardcoded role/HOD-department floor, structurally identical in shape to the bug just fixed, but unlike that one this looks like a deliberate governance decision (restricting who can reshuffle the school's teaching loads / timetable integrity to actual leadership + department heads) rather than an oversight. Left untouched rather than silently opening it up — extending it to honor a Settings grant (e.g. `hasExplicitSubGrant('teachers'|'classes', 'update')` alongside the existing floor) is a real policy call with school-wide timetable blast radius, raised to the user rather than decided unilaterally.
+
+### Verified
+`esbuild` syntax-check (no client test runner in this codebase). `server/__tests__/routes/teachers-*.test.js` (28 tests) unaffected — pure client change, no server route touched.
+
+### Files
+- `client/src/pages/teachers/TeacherList.jsx` — `canCreate`/`canEditTeacher`/`canDelete` now check real Settings permissions via `can('teachers', action)`; `canViewFull` deliberately unchanged; `canEdit` prop fixed to reference the update-specific variable
