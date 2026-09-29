@@ -5542,3 +5542,41 @@ Reproduction (pre-fix): any staff account holding plain `grades:read` — a comm
 - `server/__tests__/academic-calc.test.js` — 6 new `attendanceSummary` tests
 - `server/__tests__/routes/report-cards-scope.test.js` — 5 new scope tests covering the 3 previously-unchecked routes
 - `server/__tests__/routes/report-cards-html.test.js` — `scopeMiddleware` neutralized to match that file's existing `rbac` mock convention (not under test there)
+
+## 89. Closing §88's Three Flagged Items — Signature Upload UI, Preview Moderation Indicator, Class Teacher Observation Ratings (v5.149.0)
+
+Follow-up to §88's audit, actioning the three findings that needed a decision rather than a silent fix.
+
+### Signature/stamp upload UI
+The backend contract was already complete (`schools.principalSignatureUrl`/`schoolStampUrl`, read and drawn into the PDF by `_fetchSignatureImages`/`_buildPDFPage`) — only a UI to set them was missing. Added a "Sign-off images" section to Report Cards → General (`SettingsPanel.jsx`'s `SignatureBrandingSection`), reusing `AssetUploader` (exported from `SettingsPage.jsx` for this — the only cross-page import this needed, not a relocation of the component) and its established client-side resize.
+
+**Storage decision, worth being explicit about:** the logo/favicon/login-background branding assets use a two-field pattern — a large `...Base64` field plus a small `...Url` field pointing at a dedicated public asset-serving endpoint (`/api/public/school-asset/:type`), so a browser `<img src>` never has to carry the whole payload. That pattern does NOT work here: `_fetchImageBuf` (the function that pulls a signature/stamp into the PDF) only handles a `data:` URI or a real `http(s)://` absolute URL — it cannot resolve a relative API path, since it runs server-side with no "current origin" to resolve against. So `principalSignatureUrl`/`schoolStampUrl` store the actual `data:` URI directly — simpler, and it's what `_fetchImageBuf` already expects with zero code change needed there. The tradeoff: `GET /school-profile`'s plain, unprojected `.lean()` fetch now returns up to ~200KB (both images, 100KB cap each) on every load instead of a few bytes. Deliberately accepted, not overlooked — this is an admin-only, occasional Settings fetch, not the public, every-page-load branding lookup that made an *unbounded*, multi-MB version of this exact problem a real incident in v5.140.0. Added real server-side validation (format + 100KB cap) to `PATCH /school-profile` for these two fields specifically, previously accepting any string at all.
+
+### Preview moderation indicator
+`POST /generate`'s response gained `provisional` (boolean) and `unmoderatedExams` (`[{id, title, status}]`), computed from the exact same `examStatuses`/`APPROVED_STATES` check `/publish` already uses — previously discarded via `{ data: examData }` destructuring that dropped `examStatuses` entirely. `ReportCardsTab.jsx` shows an amber banner naming the specific unmoderated exam(s) when `provisional` is true. Deliberately advisory only, never a block — gating the preview itself would remove a legitimate earlier use ("what would this look like right now") that `/publish`'s own hard gate doesn't need to share.
+
+### Class Teacher Observation Ratings
+The most substantial of the three. Design decisions made (documented here since the report didn't specify them):
+- **Not Cambridge-specific.** The category list (`observationCategories`) is a per-school-configurable array, not a hardcoded set — defaults to the 6 categories from the real report (`Engaged, Teamwork, Confidence, Responsibility, Reflective, Innovative`) so it works out of the box, but any school can rename/add/remove.
+- **The rating scale itself is fixed** (`excellent`/`good`/`improve`, exported as `OBSERVATION_RATING_VALUES`), not configurable — keeps the print grid's 3 columns meaningful across every school, unlike the category list.
+- **Off by default** (`showObservationRatings: false`) — most schools' templates don't have this section; it must be explicitly turned on.
+- **Lives on the existing pre-publish draft record**, not a new collection: `report_card_draft_comments` (the same document `classTeacherRemark` already lives on) gained an `observationRatings: { [category]: rating }` field via `PUT /draft-comments/:studentId`, validated against the school's own `observationCategories` and `OBSERVATION_RATING_VALUES` — reusing the exact mechanism and permission model (`rbac('report_cards','update')`, RC6 subject-teacher scoping untouched) rather than inventing a parallel one.
+- **Carried to the published snapshot exactly like every other draft field** — `_resolveSnapComments` gained `observationRatings: draft?.observationRatings ?? {}` alongside `classTeacherRemark`/`sportsAndTalent`, so it snapshots at publish time and never drifts after.
+- **Rendered in the IR, then both "new" layouts, both formats.** `_computeReportSections`'s `comments` block gained `showObservationRatings` (from config) and `observationRatings` (an array of `{category, rating}` built from `config.observationCategories`, not from whatever keys happen to exist on the snapshot — so a renamed/removed category doesn't leave a stale row). `report-layouts.js` gained a shared `_observationRatingsHtml(s)` helper for the two HTML renderers (`_renderSubjectPairedHtml`, `_renderMarksThenCommentsHtml`) and near-identical inline PDFKit drawing in their PDF counterparts (not factored into one shared function — `DARK`/`GRAY`/`BORDER`/`PAGE_WIDTH`/`ensureSpace` are per-function local closures in this file, matching how REMARKS/BEHAVIOUR are already written per-layout rather than shared). `legacy_tabular` stays frozen and never renders it, the same posture as every other RCE1 toggle.
+- **On-screen editing**: `StudentReportCard.jsx`'s new `ObservationRatingsGrid` (radio-button Excellent/Good/Improve per category) appears in the Comments tab only when `observationConfig.enabled` and at least one category exists, saved through the exact same `onSaveComment` flow as `classTeacherRemark`.
+
+### Verified
+8 new tests for signature validation, 3 for the preview flag, 3 for the config defaults, 6 for the draft-comments validation, 3 for the IR fields — 23 new tests total across 5 files. Two pre-existing exact-shape assertions in `report-cards.test.js` updated for the new `observationRatings: {}` field in `_resolveSnapComments`'s default output. All touched client files syntax-checked clean with `esbuild`. Full suite passing (259 suites, 2686 tests), zero regressions. `scripts/verify-tenant-coverage.js` held at ceiling (35).
+
+### Files
+- `server/routes/academic-config.js` — `PATCH /school-profile` signature/stamp validation; `showObservationRatings`/`observationCategories` in `DEFAULT_REPORT_CONFIG`/`ConfigSchema`/`_mergeConfig`; new `OBSERVATION_RATING_VALUES` export
+- `server/routes/report-cards.js` — `/generate`'s `provisional`/`unmoderatedExams`; `observationRatings` validated on `PUT /draft-comments/:studentId`; `_resolveSnapComments` and `_computeReportSections` carry it through
+- `server/utils/report-layouts.js` — `_observationRatingsHtml` (shared HTML helper) + inline PDF drawing in `_renderSubjectPairedPdf`/`_renderMarksThenCommentsPdf`
+- `client/src/api/client.js` — `academicConfig.schoolProfile.{get,update}`
+- `client/src/pages/settings/SettingsPage.jsx` — `AssetUploader` exported
+- `client/src/pages/reportcards/components/SettingsPanel.jsx` — `SignatureBrandingSection`, `ObservationCategoriesEditor`, signature-label inputs
+- `client/src/pages/grades/components/StudentReportCard.jsx` — `ObservationRatingsGrid`
+- `client/src/pages/grades/components/ReportCardsTab.jsx` — provisional banner, `observationConfig` prop
+- `server/__tests__/routes/academic-config-school-profile-signature.test.js` (new)
+- `server/__tests__/routes/report-cards-observation-ratings.test.js` (new)
+- `server/__tests__/routes/report-cards-term-scope.test.js`, `report-cards-ir.test.js`, `academic-config-report-toggles.test.js`, `report-cards.test.js` — extended

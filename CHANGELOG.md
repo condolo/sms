@@ -6,6 +6,43 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.149.0] — 2026-09-29 — feat(report-cards): closes the three remaining exam-to-report-card audit items
+
+Follow-up to v5.148.0's audit — the three findings flagged as needing a decision rather than a silent fix, all actioned:
+
+### Signature/stamp upload UI
+`schools.principalSignatureUrl`/`schoolStampUrl` were already fully wired into the PDF renderer but had no way for a school to actually set them — the audit found zero client references to either field. Added a Settings UI (Report Cards → General → "Sign-off images") using the same `AssetUploader`/client-side-resize pattern already proven for logo/favicon/login-background. Stored as the actual `data:` URI directly on the field (not the separate Base64-field + served-by-URL pattern those other assets use) — `_fetchImageBuf` (the PDF renderer's image loader) already decodes a `data:` URI with zero network cost but can't resolve a relative API path, so that pattern doesn't fit here. Capped at 100 KB server-side; this is an admin-only, occasional Settings fetch, not the high-frequency public branding lookup that made an unbounded size a real problem in v5.140.0.
+
+### Preview moderation indicator
+`POST /generate` (preview) never flagged when it was showing scores from an exam that hadn't been moderated/approved yet, even though `/publish` correctly refuses to publish that same data. Added a `provisional` flag + the specific unmoderated exam(s) to the response — advisory only, never blocks the preview (an early "here's what it'll look like" is a legitimate use before moderation happens) — and a banner in `ReportCardsTab.jsx` surfacing it.
+
+### Class Teacher Observation Ratings ("Cambridge Attributes")
+The audit's most significant finding: a school's actual report card had a "Class Teacher Observations" section (Engaged/Teamwork/Confidence/Responsibility/Reflective/Innovative, each Excellent/Good/Improve) with no data model, input screen, or template section anywhere in the codebase — always blank, for every student, every school. Built for real, not Cambridge-specific (any school defines its own category list):
+
+- New school-level config: `showObservationRatings` (off by default) and `observationCategories` (defaults to the 6 categories from the real report), editable in Settings → Report Cards → General.
+- New `observationRatings` field on the existing pre-publish draft record (`report_card_draft_comments`, the same one `classTeacherRemark` already lives on) via `PUT /draft-comments/:studentId`, validated against the school's own configured categories and a fixed Excellent/Good/Improve scale.
+- A ratings grid in the on-screen report-card editor (`StudentReportCard.jsx`) for the class teacher to fill in per student, shown only when the school has turned the feature on.
+- Carried forward to the published snapshot at publish time, exactly like `classTeacherRemark`/`sportsAndTalent` already are.
+- Rendered in both the HTML and PDF output for the two "new" layouts (Subject + Comment Together, Subjects First Comments After) — the same two layouts every other RCE1 toggle already applies to; the legacy layout stays frozen and ignores it, same as everything else.
+
+### Verified
+8 new tests for the signature validation (`academic-config-school-profile-signature.test.js`); 3 new tests for the preview `provisional` flag (`report-cards-term-scope.test.js`); 3 new tests for the observation-config defaults (`academic-config-report-toggles.test.js`), 6 for the draft-comments validation (`report-cards-observation-ratings.test.js`), and 3 for the IR fields (`report-cards-ir.test.js`). All touched client files syntax-checked clean with `esbuild`. Full suite passing, zero regressions. `scripts/verify-tenant-coverage.js` held at ceiling (35).
+
+### Files
+- `server/routes/academic-config.js` — signature/stamp validation on `PATCH /school-profile`; `showObservationRatings`/`observationCategories` added to the report config schema/defaults; exports `OBSERVATION_RATING_VALUES`
+- `server/routes/report-cards.js` — `provisional`/`unmoderatedExams` on `POST /generate`'s response; `observationRatings` validated and stored on `PUT /draft-comments/:studentId`, carried into `_resolveSnapComments` and the IR's `comments` section
+- `server/utils/report-layouts.js` — new shared `_observationRatingsHtml` helper + inline PDF drawing in both "new" layouts
+- `client/src/api/client.js` — `academicConfig.schoolProfile.{get,update}`
+- `client/src/pages/settings/SettingsPage.jsx` — `AssetUploader` exported for reuse
+- `client/src/pages/reportcards/components/SettingsPanel.jsx` — new `SignatureBrandingSection`, `ObservationCategoriesEditor`, signature-label inputs
+- `client/src/pages/grades/components/StudentReportCard.jsx` — new `ObservationRatingsGrid`
+- `client/src/pages/grades/components/ReportCardsTab.jsx` — provisional banner; `observationConfig` passed through
+- `server/__tests__/routes/academic-config-school-profile-signature.test.js` (new)
+- `server/__tests__/routes/report-cards-observation-ratings.test.js` (new)
+- `server/__tests__/routes/report-cards-term-scope.test.js`, `report-cards-ir.test.js`, `academic-config-report-toggles.test.js`, `report-cards.test.js` — extended
+
+---
+
 ## [v5.148.0] — 2026-09-29 — fix(report-cards): attendance always showed zero, and 3 routes let any teacher pull any class's report cards
 
 Requested a full audit of the exam-to-report-card connection, prompted by a real report card PDF with several blank fields — investigated with an agent doing read-only research, then independently re-verified every finding against the actual code and a live database query before fixing anything. That specific PDF turned out to be external to the app entirely: the admission number's real student has zero report card snapshots ever generated, and the school has never configured a signature/stamp — so its blank Name/Age/Days-Absent/observation-checkbox fields are a manual-template gap, not this app's bug. But tracing *why* those fields would still be broken if the app ever did generate that card surfaced two real, independently-confirmed issues.
