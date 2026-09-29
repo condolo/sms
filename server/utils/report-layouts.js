@@ -27,6 +27,34 @@ function _esc(str) {
   return String(str ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+/* Class-teacher observation ratings grid (2026-09) — shared between the
+   two "new" layouts (subject_paired, marks_then_comments); legacy_tabular
+   is frozen and never renders it, same posture as every other RCE1
+   toggle. Empty string when the school hasn't turned this on, or has
+   turned it on but defined zero categories — same "zero trace when
+   disabled" rule subjectTeacherCommentsEnabled already follows. */
+function _observationRatingsHtml(s) {
+  if (!s.comments.showObservationRatings || !s.comments.observationRatings.length) return '';
+  const RATING_LABELS = { excellent: 'Excellent', good: 'Good', improve: 'Improve' };
+  return `
+  <div style="margin:16px 0">
+    <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 6px">Class Teacher Observations</p>
+    <table style="width:100%;border-collapse:collapse;font-size:10px">
+      <thead><tr>
+        <th style="border:1px solid #e2e8f0;padding:5px 8px;text-align:left;background:#f8fafc">Category</th>
+        ${['excellent', 'good', 'improve'].map(v => `<th style="border:1px solid #e2e8f0;padding:5px 8px;background:#f8fafc">${RATING_LABELS[v]}</th>`).join('')}
+      </tr></thead>
+      <tbody>
+        ${s.comments.observationRatings.map(({ category, rating }) => `
+        <tr>
+          <td style="border:1px solid #e2e8f0;padding:5px 8px">${_esc(category)}</td>
+          ${['excellent', 'good', 'improve'].map(v => `<td style="border:1px solid #e2e8f0;padding:5px 8px;text-align:center">${rating === v ? '&#10003;' : ''}</td>`).join('')}
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>`;
+}
+
 /* PDF renderer — walks the IR and makes the pdfkit calls. Every
    coordinate/color/size constant here is unchanged from the original
    monolithic _buildPDFPage; only the source of each value moved from
@@ -801,6 +829,33 @@ function _renderSubjectPairedPdf(doc, s, images, isFirstPage) {
     }
   }
 
+  /* CLASS TEACHER OBSERVATIONS (2026-09) — off unless the school has
+     turned it on and defined at least one category, same "zero trace
+     when disabled" rule every other optional section here follows. */
+  if (s.comments.showObservationRatings && s.comments.observationRatings.length) {
+    const rowH = 16;
+    ensureSpace(20 + s.comments.observationRatings.length * rowH);
+    doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text('CLASS TEACHER OBSERVATIONS', 40, rowY);
+    rowY += 14;
+    const catW = PAGE_WIDTH * 0.4;
+    const colW = (PAGE_WIDTH - catW) / 3;
+    ['Excellent', 'Good', 'Improve'].forEach((label, i) => {
+      doc.fillColor(GRAY).fontSize(7).font('Helvetica-Bold').text(label.toUpperCase(), 40 + catW + i * colW, rowY, { width: colW, align: 'center' });
+    });
+    rowY += 12;
+    s.comments.observationRatings.forEach(({ category, rating }) => {
+      doc.rect(40, rowY, PAGE_WIDTH, rowH).stroke(BORDER);
+      doc.fillColor(DARK).fontSize(8).font('Helvetica').text(category, 44, rowY + 4, { width: catW - 8 });
+      ['excellent', 'good', 'improve'].forEach((v, i) => {
+        if (rating === v) {
+          doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text('X', 40 + catW + i * colW, rowY + 4, { width: colW, align: 'center' });
+        }
+      });
+      rowY += rowH;
+    });
+    rowY += 6;
+  }
+
   /* BEHAVIOUR */
   if (s.behaviour) {
     ensureSpace(60);
@@ -969,6 +1024,7 @@ function _renderSubjectPairedHtml(s) {
     <tbody>${gradingRows}</tbody>
   </table>` : ''}
   ${remarksHtml}
+  ${_observationRatingsHtml(s)}
   ${behHtml}
   <p style="text-align:center;font-size:9px;color:#94a3b8;margin-top:16px">${_esc(s.footer.footerNote)} — ${_esc(s.footer.genLine)}${s.footer.reportId ? ` — Report ID: ${_esc(s.footer.reportId)}` : ''}</p>
 </div>`;
@@ -1170,6 +1226,32 @@ function _renderMarksThenCommentsPdf(doc, s, images, isFirstPage) {
     }
   }
 
+  /* CLASS TEACHER OBSERVATIONS (2026-09) — off unless the school has
+     turned it on and defined at least one category. */
+  if (s.comments.showObservationRatings && s.comments.observationRatings.length) {
+    const rowH = 16;
+    ensureCommentsSpace(20 + s.comments.observationRatings.length * rowH);
+    doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text('CLASS TEACHER OBSERVATIONS', 40, rowY);
+    rowY += 14;
+    const catW = PAGE_WIDTH * 0.4;
+    const colW = (PAGE_WIDTH - catW) / 3;
+    ['Excellent', 'Good', 'Improve'].forEach((label, i) => {
+      doc.fillColor(GRAY).fontSize(7).font('Helvetica-Bold').text(label.toUpperCase(), 40 + catW + i * colW, rowY, { width: colW, align: 'center' });
+    });
+    rowY += 12;
+    s.comments.observationRatings.forEach(({ category, rating }) => {
+      doc.rect(40, rowY, PAGE_WIDTH, rowH).stroke(BORDER);
+      doc.fillColor(DARK).fontSize(8).font('Helvetica').text(category, 44, rowY + 4, { width: catW - 8 });
+      ['excellent', 'good', 'improve'].forEach((v, i) => {
+        if (rating === v) {
+          doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text('X', 40 + catW + i * colW, rowY + 4, { width: colW, align: 'center' });
+        }
+      });
+      rowY += rowH;
+    });
+    rowY += 6;
+  }
+
   /* BEHAVIOUR */
   if (s.behaviour) {
     ensureCommentsSpace(60);
@@ -1349,6 +1431,7 @@ function _renderMarksThenCommentsHtml(s) {
   ${pageHeaderHtml('Teacher Comments')}
   ${subjectCommentsSectionHtml}
   ${remarksSectionHtml}
+  ${_observationRatingsHtml(s)}
   ${behHtml}
   <p style="text-align:center;font-size:9px;color:#94a3b8;margin-top:16px">${_esc(s.footer.footerNote)} — ${_esc(s.footer.genLine)}${s.footer.reportId ? ` — Report ID: ${_esc(s.footer.reportId)}` : ''}</p>
 </div>`;

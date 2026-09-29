@@ -486,7 +486,7 @@ describe('_resolveSnapComments', () => {
       principalName:      'Dr. Kariuki',
     };
     const out = resolve(undefined, draft);
-    expect(out).toEqual({ ...draft, reportRemarks: [] });
+    expect(out).toEqual({ ...draft, reportRemarks: [], observationRatings: {} });
   });
 
   test('a first-ever publish with NO draft doc at all still produces the same blank-default shape as before this fix', () => {
@@ -495,6 +495,7 @@ describe('_resolveSnapComments', () => {
       subjectComments: {}, classTeacherRemark: '', principalRemark: '',
       sportsAndTalent: '', closingDate: '', nextTermBegin: '',
       classTeacherName: '', principalName: '', reportRemarks: [],
+      observationRatings: {},
     });
   });
 

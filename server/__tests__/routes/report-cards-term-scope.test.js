@@ -182,3 +182,46 @@ describe('POST /api/report-cards/generate — year/term scope resolution', () =>
     expect(stu.subjects.sub_math.finalScore).toBe(77);
   });
 });
+
+describe('POST /api/report-cards/generate — provisional flag (unmoderated exams)', () => {
+  test('every relevant exam already approved+ → provisional is false', async () => {
+    // Fixture default: both ex_old and ex_cur are status:'published'.
+    const res = await supertest(buildApp())
+      .post('/api/report-cards/generate')
+      .send({ classId: CLASS, termNumber: 1 });
+    expect(res.status).toBe(200);
+    expect(res.body.data.provisional).toBe(false);
+    expect(res.body.data.unmoderatedExams).toEqual([]);
+  });
+
+  test('a merely-completed (unmoderated) exam in the current term → provisional is true, named in unmoderatedExams', async () => {
+    mockStores.exams = makeCollection([
+      {
+        id: 'ex_cur', schoolId: SCHOOL, classId: CLASS, subjectId: 'sub_math',
+        termId: 't_cur_1', academicYearId: 'ay_cur', title: 'Mid-Term Maths',
+        status: 'completed', maxScore: 100, assessmentType: 'ET',
+      },
+    ]);
+    const res = await supertest(buildApp())
+      .post('/api/report-cards/generate')
+      .send({ classId: CLASS, termNumber: 1 });
+    expect(res.status).toBe(200);
+    expect(res.body.data.provisional).toBe(true);
+    expect(res.body.data.unmoderatedExams).toEqual([{ id: 'ex_cur', title: 'Mid-Term Maths', status: 'completed' }]);
+  });
+
+  test('moderated (not yet approved) also counts as provisional — only approved/locked/published/archived clear it', async () => {
+    mockStores.exams = makeCollection([
+      {
+        id: 'ex_cur', schoolId: SCHOOL, classId: CLASS, subjectId: 'sub_math',
+        termId: 't_cur_1', academicYearId: 'ay_cur', title: 'Mid-Term Maths',
+        status: 'moderated', maxScore: 100, assessmentType: 'ET',
+      },
+    ]);
+    const res = await supertest(buildApp())
+      .post('/api/report-cards/generate')
+      .send({ classId: CLASS, termNumber: 1 });
+    expect(res.status).toBe(200);
+    expect(res.body.data.provisional).toBe(true);
+  });
+});

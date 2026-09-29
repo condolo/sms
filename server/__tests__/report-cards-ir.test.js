@@ -91,4 +91,31 @@ describe('_computeReportSections — the IR itself, directly', () => {
     expect(ir.resultsTable.rankingNote).toBeNull();
     expect(ir.resultsTable.rows).toEqual([]);
   });
+
+  describe('observationRatings (2026-09) — off by default, zero trace when disabled', () => {
+    const base = golden.fixtures[0];
+
+    test('showObservationRatings is false and observationRatings is empty when the school never configured it', () => {
+      const ir = reportCardsRouter._computeReportSections(base.snap, base.config, base.attendance);
+      expect(ir.comments.showObservationRatings).toBe(false);
+      expect(ir.comments.observationRatings).toEqual([]);
+    });
+
+    test('when enabled, every configured category appears with its saved rating or null', () => {
+      const config = { ...base.config, showObservationRatings: true, observationCategories: ['Engaged', 'Teamwork'] };
+      const snap = { ...base.snap, comments: { ...base.snap.comments, observationRatings: { Engaged: 'excellent' } } };
+      const ir = reportCardsRouter._computeReportSections(snap, config, base.attendance);
+      expect(ir.comments.showObservationRatings).toBe(true);
+      expect(ir.comments.observationRatings).toEqual([
+        { category: 'Engaged',  rating: 'excellent' },
+        { category: 'Teamwork', rating: null },
+      ]);
+    });
+
+    test('enabled but zero categories configured still produces an empty array, not a crash', () => {
+      const config = { ...base.config, showObservationRatings: true, observationCategories: [] };
+      const ir = reportCardsRouter._computeReportSections(base.snap, config, base.attendance);
+      expect(ir.comments.observationRatings).toEqual([]);
+    });
+  });
 });

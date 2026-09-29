@@ -35,6 +35,24 @@ describe('academic-config _mergeConfig — RCE1 report-card toggles', () => {
   });
 });
 
+describe('academic-config _mergeConfig — observation ratings (2026-09)', () => {
+  test('showObservationRatings defaults to false — most schools\' templates don\'t use this section', () => {
+    expect(mergeConfig(null).showObservationRatings).toBe(false);
+  });
+
+  test('observationCategories defaults to the 6 categories from the real report that surfaced this gap', () => {
+    expect(mergeConfig(null).observationCategories).toEqual([
+      'Engaged', 'Teamwork', 'Confidence', 'Responsibility', 'Reflective', 'Innovative',
+    ]);
+  });
+
+  test('a school\'s own saved categories/toggle override the default, not merged with it', () => {
+    const cfg = mergeConfig({ showObservationRatings: true, observationCategories: ['Kindness', 'Effort'] });
+    expect(cfg.showObservationRatings).toBe(true);
+    expect(cfg.observationCategories).toEqual(['Kindness', 'Effort']);
+  });
+});
+
 describe('academic-config ConfigSchema (via the exported router) — RCE1 fields are PATCH-able', () => {
   // The route module isn't required elsewhere in this file, so pulling
   // its internal Zod schema would need a new export; instead this proves

@@ -37,7 +37,7 @@ const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 const { rankStudents, mergeRankings, bestPerSubject, computeRankingScore } = require('../utils/ranking');
-const { mergeConfig, resolveGrade, resolveCurrentPeriod } = require('./academic-config');
+const { mergeConfig, resolveGrade, resolveCurrentPeriod, OBSERVATION_RATING_VALUES } = require('./academic-config');
 const { getConfig: _getAssessmentConfig } = require('./assessment');
 const { resolveTemplate } = require('./report-card-templates');
 const { getLayout }       = require('../utils/report-layouts');
@@ -279,6 +279,10 @@ function _resolveSnapComments(prev, draft) {
     // chain (PATCH /draft-comments/:studentId/advance); empty for every
     // other school, same as subjectComments defaulting to {}.
     reportRemarks:      draft?.reportRemarks       ?? [],
+    // Class-teacher observation ratings — { [category]: 'excellent'|'good'|'improve' }.
+    // Empty for every school not using showObservationRatings, same posture
+    // as every other field here.
+    observationRatings: draft?.observationRatings  ?? {},
   };
 }
 
@@ -395,11 +399,19 @@ router.post('/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
       _loadCaConfig(schoolId),
     ]);
 
-    const [gradesData, { data: examData }, caMarksData] = await Promise.all([
+    const [gradesData, { data: examData, examStatuses }, caMarksData] = await Promise.all([
       aggregateGrades(schoolId, classId, scope.termId, scope.academicYearId, studentId),
       aggregateExamResults(schoolId, classId, scope.termId, scope.academicYearId, studentId),
       aggregateAssessmentMarks(schoolId, classId, termNum ?? null, scope.academicYearId, studentId),
     ]);
+
+    // Same moderation gate /publish enforces — this is only a warning here,
+    // never a block, since a preview showing "here's what it'll look like
+    // once X is moderated" is a legitimate, earlier use than /publish's.
+    // Without this flag a reviewer had no way to tell a final-looking
+    // preview from one built on marks that could still change.
+    const PREVIEW_APPROVED_STATES = ['approved', 'locked', 'published', 'archived'];
+    const unmoderatedExams = (examStatuses || []).filter(e => !PREVIEW_APPROVED_STATES.includes(e.status));
 
     const activeWeights = _convertCustomTypesToWeights(caConfig.customTypes);
     // Prefer grade_boundaries default scale over legacy academic_config.gradingSchema
@@ -466,6 +478,12 @@ router.post('/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
 
     return ok(res, {
       generated: students.length,
+      // Advisory only — never blocks the preview. True when at least one
+      // exam feeding these scores hasn't been moderated/approved yet, so
+      // the numbers shown could still change before /publish would accept
+      // them.
+      provisional: unmoderatedExams.length > 0,
+      unmoderatedExams: unmoderatedExams.map(e => ({ id: e.id, title: e.title, status: e.status })),
       config: {
         gradingType: config.gradingType, passMark: config.passMark,
         rankingEnabled: config.rankingEnabled, rankingSubjectStrategy: config.rankingSubjectStrategy,
@@ -477,6 +495,8 @@ router.post('/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
         // §6.2 — the client must never fall back to its own local default,
         // it has to render from what the server actually used).
         gradeScale: { bands: _normalizeGradeScaleBands(activeSchema) },
+        showObservationRatings: config.showObservationRatings,
+        observationCategories:  config.observationCategories,
       },
       students,
     });
@@ -1629,6 +1649,14 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
       reportRemarks: (snap.comments?.reportRemarks || []).map(r => ({
         label: r.label || 'Remark', text: sanitisePdfStr(r.remark) || '',
       })),
+      // Class-teacher observation ratings (2026-09) — off for every school
+      // until explicitly turned on in Settings; same "zero trace when
+      // disabled" posture as subjectTeacherCommentsEnabled above.
+      showObservationRatings: !!config.showObservationRatings,
+      observationRatings: (config.observationCategories || []).map(category => ({
+        category,
+        rating: snap.comments?.observationRatings?.[category] || null,
+      })),
     },
     signatures: {
       classTeacherLabel: config.classTeacherSignatureLabel || 'Class Teacher',
@@ -2039,7 +2067,7 @@ router.put('/draft-comments/:studentId', authMiddleware, PLAN, MODGATE, rbac('re
     const { studentId } = req.params;
     const { classId, termNumber, classTeacherName, classTeacherRemark,
             sportsAndTalent, principalName, principalRemark, closingDate, nextTermBegin,
-            subjectComments } = req.body;
+            subjectComments, observationRatings } = req.body;
     if (!termNumber) return E.badRequest(res, 'termNumber is required');
 
     // Guard: subject-teacher scoping (RC6) — every subject key this caller
@@ -2050,6 +2078,25 @@ router.put('/draft-comments/:studentId', authMiddleware, PLAN, MODGATE, rbac('re
       const denied = await unassignedPairs(req, pairs);
       if (denied.length > 0) {
         return E.forbidden(res, `You are not assigned to teach: ${denied.map(p => p.subjectId).join(', ')}`);
+      }
+    }
+
+    // Class-teacher observation ratings — validated against THIS school's
+    // own configured category list (Settings → Report Cards → General),
+    // not a hardcoded set, since a school can rename/add/remove categories.
+    if (observationRatings !== undefined) {
+      if (typeof observationRatings !== 'object' || observationRatings === null || Array.isArray(observationRatings)) {
+        return E.badRequest(res, 'observationRatings must be an object of { category: rating }');
+      }
+      const cfg = await _loadConfig(schoolId);
+      const validCategories = new Set(cfg.observationCategories || []);
+      for (const [category, rating] of Object.entries(observationRatings)) {
+        if (!validCategories.has(category)) {
+          return E.badRequest(res, `"${category}" is not a configured observation category for this school.`);
+        }
+        if (!OBSERVATION_RATING_VALUES.includes(rating)) {
+          return E.badRequest(res, `Invalid rating "${rating}" for "${category}" — must be one of: ${OBSERVATION_RATING_VALUES.join(', ')}.`);
+        }
       }
     }
 
@@ -2067,6 +2114,7 @@ router.put('/draft-comments/:studentId', authMiddleware, PLAN, MODGATE, rbac('re
       updatedBy,
       updatedAt: new Date(),
     };
+    if (observationRatings !== undefined) setFields.observationRatings = observationRatings;
 
     // Merge subject comments with dot-notation $set so each teacher only touches their own subject
     // without wiping other teachers' comments on the same student record.
