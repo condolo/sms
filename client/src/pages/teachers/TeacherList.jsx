@@ -52,11 +52,33 @@ export default function TeacherList() {
   const qc    = useQueryClient();
   const { toast } = useToast();
   const role  = useAuthStore(s => s.session?.user?.role ?? '');
-  // Only privileged roles may edit or delete staff records.
-  // can('teachers') is a module-level flag (true for every viewer including teachers)
-  // so we gate write actions on explicit role membership instead.
-  const canCreate   = ['admin', 'superadmin', 'principal', 'hr'].includes(role);
-  const canDelete   = ['admin', 'superadmin', 'principal', 'hr'].includes(role);
+  const can   = useAuthStore(s => s.can.bind(s));
+  const isAdminLevel = role === 'admin' || role === 'superadmin';
+  /* Was: ['admin','superadmin','principal','hr'].includes(role) for all three —
+     a hardcoded role allowlist with no Settings equivalent, same bug class as
+     HRPage.jsx's old isHR (v5.115.0/v5.115.1, and this session's §93-96 fixes).
+     can('teachers') with NO action does return true for basically anyone (any
+     role with even read access), which the original comment here correctly
+     flagged as unusable — but the fix was never to pass can(module, action)
+     instead, which checks the SPECIFIC action ('create'/'update'/'delete') a
+     role was actually granted in Settings → Roles & Permissions → Teachers.
+     Found 2026-09-29: a school granted 'Admissions Officer' full Edit Teacher
+     rights in Settings, and it had zero effect — the Edit button, and the
+     subject-tagging field inside it, stayed hidden regardless, because this
+     array never consulted Settings at all. The server's own PUT/POST/DELETE
+     /api/teachers routes already correctly check rbac('teachers', action) —
+     this brings the client in line with what the server already enforces. */
+  const canCreate      = isAdminLevel || can('teachers', 'create');
+  const canEditTeacher = isAdminLevel || can('teachers', 'update');
+  const canDelete      = isAdminLevel || can('teachers', 'delete');
+  // canViewFull is a DELIBERATE exception, left as a hardcoded role floor —
+  // it gates sensitive PII (contact details, DOB) that the server's own
+  // GET /api/teachers independently redacts for anyone outside the identical
+  // FULL_ACCESS_ROLES set (teachers.js) via a limited-projection query, not a
+  // permission check. Making this Settings-grantable here without also
+  // changing that server-side floor would be pure UI theater — the fields
+  // simply wouldn't be in the API response — so it stays in sync with the
+  // server's real privacy boundary rather than the Settings permission model.
   const canViewFull = ['admin', 'superadmin', 'principal', 'hr'].includes(role);
 
   const [search,       setSearch]       = useState('');
@@ -374,7 +396,7 @@ export default function TeacherList() {
         {selected && (
           <TeacherDetailSlideOver
             teacher={selected}
-            canEdit={canCreate}
+            canEdit={canEditTeacher}
             onClose={() => setSelected(null)}
             onUpdated={updated => {
               setSelected(updated);
