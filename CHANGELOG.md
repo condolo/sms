@@ -6,6 +6,30 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.153.0] — 2026-09-29 — fix(students): a mistyped guardian email had no way to be corrected, and its import-time source
+
+Raised directly: emails across the system are "either mistyped or wrong and need to be updated," with one concrete symptom — a trailing comma that fails with "invalid email" when trying to fix it. Investigated against the live database before touching anything.
+
+### What was actually wrong
+Confirmed directly against the database: `users.email` (every login account) and `teachers.email` were completely clean — zero malformed entries anywhere. The real problem was isolated to 8 students at Trinity International School, whose `parentEmail`/`motherEmail`/`fatherEmail` had a trailing comma (e.g. `"name@gmail.com,"`) — a CSV bulk-import artifact. Traced the root cause: `import-export.js`'s own email-format check (`/^[^\s@]+@[^\s@]+\.[^\s@]+$/`, used 5 times in that file and duplicated in 4 other routes) only excludes whitespace and `@` — a comma isn't either, so it let the malformed value straight through as "valid" at import time. Every subsequent edit re-validates with the stricter `z.string().email()`, which correctly rejects that same value — but `motherEmail`/`fatherEmail` had **no edit field anywhere in the app** once a student existed past admissions (only settable in the original admission form, `AddSlideOver.jsx`), so there was no way to actually fix them. Worse: `StudentProfile.jsx`'s edit form spreads the *entire* student record into local state and resubmits every field on any save — so even editing `parentEmail` (which does have a field) still failed, because the untouched, still-broken `motherEmail` was silently included in the same request and rejected the whole update.
+
+### Fix
+- Tightened the loose email regex everywhere it appeared (`import-export.js`, `users.js`, `platform.js`, `onboard.js`, `academic-config.js` — 11 occurrences) to also exclude commas.
+- Added `motherEmail`/`fatherEmail` as real editable fields in `StudentProfile.jsx`'s Overview/Guardian card (previously view-only, and only ever settable at admission) — closing the actual gap that made this unfixable through the product.
+- Added `.trim()` to `parentEmail`/`motherEmail`/`fatherEmail` in `StudentCreateSchema`/`StudentUpdateSchema` — a copy-pasted address with stray whitespace is now cleaned up instead of failing outright (trim never masks a real problem like a trailing comma, which isn't whitespace).
+- Directly corrected the 15 already-broken values (8 students, 3 fields) in the live database — verified zero malformed emails remain in any of `students.{parentEmail,motherEmail,fatherEmail}`, `users.email`, or `teachers.email`, across every school.
+
+### Verified
+5 new tests: `import-students-guardian-fields.test.js` (a trailing-comma import is now rejected, not silently accepted) and `students.test.js` (whitespace is trimmed and accepted; a trailing comma is still correctly rejected on `motherEmail`/`fatherEmail`; both fields can now be updated through the route at all). Full suite passing, zero regressions.
+
+### Files
+- `server/routes/import-export.js`, `users.js`, `platform.js`, `onboard.js`, `academic-config.js` — email regex tightened to exclude commas
+- `server/routes/students.js` — `.trim()` added to `parentEmail`/`motherEmail`/`fatherEmail`
+- `client/src/pages/students/StudentProfile.jsx` — `motherEmail`/`fatherEmail` are now real editable fields (Overview tab, view and edit modes)
+- `server/__tests__/routes/import-students-guardian-fields.test.js`, `students.test.js` — 5 new tests
+
+---
+
 ## [v5.152.0] — 2026-09-29 — fix(dashboard): "Academic Health" panel's link 404'd
 
 Real report: clicking "View" on the Dashboard's Academic Health leadership panel gave "Page not found." `/grades` was a real route once (`GradesPage.jsx`), removed when that page was consolidated into `ExamsPage.jsx`'s own Markbook tab and the newer standalone Report Cards module — this one `<Link>` was never updated when the route disappeared. Confirmed via `git log` that `/grades`/`/grades/:tab` genuinely existed and were removed, and grepped the entire client for any other reference to it — this was the only surviving one. Pointed it at `/exams`, the module that now actually hosts the per-student CA/HW/MT/ET grades this panel averages (Markbook tab), matching the pattern the other 3 leadership panels already use (each links to its own real top-level module: `/attendance`, `/finance`, `/behaviour`).

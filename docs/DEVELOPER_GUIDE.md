@@ -5619,3 +5619,30 @@ None of these 28 routes were ever actually open to unauthorized access.
 
 ### Files
 - `scripts/_rbac-scan.js` — `RBAC_RE` gained `timetableManageAccess(`, `attendanceConflictAccess(`, `_hasBulkImportGrant(`, `hasExplicitSubGrant(`
+
+## 92. A Mistyped Guardian Email Had No Way to Be Corrected — a Loose Import Regex, a Missing Edit Field, and a Whole-Record Resubmit (v5.153.0)
+
+Raised directly: emails across the system need fixing, "cuts across... users, staff, students and parents," with a concrete symptom — a trailing comma that fails "invalid email" when trying to remove it. Checked the actual database before assuming the claim's full scope was accurate.
+
+### What was actually wrong — narrower than reported, but real
+`users.email` (every login account) and `teachers.email`: zero malformed entries, confirmed by direct query against every real school. The actual problem was 8 students at Trinity International School, `parentEmail`/`motherEmail`/`fatherEmail` each carrying a trailing comma (`"name@gmail.com,"`) — 15 field-values total. Three compounding causes, each independently confirmed:
+
+1. **Import-time root cause.** `import-export.js`'s own email-format check — `/^[^\s@]+@[^\s@]+\.[^\s@]+$/`, used 5 times in that file and duplicated verbatim in `users.js`, `platform.js`, `onboard.js`, `academic-config.js` (11 occurrences total) — only excludes whitespace and `@`. A comma is neither, so `"name@gmail.com,"` matched as "valid" and was imported as-is from a real school's CSV.
+2. **No edit path existed.** Every subsequent edit re-validates with the stricter `z.string().email()` (no trim, rejects the comma correctly) — but `motherEmail`/`fatherEmail` had **zero edit UI anywhere in the app** once a student existed past admissions; the ONLY place that ever wrote them was the original admission form (`AddSlideOver.jsx`). A school had no self-service way to correct a bad value in either field, ever.
+3. **The confusing part — fixing the field you CAN see still failed.** `StudentProfile.jsx`'s `OverviewTab` does `const [form, setForm] = useState({ ...student })` — the entire record, including `motherEmail`/`fatherEmail`, which had no input to change them. Any save resubmits the whole `form` object. So an admin editing `parentEmail` (which DOES have a field) and removing its comma would still get "invalid email" on save — not because their fix was wrong, but because the untouched `motherEmail` (same broken value, same student, from the same import) was silently included in the same PUT and failed `StudentUpdateSchema`'s validation. From the admin's side this looked exactly like "I fixed it and it's still broken."
+
+### Fix
+- **Import validation, everywhere it's duplicated**: `[^\s@]` → `[^\s@,]` in all 11 occurrences across the 5 files — every other legal email character still allowed, only comma newly excluded.
+- **The actual missing capability**: added `motherEmail`/`fatherEmail` as real inputs in `StudentProfile.jsx`'s Guardian card (Overview tab), both view mode (`InfoRow`, shown only when either is set) and edit mode (`FField` + `<input type="email">`, always available) — this is the change that actually lets a school fix these going forward, independent of the regex fix.
+- **Defense in depth**: added `.trim()` to `parentEmail`/`motherEmail`/`fatherEmail` in `StudentCreateSchema`/`StudentUpdateSchema` (`z.string().trim().email()...`) — cleans up a copy-pasted address's stray whitespace before validating, without weakening anything: trim strips whitespace only, so a trailing comma is still correctly rejected.
+- **Data correction**: directly fixed the 15 already-broken values in production — stripped the trailing comma from each, re-validated the result against the tightened regex before writing, confirmed by direct query afterward that zero malformed emails remain in `students.{parentEmail,motherEmail,fatherEmail}`, `users.email`, or `teachers.email`, across every school.
+
+### Verified
+5 new tests: `import-students-guardian-fields.test.js` gained a case proving a trailing-comma import is now rejected (previously would have silently succeeded — reproduces the actual historical bug). `students.test.js` gained 4 cases: whitespace on `parentEmail` is trimmed and accepted; a trailing comma on `motherEmail`/`fatherEmail` is still correctly rejected (proving trim didn't accidentally loosen anything); and both fields can now be updated through `PUT /:id` at all (previously untested because there was no reason to test a field nothing ever wrote to post-creation). Full suite passing (259 suites, 2692 tests), zero regressions.
+
+### Files
+- `server/routes/import-export.js`, `users.js`, `platform.js`, `onboard.js`, `academic-config.js` — email regex tightened to exclude commas (11 occurrences)
+- `server/routes/students.js` — `.trim()` added ahead of `.email()` for `parentEmail`/`motherEmail`/`fatherEmail`
+- `client/src/pages/students/StudentProfile.jsx` — `motherEmail`/`fatherEmail` are now real fields in the Guardian card, view and edit modes
+- `server/__tests__/routes/import-students-guardian-fields.test.js` — 1 new test
+- `server/__tests__/routes/students.test.js` — 4 new tests
