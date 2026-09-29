@@ -46,6 +46,22 @@ function computeNav(configurableModules, moduleConfig, userRole, userPermissions
     .filter(m => (cfgMap[m.key]?.enabled ?? true))
     .filter(m => {
       if (isAdminLevel) return true;
+      // 'hr' is a special case: EVERY staff member gets a self-service view
+      // (submit leave, view own payslip) regardless of what's granted in
+      // Settings → Roles & Permissions → HR & Payroll — HRPage.jsx itself
+      // already branches into "HR & Staff" (admin view) vs "My HR"
+      // (self-service) internally, and always offers the self-service tabs.
+      // Filtering the nav entry by the SAME permission matrix defeated that
+      // design: a role with nothing ticked under HR & Payroll (or one never
+      // re-saved since sub-permissions existed, leaving the key absent
+      // entirely) got the coarse 'hr' grant as an empty/missing array and
+      // lost the nav link — found 2026-09-29 checking the real role
+      // documents in production: 102 of 135 real role docs across live
+      // schools were in exactly this state, meaning most staff at most
+      // schools could reach "My HR" only by typing /hr directly, never via
+      // navigation. The route itself was never permission-gated — only
+      // discoverability was broken.
+      if (m.key === 'hr') return true;
       // No permissions loaded yet (e.g. cached session from before this fix) → show all
       if (!userPermissions) return true;
       // Module explicitly listed in permissions — must have at least one allowed action

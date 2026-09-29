@@ -1222,6 +1222,11 @@ export default function HelpPage() {
     return SECTIONS.filter(sec => {
       if (sec.moduleKey === null) return true;
       if (!(cfgMap[sec.moduleKey]?.enabled ?? true)) return false; // tenancy gate — unconditional
+      // 'hr' is a special case, same reasoning as Sidebar.jsx's computeNav:
+      // every staff member has self-service HR access (submit leave, view
+      // own payslip) regardless of what's granted in Settings, so the help
+      // section for it must stay visible even when can('hr') is false.
+      if (sec.moduleKey === 'hr') return true;
       return role === 'superadmin' || role === 'admin' || can(sec.moduleKey); // RBAC gate
     });
   }, [role, moduleConfig]); // `can` is a stable bound method — role/moduleConfig change are the only triggers
