@@ -6,6 +6,28 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.155.0] — 2026-09-29 — fix(hr): a single narrow HR sub-permission silently unlocked the entire HR & Staff page and several unrelated write routes
+
+Raised directly, with screenshots: a role (Admissions Officer) with only "View Leave Requests" checked in Settings → Roles & Permissions → HR & Payroll could nonetheless open the full "HR & Staff" page — staff directory, Add Staff / Import Staff / Activate Existing User, Payroll tab, Documents tab, and aggregate stat cards (Total Staff, Net Payroll) — none of which that single checkbox should have granted.
+
+### Root cause
+`_deriveApiPerms` (`server/routes/settings.js`) computes the COARSE `hr` permission array — the one a bare `rbac('hr', action)` call with no subKey reads — as the union of every action ticked across **all 6** HR & Payroll sub-rows. Ticking only "View Leave Requests" (view) therefore still produces `hr: ['read']`. Six server routes read that same coarse array directly with no subKey at all: `GET /summary`, `PUT /payroll-config`, `POST /payroll`, `PATCH /payroll/:id/status`, `POST /payroll/copy`, `DELETE /payroll/:id` — none of them scoped to what their own Settings row actually controls. Separately, `client/src/pages/hr/HRPage.jsx` gated its Staff/Payroll/Documents tabs and every action inside them off one coarse `isHR` flag (`isAdminLevel || can('hr','read')`), so any single sub-permission satisfying that same polluted coarse array unlocked the whole page. Most seriously: ticking a completely unrelated row's Edit box (e.g. "Approve / Reject Leave") would silently add `create`+`update` to the same shared array, reaching payroll write/config routes with no checkbox anywhere showing that had happened.
+
+### Fix
+- **Server** (`server/routes/hr.js`): `GET /summary` now requires the `HR_ROLES` floor with no sub-grant escape (`hrFloorOnly`) — it aggregates staff/leave/payroll data with no dedicated sub-permission of its own. The 5 payroll write/config routes now require `HR_ROLES` OR `hasExplicitSubGrant('hr','payroll_view', action)` (`payrollManageAccess`) — tied to the SAME `payroll_view` sub-key its own read routes already use, mirroring how `documents` already correctly gates its own create/update/delete.
+- **Client** (`client/src/pages/hr/HRPage.jsx`): replaced the single `isHR` gate with additive, capability-specific checks — `isHR` itself narrowed to an actual role-floor check (`admin`/`superadmin`/`hr`, matching the server's `hrFloorOnly`) for Staff tab, Add/Import/Activate Staff, and stat cards; `canApproveLeave`, `canManageWorkflow`, `canViewPayroll`/`canManagePayroll`/`canDeletePayroll`, and `canViewDocuments`/`canCreateDocument`/`canDeleteDocument` each independently unlock only their own tab/button. `useAuthStore.can()` (`client/src/store/auth.js`) gained an optional `subKey` parameter so the client can check a sub-permission (e.g. `hr__payroll_view`) directly instead of only the coarse module grant.
+
+### Verified
+10 new tests in `server/__tests__/routes/hr-coarse-permission-leak.test.js`: a non-floor role is denied `GET /summary` even when `hasExplicitSubGrant` would say yes for something else (proving the route never even asks); the 5 payroll routes are denied without `payroll_view`'s own grant, including the exact leak scenario (a different sub-permission granting the coarse action); the same routes succeed once `payroll_view` itself covers the action; the `HR_ROLES` floor is unaffected throughout. Full suite passing (261 suites, 2706 tests), zero regressions. Client change verified by `esbuild` syntax-check (no client test runner exists in this codebase) and manual trace of all 27 prior `isHR` call sites to confirm each was re-scoped to the correct new boolean.
+
+### Files
+- `server/routes/hr.js` — `hrFloorOnly` and `payrollManageAccess` helpers; applied to `GET /summary` and 5 payroll write/config routes
+- `client/src/pages/hr/HRPage.jsx` — `isHR` narrowed to a true role-floor check; added `canApproveLeave`, `canManageWorkflow`, `canViewPayroll`, `canManagePayroll`, `canDeletePayroll`, `canViewDocuments`, `canCreateDocument`, `canDeleteDocument`; TABS built additively; every affected button/query re-gated
+- `client/src/store/auth.js` — `can(feature, action, subKey)` gained the optional `subKey` parameter
+- `server/__tests__/routes/hr-coarse-permission-leak.test.js` — 10 new tests
+
+---
+
 ## [v5.154.0] — 2026-09-29 — fix(hr): two of the 7 "HR & Payroll" Settings toggles had nothing behind them; sidebar/permission refresh hardened
 
 Raised directly: a screenshot of Settings → Roles & Permissions → HR & Payroll's 7 sub-module checkboxes, asking whether each one actually works. Traced every one of the 7 keys (`staff`, `leave_view`, `leave_approve`, `payroll_view`, `payroll_export`, `documents`, `workflow`) against real server-side enforcement before answering.

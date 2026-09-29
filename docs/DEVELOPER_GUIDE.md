@@ -5679,3 +5679,50 @@ Checked the actual database for the admissions-officer account used as the examp
 - `client/src/pages/help/HelpPage.jsx` — updated HR & Payroll permissions help copy to match
 - `client/src/components/layout/AppShell.jsx` — added a 5-minute periodic `/api/auth/permissions` refresh
 - `server/__tests__/routes/hr-leave-view-permission.test.js` — 4 new tests
+
+## 94. A Single Narrow HR Sub-Permission Silently Unlocked the Entire HR & Staff Page and Several Unrelated Write Routes (v5.155.0)
+
+Direct follow-up to §93, with screenshots: an Admissions Officer role with only "View Leave Requests" checked could still open the full "HR & Staff" page — staff directory, Add Staff / Import Staff / Activate Existing User, Payroll tab, Documents tab, and the Total Staff / Net Payroll stat cards. None of that should follow from a single view-only leave checkbox.
+
+### Root cause
+`_deriveApiPerms` (`server/routes/settings.js:147-177`) writes TWO things per sub-row: the sub-key's own array (`hr__leave_view: ['read']`) and, critically, a coarse `hr` array that is the **union of every action ticked across all 6 rows** (`perms[mod] = [...actions]`, line 174). Checking only "View Leave Requests" therefore still produces `hr: ['read']` — the same array a bare `rbac('hr', action)` call with no subKey reads. Six hr.js routes did exactly that:
+
+```
+GET  /hr/summary              rbac('hr','read')    — no subKey
+PUT  /hr/payroll-config       rbac('hr','update')  — no subKey
+POST /hr/payroll              rbac('hr','create')  — no subKey
+PATCH /hr/payroll/:id/status  rbac('hr','update')  — no subKey
+POST /hr/payroll/copy         rbac('hr','create')  — no subKey
+DELETE /hr/payroll/:id        rbac('hr','delete')  — no subKey
+```
+
+None of these are scoped to what their own Settings row controls — they're scoped to "was ANY action anywhere in the module ever ticked." Worse than the leave_view case: ticking a completely different row's Edit box (e.g. "Approve / Reject Leave") contributes `create`+`update` to that same shared array, silently reaching the 4 payroll write routes with no checkbox anywhere showing that connection.
+
+On the client, `HRPage.jsx` compounded this: `isHR = isAdminLevel || can('hr','read')` gated the Staff tab, Payroll tab, Documents tab, and every action inside them off that same single polluted coarse flag — so the one bug made the entire page an all-or-nothing switch, tripped by any one of the 6 sub-permissions.
+
+### Fix
+**Server** (`hr.js`) — two new helpers, same shape as §93's `hr__leave_view` fix (additive to `HR_ROLES`, never a replacement):
+```js
+function hrFloorOnly(req, res, next) {
+  if (HR_ROLES.has(req.jwtUser?.role)) return next();
+  return res.status(403).json(...);
+}
+function payrollManageAccess(action) {
+  return async (req, res, next) => {
+    const allowed = HR_ROLES.has(req.jwtUser?.role) || await hasExplicitSubGrant(req, 'hr', 'payroll_view', action);
+    ...
+  };
+}
+```
+`GET /summary` now uses `hrFloorOnly` — it aggregates staff/leave/payroll data with no dedicated sub-permission of its own, so (unlike leave_view) there's no sub-key to delegate through; only a real HR-class role sees it. The 5 payroll write/config routes now use `payrollManageAccess(action)`, tied to the SAME `payroll_view` sub-key its own read routes (`GET /payroll`, `/payroll-config`, `/payroll-history*`) already used — mirroring how `documents` already correctly gated its own `create`/`update`/`delete` via `rbac('hr', action, 'documents')`. `payroll_view`'s Edit checkbox maps to `create`+`update` (the standard V/E/D convention every module uses), Delete to `delete` — there's no separate "Manage Payroll Records" row in Settings, so this is the only anchor available without new UI, and it's the one the label already implies.
+
+**Client** (`HRPage.jsx`) — `isHR` narrowed to an actual role-floor check (`isAdminLevel || user?.role === 'hr'`), matching every real school's `hr` role directly by its role key rather than through its (previously leaky) coarse grant — verified this doesn't regress any school: a live query across 3 schools' real `hr` role documents showed `teachers` permission is sometimes empty at the coarse-array level, confirming `isHR` was never actually reliable there anyway, and the new role-key check is a strictly more direct, equally-inclusive signal. Eight new booleans replace the single flag, each unlocking only its own capability: `canApproveLeave` (`hr__leave_approve`, gates the HR-final confirm/reject buttons — the workflow-step-eligibility approve/reject buttons earlier in the chain were already separately gated and untouched), `canManageWorkflow` (the `manage_workflow` literal — immune to the union-leak since no other row can ever produce that exact string), `canViewPayroll`/`canManagePayroll`/`canDeletePayroll` and `canViewDocuments`/`canCreateDocument`/`canDeleteDocument` (mirroring `payroll_view`'s and `documents`' own V/E/D). `TABS` is now built additively (`...(isHR ? [staff] : []), leave, ...(canViewPayroll ? [payroll] : (!isHR ? [payslip] : [])), ...(canViewDocuments ? [documents] : [])`) instead of a single `isHR ? 4 tabs : 2 tabs` switch. `useAuthStore.can()` (`auth.js`) gained an optional third `subKey` parameter — `can('hr', 'read', 'payroll_view')` checks `permissions['hr__payroll_view']` directly, falling back to the coarse grant only when the sub-key array is absent (mirrors `rbac.js`'s own subKey-falls-back-to-coarse rule; in practice never falls back once a role has been saved through current Settings, since every sub-key array is always written, even empty).
+
+### Verified
+10 new tests in `server/__tests__/routes/hr-coarse-permission-leak.test.js`: `GET /summary` denies a non-floor role even when `hasExplicitSubGrant` is mocked to return true (proving the route never calls it at all — no escape hatch exists); each of the 5 payroll routes denies a role without `payroll_view`'s own grant, including the exact cross-contamination scenario (`hasExplicitSubGrant` returning false specifically reproduces "a different row's checkbox was ticked, this one wasn't"); the same routes succeed once `payroll_view` covers the specific action; the `HR_ROLES` floor is proven unaffected on both the allow side and the "never even calls hasExplicitSubGrant" side. Full suite: 261 suites, 2706 tests, zero regressions. Client change checked via `esbuild` syntax validation (no client test runner in this codebase) plus a manual trace of all 27 pre-existing `isHR` call sites to confirm each was re-scoped to its correct new boolean, not silently left on the old coarse flag.
+
+### Files
+- `server/routes/hr.js` — `hrFloorOnly`, `payrollManageAccess` helpers; applied to `GET /summary` and the 5 payroll write/config routes
+- `client/src/pages/hr/HRPage.jsx` — `isHR` narrowed to a role-floor check; 8 new capability-specific booleans; `TABS` built additively; every affected tab/button/query re-gated
+- `client/src/store/auth.js` — `can(feature, action, subKey)` gained the optional `subKey` parameter
+- `server/__tests__/routes/hr-coarse-permission-leak.test.js` — 10 new tests
