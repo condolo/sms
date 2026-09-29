@@ -5600,3 +5600,22 @@ Two layers, deliberately not just one — a `Content-Type` header from any clien
 - `server/routes/lessons.js` — `POST /plans/import/preview`'s `extractDocxRows` call wrapped in try/catch
 - `client/src/pages/lessons/LessonsPage.jsx` — `handlePreview()` validates the real extension before upload
 - `server/__tests__/routes/lessons-plans-import.test.js` — 1 new test
+
+## 91. "RBAC Coverage Gate" Failing on Every Push — 28 False Positives in the CI Scanner, Not Real Gaps (v5.151.0)
+
+Raised directly: the GitHub Action kept failing after every push. Rather than assume the gate was correct and start bolting `rbac()` calls onto 28 routes, investigated each one against its actual code first — every single one already had real, working authorization; `scripts/_rbac-scan.js`'s regex just didn't recognize the specific pattern in use.
+
+`_rbac-scan.js` already carried an allowlist of recognized-but-non-standard protection patterns (`_pdfAccess`, `_can(`, `_typeGuard`, `behaviourAccess(` — each added previously for the exact same reason: a real, working guard the scanner's plain `rbac(` regex didn't match). This just extends that same list with 3 more names, confirmed real one at a time:
+
+- **`timetableManageAccess(action)`** (19 of the 28 flagged routes, all of `timetable.js`) — `function timetableManageAccess(action) { return async (req,res,next) => { if (ScopeEngine.TIMETABLE_FLOOR_ROLES.has(role)) return next(); if (await hasExplicitSubGrant(req,'timetable','manage',action)) return next(); return E.forbidden(...); }; }`. Checked all 19 call sites individually — every one calls it directly on the route registration line.
+- **`attendanceConflictAccess(action)`** (3 routes) — same shape, `attendance.js`'s equivalent for its conflict-resolution routes.
+- **`hasExplicitSubGrant(...)` called inline, unwrapped** (1 route: `attendance.js`'s `GET /absentee-officer-config`) — the real primitive both wrappers above call internally, but here invoked directly inside the handler body instead of through a named middleware wrapper. This is the SAME mechanism `rbac()` itself is built on, just reached for by hand where a check doesn't fit `rbac()`'s coarse module+action shape (here, a distinct `'absentees'` sub-key). Recognizing the primitive itself, not just wrappers around it, was the fix for this one — several other places in the codebase call it the same unwrapped way.
+- **`_hasBulkImportGrant(req)`** (2 routes: `lessons.js`'s `/plans/import/preview` and `/plans/import/commit`) — a local one-line wrapper (`return hasExplicitSubGrant(req, 'lessons', 'import', 'create')`, plus a floor-role bypass) called inline in the handler body. Its own definition contains `hasExplicitSubGrant(`, but that string isn't in the scanner's 4-line context window at the CALL site — only the wrapper's own name is — so it needed its own explicit allowlist entry.
+
+None of these 28 routes were ever actually open to unauthorized access.
+
+### Verified
+`node scripts/verify-rbac-coverage.js`: 484/512 (94.53%) → 512/512 (100.00%) — exactly the 28 previously-flagged routes, mathematically guaranteed by construction (a new recognized pattern can only reclassify an already-flagged route as protected; it can never change `total` or affect a route not already flagged). Matches the committed 100.00% baseline exactly, so no `--update-baseline` ratchet was needed. `scripts/verify-tenant-coverage.js` re-run, confirmed unaffected (still held at ceiling 35 — this change touches only the RBAC scanner). Full suite passing, zero regressions — no application code changed, only `scripts/_rbac-scan.js`'s recognized-pattern list.
+
+### Files
+- `scripts/_rbac-scan.js` — `RBAC_RE` gained `timetableManageAccess(`, `attendanceConflictAccess(`, `_hasBulkImportGrant(`, `hasExplicitSubGrant(`

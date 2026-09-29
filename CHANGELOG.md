@@ -6,6 +6,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.151.0] — 2026-09-29 — fix(ci): "RBAC Coverage Gate" was failing on every push — false positives in the scanner, not real gaps
+
+Raised directly: the GitHub Action "Security Scan / RBAC Coverage Gate" had been failing on every push. Investigated each of the 28 flagged endpoints individually rather than assuming the gate was right — all 28 turned out to already have real, working authorization; the CI scanner (`scripts/_rbac-scan.js`) just didn't recognize the specific pattern each one used:
+
+- **19 routes in `timetable.js`** use `timetableManageAccess(action)` — a real wrapper (floor-role bypass, else `hasExplicitSubGrant('timetable', 'manage', action)`, else 403) — just not literally named `rbac(...)`.
+- **3 routes in `attendance.js`** (`/conflicts`, `/conflicts/:id/resolve`, `/conflict-officer-config`) use the equivalent `attendanceConflictAccess(action)` wrapper.
+- **1 route in `attendance.js`** (`GET /absentee-officer-config`) and **2 routes in `lessons.js`** (`/plans/import/preview`, `/plans/import/commit`) check authorization inline in the handler body — `hasExplicitSubGrant(...)` directly, or lessons.js's own `_hasBulkImportGrant()` wrapper around it — rather than as route-level middleware.
+
+None of these were ever actually open; the scanner's regex (`RBAC_RE`) simply didn't include these three additional names alongside the ones it already recognized (`_pdfAccess`, `_can(`, `_typeGuard`, `behaviourAccess(`). Added `timetableManageAccess(`, `attendanceConflictAccess(`, `_hasBulkImportGrant(`, and the underlying `hasExplicitSubGrant(` primitive itself (used inline, unwrapped, in several other places) to the recognized-pattern list, with the same reasoning documented inline as every prior addition to that list.
+
+### Verified
+Re-ran `scripts/verify-rbac-coverage.js` before and after: 484/512 (94.53%) → 512/512 (100.00%), exactly the 28 previously-flagged endpoints and no others — mathematically guaranteed by construction, since a new recognized pattern can only move a route from "flagged" to "protected," never change which routes are scanned at all or affect a route already counted as protected. Coverage now matches the committed 100.00% baseline exactly, so the gate passes without needing a baseline ratchet. `scripts/verify-tenant-coverage.js` re-run and confirmed unaffected (still held at ceiling 35). Full suite passing, zero regressions — this change touches only a CI scanner script, not application code.
+
+### Files
+- `scripts/_rbac-scan.js` — 4 new recognized protection patterns added to `RBAC_RE`
+
+---
+
 ## [v5.150.0] — 2026-09-29 — fix(lessons): uploading a non-.docx file to Lesson Plan Import crashed with a bare 500
 
 Real teacher report, screenshot in hand: uploading `YEAR 6 ENGLISH LESSON PLANS.pdf` to Import Lesson Plans showed "Internal server error" with no explanation, and no clear next step.
