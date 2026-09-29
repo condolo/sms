@@ -521,7 +521,29 @@ router.put('/school', authMiddleware, rbac('settings', 'update'), async (req, re
           ? await tenantModel('users', tenantContext(req)).find({ schoolId: req.jwtUser.schoolId, id: { $in: userIds }, isActive: { $ne: false } }).select('id').lean()
           : [];
         const realUserIds = new Set(realUsers.map(u => u.id));
-        const unknownUserIds = userIds.filter(id => !realUserIds.has(id));
+        let unknownUserIds = userIds.filter(id => !realUserIds.has(id));
+
+        // Dual ID forms — a handful of legacy accounts were created with no
+        // `id` (UUID) field at all, only Mongo's own _id (found 2026-09-29:
+        // 2 real, active users at a live school, each with an existing
+        // Per-User permission override keyed by that _id string, since it
+        // was the only identifier available when the override was first
+        // saved). Without this fallback, the `id`-only check above can
+        // never validate that key — silently blocking EVERY future
+        // permission save for the WHOLE school, not just that one row,
+        // with a cryptic raw ObjectId in the error and no way for an admin
+        // to self-serve a fix.
+        if (unknownUserIds.length) {
+          const oidCandidates = unknownUserIds.filter(id => /^[a-f\d]{24}$/i.test(id));
+          if (oidCandidates.length) {
+            const byOid = await tenantModel('users', tenantContext(req))
+              .find({ schoolId: req.jwtUser.schoolId, _id: { $in: oidCandidates.map(id => new mongoose.Types.ObjectId(id)) }, isActive: { $ne: false } })
+              .select('_id').lean();
+            const foundOids = new Set(byOid.map(u => String(u._id)));
+            unknownUserIds = unknownUserIds.filter(id => !foundOids.has(id));
+          }
+        }
+
         if (unknownUserIds.length) {
           return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: `Not a real, active user in this school: ${unknownUserIds.join(', ')}` } });
         }
