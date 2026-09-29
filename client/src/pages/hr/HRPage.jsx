@@ -735,12 +735,29 @@ export default function HRPage() {
   const can    = useAuthStore(s => s.can.bind(s));
   const sym    = school?.currencySymbol ?? 'KSh';
   const isAdminLevel = user?.role === 'admin' || user?.role === 'superadmin';
-  /* Was: HR_ROLES.includes(user?.role) — a hardcoded ['superadmin','admin','hr']
-     array with no Settings equivalent, same bug class as v5.115.0/v5.115.1.
-     Real gate is the coarse hr:read grant the server's own GET /hr/summary
-     enforces (rbac('hr','read')) — 'hr' role has it by default, matching the
-     old array exactly, but now any role can be granted it live via Settings. */
-  const isHR   = isAdminLevel || can('hr', 'read');
+  /* isHR = true HR-class access (staff directory, aggregate stats — the
+     things with no sub-permission of their own). Used to be isAdminLevel ||
+     can('hr','read') (the COARSE grant) — but settings.js's _deriveApiPerms
+     unions every sub-row's ticked actions into that same coarse array, so a
+     role granted ONLY 'View Leave Requests' satisfied it too, and got the
+     full Staff/Payroll/Documents page meant only for real HR (2026-09-29,
+     found auditing why an Admissions Officer with just that one box ticked
+     could see the entire staff directory + Add/Import/Activate Staff).
+     Narrowed to an actual role-floor check, mirroring the server's own
+     hrFloorOnly (hr.js's GET /summary) — matches every real school's 'hr'
+     role today (that role's own key already satisfies this directly) with
+     zero dependency on what its coarse array happens to contain. Each of
+     the 6 Settings sub-permissions now ADDITIONALLY, independently unlocks
+     only its own specific capability below — never the whole page. */
+  const isHR   = isAdminLevel || user?.role === 'hr';
+  const canApproveLeave   = isHR || can('hr', 'update', 'leave_approve');
+  const canManageWorkflow = isHR || can('hr', 'manage_workflow');
+  const canViewPayroll    = isHR || can('hr', 'read',   'payroll_view');
+  const canManagePayroll  = isHR || can('hr', 'create', 'payroll_view');
+  const canDeletePayroll  = isHR || can('hr', 'delete', 'payroll_view');
+  const canViewDocuments  = isHR || can('hr', 'read',   'documents');
+  const canCreateDocument = isHR || can('hr', 'create', 'documents');
+  const canDeleteDocument = isHR || can('hr', 'delete', 'documents');
 
   const [tab, setTab]                 = useState(() => isHR ? 'staff' : 'leave');
   const [showLeaveForm, setLeaveForm] = useState(false);
@@ -783,28 +800,28 @@ export default function HRPage() {
   const { data: workflowConfigData } = useQuery({
     queryKey: ['hr','leave','workflow-config'],
     queryFn:  () => hrApi.leave.workflowConfig(),
-    enabled:  isHR,
+    enabled:  isHR || canApproveLeave || canManageWorkflow,
   });
   const workflowConfig = workflowConfigData?.data?.steps?.length ? workflowConfigData.data : null;
 
   const { data: payrollData, isLoading: payLoading } = useQuery({
     queryKey: ['hr','payroll', payPeriod],
     queryFn:  () => hrApi.payroll.list({ period: payPeriod }),
-    enabled:  isHR,
+    enabled:  canViewPayroll,
     staleTime: 0,
   });
 
   const { data: myPayrollData, isLoading: myPayLoading } = useQuery({
     queryKey: ['hr','payroll','mine', payPeriod],
     queryFn:  () => hrApi.payroll.mine({ period: payPeriod }),
-    enabled:  !isHR,
+    enabled:  !canViewPayroll,
     staleTime: 0,
   });
 
   const { data: docsData, isLoading: docsLoading } = useQuery({
     queryKey: ['hr','documents', docStaffFilter],
     queryFn:  () => hrApi.documents.list(docStaffFilter ? { staffId: docStaffFilter } : {}),
-    enabled:  tab === 'documents' && isHR,
+    enabled:  tab === 'documents' && canViewDocuments,
     staleTime: 60_000,
   });
 
@@ -832,12 +849,14 @@ export default function HRPage() {
     staleTime: 60_000,
   });
 
-  // Fetch custom roles so we can offer them in the Create Login modal
+  // Fetch custom roles so we can offer them in the Create Login modal, and
+  // so a leave/payroll workflow-chain delegate (not necessarily isHR) sees
+  // custom roles as assignee options in WorkflowConfigModal.
   const { data: customRolesData } = useQuery({
     queryKey: ['settings', 'custom-roles'],
     queryFn:  () => settingsApi.customRoles.list(),
     select:   r => r?.data ?? [],
-    enabled:  isHR,
+    enabled:  isHR || canManageWorkflow,
     staleTime: 60_000,
   });
 
@@ -1070,17 +1089,17 @@ export default function HRPage() {
 
   const docs = docsData?.data ?? docsData?.documents ?? [];
 
-  const TABS = isHR
-    ? [
-        { id:'staff',     label:'Staff',     Icon: Users      },
-        { id:'leave',     label:`Leave${pendingLeaves.length ? ` (${pendingLeaves.length})` : ''}`, Icon: Calendar },
-        { id:'payroll',   label:'Payroll',   Icon: Wallet     },
-        { id:'documents', label:'Documents', Icon: FolderOpen },
-      ]
-    : [
-        { id:'leave',   label:'My Leaves',  Icon: Calendar },
-        { id:'payslip', label:'My Payslip', Icon: Wallet   },
-      ];
+  // Additive: each capability unlocks only its own tab, never the whole
+  // page — see isHR's own comment above for why this replaced a single
+  // all-or-nothing flag.
+  const TABS = [
+    ...(isHR ? [{ id:'staff', label:'Staff', Icon: Users }] : []),
+    { id:'leave', label:`${isHR ? 'Leave' : 'My Leaves'}${pendingLeaves.length ? ` (${pendingLeaves.length})` : ''}`, Icon: Calendar },
+    ...(canViewPayroll
+      ? [{ id:'payroll', label:'Payroll', Icon: Wallet }]
+      : (!isHR ? [{ id:'payslip', label:'My Payslip', Icon: Wallet }] : [])),
+    ...(canViewDocuments ? [{ id:'documents', label:'Documents', Icon: FolderOpen }] : []),
+  ];
 
   const prevPeriod = getPrevPeriod(payPeriod);
 
@@ -1132,7 +1151,7 @@ export default function HRPage() {
           <p className="text-slate-500 text-sm mt-0.5">{isHR ? 'Leave management, payroll, and staff overview.' : 'Your leave requests and payslips.'}</p>
         </div>
         <div className="flex items-center gap-2">
-          {tab === 'documents' && isHR && (
+          {tab === 'documents' && canCreateDocument && (
             <button onClick={() => setDocForm(true)} className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition">
               <Plus size={14} /> Add Document
             </button>
@@ -1426,7 +1445,7 @@ export default function HRPage() {
       {/* ── LEAVE TAB ── */}
       {tab === 'leave' && (
         <div className="space-y-3">
-          {isHR && (
+          {canManageWorkflow && (
             <div className="flex justify-end">
               <button onClick={() => setShowWorkflowConfig(true)}
                 className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">
@@ -1477,7 +1496,7 @@ export default function HRPage() {
                         </button>
                       </div>
                     )}
-                    {isHR && l.status === 'pending' && atHrFinal && (
+                    {canApproveLeave && l.status === 'pending' && atHrFinal && (
                       <div className="flex gap-1.5 shrink-0">
                         <button onClick={() => resolveLeave.mutate({ id: l.id, status:'approved' })}
                           className="flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 transition">
@@ -1534,7 +1553,7 @@ export default function HRPage() {
       )}
 
       {/* ── PAYROLL TAB ── */}
-      {tab === 'payroll' && isHR && (
+      {tab === 'payroll' && canViewPayroll && (
         <div className="space-y-4">
           {/* Toolbar */}
           <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -1545,17 +1564,19 @@ export default function HRPage() {
                 className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400/40" />
 
               {/* Copy from previous period */}
-              <button
-                onClick={() => copyPayroll.mutate({ sourcePeriod: prevPeriod, targetPeriod: payPeriod })}
-                disabled={copyPayroll.isPending}
-                title={`Copy salary data from ${fmtPeriodLabel(prevPeriod)}`}
-                className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition"
-              >
-                {copyPayroll.isPending
-                  ? <Loader2 size={13} className="animate-spin" />
-                  : <Copy size={13} />}
-                Copy from {fmtPeriodLabel(prevPeriod)}
-              </button>
+              {canManagePayroll && (
+                <button
+                  onClick={() => copyPayroll.mutate({ sourcePeriod: prevPeriod, targetPeriod: payPeriod })}
+                  disabled={copyPayroll.isPending}
+                  title={`Copy salary data from ${fmtPeriodLabel(prevPeriod)}`}
+                  className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition"
+                >
+                  {copyPayroll.isPending
+                    ? <Loader2 size={13} className="animate-spin" />
+                    : <Copy size={13} />}
+                  Copy from {fmtPeriodLabel(prevPeriod)}
+                </button>
+              )}
 
               {copyPayroll.isSuccess && (
                 <span className="text-xs text-emerald-600 font-medium">
@@ -1568,14 +1589,18 @@ export default function HRPage() {
 
             {/* Right: settings + add + export */}
             <div className="flex items-center gap-2">
-              <button onClick={() => setShowPayrollSettings(true)}
-                className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 transition">
-                <Settings size={13} /> Payroll Settings
-              </button>
-              <button onClick={() => setPayrollModal({ mode:'add', record: null })}
-                className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-violet-700 transition">
-                <Plus size={13} /> Add Entry
-              </button>
+              {canManagePayroll && (
+                <button onClick={() => setShowPayrollSettings(true)}
+                  className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 transition">
+                  <Settings size={13} /> Payroll Settings
+                </button>
+              )}
+              {canManagePayroll && (
+                <button onClick={() => setPayrollModal({ mode:'add', record: null })}
+                  className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-violet-700 transition">
+                  <Plus size={13} /> Add Entry
+                </button>
+              )}
               {payrollRecs.length > 0 && (
                 <button onClick={exportPayrollCSV}
                   className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 transition">
@@ -1604,10 +1629,12 @@ export default function HRPage() {
               <p className="text-xs text-slate-400 mt-1 mb-4">
                 Add entries manually or copy from a previous month.
               </p>
-              <button onClick={() => setPayrollModal({ mode:'add', record: null })}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 transition">
-                <Plus size={13} /> Add Entry
-              </button>
+              {canManagePayroll && (
+                <button onClick={() => setPayrollModal({ mode:'add', record: null })}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 transition">
+                  <Plus size={13} /> Add Entry
+                </button>
+              )}
             </div>
           ) : (
             <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
@@ -1667,7 +1694,7 @@ export default function HRPage() {
                           <td className="px-4 py-3">
                             <div className="flex items-center justify-center gap-1">
                               {/* Edit — only on draft records */}
-                              {canEdit && (
+                              {canEdit && canManagePayroll && (
                                 <button
                                   onClick={() => setPayrollModal({ mode:'edit', record: p })}
                                   className="p-1.5 rounded-lg text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition opacity-0 group-hover:opacity-100"
@@ -1676,7 +1703,7 @@ export default function HRPage() {
                                 </button>
                               )}
                               {/* Confirm — draft → confirmed (HR) */}
-                              {isDraft && (
+                              {isDraft && canManagePayroll && (
                                 <button
                                   disabled={isSettingStatus}
                                   onClick={() => setPayrollStatus.mutate({ id: p.id, status: 'confirmed' })}
@@ -1704,6 +1731,7 @@ export default function HRPage() {
                                 {downloadingPayslip === p.id ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
                               </button>
                               {/* Delete */}
+                              {canDeletePayroll && (
                               <button
                                 disabled={isDeleting || deletePayroll.isPending}
                                 onClick={() => {
@@ -1716,6 +1744,7 @@ export default function HRPage() {
                                 title="Delete">
                                 {isDeleting ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
                               </button>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -1740,7 +1769,7 @@ export default function HRPage() {
       )}
 
       {/* ── DOCUMENTS TAB ── */}
-      {tab === 'documents' && isHR && (
+      {tab === 'documents' && canViewDocuments && (
         <div className="space-y-4">
           {/* Filter by staff */}
           <div className="flex items-center gap-3">
@@ -1764,7 +1793,9 @@ export default function HRPage() {
             <div className="text-center py-16">
               <FolderOpen size={32} className="mx-auto text-slate-300 mb-3" />
               <p className="text-slate-500 text-sm">No documents recorded yet.</p>
-              <button onClick={() => setDocForm(true)} className="mt-3 text-violet-600 text-sm hover:underline">Add first document</button>
+              {canCreateDocument && (
+                <button onClick={() => setDocForm(true)} className="mt-3 text-violet-600 text-sm hover:underline">Add first document</button>
+              )}
             </div>
           ) : (
             <div className="grid md:grid-cols-2 gap-3">
@@ -1793,12 +1824,14 @@ export default function HRPage() {
                           </a>
                         )}
                       </div>
-                      <button
-                        onClick={() => { if (confirm(`Remove "${d.name}"?`)) removeDoc.mutate(d.id ?? d._id); }}
-                        className="shrink-0 p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition opacity-0 group-hover:opacity-100"
-                        title="Remove document">
-                        <Trash2 size={13} />
-                      </button>
+                      {canDeleteDocument && (
+                        <button
+                          onClick={() => { if (confirm(`Remove "${d.name}"?`)) removeDoc.mutate(d.id ?? d._id); }}
+                          className="shrink-0 p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition opacity-0 group-hover:opacity-100"
+                          title="Remove document">
+                          <Trash2 size={13} />
+                        </button>
+                      )}
                     </div>
                   </motion.div>
                 );
@@ -1809,7 +1842,7 @@ export default function HRPage() {
       )}
 
       {/* ── MY PAYSLIP TAB (non-HR staff only) ── */}
-      {tab === 'payslip' && !isHR && (
+      {tab === 'payslip' && !canViewPayroll && (
         <div className="space-y-4">
           <div className="flex items-center gap-3">
             <label className="text-sm font-medium text-slate-700">Pay Period:</label>

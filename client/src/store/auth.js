@@ -164,12 +164,24 @@ const useAuthStore = create((set, get) => ({
   clearError()          { set({ error: null }); },
 
   /** Permission check helper.
-   *  can(feature)         — true if role is admin/superadmin or has ≥1 action for feature
-   *  can(feature, action) — true only if that SPECIFIC action ('read'/'create'/'update'/'delete')
-   *                         is granted, e.g. distinguishing "can view" from "can manage" when a
-   *                         module (like library) grants broad read access by default but reserves
-   *                         write actions for specific roles. */
-  can(feature, action) {
+   *  can(feature)                  — true if role is admin/superadmin or has ≥1 action for feature
+   *  can(feature, action)          — true only if that SPECIFIC action ('read'/'create'/'update'/'delete')
+   *                                  is granted, e.g. distinguishing "can view" from "can manage" when a
+   *                                  module (like library) grants broad read access by default but reserves
+   *                                  write actions for specific roles.
+   *  can(feature, action, subKey)  — checks the sub-permission `${feature}__${subKey}` (e.g.
+   *                                  'hr__payroll_view') instead of the coarse feature grant. Mirrors
+   *                                  rbac.js's own subKey-falls-back-to-coarse rule server-side: since
+   *                                  Settings always writes an explicit (possibly empty) array for every
+   *                                  sub-key once a role has been saved, this only actually falls back
+   *                                  to the coarse grant for a role never re-saved since sub-keys existed.
+   *                                  Added 2026-09-29 — HRPage.jsx used to gate its Staff/Payroll/
+   *                                  Documents tabs off the coarse 'hr' grant alone, which a single
+   *                                  narrow sub-permission (e.g. just 'View Leave Requests') silently
+   *                                  satisfies too (settings.js's _deriveApiPerms unions every sub-row's
+   *                                  actions into the coarse key) — this lets a feature ask for its OWN
+   *                                  sub-permission specifically instead. */
+  can(feature, action, subKey) {
     const { session } = get();
     if (!session) return false;
     const { role, permissions = {} } = session.user ?? {};
@@ -177,6 +189,11 @@ const useAuthStore = create((set, get) => ({
     // null permissions means full access (superadmin path above handles this,
     // but guard here too in case permissions arrives as null from the server)
     if (permissions === null) return true;
+    if (subKey) {
+      const subFullKey = `${feature}__${subKey}`;
+      const sp = permissions[subFullKey];
+      if (Array.isArray(sp)) return action ? sp.includes(action) : sp.length > 0;
+    }
     const p = permissions[feature];
     if (Array.isArray(p)) return action ? p.includes(action) : p.length > 0;
     return action ? false : !!p;

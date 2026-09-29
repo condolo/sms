@@ -49,6 +49,43 @@ router.use(authMiddleware, PLAN, moduleGate('hr'));
 const HR_ROLES    = new Set(['superadmin', 'admin', 'hr']);
 const ADMIN_ROLES = new Set(['superadmin', 'admin']);
 
+/* Settings' HR & Payroll table computes the COARSE 'hr' array (the one
+   a bare rbac('hr', action) with no subKey reads) as the UNION of every
+   action ticked across ALL 6 sub-rows (server/routes/settings.js's
+   _deriveApiPerms) — e.g. ticking ONLY 'Approve / Reject Leave''s Edit
+   box contributes create+update to that same shared array a completely
+   unrelated route might read. A bare rbac('hr', action) call is
+   therefore never actually scoped to what its own Settings row
+   controls; it's scoped to "was ANY box anywhere in this module ticked
+   with this action." Found 2026-09-29 auditing why a role granted only
+   read-only 'View Leave Requests' could also reach GET /summary, and
+   why ticking a different row's Edit box would silently reach payroll
+   write routes with no corresponding checkbox ever shown for it.
+   These two helpers give the affected routes a real, specific floor:
+   hrFloorOnly for capabilities with no dedicated sub-permission of
+   their own (never delegable via a checkbox — same posture as the
+   'workflow' sub's own literal-string special case above it), and
+   payrollManageAccess for payroll's write/config routes, tied to the
+   SAME 'payroll_view' sub-key its own read routes already use (V/E/D
+   on 'View Payroll' governs payroll read AND write — mirrors how
+   'documents' already correctly gates its own create/update/delete
+   via rbac('hr', action, 'documents')). Both are additive to the
+   HR_ROLES floor, never a replacement — identical shape to the
+   hr__leave_view fix above. */
+function hrFloorOnly(req, res, next) {
+  if (HR_ROLES.has(req.jwtUser?.role)) return next();
+  return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: "Your role does not have 'read' permission on 'hr'" } });
+}
+function payrollManageAccess(action) {
+  return async (req, res, next) => {
+    const allowed = HR_ROLES.has(req.jwtUser?.role) || await hasExplicitSubGrant(req, 'hr', 'payroll_view', action);
+    if (!allowed) {
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: `Your role does not have '${action}' permission on 'hr' (payroll_view)` } });
+    }
+    next();
+  };
+}
+
 /* ── Validation schemas ──────────────────────────────────────── */
 const LeaveSchema = z.object({
   type:          z.enum(['annual','sick','emergency','maternity','paternity','unpaid']),
@@ -612,7 +649,7 @@ router.get('/payroll-config', rbac('hr', 'read', 'payroll_view'), async (req, re
 });
 
 /* PUT /api/hr/payroll-config — save/update (upsert) */
-router.put('/payroll-config', rbac('hr', 'update'), async (req, res) => {
+router.put('/payroll-config', payrollManageAccess('update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(PayrollConfigSchema, req.body);
@@ -715,7 +752,7 @@ router.get('/payroll', rbac('hr', 'read', 'payroll_view'), async (req, res) => {
 });
 
 /* POST /api/hr/payroll — create or update a payroll record */
-router.post('/payroll', rbac('hr', 'create'), async (req, res) => {
+router.post('/payroll', payrollManageAccess('create'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
 
@@ -880,7 +917,7 @@ router.post('/payroll', rbac('hr', 'create'), async (req, res) => {
 });
 
 /* PATCH /api/hr/payroll/:id/status — advance payroll lifecycle */
-router.patch('/payroll/:id/status', rbac('hr', 'update'), async (req, res) => {
+router.patch('/payroll/:id/status', payrollManageAccess('update'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
 
@@ -1073,7 +1110,7 @@ router.patch('/payroll/:id/advance', authMiddleware, async (req, res) => { // rb
 });
 
 /* POST /api/hr/payroll/copy — copy records from one period to another */
-router.post('/payroll/copy', rbac('hr', 'create'), async (req, res) => {
+router.post('/payroll/copy', payrollManageAccess('create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
 
@@ -1150,7 +1187,7 @@ router.post('/payroll/copy', rbac('hr', 'create'), async (req, res) => {
 });
 
 /* DELETE /api/hr/payroll/:id — remove a payroll record by its ID */
-router.delete('/payroll/:id', rbac('hr', 'delete'), async (req, res) => {
+router.delete('/payroll/:id', payrollManageAccess('delete'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
 
@@ -1379,7 +1416,7 @@ router.delete('/documents/:id', rbac('hr', 'delete', 'documents'), async (req, r
    SUMMARY — headcount + current-month payroll totals
    Uses aggregation instead of full JS-side filtering.
    ══════════════════════════════════════════════════════════════ */
-router.get('/summary', rbac('hr', 'read'), async (req, res) => {
+router.get('/summary', hrFloorOnly, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
 
