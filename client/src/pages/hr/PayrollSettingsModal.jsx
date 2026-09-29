@@ -87,7 +87,7 @@ function TypeCatalogueEditor({ title, hint, types, onChange }) {
   );
 }
 
-function AssigneePicker({ value, customRoles, teachers, onChange }) {
+function AssigneePicker({ value, builtInRoles, customRoles, teachers, onChange }) {
   const [kind, val] = value.assigneeValue ? [value.assigneeType, value.assigneeValue] : [value.assigneeType, ''];
   const fCls = 'rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-violet-400/40';
   return (
@@ -99,7 +99,7 @@ function AssigneePicker({ value, customRoles, teachers, onChange }) {
       {kind === 'role' ? (
         <select value={val} onChange={e => onChange({ ...value, assigneeValue: e.target.value })} className={`${fCls} flex-1`}>
           <option value="">Select a role…</option>
-          {BUILT_IN_STAFF_ROLES.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
+          {builtInRoles.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
           {customRoles.map(r => <option key={r.key} value={r.key}>{r.label} (custom)</option>)}
         </select>
       ) : (
@@ -180,7 +180,7 @@ function StatutorySection({ statutory, defaultApplyStatutory, onToggle }) {
   );
 }
 
-export default function PayrollSettingsModal({ teachers, customRoles, onClose }) {
+export default function PayrollSettingsModal({ teachers, builtInRoles = BUILT_IN_STAFF_ROLES, customRoles, onClose }) {
   const qc = useQueryClient();
   const { toast } = useToast();
 
@@ -336,7 +336,7 @@ export default function PayrollSettingsModal({ teachers, customRoles, onClose })
                   {steps.map((step, i) => (
                     <div key={i} className="flex items-center gap-2 bg-slate-50 rounded-lg p-2.5">
                       <span className="w-6 h-6 rounded-full bg-violet-100 text-violet-700 text-xs font-bold flex items-center justify-center shrink-0">{i + 1}</span>
-                      <AssigneePicker value={step} customRoles={customRoles} teachers={teachers} onChange={next => updateStep(i, next)} />
+                      <AssigneePicker value={step} builtInRoles={builtInRoles} customRoles={customRoles} teachers={teachers} onChange={next => updateStep(i, next)} />
                       <button onClick={() => removeStep(i)} disabled={steps.length <= 1}
                         className="text-slate-400 hover:text-red-600 p-1 disabled:opacity-30 disabled:cursor-not-allowed shrink-0"><Trash2 size={14} /></button>
                     </div>

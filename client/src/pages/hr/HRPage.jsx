@@ -897,6 +897,21 @@ export default function HRPage() {
   const roleColorMap = Object.fromEntries(allStaffRoles.map(r => [r.key, r.color]));
   const roleLabelMap = Object.fromEntries(allStaffRoles.map(r => [r.key, r.label]));
 
+  // A role hidden in Settings (school.hiddenSystemRoles — the eye-off icon
+  // next to a role in Roles & Permissions) must stop being newly assignable
+  // here too: HR's role pickers used to build their list purely from
+  // STAFF_ROLE_KEYS, independent of Settings' own hide toggle, so a role an
+  // admin hid there could still be handed to a new staff member, or picked
+  // as a workflow-chain assignee, from HR. This only affects NEW
+  // assignment — allStaffRoles (above) stays unfiltered so an existing
+  // staff member who already holds a hidden role still shows the correct
+  // badge label/color instead of falling back to a raw key.
+  const hiddenSystemRoles  = schoolSettingsData?.hiddenSystemRoles ?? [];
+  const assignableStaffRoles  = allStaffRoles.filter(r => !hiddenSystemRoles.includes(r.key));
+  const assignableBuiltInRoles = allStaffRoles
+    .filter(r => !hiddenSystemRoles.includes(r.key))
+    .filter(r => BUILT_IN_STAFF_ROLES.some(b => b.key === r.key));
+
   const pendingLeaves = leaves.filter(l => l.status === 'pending');
 
   /* ── Mutations ── */
@@ -1543,7 +1558,7 @@ export default function HRPage() {
       {showWorkflowConfig && (
         <WorkflowConfigModal
           config={workflowConfig}
-          builtInRoles={BUILT_IN_STAFF_ROLES}
+          builtInRoles={assignableBuiltInRoles}
           customRoles={customRolesData ?? []}
           teachers={teachers}
           saving={saveWorkflowConfig.isPending}
@@ -1938,6 +1953,7 @@ export default function HRPage() {
       {showPayrollSettings && (
         <PayrollSettingsModal
           teachers={teachers}
+          builtInRoles={assignableBuiltInRoles}
           customRoles={customRolesList}
           onClose={() => setShowPayrollSettings(false)}
         />
@@ -1963,7 +1979,7 @@ export default function HRPage() {
           departments={departments}
           subjects={subjectsList}
           responsibilities={responsibilities}
-          staffRoles={allStaffRoles}
+          staffRoles={assignableStaffRoles}
           isHR={isHR}
           onClose={() => setStaffModal(null)}
           saving={createTeacher.isPending || updateTeacher.isPending}
