@@ -1333,7 +1333,22 @@ export default function HRPage() {
           {(() => {
             const q = staffSearch.trim().toLowerCase();
             const filtered = teachers.filter(t => {
-              if (staffTypeFilter && t.staffType !== staffTypeFilter) return false;
+              if (staffTypeFilter) {
+                // 'teacher' is a special case, same reasoning as teachers.js's
+                // GET /?teachingOnly=true (server-side fix, same investigation):
+                // most schools never bother setting staffType for their
+                // majority-teacher headcount, so a strict equality check here
+                // undercounts real teachers to just the handful explicitly
+                // labeled — reported live: this exact filter, set to
+                // "Teacher", returned only 2 people at a school with over a
+                // dozen real teachers. Also match anyone with a populated
+                // subjects list, regardless of what staffType (if anything)
+                // they were given.
+                const isTeacherMatch = staffTypeFilter === 'teacher'
+                  ? (t.staffType === 'teacher' || (t.subjectIds ?? t.subjects ?? []).length > 0)
+                  : t.staffType === staffTypeFilter;
+                if (!isTeacherMatch) return false;
+              }
               if (!q) return true;
               return `${t.firstName} ${t.lastName}`.toLowerCase().includes(q) ||
                 (t.email ?? '').toLowerCase().includes(q) ||
