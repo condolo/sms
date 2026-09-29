@@ -267,6 +267,18 @@ export default function ReportCardsTab() {
         </div>
       ) : (
         <div className="space-y-4">
+          {genPayload.provisional && (
+            <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+              <AlertTriangle size={16} className="text-amber-500 flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-amber-800">
+                <span className="font-semibold">Provisional — not yet moderated.</span>{' '}
+                {genPayload.unmoderatedExams?.length === 1
+                  ? `"${genPayload.unmoderatedExams[0].title}" hasn't been moderated and approved yet.`
+                  : `${genPayload.unmoderatedExams?.length ?? 0} exams feeding these scores haven't been moderated and approved yet.`}{' '}
+                These numbers can still change before Publish will accept them.
+              </p>
+            </div>
+          )}
           <p className="text-xs text-slate-500">
             {students.length} student{students.length !== 1 ? 's' : ''} · {className} · Term {termNum} {academicYear && `· ${academicYear}`}
           </p>
@@ -288,6 +300,7 @@ export default function ReportCardsTab() {
               studentDeviations={deviationMap[student.studentId] ?? null}
               behaviourSummary={behaviourMap?.[student.studentId] ?? null}
               snapshot={snapshotsMap?.[student.studentId] ?? null}
+              observationConfig={{ enabled: !!config.showObservationRatings, categories: config.observationCategories ?? [] }}
             />
           ))}
         </div>

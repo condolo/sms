@@ -71,6 +71,49 @@ function Field({ label, value, onChange, multiline = false, readOnly = false, pl
   );
 }
 
+/* ── Class-teacher observation ratings (2026-09) ─────────────
+   School-defined categories (Settings → Report Cards → General),
+   each rated on a fixed Excellent/Good/Improve scale — the fixed
+   scale keeps the print grid's 3 columns meaningful across schools
+   even though the category list itself is fully configurable. ── */
+const RATING_VALUES = [
+  { value: 'excellent', label: 'Excellent' },
+  { value: 'good',      label: 'Good' },
+  { value: 'improve',   label: 'Improve' },
+];
+
+function ObservationRatingsGrid({ categories, ratings, onChange }) {
+  function setRating(category, value) {
+    onChange({ ...ratings, [category]: value });
+  }
+  return (
+    <div className="border-t border-slate-100 pt-3">
+      <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2">Class Teacher Observations</p>
+      <div className="space-y-1.5">
+        {categories.map(category => (
+          <div key={category} className="flex items-center gap-3 rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2">
+            <span className="text-xs font-medium text-slate-700 min-w-[130px]">{category}</span>
+            <div className="flex gap-4">
+              {RATING_VALUES.map(({ value, label }) => (
+                <label key={value} className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
+                  <input
+                    type="radio"
+                    name={`obs-${category}`}
+                    checked={ratings[category] === value}
+                    onChange={() => setRating(category, value)}
+                    className="accent-indigo-600"
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ── Section tab button ──────────────────────────────────── */
 function SectionTab({ active, onClick, icon: Icon, label }) {
   return (
@@ -90,6 +133,7 @@ export default function StudentReportCard({
   customTypes, gradeScale, instanceMarks,
   draftComment, onSaveComment, termNum, school, academicYear,
   studentDeviations, behaviourSummary, snapshot,
+  observationConfig,
 }) {
   const types      = customTypes ?? DEFAULT_CUSTOM_TYPES;
   // No local fallback — the server always returns the exact bands it used
@@ -127,6 +171,7 @@ export default function StudentReportCard({
     closingDate:        draftComment?.closingDate        ?? '',
     nextTermBegin:      draftComment?.nextTermBegin      ?? '',
     subjectComments:    draftComment?.subjectComments    ?? {},
+    observationRatings: draftComment?.observationRatings ?? {},
   });
 
   useEffect(() => {
@@ -140,6 +185,7 @@ export default function StudentReportCard({
       closingDate:        draftComment.closingDate        ?? '',
       nextTermBegin:      draftComment.nextTermBegin      ?? '',
       subjectComments:    draftComment.subjectComments    ?? {},
+      observationRatings: draftComment.observationRatings ?? {},
     });
   }, [draftComment]);
 
@@ -365,6 +411,14 @@ export default function StudentReportCard({
             <Field label="Closing Date" value={comment.closingDate} onChange={set('closingDate')} />
             <Field label="Next Term Begins" value={comment.nextTermBegin} onChange={set('nextTermBegin')} />
           </div>
+
+          {observationConfig?.enabled && observationConfig.categories?.length > 0 && (
+            <ObservationRatingsGrid
+              categories={observationConfig.categories}
+              ratings={comment.observationRatings}
+              onChange={ratings => setComment(c => ({ ...c, observationRatings: ratings }))}
+            />
+          )}
 
           {onSaveComment && (
             <div className="flex justify-end pt-1">
