@@ -6,6 +6,22 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.159.0] — 2026-09-29 — feat(teachers): teaching-assignment management can now be granted via Settings, not just leadership roles
+
+Direct follow-up to v5.158.0: while fixing the Teacher Edit gate, found that assigning a teacher to a class+subject (the Assignments tab, which feeds Timetable) goes through a completely separate mechanism whose authorization was closed to Settings entirely — a hardcoded `FULL_MANAGE` role set (`admin`/`superadmin`/`deputy`/`principal`/`acting_deputy`/`head_of_school`) plus department-scoped HODs, with no permission grant of any kind able to satisfy it. Flagged this to the user as a likely-deliberate governance decision rather than fixing it unilaterally; asked to extend it to Settings, same as the Edit gate.
+
+### Fix
+`teaching-assignments.js`'s `canManage()` now also allows anyone holding the real, Settings-granted `teachers` `update` permission (`hasPermission(req, 'teachers', 'update')`) — additive to the existing `FULL_MANAGE`/HOD floor, never a replacement. A school that wants this restricted to real leadership only simply never grants Teachers → Edit to any other role, exactly as before. This matches the client's own gate on the Assignments tab's "Add assignment" button (`can('teachers','update')`, from v5.158.0) — the two are now consistent end-to-end.
+
+### Verified
+5 new tests in `server/__tests__/routes/teaching-assignments-permission-grant.test.js`: a non-`FULL_MANAGE`, non-HOD role is forbidden without the grant on POST/PUT/DELETE; the same role succeeds once granted; `FULL_MANAGE` roles are confirmed unaffected (`hasPermission` never even called for them). Full suite passing, zero regressions.
+
+### Files
+- `server/routes/teaching-assignments.js` — `canManage()` made async, added the `hasPermission('teachers','update')` path
+- `server/__tests__/routes/teaching-assignments-permission-grant.test.js` — 5 new tests
+
+---
+
 ## [v5.158.0] — 2026-09-29 — fix(teachers): granting a role full "Edit Teacher" rights in Settings had zero effect
 
 Raised directly: "Admission Officer" was granted full rights to edit teachers, students, subjects, and classes in Settings, yet still couldn't tag a subject on a teacher's profile via the Edit button.

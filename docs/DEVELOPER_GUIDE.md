@@ -5830,3 +5830,26 @@ No Settings permission of any kind can satisfy this — it's a hardcoded role/HO
 
 ### Files
 - `client/src/pages/teachers/TeacherList.jsx` — `canCreate`/`canEditTeacher`/`canDelete` now check real Settings permissions via `can('teachers', action)`; `canViewFull` deliberately unchanged; `canEdit` prop fixed to reference the update-specific variable
+
+## 98. Teaching-Assignment Management Opened Up to Settings, Not Just Leadership Roles (v5.159.0)
+
+Direct follow-up to §97, same conversation: raised the `teaching_assignments` floor found while investigating (§97's "A separate, deeper restriction" section) — asked directly whether to open it to Settings too, or leave it leadership-only. User chose to open it up.
+
+### Fix
+`server/routes/teaching-assignments.js`'s `canManage()` — previously synchronous, checking only `FULL_MANAGE` (`admin`/`superadmin`/`deputy`/`principal`/`acting_deputy`/`head_of_school`) and department-scoped HOD — is now `async` and falls through to `hasPermission(req, 'teachers', 'update')` (imported from `middleware/rbac`) when neither of those match:
+```js
+async function canManage(req, subjectDepartmentId = null) {
+  const eff = _effectiveRoles(req);
+  if ([...FULL_MANAGE].some(r => eff.has(r))) return true;
+  if (eff.has('hod')) { /* unchanged department-scoped check */ }
+  return hasPermission(req, 'teachers', 'update');
+}
+```
+Additive to the existing floor, never a replacement — a school that wants this restricted to real leadership only simply never grants Teachers → Edit to any other role, exactly as it could before this change. `hasPermission` (not `hasExplicitSubGrant`) was the right primitive here: unlike the leave_view/payroll_view fixes (§93-94), there's no dedicated sub-permission for "manage teaching assignments" — this reuses the SAME coarse `teachers` `update` grant the client's own Assignments-tab button already checks (`can('teachers','update')`, wired in §97), keeping client and server aligned on the identical permission rather than inventing a new one. All three call sites (`POST /`, `PUT /:id`, `DELETE /:id`) updated to `await canManage(...)`.
+
+### Verified
+5 new tests in `server/__tests__/routes/teaching-assignments-permission-grant.test.js`: a non-`FULL_MANAGE`, non-HOD role (`admissions_officer`, the exact role from §97's report) is forbidden on POST/PUT/DELETE without the grant; succeeds on all three once granted; `FULL_MANAGE` roles are proven unaffected (`hasPermission` asserted never called for them, confirming the floor short-circuits before reaching the new check). Existing `teaching-assignments-legacy-class-id.test.js` (16 tests, mock role `admin`, always hits the `FULL_MANAGE` short-circuit) re-run and confirmed unaffected. Full suite: 262 suites, 2711 tests, zero regressions.
+
+### Files
+- `server/routes/teaching-assignments.js` — `canManage()` made `async`; added the `hasPermission('teachers','update')` path; all 3 call sites now `await` it
+- `server/__tests__/routes/teaching-assignments-permission-grant.test.js` — 5 new tests
