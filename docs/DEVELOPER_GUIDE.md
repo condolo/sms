@@ -5751,3 +5751,34 @@ Deliberately **left unfiltered**: `allStaffRoles` itself (staff-list role badges
 ### Files
 - `client/src/pages/hr/HRPage.jsx` — `assignableStaffRoles`/`assignableBuiltInRoles` added; wired into `StaffFormModal`, `WorkflowConfigModal`, `PayrollSettingsModal`
 - `client/src/pages/hr/PayrollSettingsModal.jsx` — `builtInRoles` prop added (default: its previous unfiltered constant), threaded through `AssigneePicker`
+
+## 96. A Role With Nothing Granted Under HR & Payroll Could Not Even Find "My HR" in the Sidebar (v5.157.0)
+
+Raised directly, immediately after §95: "when none is clicked some roles don't see the HR (my hr) at all — was this part of the fix?" It wasn't — this is a separate, older gate than anything touched in §93–95, living entirely in `Sidebar.jsx`, not `HRPage.jsx`.
+
+### Root cause
+`Sidebar.jsx`'s `computeNav` (lines 40-58) hides a module from the nav for any non-admin role with zero granted actions for it:
+```js
+if (m.key in userPermissions) {
+  const perms = userPermissions[m.key];
+  return Array.isArray(perms) && perms.length > 0;
+}
+return false; // module not in permissions map → hidden by default (fail-closed)
+```
+This is the right default for an admin-gated module — but `HRPage.jsx` was never built that way. It already always renders a "My HR" self-service view (submit leave, view own payslip) for any non-full-HR role, entirely independent of the HR & Payroll permission matrix (§93–95's whole `TABS` discussion: `leave` is unconditional, `payslip` is the fallback when `!canViewPayroll`). `Sidebar.jsx`'s filter had no knowledge of that design and applied the same admin-gate logic anyway — hiding the one thing every staff member needs regardless of what an admin has configured.
+
+Checked the actual scale against the live database rather than assuming: querying every real `role_permissions` document (excluding per-user overrides) for its coarse `hr` value —
+```
+{ missing: 59, emptyArr: 43, nonEmpty: 33, total: 135 }
+```
+102 of 135 (missing + empty) real role documents across live schools were in exactly this state: either the coarse `hr` key is an explicit empty array (a role saved through current Settings with nothing ticked under HR & Payroll — `_deriveApiPerms` always writes the coarse key, even as `[]`), or the key is entirely absent (a role never re-saved through the sub-permission-era Settings UI at all). Either shape hits the same `return false` fail-closed branch. Confirmed separately that `/hr` (`App.jsx`) carries no route-level permission guard of its own — the page was always reachable by direct URL, so this was purely a discoverability bug, not an access-control one; nobody could realistically be expected to know that, though.
+
+### Fix
+Added `hr` as a named exception in `computeNav`'s permission filter — visible whenever the module itself is enabled for the school (`cfgMap[m.key]?.enabled`), regardless of the viewer's permission grant, same treatment `isAdminLevel` already receives. `HelpPage.jsx` (already touched in §93 for its "Who can do what here?" HR copy) had the identical pattern gating its HR & Payroll help section off `can('hr')` — closed the same way, for the same reason.
+
+### Verified
+`esbuild` syntax-check on both files (no client test runner in this codebase). Full suite: 261 suites, 2706 tests, unaffected — this touches only client-side nav/help-section visibility, no server route or permission-check logic.
+
+### Files
+- `client/src/components/layout/Sidebar.jsx` — `hr` added as an always-visible exception in `computeNav`
+- `client/src/pages/help/HelpPage.jsx` — same exception applied to the HR & Payroll help section

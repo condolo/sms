@@ -6,6 +6,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.157.0] — 2026-09-29 — fix(hr): a role with nothing granted under HR & Payroll could not even find "My HR" in the sidebar
+
+Raised directly: "when none is clicked some roles don't see the HR (my hr) at all." Confirmed against the live database: 102 of 135 real role documents across live schools have an empty or entirely absent coarse `hr` permission array, and every one of them lost the "HR & Staff"/"My HR" sidebar link entirely.
+
+### Root cause
+`Sidebar.jsx`'s `computeNav` hides any module from the nav when the viewer's role has zero actions granted for it (`permissions[key].length > 0`, or fail-closed to hidden if the key is absent at all). That's the right default for an admin-gated module — but `HRPage.jsx` was never actually built that way: it already always renders a "My HR" self-service view (submit leave, view own payslip) for anyone who isn't a full HR/admin role, entirely independent of the HR & Payroll permission matrix — the whole reason its own `TABS` array unconditionally includes a `leave` tab and falls back to a `payslip` tab. `Sidebar.jsx`'s filter never knew that, and hid the one thing every staff member needs regardless of what an admin has (or hasn't) configured. The route itself (`/hr` in `App.jsx`) was never permission-gated — only the nav link was, so a staff member who somehow knew the URL could always reach it; nobody could realistically be expected to know that.
+
+### Fix
+Added `hr` as a named exception in `Sidebar.jsx`'s `computeNav` — visible whenever the module itself is enabled for the school, regardless of the viewer's permission grant (same treatment `isAdminLevel` already gets). The same gap existed in the Help Centre's own module-visibility filter (`HelpPage.jsx`, using the identical pattern) for the "Who can do what here? (Roles & Permissions)" HR section — closed the same way.
+
+### Verified
+`esbuild` syntax-check on both files (no client test runner in this codebase). Full suite: 261 suites, 2706 tests, unaffected — this touches only client-side nav visibility, no server route or permission-check logic.
+
+### Files
+- `client/src/components/layout/Sidebar.jsx` — `hr` added as an always-visible exception in `computeNav`'s permission filter
+- `client/src/pages/help/HelpPage.jsx` — same exception applied to the HR & Payroll help section
+
+---
+
 ## [v5.156.0] — 2026-09-29 — fix(hr): a role hidden in Settings could still be assigned to staff, or picked as a workflow-chain approver, from HR
 
 Raised directly: "the roles in Settings modules should be the only roles appearing in the HR module." Traced HR's role pickers (Add Staff's role dropdown, the staff-list "All roles" filter, the Leave and Payroll approval-chain assignee pickers) — all three build their built-in role list from `STAFF_ROLE_KEYS` (`client/src/utils/roleLabels.js`), independent of Settings' own per-school "hide this role" toggle (`school.hiddenSystemRoles`, the eye-off icon in Roles & Permissions). Hiding a role there — meant to stop it being handed out further — had no effect on any of these three pickers: an admin could still assign a hidden role to a new staff member, or pick it as a leave/payroll approval-chain step, with no checkbox anywhere showing that it was supposed to be off-limits.
