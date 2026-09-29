@@ -416,7 +416,7 @@ function SectionsPanel() {
 // document carrying a multi-MB image caused real production incidents
 // on every page load that read it). Omit `resize` to upload as-is
 // (used nowhere currently, kept as an escape hatch).
-function AssetUploader({ label, hint, currentUrl, maxKB, accept, onUpload, onDelete, uploading, square, resize }) {
+export function AssetUploader({ label, hint, currentUrl, maxKB, accept, onUpload, onDelete, uploading, square, resize }) {
   const inputRef  = useRef(null);
   const [preview, setPreview] = useState(null);
 

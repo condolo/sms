@@ -38,6 +38,7 @@ import {
   settings as settingsApi,
 } from '@/api/client.js';
 import { Skeleton, Toast } from '../../grades/components/GradesPrimitives.jsx';
+import { AssetUploader } from '../../settings/SettingsPage.jsx';
 import RCTemplatesSection from './RCTemplatesSection.jsx';
 
 const SUB_TABS = [
@@ -72,7 +73,12 @@ export default function SettingsPanel() {
         })}
       </div>
 
-      {subTab === 'general'      && <GeneralSection />}
+      {subTab === 'general'      && (
+        <div className="space-y-4">
+          <GeneralSection />
+          <SignatureBrandingSection />
+        </div>
+      )}
       {subTab === 'comments'     && <CommentsSection />}
       {subTab === 'workflow'     && <WorkflowSection />}
       {subTab === 'policy'       && <PublicationPolicySection />}
@@ -120,7 +126,60 @@ const GENERAL_TOGGLES = [
   { key: 'showBehaviour',          label: 'Show Behaviour Summary',       description: 'Display a Merits / Demerits / Net Points block.' },
   { key: 'showClassTeacherRemark', label: "Show Class Teacher's Remark",  description: "Display the class teacher's written remark block." },
   { key: 'showPrincipalRemark',    label: "Show Principal's Comment",     description: "Display the principal's written comment block." },
+  { key: 'showObservationRatings', label: 'Class Teacher Observation Ratings', description: 'Add an Excellent / Good / Improve rating grid (e.g. Engaged, Teamwork, Confidence) the class teacher fills in per student. Off by default — most schools\' templates don\'t use this.' },
 ];
+
+/* Editable list of observation categories (e.g. Engaged, Teamwork,
+   Confidence) — not Cambridge-specific, any school can define its own.
+   The rating scale itself (Excellent/Good/Improve) is fixed, not
+   editable here, to keep the print grid's 3 columns meaningful. */
+function ObservationCategoriesEditor({ categories, onChange }) {
+  const [newCat, setNewCat] = useState('');
+
+  function addCategory() {
+    const trimmed = newCat.trim();
+    if (!trimmed || categories.includes(trimmed)) return;
+    onChange([...categories, trimmed]);
+    setNewCat('');
+  }
+  function removeCategory(cat) {
+    onChange(categories.filter(c => c !== cat));
+  }
+  function renameCategory(oldCat, newName) {
+    onChange(categories.map(c => (c === oldCat ? newName : c)));
+  }
+
+  return (
+    <div className="border-t border-slate-100 mt-4 pt-4">
+      <label className="block text-xs font-medium text-slate-600 mb-1">Observation categories</label>
+      <p className="text-[11px] text-slate-400 mb-2">Each is rated Excellent / Good / Improve per student. A category already used on a published report card should be renamed carefully — the name is what's stored, not an id.</p>
+      <div className="space-y-1.5">
+        {categories.map((cat, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <input
+              type="text" maxLength={50}
+              value={cat}
+              onChange={e => renameCategory(cat, e.target.value)}
+              className="flex-1 rounded-lg border border-slate-200 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400/30"
+            />
+            <button type="button" onClick={() => removeCategory(cat)} className="text-xs text-red-500 hover:text-red-700 px-2">Remove</button>
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center gap-2 mt-2">
+        <input
+          type="text" maxLength={50}
+          value={newCat}
+          onChange={e => setNewCat(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCategory(); } }}
+          placeholder="Add a category…"
+          className="flex-1 rounded-lg border border-slate-200 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400/30"
+        />
+        <button type="button" onClick={addCategory} className="text-xs font-medium text-teal-700 hover:text-teal-800 px-2">Add</button>
+      </div>
+    </div>
+  );
+}
 
 function GeneralSection() {
   const qc = useQueryClient();
@@ -168,6 +227,38 @@ function GeneralSection() {
           />
         ))}
       </div>
+
+      {active.showObservationRatings && (
+        <ObservationCategoriesEditor
+          categories={active.observationCategories ?? []}
+          onChange={cats => setDraft(d => ({ ...d, observationCategories: cats }))}
+        />
+      )}
+
+      <div className="border-t border-slate-100 mt-4 pt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">Principal's signature label</label>
+          <input
+            type="text" maxLength={100}
+            value={active.principalSignatureLabel ?? 'Principal'}
+            onChange={e => setDraft(d => ({ ...d, principalSignatureLabel: e.target.value }))}
+            placeholder="Principal"
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400/30"
+          />
+          <p className="text-[11px] text-slate-400 mt-1">Shown under the principal's signature — e.g. "Head of School" instead of "Principal".</p>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">Class teacher's signature label</label>
+          <input
+            type="text" maxLength={100}
+            value={active.classTeacherSignatureLabel ?? 'Class Teacher'}
+            onChange={e => setDraft(d => ({ ...d, classTeacherSignatureLabel: e.target.value }))}
+            placeholder="Class Teacher"
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400/30"
+          />
+        </div>
+      </div>
+
       <div className="flex justify-end mt-4">
         <button
           onClick={() => save()}
@@ -177,6 +268,101 @@ function GeneralSection() {
           {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
           {saving ? 'Saving…' : 'Save changes'}
         </button>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Signature & stamp images — the school-profile fields the PDF
+   renderer has always been able to draw (_fetchSignatureImages,
+   server/routes/report-cards.js) but that had no upload UI anywhere
+   in the app. Stored as the data: URI directly on
+   principalSignatureUrl/schoolStampUrl (not the separate Base64-field
+   + served-by-URL pattern the logo/favicon/login-bg branding assets
+   use) — _fetchImageBuf decodes a data: URI with zero network cost
+   but can't resolve a relative API path, so that pattern doesn't fit
+   here. Capped small server-side (100 KB) since, unlike those public,
+   every-page-load branding assets, this is an admin-only, occasional
+   settings fetch — the same severity class of bug (v5.140.0) doesn't
+   apply at this size.
+   ══════════════════════════════════════════════════════════════ */
+function SignatureBrandingSection() {
+  const qc = useQueryClient();
+  const [toast, setToast] = useState(null);
+  const [sigUploading, setSigUploading] = useState(false);
+  const [stampUploading, setStampUploading] = useState(false);
+
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: ['academic-config', 'school-profile'],
+    queryFn:  () => academicConfigApi.schoolProfile.get(),
+    staleTime: 60_000,
+  });
+  const profile = data?.data ?? {};
+
+  async function handleUpload(field, setUploading, b64) {
+    setUploading(true);
+    try {
+      await academicConfigApi.schoolProfile.update({ [field]: b64 });
+      qc.invalidateQueries({ queryKey: ['academic-config', 'school-profile'] });
+      setToast({ msg: 'Saved.', type: 'success' });
+    } catch (err) {
+      setToast({ msg: err?.message ?? 'Failed to save image.', type: 'error' });
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function handleDelete(field, setUploading) {
+    setUploading(true);
+    try {
+      await academicConfigApi.schoolProfile.update({ [field]: null });
+      qc.invalidateQueries({ queryKey: ['academic-config', 'school-profile'] });
+      setToast({ msg: 'Removed.', type: 'success' });
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  if (isLoading) return <Skeleton className="h-24" />;
+  if (isError) return <ErrorCard onRetry={refetch} />;
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+      <div className="h-6">
+        <AnimatePresence>
+          {toast && <Toast msg={toast.msg} type={toast.type} onDismiss={() => setToast(null)} />}
+        </AnimatePresence>
+      </div>
+      <div>
+        <h3 className="text-sm font-semibold text-slate-800">Sign-off images</h3>
+        <p className="text-xs text-slate-400 mt-0.5">Drawn onto every generated report card PDF, next to the labels above. Small images work best — a signature is a line drawing, not a photo.</p>
+      </div>
+
+      <AssetUploader
+        label="Principal's Signature"
+        hint="PNG with a transparent background recommended. Max 100 KB."
+        currentUrl={profile.principalSignatureUrl}
+        accept="image/png,image/jpeg,image/webp"
+        onUpload={b64 => handleUpload('principalSignatureUrl', setSigUploading, b64)}
+        onDelete={() => handleDelete('principalSignatureUrl', setSigUploading)}
+        uploading={sigUploading}
+        square={false}
+        resize={{ maxW: 500, maxH: 200, format: 'png' }}
+      />
+
+      <div className="border-t border-slate-100 pt-4">
+        <AssetUploader
+          label="School Stamp"
+          hint="PNG with a transparent background recommended. Max 100 KB."
+          currentUrl={profile.schoolStampUrl}
+          accept="image/png,image/jpeg,image/webp"
+          onUpload={b64 => handleUpload('schoolStampUrl', setStampUploading, b64)}
+          onDelete={() => handleDelete('schoolStampUrl', setStampUploading)}
+          uploading={stampUploading}
+          square={true}
+          resize={{ maxW: 300, maxH: 300, format: 'png' }}
+        />
       </div>
     </div>
   );

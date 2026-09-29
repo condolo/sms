@@ -54,7 +54,24 @@ const DEFAULT_REPORT_CONFIG = {
   principalSignatureLabel: 'Principal',
   classTeacherSignatureLabel: 'Class Teacher',
   footerNote:          'This report card is computer-generated and is valid without a handwritten signature.',
+  // Class-teacher observation ratings (2026-09) — a real gap found live:
+  // a school's actual report card had a "Class Teacher Observations"
+  // section (Engaged/Teamwork/Confidence/Responsibility/Reflective/
+  // Innovative, each Excellent/Good/Improve) that nothing in the app
+  // backed at all — always blank, for every student, every school,
+  // because no data model or input screen ever existed for it. OFF by
+  // default (most schools' templates don't have this section); the
+  // category list defaults to the 6 categories from that real card but
+  // is fully editable per school, since this isn't a Cambridge-specific
+  // feature — any school can define its own observation categories.
+  showObservationRatings: false,
+  observationCategories: ['Engaged', 'Teamwork', 'Confidence', 'Responsibility', 'Reflective', 'Innovative'],
 };
+
+// The only 3 values an observation rating can take — fixed, not
+// per-school configurable (unlike the category list itself), to keep
+// the print-template grid (3 columns) meaningful across schools.
+const OBSERVATION_RATING_VALUES = ['excellent', 'good', 'improve'];
 
 /* ── Validation ─────────────────────────────────────────────── */
 const GradeBandSchema = z.object({
@@ -105,6 +122,8 @@ const ConfigSchema = z.object({
   principalSignatureLabel:     z.string().max(100).optional(),
   classTeacherSignatureLabel:  z.string().max(100).optional(),
   footerNote:          z.string().max(500).optional(),
+  showObservationRatings: z.boolean().optional(),
+  observationCategories: z.array(z.string().min(1).max(50)).max(12).optional(),
 
   // Subject assignment enforcement — vestigial as of 2026-09. Kept for
   // backward compatibility (existing stored docs, GET responses) only;
@@ -149,6 +168,8 @@ function _mergeConfig(saved) {
     principalSignatureLabel:    saved?.principalSignatureLabel     ?? DEFAULT_REPORT_CONFIG.principalSignatureLabel,
     classTeacherSignatureLabel: saved?.classTeacherSignatureLabel  ?? DEFAULT_REPORT_CONFIG.classTeacherSignatureLabel,
     footerNote:            saved?.footerNote            ?? DEFAULT_REPORT_CONFIG.footerNote,
+    showObservationRatings: saved?.showObservationRatings ?? DEFAULT_REPORT_CONFIG.showObservationRatings,
+    observationCategories: saved?.observationCategories  ?? DEFAULT_REPORT_CONFIG.observationCategories,
     rankingSubjectStrategy: saved?.rankingSubjectStrategy ?? 'all',
     rankingN:              saved?.rankingN              ?? 7,
     compulsorySubjects:    saved?.compulsorySubjects    ?? [],
@@ -827,6 +848,25 @@ router.patch('/school-profile', authMiddleware, async (req, res) => { // rbac: a
       }
     }
 
+    // principalSignatureUrl/schoolStampUrl are stored as the actual data:
+    // URI (not a separate Base64 field + served-by-URL pair like the logo/
+    // favicon/login-bg branding assets) — report-cards.js's _fetchImageBuf
+    // already decodes a data: URI directly with zero network cost, but
+    // does NOT resolve a relative API path, so that pattern doesn't apply
+    // here. null clears the field (existing has*/should-show checks all
+    // treat it as falsy); anything else must be a real, size-capped image.
+    for (const field of ['principalSignatureUrl', 'schoolStampUrl']) {
+      const val = req.body[field];
+      if (val === undefined || val === null) continue;
+      if (!/^data:image\/(jpeg|jpg|png|webp);base64,/.test(val)) {
+        return E.badRequest(res, `${field} must be a JPEG, PNG, or WebP data URI, or null to clear it.`);
+      }
+      const sizeBytes = Math.ceil((val.split(',')[1] || '').length * 0.75);
+      if (sizeBytes > 100 * 1024) {
+        return E.badRequest(res, `${field} is too large. Maximum size is 100 KB — resize the image before uploading.`);
+      }
+    }
+
     // Whitelist updates — only allow permitted fields
     const update = {};
     SCHOOL_PROFILE_FIELDS.forEach(f => {
@@ -900,3 +940,4 @@ module.exports.resolveGrade          = resolveGrade;
 module.exports.DEFAULT_GRADING_SCHEMA = DEFAULT_GRADING_SCHEMA;
 module.exports.mergeConfig           = _mergeConfig;
 module.exports.resolveCurrentPeriod  = _resolveCurrentPeriod;
+module.exports.OBSERVATION_RATING_VALUES = OBSERVATION_RATING_VALUES;

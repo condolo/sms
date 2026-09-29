@@ -608,6 +608,12 @@ export const academicConfig = {
   },
   transition:   (data)       => _post('/academic-config/transition-year', data),
   archiveYear:  (data)       => _post('/academic-config/archive-year', data),
+  // School profile — name/contact fields plus the report-card
+  // signature/stamp images (principalSignatureUrl/schoolStampUrl).
+  schoolProfile: {
+    get:    ()      => _get('/academic-config/school-profile'),
+    update: (data)  => _patch('/academic-config/school-profile', data),
+  },
 };
 
 export const departments = _resource('departments');
