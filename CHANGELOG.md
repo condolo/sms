@@ -6,6 +6,33 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.154.0] — 2026-09-29 — fix(hr): two of the 7 "HR & Payroll" Settings toggles had nothing behind them; sidebar/permission refresh hardened
+
+Raised directly: a screenshot of Settings → Roles & Permissions → HR & Payroll's 7 sub-module checkboxes, asking whether each one actually works. Traced every one of the 7 keys (`staff`, `leave_view`, `leave_approve`, `payroll_view`, `payroll_export`, `documents`, `workflow`) against real server-side enforcement before answering.
+
+### What was actually wrong
+- **`leave_view` ("View Leave Requests")** — real, tested plumbing existed for the generic sub-key mechanism (`rbac-subkey.test.js`), but `GET /api/hr/leave` itself never consulted it. The route only ever checked the hardcoded `HR_ROLES` set (`superadmin`/`admin`/`hr`) to decide "see everyone's leave requests" vs. "see only my own (+ any approval step I'm eligible for)." Granting `leave_view` to any other role — e.g. a Deputy Principal who should see all leave requests without being handed the full `hr` role — had zero effect.
+- **`staff` ("View Staff Records")** — phantom. Zero references anywhere in server or client code. The real staff-list route (`GET /api/teachers`) is gated entirely by the separate, already-working Teachers module's own `teachers:read` permission — this toggle duplicated it and did nothing.
+- Confirmed the other 5 keys are correctly wired: `leave_approve` → `PATCH /hr/leave/:id/resolve`; `payroll_view` → `GET /hr/payroll*`; `payroll_export` → `import-export.js`'s `EXPORT_MODULE` map; `documents` → `POST/PUT/DELETE /hr/documents`; `workflow` → the deliberately special-cased `manage_workflow` check (§ moduleRegistry.js's own comment on this sub).
+- Separately asked why a role's permission change doesn't "live" reflect on an individual user already signed in (a real admissions officer's account was used as the example). Confirmed: the server-side authorization check is already live within seconds (`invalidatePermCache()` runs on every Settings save; JWTs carry only the role, never a permissions snapshot, so the next request always re-checks the role's current grant). The client's sidebar/buttons, however, only refresh on page mount, window focus, or an explicit same-browser broadcast (`AppShell.jsx`) — a user who stays on one focused tab without switching away could see stale UI indefinitely.
+
+### Fix
+- `GET /api/hr/leave`: `canViewAllLeave = HR_ROLES.has(role) || await hasExplicitSubGrant(req, 'hr', 'leave_view', 'read')` — additive to the existing `HR_ROLES` floor, never a replacement, matching the same floor-or-explicit-grant pattern already used by `timetableManageAccess`/`attendanceConflictAccess`.
+- Removed the `staff` key from both `server/config/moduleRegistry.js` and `client/src/pages/settings/SettingsPage.jsx`'s `hr` module (rather than wiring it to the Teachers route, which would have created two toggles governing the same capability). Updated the matching Help Center copy.
+- Added a 5-minute background interval refresh of `/api/auth/permissions` in `AppShell.jsx`, alongside the existing mount/focus/broadcast triggers — a floor under all of them so a session that never loses focus is never staler than the server's own permission-cache TTL.
+
+### Verified
+4 new tests in `server/__tests__/routes/hr-leave-view-permission.test.js`: a non-HR-floor role without the grant still sees only its own requests (unchanged); with the grant, sees every request; the `staffId` filter only applies once full visibility is granted; the `HR_ROLES` floor still bypasses the grant check entirely (`hasExplicitSubGrant` never called). Checked the live database for the actual admissions-officer account raised in the question — no per-user override, role document fully populated and current, nothing stuck. Full suite passing, zero regressions.
+
+### Files
+- `server/routes/hr.js` — `GET /leave` now also checks `hasExplicitSubGrant('hr', 'leave_view', 'read')`
+- `server/config/moduleRegistry.js`, `client/src/pages/settings/SettingsPage.jsx` — removed the phantom `hr.staff` sub-permission
+- `client/src/pages/help/HelpPage.jsx` — updated the HR & Payroll permissions help copy
+- `client/src/components/layout/AppShell.jsx` — added a 5-minute periodic permissions refresh
+- `server/__tests__/routes/hr-leave-view-permission.test.js` — 4 new tests
+
+---
+
 ## [v5.153.0] — 2026-09-29 — fix(students): a mistyped guardian email had no way to be corrected, and its import-time source
 
 Raised directly: emails across the system are "either mistyped or wrong and need to be updated," with one concrete symptom — a trailing comma that fails with "invalid email" when trying to fix it. Investigated against the live database before touching anything.
