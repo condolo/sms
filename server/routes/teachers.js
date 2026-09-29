@@ -225,6 +225,34 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('teachers', 'read'), async (
       filter.id = { $in: matched.map(t => t.id) };
     }
 
+    // The Teachers MODULE's own list (as opposed to HR's general Staff
+    // directory, which deliberately shows every staffType) only wants
+    // people actually functioning as a teacher. This collection holds
+    // every staff type (HR's "Add Staff" writes here too, with staffType
+    // covering admin/hr/finance/admissions_officer/etc.), and many real
+    // records — a school onboarding rarely bothers to set staffType for
+    // its majority-teacher headcount — have staffType entirely unset.
+    // Found live: two accounts with NEITHER a teaching staffType NOR any
+    // subjects/assignments (no signal of teaching at all) were showing up
+    // in the Teachers list purely because they exist in this shared
+    // collection. Filtering on staffType==='teacher' ALONE would have
+    // wrongly hidden every genuinely-teaching record that just never had
+    // staffType set (the majority, in practice) — so this instead requires
+    // ANY positive teaching signal: the explicit staffType, a non-empty
+    // subjects list, or at least one real teaching_assignments record.
+    // Opt-in via ?teachingOnly=true so HRPage.jsx's Staff tab (which wants
+    // every staff type) is completely unaffected.
+    if (req.query.teachingOnly === 'true') {
+      const Assignments3 = tenantModel('teaching_assignments', tenantContext(req));
+      const assignedTeacherIds = await Assignments3.distinct('teacherId', { schoolId });
+      filter.$or = [
+        { staffType: 'teacher' },
+        { subjects: { $exists: true, $ne: [] } },
+        { id:     { $in: assignedTeacherIds } },
+        { userId: { $in: assignedTeacherIds } },
+      ];
+    }
+
     // Each word matched independently, ALL required (2026-09 fix — see
     // the identical bug/fix in students.js GET /): firstName and
     // lastName are separate fields, so a single regex built from "John

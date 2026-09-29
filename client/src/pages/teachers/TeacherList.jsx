@@ -132,6 +132,7 @@ export default function TeacherList() {
     queryKey: ['teachers', { page, search: debSearch, departmentId, classId, statusFilter }],
     queryFn:  () => teachersApi.list({
       page, limit: LIMIT,
+      teachingOnly: 'true', // this page is specifically "Teachers", not the general staff directory (that's HR's own Staff tab) — see teachers.js's GET / for the exact inclusion rule
       ...(debSearch    && { search: debSearch }),
       ...(departmentId && { departmentId }),
       ...(classId      && { classId }),
