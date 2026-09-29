@@ -186,13 +186,17 @@ describe('A7. extraRoles', () => {
     expect(await hasPermission({ jwtUser: carl }, 'hr', 'read')).toBe(false);
   });
 
-  test('DOES elevate on the three routes that intentionally check it', () => {
+  test('DOES elevate on the three routes that intentionally check it', async () => {
     const reqNoExtra = { jwtUser: { role: 'teacher', roles: ['teacher'] } };
     const reqHod      = { jwtUser: { role: 'teacher', roles: ['teacher'], extraRoles: ['hod'] } };
     expect(lessons.isHodOrAdmin(reqNoExtra)).toBe(false);
     expect(lessons.isHodOrAdmin(reqHod)).toBe(true);
-    expect(teachingAssignments.canManage(reqHod)).toBe(true);      // no dept given yet -> provisionally allowed, validated later
-    expect(teachingAssignments.canManage(reqNoExtra)).toBe(false);
+    // canManage is async since v5.159.0 (it now also falls through to a
+    // hasPermission('teachers','update') DB check for non-floor/non-HOD
+    // roles) — reqNoExtra here is a bare 'teacher' with no role_permissions
+    // doc seeded, so that fallback resolves to false, same as before.
+    expect(await teachingAssignments.canManage(reqHod)).toBe(true);      // no dept given yet -> provisionally allowed, validated later
+    expect(await teachingAssignments.canManage(reqNoExtra)).toBe(false);
     const eff = weeklySnapshots._effectiveRoles(reqHod);
     expect(eff.has('hod')).toBe(true);
   });
@@ -212,13 +216,13 @@ describe('A7b. extraRoles security fix (2026-09) — responsibility tags renamed
   // equal a SYSTEM_ROLES value again — these tests prove the renamed
   // values still grant the SAME intended capability (nobody's access
   // regresses) using the new, non-colliding strings.
-  test('the renamed values elevate the same three routes exactly like "hod" does', () => {
+  test('the renamed values elevate the same three routes exactly like "hod" does', async () => {
     const reqHeadOfSchool = { jwtUser: { role: 'teacher', roles: ['teacher'], extraRoles: ['head_of_school'] } };
     const reqActingDeputy = { jwtUser: { role: 'teacher', roles: ['teacher'], extraRoles: ['acting_deputy'] } };
     expect(lessons.isAdmin(reqHeadOfSchool)).toBe(true);
     expect(lessons.isAdmin(reqActingDeputy)).toBe(true);
-    expect(teachingAssignments.canManage(reqHeadOfSchool)).toBe(true);
-    expect(teachingAssignments.canManage(reqActingDeputy)).toBe(true);
+    expect(await teachingAssignments.canManage(reqHeadOfSchool)).toBe(true);
+    expect(await teachingAssignments.canManage(reqActingDeputy)).toBe(true);
     expect(weeklySnapshots._effectiveRoles(reqHeadOfSchool).has('head_of_school')).toBe(true);
     expect(weeklySnapshots._effectiveRoles(reqActingDeputy).has('acting_deputy')).toBe(true);
   });

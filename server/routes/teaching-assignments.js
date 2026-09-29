@@ -30,6 +30,9 @@
      - WRITE:  admin, superadmin, principal, deputy (any subject/class)
                hod (only subjects in their department)
                timetabler (read only, cannot create/delete)
+               any other role explicitly granted 'teachers' update access
+               in Settings → Roles & Permissions (2026-09-29, Priority per
+               user request — see canManage()'s own comment)
    ============================================================ */
 'use strict';
 
@@ -38,6 +41,7 @@ const { z }         = require('zod');
 const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware }      = require('../middleware/auth');
+const { hasPermission }       = require('../middleware/rbac');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, E }      = require('../utils/response');
 const { invalidateScopeCache } = require('../middleware/scopeMiddleware');
@@ -63,8 +67,20 @@ function _effectiveRoles(req) {
 }
 
 /* Returns true if user may create/delete assignments.
-   departmentId is the subject's department — used to scope HODs. */
-function canManage(req, subjectDepartmentId = null) {
+   departmentId is the subject's department — used to scope HODs.
+
+   2026-09-29 (direct user request, following the identical v5.158.0 fix
+   for the Teacher Edit button): this floor was entirely closed to
+   Settings — no permission grant of any kind could satisfy it, unlike
+   every other write path in the app. The client's own "Add assignment"
+   button (TeacherList.jsx's TeacherAssignmentsTab) already unlocks for
+   any role holding the Teachers module's 'update' permission (the same
+   Assignments tab lives inside the same Edit-gated slide-over as the
+   Profile tab's subject tags) — extending this to match is additive to
+   FULL_MANAGE/HOD, never a replacement: a school that wants this
+   restricted to real leadership only simply never grants 'teachers'
+   update to anyone else, exactly as it could before this change. */
+async function canManage(req, subjectDepartmentId = null) {
   const eff = _effectiveRoles(req);
   if ([...FULL_MANAGE].some(r => eff.has(r))) return true;
 
@@ -73,7 +89,8 @@ function canManage(req, subjectDepartmentId = null) {
     if (!subjectDepartmentId) return true; // no dept info yet, validate later
     return (req.jwtUser.departmentId ?? req.jwtUser.deptId) === subjectDepartmentId;
   }
-  return false;
+
+  return hasPermission(req, 'teachers', 'update');
 }
 
 /* ── Helper: find a class by either custom id (UUID) or _id (ObjectId string) ─
@@ -215,7 +232,7 @@ router.post('/', authMiddleware, async (req, res) => { // rbac: canManage() belo
       if (subject.departmentId && hodDeptId && subject.departmentId !== hodDeptId) {
         return E.forbidden(res, 'As HOD you can only create assignments for subjects in your department');
       }
-    } else if (!canManage(req)) {
+    } else if (!(await canManage(req))) {
       return E.forbidden(res);
     }
 
@@ -305,7 +322,7 @@ router.put('/:id', authMiddleware, async (req, res) => { // rbac: canManage() be
       .findOne({ id: req.params.id, schoolId }).lean();
     if (!existing) return E.notFound(res, 'Assignment not found');
 
-    if (!canManage(req, existing.departmentId)) return E.forbidden(res);
+    if (!(await canManage(req, existing.departmentId))) return E.forbidden(res);
 
     const UpdateSchema = z.object({
       preferredRoomId: z.string().optional().nullable(),
@@ -353,7 +370,7 @@ router.delete('/:id', authMiddleware, async (req, res) => { // rbac: canManage()
       .findOne({ id: req.params.id, schoolId }).lean();
     if (!existing) return E.notFound(res, 'Assignment not found');
 
-    if (!canManage(req, existing.departmentId)) return E.forbidden(res);
+    if (!(await canManage(req, existing.departmentId))) return E.forbidden(res);
 
     await tenantModel('teaching_assignments', tenantContext(req)).deleteOne({ id: req.params.id, schoolId });
     invalidateScopeCache(existing.teacherId, schoolId);
