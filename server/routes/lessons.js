@@ -1885,7 +1885,21 @@ router.post('/plans/import/preview', authMiddleware, PLAN, MODGATE, importDocxBo
 
     let blocks, parseWarnings;
     if (Buffer.isBuffer(req.body)) {
-      const tableRows = await extractDocxRows(req.body);
+      // Real incident: a teacher's client sent a .pdf with this route's
+      // docx Content-Type (the client only checked for ".csv"; anything
+      // else defaulted to "assume .docx" — fixed separately in
+      // LessonsPage.jsx). express.raw() only filters by header, not real
+      // content, so a mismatched file reaches here as a Buffer regardless
+      // — JSZip.loadAsync then throws on non-ZIP bytes, and an uncaught
+      // throw here escaped to the generic 500 handler below with no useful
+      // message. A Content-Type header is never trustworthy on its own;
+      // this is the actual content-sniffing check.
+      let tableRows;
+      try {
+        tableRows = await extractDocxRows(req.body);
+      } catch (parseErr) {
+        return E.badRequest(res, `This doesn't look like a valid Word (.docx) document (${parseErr.message}). If you meant to upload a .csv, check the file extension; otherwise re-save it as .docx before uploading.`);
+      }
       ({ blocks, warnings: parseWarnings } = extractLessonBlocks(tableRows));
     } else if (typeof req.body === 'string' && req.body) {
       ({ blocks, warnings: parseWarnings } = extractCsvLessonBlocks(req.body));

@@ -268,6 +268,22 @@ describe('POST .../import/preview — never writes, classifies every row', () =>
     expect(res.body.data.rows[0].status).toBe('invalid');
   });
 
+  test('real incident: a non-.docx file (e.g. a PDF) sent with the docx Content-Type is rejected with a clear 400, never a 500', async () => {
+    // express.raw() only checks the Content-Type header, not real content —
+    // a mismatched upload (client bug, since fixed, defaulted anything
+    // that wasn't .csv to "assume .docx") reaches the route as a real
+    // Buffer of non-ZIP bytes. JSZip.loadAsync throws on this; the route
+    // must catch that and answer with a real validation message, not let
+    // it fall through to the generic 500 handler.
+    const fakePdfBytes = Buffer.from('%PDF-1.4\n%not a real docx file at all\n');
+    const res = await supertest(buildApp())
+      .post(`/api/lessons/plans/import/preview?${PREVIEW_QS}`)
+      .set('Content-Type', DOCX_MIME)
+      .send(fakePdfBytes);
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toMatch(/doesn't look like a valid Word.*docx.*document/i);
+  });
+
   test('multi-stream teacher, no streamIds given: rejected with the real available streams named, not guessed', async () => {
     mockTeachingAssignments = mockMakeFakeCollection([
       { schoolId: SCHOOL_A, teacherId: 'usr_admin', classId: 'cls_yr7', subjectId: 'subj_eng', streamId: 'strm_a', streamName: 'A' },

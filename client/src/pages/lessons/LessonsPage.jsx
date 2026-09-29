@@ -1141,6 +1141,18 @@ function ImportSlideOver({ classId, className, subjectId, subjectName, streamId,
   function handlePreview() {
     setError('');
     if (!file) { setError('Choose a .docx or .csv file first.'); return; }
+    // Real incident: a teacher dragged in a .pdf — the file picker's
+    // accept=".docx,.csv" is only a hint (drag-and-drop and "All Files"
+    // ignore it), and this used to assume "not .csv" meant ".docx",
+    // sending the PDF's bytes with the docx Content-Type straight to the
+    // server, which then failed to unzip it and returned a bare 500 with
+    // no useful message. Reject anything that isn't actually one of the
+    // two supported extensions before it's ever sent.
+    const name = file.name.toLowerCase();
+    if (!name.endsWith('.docx') && !name.endsWith('.csv')) {
+      setError(`"${file.name}" isn't a .docx or .csv file. Convert or re-save it as one of those before uploading.`);
+      return;
+    }
     if (!academicYearId || !termId) { setError('Pick the academic year and term this document is for.'); return; }
     previewMutation.mutate();
   }
