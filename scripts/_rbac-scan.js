@@ -28,15 +28,36 @@ const OWN_ACCOUNT_PATTERNS = [
 
 const ROUTE_RE = /router\.(get|post|put|patch|delete)\s*\(\s*['"`]([^'"`]+)['"`]/g;
 // Recognised protection patterns:
-//   rbac(            — standard RBAC middleware
-//   // rbac:         — manual annotation for intentional non-rbac guards
-//   planGate(        — plan-tier gate (bell-schedule, elearning, etc.)
-//   _pdfAccess       — custom PDF access guard (report-cards /:id/pdf)
-//   _can(            — teacher/admin inline guard (lesson-plans)
-//   _typeGuard       — growth-records type-based access guard
-//   behaviourAccess( — behaviour.js's rbac('behaviour', action) wrapper;
-//                      also lets the assigned Behaviour Officer through
-const RBAC_RE  = /rbac\s*\(|\/[/*] rbac:|planGate\(|_pdfAccess|_can\(|_typeGuard|behaviourAccess\(/;
+//   rbac(                    — standard RBAC middleware
+//   // rbac:                 — manual annotation for intentional non-rbac guards
+//   planGate(                — plan-tier gate (bell-schedule, elearning, etc.)
+//   _pdfAccess               — custom PDF access guard (report-cards /:id/pdf)
+//   _can(                    — teacher/admin inline guard (lesson-plans)
+//   _typeGuard               — growth-records type-based access guard
+//   behaviourAccess(         — behaviour.js's rbac('behaviour', action) wrapper;
+//                              also lets the assigned Behaviour Officer through
+//   timetableManageAccess(   — timetable.js's own floor-role/hasExplicitSubGrant
+//                              wrapper (module 'timetable', action 'manage');
+//                              confirmed real (not a naming coincidence) against
+//                              every one of the 19 routes it gated before this
+//                              scanner recognized it — none were actually open
+//   attendanceConflictAccess( — same shape, attendance.js's conflict-resolution
+//                              routes (module 'attendance', action varies)
+//   _hasBulkImportGrant(      — lessons.js's own hasExplicitSubGrant('lessons',
+//                              'import', ...) wrapper for the two bulk-import
+//                              routes; the inline call sits inside the handler
+//                              body (this scanner's 4-line context window),
+//                              not on the route registration line itself
+//   hasExplicitSubGrant(      — the real primitive several routes call
+//                              directly inline (floor-role bypass, else a
+//                              school-configurable per-role sub-permission),
+//                              rather than through a named wrapper — same
+//                              authorization mechanism rbac() itself uses
+//                              internally, just invoked by hand for a check
+//                              rbac()'s own coarse module+action shape can't
+//                              express (e.g. attendance.js's absentee-officer
+//                              config, gated on a distinct 'absentees' sub-key)
+const RBAC_RE  = /rbac\s*\(|\/[/*] rbac:|planGate\(|_pdfAccess|_can\(|_typeGuard|behaviourAccess\(|timetableManageAccess\(|attendanceConflictAccess\(|_hasBulkImportGrant\(|hasExplicitSubGrant\(/;
 const AUTH_RE  = /authMiddleware/;
 // Some files apply authMiddleware once, file-wide, via router.use(...)
 // rather than repeating it on every individual route line (e.g.
