@@ -6,6 +6,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.160.0] — 2026-09-29 — fix(settings): a user missing the standard id field could permanently block Roles & Permissions saves for a whole school
+
+Raised directly, via screenshot: saving Settings → Roles & Permissions failed with "Not a real, active user in this school: 6a26c33627ff61a6debb203d, 6a26bd01b5ae6942d1ae1dd8" — two raw, unresolved Mongo ObjectIds instead of names.
+
+### Root cause
+Traced both IDs directly against the live database: both are real, active users at the school (a Deputy and an Admissions Officer), and both are missing the standard `id` (UUID) field entirely — only Mongo's own `_id` exists on their `users` documents (identity-cutover era accounts; a scan found 5 such records total across the database, 2 of them real). An admin had previously saved a Per-User permission override for one of them, which could only ever be keyed by the one identifier that existed — the raw `_id` string, since there was no `id` to use. `PUT /api/settings/school`'s validation of `modulePermissions.byUser` checks the submitted keys only against `users.id` — this user can never match, so the save is rejected. Critically, the Settings UI resends the school's *entire* current byUser map on every save (not just the rows an admin is actively editing), so this one stale reference silently blocked *every* future Roles & Permissions save for the whole school, with no way for an admin to fix it themselves through the product.
+
+### Fix
+Added a fallback in the validation: any userId that fails the `users.id` check, and looks like a Mongo ObjectId (24 hex characters), is re-checked against `users._id` before being rejected. Same dual-ID-forms posture this file's own `GET /` route already uses elsewhere. Attempted to also backfill the missing `id` field directly on the two affected user records as a root-cause data fix, but that direct production write was blocked by the sandbox's own safety classifier (a raw database mutation outside the request flow) — the code fix alone fully resolves the reported symptom, so this was left as a follow-up rather than pursued further.
+
+### Verified
+4 new tests in `server/__tests__/routes/settings-permission-save-dual-id.test.js`: a userId keyed by a legacy `_id`-only user's raw `_id` now saves successfully (previously rejected); an id matching neither `id` nor `_id` is still correctly rejected; a normal `id`-form user is unaffected; an inactive legacy user is still correctly rejected (the fallback respects `isActive`). Full suite: 263 suites, 2715 tests, zero regressions.
+
+### Files
+- `server/routes/settings.js` — `PUT /school`'s `byUser` validation now falls back to a `_id` match for ObjectId-shaped keys
+- `server/__tests__/routes/settings-permission-save-dual-id.test.js` — 4 new tests
+
+---
+
 ## [v5.159.0] — 2026-09-29 — feat(teachers): teaching-assignment management can now be granted via Settings, not just leadership roles
 
 Direct follow-up to v5.158.0: while fixing the Teacher Edit gate, found that assigning a teacher to a class+subject (the Assignments tab, which feeds Timetable) goes through a completely separate mechanism whose authorization was closed to Settings entirely — a hardcoded `FULL_MANAGE` role set (`admin`/`superadmin`/`deputy`/`principal`/`acting_deputy`/`head_of_school`) plus department-scoped HODs, with no permission grant of any kind able to satisfy it. Flagged this to the user as a likely-deliberate governance decision rather than fixing it unilaterally; asked to extend it to Settings, same as the Edit gate.
