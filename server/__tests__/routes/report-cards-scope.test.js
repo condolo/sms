@@ -180,6 +180,45 @@ describe('GET /api/report-cards/:id — data scope + ownership', () => {
   });
 });
 
+describe('GET /api/report-cards/:id/pdf — scope (the JSON route\'s twin, previously unchecked)', () => {
+  test('a teacher out of scope for the class → 403, before any PDF is generated', async () => {
+    mockScope = { level: 'assigned', classIds: [CLASS_B], subjectIds: [], streamIds: [], unrestrictedModules: [] };
+    const res = await supertest(buildApp()).get('/api/report-cards/rc_1/pdf');
+    expect(res.status).toBe(403);
+  });
+});
+
+describe('GET /api/report-cards/:id/html — scope (the JSON route\'s twin, previously unchecked)', () => {
+  test('a teacher out of scope for the class → 403', async () => {
+    mockScope = { level: 'assigned', classIds: [CLASS_B], subjectIds: [], streamIds: [], unrestrictedModules: [] };
+    const res = await supertest(buildApp()).get('/api/report-cards/rc_1/html');
+    expect(res.status).toBe(403);
+  });
+});
+
+describe('GET /api/report-cards/bulk-pdf — scope (had no scope check at all)', () => {
+  test('a teacher out of scope for the requested classId → 403, before any snapshot is even queried', async () => {
+    mockScope = { level: 'assigned', classIds: [CLASS_B], subjectIds: [], streamIds: [], unrestrictedModules: [] };
+    const res = await supertest(buildApp()).get('/api/report-cards/bulk-pdf').query({ classId: CLASS_A });
+    expect(res.status).toBe(403);
+  });
+
+  test('a teacher in scope for the requested classId passes the scope check (404 — no published cards — not 403)', async () => {
+    mockScope = { level: 'assigned', classIds: [CLASS_A], subjectIds: [], streamIds: [], unrestrictedModules: [] };
+    mockSnapshotDocs = [];
+    const res = await supertest(buildApp()).get('/api/report-cards/bulk-pdf').query({ classId: CLASS_A });
+    expect(res.status).not.toBe(403);
+  });
+
+  test('an unrestricted (admin) role bypasses the class-scope check entirely', async () => {
+    mockJwtUser = { userId: 'usr_admin_1', schoolId: SCHOOL, role: 'admin', roles: ['admin'] };
+    mockScope = null;
+    mockSnapshotDocs = [];
+    const res = await supertest(buildApp()).get('/api/report-cards/bulk-pdf').query({ classId: CLASS_B });
+    expect(res.status).not.toBe(403);
+  });
+});
+
 describe('PUT /api/report-cards/:id/comments — subject-teacher scoping on subjectComments', () => {
   test('a teacher not assigned to the subject → 403, no write', async () => {
     mockAssignmentDocs = [];

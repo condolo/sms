@@ -1082,10 +1082,19 @@ router.get('/verify/:reportId', async (req, res) => {
    completely unreachable before this fix, confirmed with no existing
    test coverage to have caught it.
    ══════════════════════════════════════════════════════════════ */
-router.get('/bulk-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), async (req, res) => {
+router.get('/bulk-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), scopeMiddleware, async (req, res) => {
   try {
     const { schoolId, role } = req.jwtUser;
     if (!req.query.classId) return E.badRequest(res, 'classId query parameter is required');
+
+    // Same class/stream narrowing GET /:id already enforces (v5.106.0) —
+    // this route had none at all: any staff account with plain
+    // grades:read could bulk-download every published report card for
+    // ANY class in the school, not just one they teach, since the filter
+    // below was built purely from schoolId + a client-supplied classId.
+    if (!RESTRICTED_ROLES.includes(role) && !ScopeEngine.isClassInScope(req, 'report_cards', req.query.classId, null)) {
+      return E.forbidden(res, 'This class is not in your assigned scope.');
+    }
 
     const filter = {
       schoolId, classId: req.query.classId,
@@ -1743,6 +1752,16 @@ async function _checkSnapshotAccess(req, res, snap) {
     }
   }
 
+  // Same class/stream narrowing GET /:id already enforces (v5.106.0) — its
+  // PDF/HTML twins never got it. _pdfAccess only checks rbac('grades','read')
+  // for staff; without this, any teacher with that permission could
+  // download any student's report card PDF/HTML in the school, not just
+  // their own class/stream.
+  if (!RESTRICTED_ROLES.includes(role) && !ScopeEngine.isClassInScope(req, 'report_cards', snap.classId, snap.streamId)) {
+    E.forbidden(res, 'This class is not in your assigned scope.');
+    return false;
+  }
+
   // Fee clearance check — uses school-configurable threshold (default 100 = fully
   // paid). Admins always bypass. ?force=1 is a genuine, deliberate override —
   // the comment that used to sit here said so explicitly ("Admins and force=1
@@ -1820,7 +1839,7 @@ async function _checkSnapshotAccess(req, res, snap) {
 /* ══════════════════════════════════════════════════════════════
    GET /:id/pdf  — single student PDF
    ══════════════════════════════════════════════════════════════ */
-router.get('/:id/pdf', authMiddleware, PLAN, MODGATE, _pdfAccess, async (req, res) => {
+router.get('/:id/pdf', authMiddleware, PLAN, MODGATE, _pdfAccess, scopeMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
 
@@ -1873,7 +1892,7 @@ router.get('/:id/pdf', authMiddleware, PLAN, MODGATE, _pdfAccess, async (req, re
    its logo after publish is fine to show on a re-render (branding,
    not scored content); the actual marks/grades/rankings are frozen.
    ══════════════════════════════════════════════════════════════ */
-router.get('/:id/html', authMiddleware, PLAN, MODGATE, _pdfAccess, async (req, res) => {
+router.get('/:id/html', authMiddleware, PLAN, MODGATE, _pdfAccess, scopeMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
 

@@ -314,9 +314,30 @@ function computeFinalScores(gradesData, examData, assessmentWeights, gradingSche
  */
 async function attendanceSummary(schoolId, studentId, classId, termId, academicYearId) {
   const filter = { schoolId, studentId };
-  if (classId)        filter.classId        = classId;
-  if (termId)         filter.termId         = termId;
-  if (academicYearId) filter.academicYearId = academicYearId;
+  if (classId) filter.classId = classId;
+
+  // `attendance` records carry no termId/academicYearId at all — only
+  // schoolId/studentId/classId/streamId/date/status/note/markedBy (see
+  // attendance.js's own AttendanceRecordSchema). Filtering directly by
+  // those two fields, as this used to, matched ZERO records every time,
+  // for every student at every school — every report card's attendance
+  // summary silently showed 0/0/null regardless of real attendance.
+  // Resolve the term's real startDate/endDate instead and filter by date
+  // range — the same term-dates-are-truth model academic-config.js's
+  // _resolveCurrentPeriod already uses — rather than a field that has
+  // never existed on an attendance record.
+  if (termId && academicYearId) {
+    const years = await _model('academic_years').find({ schoolId }).lean();
+    const year  = years.find(y => (y.id || y._id?.toString()) === academicYearId);
+    const term  = Array.isArray(year?.terms) ? year.terms.find(t => t.id === termId) : null;
+    if (term?.startDate && term?.endDate) {
+      filter.date = { $gte: term.startDate, $lte: term.endDate };
+    }
+    // No matching term/dates (e.g. a legacy year predating the id/name
+    // normalization in v5.129.0) — fall back to unrestricted-by-date
+    // rather than silently matching nothing, same as the pre-existing
+    // behavior when no term/year is passed in at all.
+  }
 
   const Att = _model('attendance');
   const [present, absent, total] = await Promise.all([

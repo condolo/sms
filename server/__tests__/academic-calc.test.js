@@ -13,6 +13,15 @@ let mockLastReset      = [];   // behaviour_points_resets.find().sort().limit().
 let mockIncidentsAgg   = [];   // behaviour_incidents.aggregate() result
 let mockExams          = [];   // exams.find().lean() result
 let mockExamResults    = [];   // exam_results.find().lean() result
+let mockAcademicYears  = [];   // academic_years.find().lean() result
+let mockAttendanceDocs = [];   // attendance records (countDocuments matches against these)
+
+function mockAttMatches(doc, filter) {
+  return Object.entries(filter).every(([k, v]) => {
+    if (v && typeof v === 'object' && '$gte' in v) return doc[k] >= v.$gte && doc[k] <= v.$lte;
+    return doc[k] === v;
+  });
+}
 
 jest.mock('../utils/model', () => ({
   _model: jest.fn((col) => {
@@ -27,6 +36,12 @@ jest.mock('../utils/model', () => ({
     }
     if (col === 'exam_results') {
       return { find: jest.fn().mockReturnValue({ lean: jest.fn(() => Promise.resolve(mockExamResults)) }) };
+    }
+    if (col === 'academic_years') {
+      return { find: jest.fn().mockReturnValue({ lean: jest.fn(() => Promise.resolve(mockAcademicYears)) }) };
+    }
+    if (col === 'attendance') {
+      return { countDocuments: jest.fn((filter) => Promise.resolve(mockAttendanceDocs.filter(d => mockAttMatches(d, filter)).length)) };
     }
     return {
       find:           jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([]) }),
@@ -47,13 +62,15 @@ jest.mock('../routes/academic-config', () => ({
   }),
 }));
 
-const { computeFinalScores, attachDeviations, behaviourSummary, computeTermDeviation, aggregateExamResults } = require('../utils/academic-calc');
+const { computeFinalScores, attachDeviations, behaviourSummary, computeTermDeviation, aggregateExamResults, attendanceSummary } = require('../utils/academic-calc');
 
 beforeEach(() => {
-  mockLastReset    = [];
-  mockIncidentsAgg = [];
-  mockExams        = [];
-  mockExamResults  = [];
+  mockLastReset      = [];
+  mockIncidentsAgg   = [];
+  mockExams          = [];
+  mockExamResults    = [];
+  mockAcademicYears  = [];
+  mockAttendanceDocs = [];
 });
 
 /* ── Fixtures ───────────────────────────────────────────────── */
@@ -374,5 +391,83 @@ describe('computeTermDeviation', () => {
 
   test('empty current subjects returns an empty subjects map', () => {
     expect(computeTermDeviation({}, { math: { finalScore: 78 } })).toEqual({ subjects: {} });
+  });
+});
+
+/* ============================================================
+   attendanceSummary — the term/year filter bug (2026-09-29)
+
+   Real bug: this used to filter attendance records directly by
+   termId/academicYearId — fields that don't exist on an attendance
+   record at all (only schoolId/studentId/classId/streamId/date/status).
+   Every report card's attendance summary silently showed 0/0/null,
+   for every student, every school, unconditionally. Fixed to resolve
+   the term's real startDate/endDate and filter by date range instead.
+   ============================================================ */
+describe('attendanceSummary', () => {
+  const SCHOOL = 'sch_1';
+  const STUDENT = 'stu_1';
+  const YEAR_ID = 'yr_1';
+  const TERM_ID = 'term_2';
+
+  test('with a resolvable term, counts only attendance within that term\'s date range', async () => {
+    mockAcademicYears = [{
+      id: YEAR_ID, schoolId: SCHOOL,
+      terms: [
+        { id: 'term_1', name: 'Term 1', startDate: '2026-01-05', endDate: '2026-04-03' },
+        { id: TERM_ID,  name: 'Term 2', startDate: '2026-04-27', endDate: '2026-07-24' },
+      ],
+    }];
+    mockAttendanceDocs = [
+      { schoolId: SCHOOL, studentId: STUDENT, date: '2026-02-10', status: 'present' }, // Term 1 — must be excluded
+      { schoolId: SCHOOL, studentId: STUDENT, date: '2026-05-05', status: 'present' },
+      { schoolId: SCHOOL, studentId: STUDENT, date: '2026-05-06', status: 'present' },
+      { schoolId: SCHOOL, studentId: STUDENT, date: '2026-05-07', status: 'absent' },
+    ];
+
+    const result = await attendanceSummary(SCHOOL, STUDENT, null, TERM_ID, YEAR_ID);
+    expect(result).toEqual({ daysPresent: 2, daysAbsent: 1, totalSchoolDays: 3, percentage: 66.67 });
+  });
+
+  test('the bug this fixes: a termId/academicYearId that would have matched nothing under the old field-based filter now matches real records', async () => {
+    mockAcademicYears = [{ id: YEAR_ID, schoolId: SCHOOL, terms: [{ id: TERM_ID, name: 'Term 2', startDate: '2026-04-27', endDate: '2026-07-24' }] }];
+    // Real-shape attendance record — no termId/academicYearId field at all, exactly like production data
+    mockAttendanceDocs = [{ schoolId: SCHOOL, studentId: STUDENT, date: '2026-05-05', status: 'present' }];
+
+    const result = await attendanceSummary(SCHOOL, STUDENT, null, TERM_ID, YEAR_ID);
+    expect(result.totalSchoolDays).toBe(1);
+    expect(result.daysPresent).toBe(1);
+  });
+
+  test('an unresolvable term (no matching year/term) falls back to unrestricted-by-date rather than silently returning zero', async () => {
+    mockAcademicYears = []; // year not found at all
+    mockAttendanceDocs = [{ schoolId: SCHOOL, studentId: STUDENT, date: '2020-01-01', status: 'present' }];
+
+    const result = await attendanceSummary(SCHOOL, STUDENT, null, 'term_missing', 'year_missing');
+    expect(result.totalSchoolDays).toBe(1);
+  });
+
+  test('no termId/academicYearId passed at all — unrestricted by date (unchanged pre-existing behavior)', async () => {
+    mockAttendanceDocs = [
+      { schoolId: SCHOOL, studentId: STUDENT, date: '2020-01-01', status: 'present' },
+      { schoolId: SCHOOL, studentId: STUDENT, date: '2026-05-05', status: 'absent' },
+    ];
+    const result = await attendanceSummary(SCHOOL, STUDENT, null, null, null);
+    expect(result.totalSchoolDays).toBe(2);
+  });
+
+  test('classId, when provided, still narrows the filter', async () => {
+    mockAttendanceDocs = [
+      { schoolId: SCHOOL, studentId: STUDENT, classId: 'cls_A', date: '2026-05-05', status: 'present' },
+      { schoolId: SCHOOL, studentId: STUDENT, classId: 'cls_B', date: '2026-05-06', status: 'present' },
+    ];
+    const result = await attendanceSummary(SCHOOL, STUDENT, 'cls_A', null, null);
+    expect(result.totalSchoolDays).toBe(1);
+  });
+
+  test('zero matching attendance records returns null percentage, not NaN or a crash', async () => {
+    mockAttendanceDocs = [];
+    const result = await attendanceSummary(SCHOOL, STUDENT, null, null, null);
+    expect(result).toEqual({ daysPresent: 0, daysAbsent: 0, totalSchoolDays: 0, percentage: null });
   });
 });

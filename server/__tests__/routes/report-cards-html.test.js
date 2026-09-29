@@ -31,6 +31,10 @@ jest.mock('../../middleware/auth', () => ({
   authMiddleware: (req, _res, next) => { req.jwtUser = mockCurrentUser; next(); },
 }));
 jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => next() }));
+// Not under test here (see report-cards-scope.test.js for scope coverage) —
+// neutralized the same way rbac is above, so req.scope stays unset and
+// ScopeEngine.isClassInScope's own "no scope = unrestricted" fallback applies.
+jest.mock('../../middleware/scopeMiddleware', () => ({ scopeMiddleware: (_req, _res, next) => next() }));
 jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) => next() }));
 jest.mock('../../utils/archival', () => ({ isYearArchived: jest.fn().mockResolvedValue(false) }));
 
