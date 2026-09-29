@@ -74,10 +74,20 @@ export default function AppShell() {
       bc.onmessage = () => refreshPermissions();
     } catch { /* BroadcastChannel not available in all envs */ }
 
+    // Floor under the focus/mount/broadcast triggers above: none of those fire
+    // for a user who stays on one tab, in focus, without reloading — e.g. an
+    // admissions officer working through a long admission queue right after
+    // an admin changes their role's permissions elsewhere. Without this, that
+    // session's sidebar/buttons could lag the role change indefinitely. Same
+    // interval as rbac.js's own CACHE_TTL_MS, so the UI is never staler than
+    // the server-side permission check it's trying to mirror.
+    const interval = setInterval(refreshPermissions, 5 * 60 * 1000);
+
     return () => {
       window.removeEventListener('focus', refreshPermissions);
       window.removeEventListener('permissions:changed', refreshPermissions);
       bc?.close();
+      clearInterval(interval);
     };
   }, [refreshPermissions]);
 

@@ -675,7 +675,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Staff Records — see staff profiles\n• View Leave Requests — see submitted leave applications\n• Approve / Reject Leave — decide on a leave request\n• View Payroll — see payroll records\n• Export Payroll (CSV) — download payroll data\n• Manage Staff Documents — upload/manage staff document files\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Leave Requests — see submitted leave applications\n• Approve / Reject Leave — decide on a leave request\n• View Payroll — see payroll records\n• Export Payroll (CSV) — download payroll data\n• Manage Staff Documents — upload/manage staff document files\n• Configure Leave/Payroll Approval Workflow — set up the approval chain\nStaff profiles are governed by the separate Teachers module permission, not HR & Payroll. Your role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },

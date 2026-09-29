@@ -3552,7 +3552,7 @@ const PERM_MODULES = [
     { key: 'export', label: 'Export Events (CSV)' },
   ]},
   { key: 'hr',         label: 'HR & Payroll', subs: [
-    { key: 'staff',          label: 'View Staff Records' },
+    // 'staff' (View Staff Records) removed 2026-09-29 — see moduleRegistry.js's comment
     { key: 'leave_view',     label: 'View Leave Requests' },
     { key: 'leave_approve',  label: 'Approve / Reject Leave' },
     { key: 'payroll_view',   label: 'View Payroll' },

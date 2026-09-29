@@ -265,7 +265,11 @@ const MODULE_REGISTRY = [
     { key: 'export', label: 'Export Events (CSV)' },
   ]},
   { key: 'hr', label: 'HR & Payroll', section: 'Operations', icon: 'UserCog', navRoute: '/hr', navLabel: 'HR & Staff', navOrder: 13, subs: [
-    { key: 'staff',          label: 'View Staff Records' },
+    // 'staff' (View Staff Records) removed 2026-09-29: had zero references
+    // anywhere in server or client code. Staff-record visibility is actually
+    // gated by the Teachers module's own teachers:read permission
+    // (server/routes/teachers.js) — a second toggle over the same data would
+    // only create ambiguity about which one governs.
     { key: 'leave_view',     label: 'View Leave Requests' },
     { key: 'leave_approve',  label: 'Approve / Reject Leave' },
     { key: 'payroll_view',   label: 'View Payroll' },

@@ -13,7 +13,7 @@ const { z }          = require('zod');
 const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware } = require('../middleware/auth');
-const { rbac }           = require('../middleware/rbac');
+const { rbac, hasExplicitSubGrant } = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { moduleGate }     = require('../middleware/module-gate');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
@@ -190,11 +190,19 @@ router.get('/leave', async (req, res) => {
     const { page, limit, skip } = parsePagination(req.query);
 
     const filter = { schoolId };
-    /* Non-HR staff see their own requests, plus (if a leave chain is
-       configured) any pending request currently awaiting a step they're
-       eligible to act on — otherwise a HOD/Principal step approver could
-       never see the requests they need to advance. */
-    if (!HR_ROLES.has(role)) {
+    // 'View Leave Requests' (hr__leave_view) used to be a Settings checkbox
+    // with nothing behind it — this route only ever checked the hardcoded
+    // HR_ROLES set, so granting it to any other role (e.g. a Deputy
+    // Principal) had zero effect, and there was no way to narrow it away
+    // from the built-in 'hr' role either. hasExplicitSubGrant is additive
+    // to the HR_ROLES floor below, never a replacement for it.
+    const canViewAllLeave = HR_ROLES.has(role) || await hasExplicitSubGrant(req, 'hr', 'leave_view', 'read');
+    /* Non-HR staff (and anyone without the explicit grant above) see their
+       own requests, plus (if a leave chain is configured) any pending
+       request currently awaiting a step they're eligible to act on —
+       otherwise a HOD/Principal step approver could never see the
+       requests they need to advance. */
+    if (!canViewAllLeave) {
       const ctx = tenantContext(req);
       const config = await getWorkflowConfig(ctx, schoolId, LEAVE_WORKFLOW_KEY);
       const eligibleStepOrders = [];
