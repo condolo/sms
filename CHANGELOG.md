@@ -6,6 +6,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.152.0] — 2026-09-29 — fix(dashboard): "Academic Health" panel's link 404'd
+
+Real report: clicking "View" on the Dashboard's Academic Health leadership panel gave "Page not found." `/grades` was a real route once (`GradesPage.jsx`), removed when that page was consolidated into `ExamsPage.jsx`'s own Markbook tab and the newer standalone Report Cards module — this one `<Link>` was never updated when the route disappeared. Confirmed via `git log` that `/grades`/`/grades/:tab` genuinely existed and were removed, and grepped the entire client for any other reference to it — this was the only surviving one. Pointed it at `/exams`, the module that now actually hosts the per-student CA/HW/MT/ET grades this panel averages (Markbook tab), matching the pattern the other 3 leadership panels already use (each links to its own real top-level module: `/attendance`, `/finance`, `/behaviour`).
+
+### Verified
+`esbuild` syntax-check clean. No server-side change; no client test runner exists in this codebase for a single link destination, same verification posture as other one-line client fixes this cycle.
+
+### Files
+- `client/src/pages/Dashboard.jsx` — Academic Health panel's link now points to `/exams` instead of the removed `/grades` route
+
+---
+
 ## [v5.151.0] — 2026-09-29 — fix(ci): "RBAC Coverage Gate" was failing on every push — false positives in the scanner, not real gaps
 
 Raised directly: the GitHub Action "Security Scan / RBAC Coverage Gate" had been failing on every push. Investigated each of the 28 flagged endpoints individually rather than assuming the gate was right — all 28 turned out to already have real, working authorization; the CI scanner (`scripts/_rbac-scan.js`) just didn't recognize the specific pattern each one used:

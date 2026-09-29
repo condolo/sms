@@ -1617,7 +1617,14 @@ function LeadershipPanel({ school, dateFrom, dateTo, rangeLabel }) {
               <span className="text-sm font-semibold text-slate-700">Academic Health</span>
               <span className="text-[10px] text-slate-400">(published grades)</span>
             </div>
-            <Link to="/grades" className="text-xs transition flex items-center gap-1 font-medium" style={{ color: primary }}>
+            {/* /grades was a real route (GradesPage.jsx) before that page was
+                consolidated into ExamsPage's own Markbook tab and the new
+                standalone Report Cards module — this link was never updated
+                when the route was removed, so it 404'd for anyone who
+                clicked it. Markbook (under Exams) is where the underlying
+                per-student CA/HW/MT/ET grades this panel averages actually
+                live today. */}
+            <Link to="/exams" className="text-xs transition flex items-center gap-1 font-medium" style={{ color: primary }}>
               View <ArrowRight size={11} />
             </Link>
           </div>
