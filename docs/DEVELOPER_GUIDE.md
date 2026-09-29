@@ -5580,3 +5580,23 @@ The most substantial of the three. Design decisions made (documented here since 
 - `server/__tests__/routes/academic-config-school-profile-signature.test.js` (new)
 - `server/__tests__/routes/report-cards-observation-ratings.test.js` (new)
 - `server/__tests__/routes/report-cards-term-scope.test.js`, `report-cards-ir.test.js`, `academic-config-report-toggles.test.js`, `report-cards.test.js` — extended
+
+## 90. Lesson Plan Import Crashed on a Non-.docx Upload — a Content-Type Header Was Trusted Instead of the Actual Bytes (v5.150.0)
+
+Real teacher report with a screenshot: uploading a `.pdf` to Import Lesson Plans showed "Internal server error," no explanation, no next step.
+
+### Root cause
+`LessonsPage.jsx`'s upload logic: `const contentType = isCsv ? 'text/csv' : lessonsApi.import.DOCX_MIME;` — anything that wasn't `.csv` was assumed to be `.docx`, including a `.pdf`. The file input's `accept=".docx,.csv"` doesn't enforce this (drag-and-drop and "All Files" bypass it entirely), so the PDF was sent with a `Content-Type` claiming it was a Word document. Server-side, `express.raw({ type: DOCX_MIME })` only inspects the header to decide whether to parse the body at all — it doesn't verify the bytes match — so the PDF arrived at the route handler as a genuine `Buffer`, which was then handed straight to `extractDocxRows` → `JSZip.loadAsync` (a `.docx` is a ZIP archive). JSZip threw on the non-ZIP bytes; nothing in `POST /plans/import/preview` caught that specific failure, so it fell through to the route's outer `catch` and the generic `E.serverError` — a real, valid-looking crash with zero indication of what actually went wrong.
+
+### Fix
+Two layers, deliberately not just one — a `Content-Type` header from any client is a claim, never a guarantee:
+1. **Client** (`LessonsPage.jsx`'s `handlePreview()`): checks the real extension (`.docx` or `.csv`) before ever calling the mutation, refusing anything else with a specific message naming the actual filename.
+2. **Server** (`POST /plans/import/preview`): the `extractDocxRows` call is now wrapped in its own `try/catch`, converting a parse failure into `E.badRequest` with a clear explanation, rather than letting it escape to the route's generic error handler. This closes the gap for any other file-type mismatch, not just this one report — the server no longer trusts that a `Buffer` reaching this line is actually a valid `.docx` just because the header said so.
+
+### Verified
+1 new test in `lessons-plans-import.test.js`: fake PDF bytes (`%PDF-1.4...`) sent with the `.docx` `Content-Type` now get a `400` with a message matching `/doesn't look like a valid Word.*docx.*document/i`, not a `500`. Full suite passing, zero regressions.
+
+### Files
+- `server/routes/lessons.js` — `POST /plans/import/preview`'s `extractDocxRows` call wrapped in try/catch
+- `client/src/pages/lessons/LessonsPage.jsx` — `handlePreview()` validates the real extension before upload
+- `server/__tests__/routes/lessons-plans-import.test.js` — 1 new test

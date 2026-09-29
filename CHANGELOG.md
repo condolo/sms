@@ -6,6 +6,28 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.150.0] — 2026-09-29 — fix(lessons): uploading a non-.docx file to Lesson Plan Import crashed with a bare 500
+
+Real teacher report, screenshot in hand: uploading `YEAR 6 ENGLISH LESSON PLANS.pdf` to Import Lesson Plans showed "Internal server error" with no explanation, and no clear next step.
+
+### Root cause
+`LessonsPage.jsx`'s upload only checked whether the filename ended in `.csv` — anything else, including a `.pdf`, was assumed to be a `.docx` and sent to the server labeled with the Word document content-type. The file picker's `accept=".docx,.csv"` is only a hint (ignored by drag-and-drop and "All Files" in most OS pickers), so nothing actually stopped the wrong file type from reaching this code path. Server-side, `express.raw()` only filters by the `Content-Type` header, not real content, so the PDF's raw bytes arrived as a genuine `Buffer` and were handed to the `.docx` parser (`JSZip.loadAsync`, since a `.docx` is a ZIP archive) — which threw on the non-ZIP bytes, uncaught, straight into the generic 500 handler.
+
+### Fix
+Two layers, since a `Content-Type` header sent by any client is never trustworthy on its own:
+- **Client**: `handlePreview()` now checks the actual file extension is `.docx` or `.csv` before sending anything, and shows a specific message (`"filename.pdf" isn't a .docx or .csv file`) instead of guessing.
+- **Server**: `POST /plans/import/preview` now catches a failed `.docx` parse and returns a real `400` explaining the file doesn't look like a valid Word document, instead of letting the exception escape to the generic error handler — closing the gap for any other mismatched upload, not just this one report.
+
+### Verified
+1 new test reproducing the exact scenario (PDF bytes sent with the `.docx` content-type) — asserts a `400` with a clear message, not a `500`. Full suite passing, zero regressions.
+
+### Files
+- `server/routes/lessons.js` — `POST /plans/import/preview` catches and explains a failed `.docx` parse
+- `client/src/pages/lessons/LessonsPage.jsx` — `handlePreview()` validates the real file extension before upload
+- `server/__tests__/routes/lessons-plans-import.test.js` — 1 new test
+
+---
+
 ## [v5.149.0] — 2026-09-29 — feat(report-cards): closes the three remaining exam-to-report-card audit items
 
 Follow-up to v5.148.0's audit — the three findings flagged as needing a decision rather than a silent fix, all actioned:
