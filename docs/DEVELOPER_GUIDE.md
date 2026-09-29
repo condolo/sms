@@ -5496,3 +5496,49 @@ Asked directly how to handle the sibling case before writing this: *"yes if its 
 - `client/src/pages/students/StudentProfile.jsx` — new `PortalBadge` component, used by all 4 portal-account cards
 - `server/__tests__/routes/students-portal-cascade.test.js` (new)
 - `server/__tests__/routes/students.test.js`, `students-deactivate-reactivate.test.js` — `users` mock chains extended
+
+## 88. Exam-to-Report-Card Audit — Attendance Always Zero, and Three Routes Missing the Report-Card Scope Check (v5.148.0)
+
+Asked for a full audit of the exam module, report cards, and the connection between them, prompted by a real report card PDF (Trinitas, admission #17227) with a blank Name, blank Age, blank Days Absent, and an empty "Cambridge Attributes" observation-checkbox section. Delegated the initial research to an agent (read-only, no edits), then independently re-verified every claim that mattered against the actual code and a live database query before writing or changing anything — the agent's own worktree had no `.env`, so it couldn't check the database itself; this session's own live query closed that gap.
+
+### The sample PDF itself is not a Msingi bug
+Queried the real student behind admission #17227 directly: Joseph Njogu, DOB on file, currently Year 8 (the sample PDF said Year 7). **He has zero `report_card_snapshots` documents — none have ever been generated for him**, and Trinitas has never set `principalSignatureUrl`/`schoolStampUrl` anywhere. Cross-checked against the renderer: the name-fallback logic (`report-cards.js:756`) always falls back to at least the raw student ID, never a true blank, and there is no "Age" field anywhere in any of the 4 report layouts. Conclusion: that specific PDF was produced outside the app (a manually-filled template), not by this pipeline — its blank fields are a manual-process gap, not a code bug. Tracing *why the app itself would still be broken* if it had generated that card surfaced two real, separate, verified issues below.
+
+### Bug 1 — attendance summary matched zero attendance records, unconditionally, for every school
+```js
+// academic-calc.js, before:
+async function attendanceSummary(schoolId, studentId, classId, termId, academicYearId) {
+  const filter = { schoolId, studentId };
+  if (classId)        filter.classId        = classId;
+  if (termId)         filter.termId         = termId;           // ← this field
+  if (academicYearId) filter.academicYearId = academicYearId;   // ← and this one
+  // ...counts against `attendance` using `filter`
+}
+```
+`attendance.js`'s own `AttendanceRecordSchema`/`BulkAttendanceSchema` never accept or store `termId`/`academicYearId` — confirmed by grep, zero matches in the whole file. Every attendance document only ever carries `{schoolId, studentId, classId, streamId, date, status, note, markedBy}`. `report-cards.js` always resolves and passes real, non-null `termId`/`academicYearId` into this function (3 call sites: preview generation, PDF render, HTML render) — so the filter always included a field attendance records never had, matching **zero documents, every time**, for every student at every school. `showAttendanceSummary` defaults to `true` in `academic-config.js`, so this wasn't an edge case — it was the default report-card experience. Confirmed live: a real Trinitas student (Joseph Njogu) has 6 real attendance records, none with a `termId` field, exactly as the bug predicts.
+
+**Fix:** resolve the term's real `startDate`/`endDate` from `academic_years` and filter attendance by date range instead — the same term-dates-are-source-of-truth model `academic-config.js`'s `_resolveCurrentPeriod` already uses for defaulting the current period everywhere else in the app. If the term can't be resolved (e.g. a legacy academic year predating the `id`/`name` normalization in v5.129.0), falls back to unrestricted-by-date — a less-precise number, not a confidently-wrong zero.
+
+### Bug 2 — `GET /:id/pdf`, `GET /:id/html`, and `GET /bulk-pdf` had no class/stream scope check
+`GET /:id` got this exact fix in v5.106.0, with its own comment explaining the original incident ("a teacher with grades:read could open any student's report card in the school, not just their own class/stream"). Its three siblings never got the same treatment:
+- `_checkSnapshotAccess` (shared by `/:id/pdf` and `/:id/html`) checked superseded-status, student self-ownership, guardian linkage, and fee clearance — but never class/stream scope for a staff caller.
+- `GET /bulk-pdf` built its `report_card_snapshots` filter from `schoolId` + whatever `classId` the caller passed in the query string, with no ownership check anywhere in the handler.
+
+Reproduction (pre-fix): any staff account holding plain `grades:read` — a common permission for most teaching roles — could fetch **any** student's report card PDF/HTML, or bulk-download an entire class's report cards, regardless of whether they teach that class.
+
+**Fix:** added `ScopeEngine.isClassInScope(req, 'report_cards', classId, streamId)` to `_checkSnapshotAccess` (covers both PDF and HTML) and to `GET /bulk-pdf`'s handler, bypassed for `RESTRICTED_ROLES` (student/parent/guardian, who have their own ownership checks) exactly like `GET /:id` already does. Also added `scopeMiddleware` to all three routes' registrations — `isClassInScope` reads `req.scope`, which only exists if `scopeMiddleware` ran first; without it, the check would have silently no-op'd (`isClassInScope` treats a missing `req.scope` as "school-level, unrestricted").
+
+### Flagged, not fixed — product decisions
+- **"Cambridge Attributes"** (the class-teacher observation ratings on the sample PDF — Engaged/Teamwork/Confidence/Responsibility/Reflective/Innovative, each Excellent/Good/Improve): grepped the entire repo for this section and each category name — zero matches anywhere in server or client code. There is no collection, no field on `report_card_snapshots`, no input screen. This section is always blank for every student at every school, unconditionally, because nothing in the app has ever written to it. Building it for real is scoped feature work (a data model + a class-teacher input screen + a template section), not a bug fix.
+- **Signature/stamp upload has no UI.** `schools.principalSignatureUrl`/`schoolStampUrl` and `principalSignatureLabel`/`classTeacherSignatureLabel` are real, persisted fields, read at publish time and drawn directly into the PDF (`_fetchSignatureImages`, `_buildPDFPage`) — but grepping the entire client for any of those field names returns zero matches. No Settings screen exists to set them; only a raw API call could. The backend contract is complete; this is a pure UI gap.
+- **`POST /generate` (preview) has no moderation gate**, while `/publish` correctly requires every relevant exam to be `approved`/`locked`/`published`/`archived` before it'll include their marks. A preview can show numbers from a merely-`completed` (unmoderated) exam that could still change. Lower priority than the two fixed bugs; noted for a follow-up.
+
+### Verified
+6 new tests in `academic-calc.test.js` for `attendanceSummary`: the date-range fix works correctly; the exact bug scenario (a real-shape attendance record with no `termId` field, previously unmatchable under the old filter) now matches; an unresolvable term falls back to unrestricted-by-date rather than zero; classId narrowing, no-term-given, and zero-records behavior all unchanged. 5 new tests in `report-cards-scope.test.js`: out-of-scope teacher denied on `/:id/pdf`, `/:id/html`, and `/bulk-pdf`; in-scope teacher passes; admin bypasses. Full suite passing, zero regressions. `scripts/verify-tenant-coverage.js` held at ceiling (35); `scripts/verify-rbac-coverage.js` shows the same pre-existing, unrelated timetable.js/attendance.js/lessons.js gap recorded since v5.134.0, confirmed untouched by this change.
+
+### Files
+- `server/utils/academic-calc.js` — `attendanceSummary` resolves and filters by the term's real date range instead of a field attendance records never had
+- `server/routes/report-cards.js` — `_checkSnapshotAccess` and `GET /bulk-pdf` gained the class/stream scope check; `scopeMiddleware` added to `/:id/pdf`, `/:id/html`, `/bulk-pdf`
+- `server/__tests__/academic-calc.test.js` — 6 new `attendanceSummary` tests
+- `server/__tests__/routes/report-cards-scope.test.js` — 5 new scope tests covering the 3 previously-unchecked routes
+- `server/__tests__/routes/report-cards-html.test.js` — `scopeMiddleware` neutralized to match that file's existing `rbac` mock convention (not under test there)

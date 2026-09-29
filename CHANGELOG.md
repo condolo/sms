@@ -6,6 +6,33 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.148.0] — 2026-09-29 — fix(report-cards): attendance always showed zero, and 3 routes let any teacher pull any class's report cards
+
+Requested a full audit of the exam-to-report-card connection, prompted by a real report card PDF with several blank fields — investigated with an agent doing read-only research, then independently re-verified every finding against the actual code and a live database query before fixing anything. That specific PDF turned out to be external to the app entirely: the admission number's real student has zero report card snapshots ever generated, and the school has never configured a signature/stamp — so its blank Name/Age/Days-Absent/observation-checkbox fields are a manual-template gap, not this app's bug. But tracing *why* those fields would still be broken if the app ever did generate that card surfaced two real, independently-confirmed issues.
+
+### Fix 1 — attendance summary matched zero records, for every student, every school
+`academic-calc.js`'s `attendanceSummary` filtered the `attendance` collection by `termId`/`academicYearId` — fields that do not exist on an attendance record at all (confirmed by grep: `attendance.js`'s own schema only ever stores `schoolId`/`studentId`/`classId`/`streamId`/`date`/`status`/`note`/`markedBy`). Every report card's attendance section (`showAttendanceSummary` defaults to `true`) silently computed 0 days present, 0 absent, null% — for every student at every school — with no error anywhere. Fixed to resolve the term's real `startDate`/`endDate` from `academic_years` and filter attendance by date range instead, the same term-dates-are-truth model `academic-config.js`'s `_resolveCurrentPeriod` already uses. Falls back to unrestricted-by-date (not zero) if the term can't be resolved, so a data gap degrades to "less precise" rather than "confidently wrong."
+
+### Fix 2 — any teacher with `grades:read` could pull any class's report cards
+`GET /:id` already got a class/stream scope check in v5.106.0 ("a teacher with grades:read could open any student's report card in the school, not just their own class/stream"). Its three siblings never did: `GET /:id/pdf`, `GET /:id/html` (both via the shared `_checkSnapshotAccess`), and `GET /bulk-pdf` (which built its query from `schoolId` + a client-supplied `classId` with no ownership check at all). Added the identical `ScopeEngine.isClassInScope` check to all three, plus `scopeMiddleware` on their route registrations (required for that check to have a `req.scope` to read — without it, the check silently no-ops).
+
+### Not done — needs a product decision, not a silent fix
+- **"Cambridge Attributes" / class-teacher observation ratings** (the checkboxed section on the sample PDF) has no data model, input screen, or template section anywhere in this codebase — it is not a per-card oversight, this section is always blank for every student at every school, because nothing in the app ever writes to it. Building it is scoped feature work, not a bug fix.
+- **Signature/stamp upload UI** — `schools.principalSignatureUrl`/`schoolStampUrl` and their labels are fully wired server-side and already drawn into the PDF renderer, but no Settings screen exists to set them. The backend contract is complete; only a UI is missing.
+- **Report preview (`/generate`) has no moderation gate**, unlike `/publish` — a preview can show scores from a merely-`completed` (unmoderated) exam. Lower priority; noted for a future pass.
+
+### Verified
+6 new tests for `attendanceSummary` (`academic-calc.test.js`) covering the date-range fix, the exact bug scenario (a real-shape attendance record with no termId, previously unmatchable), the unresolvable-term fallback, and existing no-term-given/classId-narrowing/zero-records behavior unchanged. 5 new tests in `report-cards-scope.test.js` covering `/:id/pdf`, `/:id/html`, and `/bulk-pdf`'s scope checks (out-of-scope teacher denied, in-scope teacher passes, admin bypasses). Full suite passing, zero regressions. `scripts/verify-tenant-coverage.js` held at ceiling (35). `scripts/verify-rbac-coverage.js` shows the same pre-existing, unrelated timetable.js/attendance.js/lessons.js gap recorded since v5.134.0 — confirmed untouched by this fix.
+
+### Files
+- `server/utils/academic-calc.js` — `attendanceSummary` now resolves and filters by the term's date range instead of a nonexistent field
+- `server/routes/report-cards.js` — scope check added to `_checkSnapshotAccess` (covers `/:id/pdf` + `/:id/html`) and to `GET /bulk-pdf`; `scopeMiddleware` added to all three route registrations
+- `server/__tests__/academic-calc.test.js` — 6 new `attendanceSummary` tests
+- `server/__tests__/routes/report-cards-scope.test.js` — 5 new scope tests
+- `server/__tests__/routes/report-cards-html.test.js` — `scopeMiddleware` neutralized (not under test in that file), matching its existing `rbac` mock convention
+
+---
+
 ## [v5.147.0] — 2026-09-28 — fix(students): deactivating a student never revoked their (or their parent's) portal login
 
 Raised directly from a screenshot: a student's profile showed "Inactive" at the top, "Active" on both the Student and Parent Portal Account cards, and a "Reactivate to restore portal access" banner — three pieces of the same screen contradicting each other. Investigated end to end rather than just relabeling the badge, and found a real access-control gap, not just a display bug.
