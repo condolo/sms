@@ -47,8 +47,21 @@ describe('extractLessonBlocks — filled real document (4 lessons, one <w:tbl> e
   });
 
   test('detects exactly 4 lesson blocks', () => {
-    expect(warnings).toEqual([]);
     expect(blocks).toHaveLength(4);
+  });
+
+  // Real authoring error in this actual document, found 2026-09-30: lesson
+  // 2's two meta rows disagree on CLASS ("x" in row 0, "YEAR" in row 1) —
+  // neither is a real class name, but they're also not the SAME value, so
+  // this is a genuine conflict, not a harmless duplicate. First still wins
+  // (unchanged behavior), but it's now surfaced instead of silently
+  // swallowed — the exact reason a downstream "class could not be
+  // resolved" error would occur for this lesson, instead of no clue why.
+  test('lesson 2\'s conflicting duplicate CLASS values are warned about, not silently swallowed', () => {
+    expect(blocks[1].classRaw).toBe('x'); // first value still wins
+    expect(warnings).toEqual([
+      'Lesson block at row 10: Conflicting CLASS values found ("x" vs "YEAR") — using "x"; verify this lesson\'s class is correct.',
+    ]);
   });
 
   test('lesson 1: meta fields resolve from the label/value rows', () => {
@@ -80,6 +93,19 @@ describe('extractLessonBlocks — filled real document (4 lessons, one <w:tbl> e
     expect(b.differentiation.low).toContain('graphic organizer');
     expect(b.assessmentRaw).toContain('word choices');
     expect(b.homeworkRaw).toContain('Observation of pair brainstorming');
+  });
+
+  // The differentiation header row's real cells are "LOW ABILITY" / "MIDDLE
+  // ABILITY" / "HIGH ABILITY" (confirmed against this actual document) —
+  // matched by label, not by assuming data-row columns 1/2/3 are always
+  // low/middle/high in that order. Lesson 2 is the one block where all
+  // three columns are populated, so it's the strongest proof the label
+  // match (not position) is what's actually wiring these up correctly.
+  test('lesson 2: all three differentiation levels resolve to their own distinct real values', () => {
+    const d = blocks[1].differentiation;
+    expect(d.low).toContain('sentence starters');
+    expect(d.middle).toContain('word bank');
+    expect(d.high).toContain('verb choices');
   });
 
   test('every block has a distinct topic (4 different lessons, not the same block repeated)', () => {

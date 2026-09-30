@@ -156,10 +156,18 @@ function _cellStartsWith(cell, label) {
 
 // Pulls {teacher, week, termYear, subject, date, class} out of the two
 // meta rows by label, not fixed position — a school's row 0 sometimes
-// carries an extra duplicate CLASS cell (seen in one real document); this
-// only reads the label/value pairs it recognizes and ignores the rest.
+// carries an extra duplicate CLASS cell (seen in one real document). The
+// first occurrence of a label wins; when a later occurrence disagrees with
+// it (confirmed against real data: one lesson block's row 0 gave "x" and
+// row 1 gave "YEAR" — a genuine authoring error in the source document,
+// not a harmless repeat), that's surfaced as a warning rather than
+// silently discarded, so the operator has a concrete reason for a
+// downstream "class could not be resolved" error instead of no clue at
+// all.
 function _parseMetaRows(row0, row1) {
   const meta = {};
+  const warnings = [];
+  const FIELD_BY_LABEL = { CLASS: 'classRaw' };
   const pairs = (row) => {
     for (let i = 0; i + 1 < row.length; i += 2) {
       const label = _norm(row[i]).toUpperCase();
@@ -170,12 +178,18 @@ function _parseMetaRows(row0, row1) {
       else if (label.startsWith('TERM')) meta.termYearRaw = value;
       else if (label === 'SUBJECT') meta.subjectRaw = value;
       else if (label === 'DATE') meta.dateRaw = value;
-      else if (label === 'CLASS' && !meta.classRaw) meta.classRaw = value; // first CLASS wins, ignore a duplicate
+      else if (label in FIELD_BY_LABEL) {
+        const field = FIELD_BY_LABEL[label];
+        if (!meta[field]) meta[field] = value;
+        else if (value && value !== meta[field]) {
+          warnings.push(`Conflicting ${label} values found ("${meta[field]}" vs "${value}") — using "${meta[field]}"; verify this lesson's class is correct.`);
+        }
+      }
     }
   };
   pairs(row0);
   pairs(row1);
-  return meta;
+  return { meta, warnings };
 }
 
 // Column headers aren't assumed to be in a fixed order — matched by
@@ -216,7 +230,9 @@ function extractLessonBlocks(rows) {
     const slice = rows.slice(start, end);
     const block = { sourceRowStart: start, sourceRowEnd: end };
 
-    Object.assign(block, _parseMetaRows(slice[0] || [], slice[1] || []));
+    const { meta, warnings: metaWarnings } = _parseMetaRows(slice[0] || [], slice[1] || []);
+    Object.assign(block, meta);
+    metaWarnings.forEach(w => warnings.push(`Lesson block at row ${start}: ${w}`));
 
     const headerIdx = slice.findIndex(r => _norm(r[0]).toLowerCase() === 'lesson');
     if (headerIdx === -1 || !slice[headerIdx + 1]) {
@@ -228,10 +244,27 @@ function extractLessonBlocks(rows) {
     const dataRow = slice[headerIdx + 1];
     for (const { index, field } of colMap) block[field] = _norm(dataRow[index]);
 
-    const diffDataIdx = slice.findIndex(r => _cellStartsWith(r[0], 'DIFFERENTIATION')) + 1;
-    if (diffDataIdx > 0 && slice[diffDataIdx]) {
-      const d = slice[diffDataIdx];
-      block.differentiation = { low: _norm(d[1]), middle: _norm(d[2]), high: _norm(d[3]) };
+    // Matched by the DIFFERENTIATION header row's OWN labels (confirmed
+    // against the real sample document: "LOW ABILITY" / "MIDDLE ABILITY" /
+    // "HIGH ABILITY"), not fixed column positions — same reasoning as
+    // COLUMN_KEYWORDS above. A positional assumption (data row cells 1/2/3
+    // = low/middle/high) happened to work for that one document only
+    // because its columns are in that exact order; a school whose template
+    // reorders or relabels them (e.g. "SUPPORT"/"CORE"/"EXTENSION") would
+    // have silently misassigned every value.
+    const diffHeaderIdx = slice.findIndex(r => _cellStartsWith(r[0], 'DIFFERENTIATION'));
+    if (diffHeaderIdx !== -1 && slice[diffHeaderIdx + 1]) {
+      const headerRow = slice[diffHeaderIdx];
+      const dataRow   = slice[diffHeaderIdx + 1];
+      const diff = { low: '', middle: '', high: '' };
+      headerRow.forEach((h, i) => {
+        if (i === 0) return; // the "DIFFERENTIATION" label cell itself
+        const norm = _norm(h).toLowerCase();
+        if (norm.includes('low')) diff.low = _norm(dataRow[i]);
+        else if (norm.includes('middle') || norm.includes('medium') || norm.includes('average')) diff.middle = _norm(dataRow[i]);
+        else if (norm.includes('high')) diff.high = _norm(dataRow[i]);
+      });
+      block.differentiation = diff;
     }
 
     const assessRow = slice.find(r => _cellStartsWith(r[0], 'ASSESSMENT'));
