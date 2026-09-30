@@ -6,6 +6,44 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.163.0] — 2026-09-30 — fix(lessons): editing an existing topic silently re-scoped it to whatever class the editor was viewing it from
+
+Raised directly: "when teachers add topics and sub topics, they disappear. A teacher who added the topics already found that they can't be traced."
+
+### Root cause
+`TopicSlideOver` (the Add/Edit Topic panel, `client/src/pages/lessons/LessonsPage.jsx`) always submitted the CURRENT class/stream context's `classId` on every save — not just when creating a new topic. `syllabus_topics` was scoped to `classId` two days earlier (v5.14x's class-scoping fix), with existing (legacy) topics deliberately left `classId`-unset so they stayed visible to every class teaching that subject. Editing one of those legacy topics from any single class's view — even a trivial fix like correcting a typo — silently attached that one class's `classId` to it, permanently narrowing a topic previously shared by every class down to just the one being viewed at that moment. The topic didn't vanish; it became invisible to every OTHER class that used to see it, which is exactly what "disappeared, can't be traced" looks like from a teacher's side. Also confirmed: topic/subtopic *definitions* have no per-stream scoping at all (`TopicSchema` has no `streamId` field) — the "editing my stream's topics updates the whole class" behavior the user described as a prior feature is architecturally still intact and was never affected by this bug or its fix.
+
+### Fix
+`classId` is now only included in the save payload when creating a brand-new topic. Editing an existing topic no longer sends it at all, so `PUT /topics/:id` leaves whatever scope (or lack of one) the topic already had untouched — a topic can still be deliberately assigned to a class later, just not as a silent side effect of an unrelated edit.
+
+### Verified
+3 new tests in `server/__tests__/routes/lessons-topics-class-scope.test.js` prove the server-side contract the client fix depends on: editing a legacy topic without `classId` in the body leaves it unscoped (still visible to every class); editing an already-scoped topic without `classId` leaves its existing scope untouched; a topic can still be explicitly assigned a class when the caller deliberately sends `classId`. Writing these tests surfaced a pre-existing test-isolation bug in this file's own mock harness (`findOneAndUpdate` mutated the shared fixture objects in place, leaking changes across tests) — fixed by deep-cloning the seed data, the same fix this codebase has applied to identical mock harnesses elsewhere. Full suite: 264 suites, 2729 tests, zero regressions.
+
+### Files
+- `client/src/pages/lessons/LessonsPage.jsx` — `classId` only sent on topic create, never on edit
+- `server/__tests__/routes/lessons-topics-class-scope.test.js` — 3 new tests, plus a mock-harness deep-clone fix
+
+---
+
+## [v5.164.0] — 2026-09-30 — fix(lessons): lesson plan import couldn't parse a "FROM: ... TO: ..." numeric date range
+
+Raised directly, with a screenshot: importing lesson plans showed "0 ready, 3 invalid," every row failing with `Could not parse date "FROM: 28th/09/26 TO: 2nd/10/26"`.
+
+### Root cause
+`resolveLessonDate` (`server/utils/lesson-plan-import-resolver.js`) only ever recognized a single date in "day MONTHNAME [year]" form (e.g. "3 SEPTEMBER 2026"). The actual document gave a date RANGE in numeric dd/mm/yy form with ordinal suffixes on both ends — a format the parser had never seen.
+
+### Fix
+The parser now also strips a trailing " TO: ..." range clause (keeping only the start date — the source document gives no separate date per lesson within the shared range, so there's nothing to split by) and recognizes a numeric `dd/mm/yy` or `dd/mm/yyyy` date (`/`, `.`, or `-` separated), expanding a 2-digit year to the current century. Caught and fixed a real regression while writing this: a naive "strip everything from TO onward" replace would have matched the literal substring "TO" inside "OCTOBER" (oc-**TO**-ber) and mangled every October date — the range-stripping regex uses a `\b` word boundary specifically to avoid that.
+
+### Verified
+6 new tests in `server/__tests__/lesson-plan-import-resolver.test.js`: the exact reported string now resolves to the FROM date; a plain numeric date with a 2-digit year; a plain numeric date with a 4-digit year and dash separators; an out-of-range numeric month is still correctly rejected; and a dedicated regression guard proving "3 OCTOBER 2026" still parses correctly (the bug caught during development, not shipped). Full suite: 264 suites, 2729 tests, zero regressions.
+
+### Files
+- `server/utils/lesson-plan-import-resolver.js` — `resolveLessonDate` now handles a "FROM/TO" range and numeric dd/mm/yy(yy) dates
+- `server/__tests__/lesson-plan-import-resolver.test.js` — 6 new tests
+
+---
+
 ## [v5.162.0] — 2026-09-29 — fix(hr): "All roles" filter set to "Teacher" in HR & Staff undercounted real teachers
 
 Direct follow-up to v5.161.0, same conversation: after explaining that `teachers.staffType` (HR's job-title label) and `users.role` (the real RBAC role) are deliberately separate fields, the user reported filtering HR & Staff's own staff list by role "Teacher" and getting only 2 results back at a school with well over a dozen real teachers.

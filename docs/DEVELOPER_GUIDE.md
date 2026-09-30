@@ -5946,3 +5946,61 @@ Deliberately did not also check for a `teaching_assignments` record here (the th
 
 ### Files
 - `client/src/pages/hr/HRPage.jsx` — the "All roles" filter's `'teacher'` case now also matches staff with a populated subjects list
+
+## 102. Editing an Existing Topic Silently Re-Scoped It to Whatever Class the Editor Was Viewing It From (v5.163.0)
+
+Raised directly: "when teachers add topics and sub topics, they disappear. A teacher who added the topics already found that they can't be traced." Bundled with a second claim to verify: "there is a function we had built before where if a teacher updates topics for their own stream, then the other streams [get it] automatically... as long as it is within the same class."
+
+### Root cause
+Two days earlier, `syllabus_topics` was scoped to `classId` (a real fix: "English" is one shared subject record across every grade that teaches it, and topics were leaking across classes). Existing topics deliberately kept `classId` unset so they stayed visible to every class — `_topicClassFilterPart()` treats an absent `classId` as "legacy, shown everywhere."
+
+`TopicSlideOver` (`LessonsPage.jsx`), however, submits `classId` on *every* save, sourced from `DrillDown`'s own ambient `item.classId` (whatever class the teacher happens to be viewing) — not just at creation:
+```js
+<TopicSlideOver classId={classId} ... existing={editingTopic} ... />
+```
+Editing a pre-existing, previously-universal topic — even something as trivial as fixing a typo — silently attached the CURRENT class's id to it. The topic didn't disappear; it became scoped to one class and invisible to every other class that used to see it, which reads exactly like "disappeared, can't be traced" from the teacher's side.
+
+Checked the live database before touching code, per this session's standing practice: no dual-ID-form mismatch between `classes.id`/`_id` and `teaching_assignments.classId`/`syllabus_topics.classId` (`matchesOidOnly: 0`, `matchesNeither: 0` across both collections) — that would have been the obvious suspect given this codebase's history of exactly that class of bug, but it wasn't the cause here. Also confirmed the second claim is unaffected and still true: `TopicSchema` has no `streamId` field at all — topic/subtopic *definitions* were never stream-scoped, only `classId`-scoped, so "editing my stream's topics updates the whole class" was never broken by this bug or touched by its fix. Stream-level scoping only exists for `lesson_coverage` and `lesson_plans` (genuinely per-stream data — different streams progress at different paces), never for the topic definitions themselves.
+
+### Fix
+`classId` is now only included in the mutation payload on create:
+```js
+mutation.mutate({
+  ...(existing ? {} : { classId }),
+  subjectId, subjectName, academicYear, title, description, subtopics,
+});
+```
+`PUT /topics/:id`'s `TopicSchema.partial()` validation already treats a missing `classId` as "don't touch this field" (no default is applied) — so no server change was needed, only confirming that contract with tests.
+
+### Verified
+3 new tests in `lessons-topics-class-scope.test.js`: editing a legacy topic without `classId` in the body leaves it unscoped, still visible to every class; editing an already-scoped topic without `classId` leaves its scope untouched; a topic can still be explicitly assigned a class when the caller deliberately sends `classId` (this closes item (6) from the file's own header comment, which described this guarantee but had never actually been tested — exactly the gap that let the regression through unnoticed). Writing these tests caught a second, independent bug: the file's `mockMakeFakeCollection` seeded its store with the literal module-level fixture object references (`YEAR7_TOPIC`, `LEGACY_TOPIC`, ...), and its `findOneAndUpdate` mutates in place — so the first test in the file to actually change a field via PUT leaked that mutation into every later test's "fresh" fixture. Fixed by deep-cloning the seed (`JSON.parse(JSON.stringify(d))` per doc), the same fix already applied to this exact class of mock bug elsewhere in this codebase. Full suite: 264 suites, 2729 tests, zero regressions.
+
+### Files
+- `client/src/pages/lessons/LessonsPage.jsx` — `classId` only sent on topic create, never on edit
+- `server/__tests__/routes/lessons-topics-class-scope.test.js` — 3 new tests; mock harness now deep-clones its seed
+
+## 103. Lesson Plan Import Couldn't Parse a "FROM: ... TO: ..." Numeric Date Range (v5.164.0)
+
+Raised directly, with a screenshot: "Import Lesson Plans" showed "0 ready, 3 invalid," every row rejected with `Could not parse date "FROM: 28th/09/26 TO: 2nd/10/26"`.
+
+### Root cause
+`resolveLessonDate` (`server/utils/lesson-plan-import-resolver.js`) only ever matched a single date in "day MONTHNAME [year]" form — its own doc comment listed exactly that: `"1ST SEPTEMBER"`, `"FROM: 2ND SEPTEMBER"`, `"3 SEPTEMBER 2026"`. The actual source document gave a date **range**, numeric, both ends ordinal-suffixed: `"FROM: 28th/09/26 TO: 2nd/10/26"` — a format the regex had never been extended to recognize, on two independent axes (a range instead of one date, and numeric dd/mm/yy instead of a month name).
+
+### Fix
+```js
+const cleaned = (dateRaw || '')
+  .replace(/^\s*FROM:?\s*/i, '')
+  .replace(/\s*[-–—]?\s*\bTO\b:?.*$/i, '') // a range only needs its start date
+  .replace(/(\d+)(ST|ND|RD|TH)\b/gi, '$1')
+  ...
+```
+then, after the existing "day MONTHNAME [year]" match attempt, a new fallback: `/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})$/` for numeric `dd/mm/yy(yy)`, expanding a 2-digit year by adding 2000 (every real term this app handles is 2020s/2030s — no ambiguity worth guarding against). The FROM date is used as the lesson's date; nothing tries to split a multi-lesson block sharing one range header across individual dates, since the source document gives no per-lesson date to split by.
+
+**Caught mid-fix, not shipped**: the first version of the range-stripping regex (`.replace(/\s*TO:?.*$/i, '')`, no word boundary) matches the literal substring "TO" inside "OCTOBER" (oc-**TO**-ber) — it would have silently mangled every October date into "3 OC" and broken a working case to fix a broken one. Caught by writing a regression test for exactly this before considering the fix done, not by inspection alone. Fixed with a `\b` word boundary (`\bTO\b`) so only a standalone "TO" token triggers the strip.
+
+### Verified
+6 new tests in `lesson-plan-import-resolver.test.js`: the exact reported string resolves to the FROM date (`2026-09-28`); a plain numeric date with a 2-digit year; one with a 4-digit year and dash separators; an out-of-range numeric month (13) is still correctly rejected, not wrapped; and the October regression guard, proving the bug caught during development stayed fixed. Full suite: 264 suites, 2729 tests, zero regressions.
+
+### Files
+- `server/utils/lesson-plan-import-resolver.js` — `resolveLessonDate` handles a "FROM/TO" range and numeric dd/mm/yy(yy) dates
+- `server/__tests__/lesson-plan-import-resolver.test.js` — 6 new tests
