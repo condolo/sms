@@ -6043,3 +6043,48 @@ Pulled both real fixture documents (`sample-filled-english-y7.docx`, `blank-temp
 - `server/utils/lesson-plan-docx-parser.js` — differentiation matched by label; conflicting duplicate meta values surfaced as a warning
 - `server/__tests__/routes/lessons-topics-class-scope.test.js` — 9 new tests
 - `server/__tests__/lesson-plan-docx-parser.test.js` — 2 new/updated tests
+
+## 105. The Markbook's Assessment Dropdown, Marks, and Report Cards Silently Excluded Every Record Stored Without an Academic Year (v5.166.0)
+
+Raised directly, with screenshots: an assessment scheduled in Settings → Exams & Assessment → Configuration ("CA 4," Term 1, dated) didn't appear in the Markbook's own "Assessment" dropdown for the same school, which read "(none scheduled — set up in Configuration)" instead. Quoted a prior product decision back: "the markbook should work as long as the assessment has been scheduled and planned in configuration whether it has been planned under exams or not."
+
+### Root cause
+Checked the live database directly before writing any code, per this session's standing practice — never assume, verify:
+```
+Total assessment_schedule docs: 8
+{ nullYear: 8, withYear: 0 }
+```
+Every single `assessment_schedule` document in production, across every real school, has `academicYearId: null`. This isn't a data-quality gap in a handful of records — the Configuration screen's Assessment Schedule form (`ExamsPage.jsx`'s Configuration tab) has never had an academic-year selector at all, so `PUT /schedule` always upserts with `academicYearId: d.academicYearId || null`. The Markbook's own Mark Entry Context, by contrast, always has a real academic year selected (defaulting to the school's current one) and sends it as `?academicYearId=<real id>` on every request. `GET /schedule`'s filter did a strict equality match — `if (req.query.academicYearId) filter.academicYearId = req.query.academicYearId` — which can never match a stored `null`. The dropdown was reading empty for every real school, unconditionally, from the moment a caller had any academic year selected at all.
+
+Audited every other `academicYearId` filter in the same file and in `academic-calc.js` (the shared report-card/gradebook aggregation engine `report-cards.js` and `grades.js` both depend on) for the identical pattern, rather than fixing only the one route the screenshot showed:
+- `assessment.js`: `GET /marks`, `GET /marks/summary`, `GET /reminders`, `POST /reminders/notify`, `_aggregateAnalyticsPeriod` (the whole-school/class analytics KPI aggregator) — all had the same bare strict-match filter.
+- `academic-calc.js`: `aggregateGrades`, `aggregateExamResults`, `aggregateAssessmentMarks` — the exact functions report cards and the Markbook's grade computation call.
+
+Checked live data for each affected collection before deciding scope, rather than assuming the fix applied everywhere uniformly:
+```
+grades         | total: 0  | null/missing academicYearId: 0
+exam_results   | total: 14 | null/missing academicYearId: 14
+assessment_marks | total: 5 | null/missing academicYearId: 0
+exams          | total: 10 | null/missing academicYearId: 0
+```
+`exam_results`' own `academicYearId` turned out to be a red herring for `aggregateExamResults` specifically — that function scopes by filtering the **`exams`** collection (0 of 10 missing the field, so no live impact today) and then joins `exam_results` by `examId`, never by year. Fixed `aggregateExamResults`'s `exams` filter anyway, for consistency with every other aggregator and as a guard against the same regression if a future exam-creation path ever drops the field. `assessment_marks` currently has zero null-year documents either (apparently already-fixed at the write path per the dual-mode adoption logic in `PUT /marks` — see `assessment-mark-academic-year-adoption.test.js`), so `aggregateAssessmentMarks`'s fix is defense-in-depth there rather than a live fix — but `assessment_schedule` (the reported bug) and the underlying `_aggregateAnalyticsPeriod`/`GET /marks`/`GET /marks/summary` code paths (which would break the moment any school's marks ever do end up null-tagged again) needed it for real, current correctness.
+
+### Fix
+Added a shared `_yearFilterPart(academicYearId)` helper to both files:
+```js
+function _yearFilterPart(academicYearId) {
+  return academicYearId
+    ? { $or: [{ academicYearId }, { academicYearId: null }, { academicYearId: { $exists: false } }] }
+    : {};
+}
+```
+Applied everywhere a bare `if (academicYearId) filter.academicYearId = academicYearId` previously did a strict match. This mirrors the exact backward-compatible posture already established for the mark-save path (`PUT /marks`' existing dual-mode lookup, `assessment.js` lines ~960-965) — extended to every READ path that had never received the same treatment.
+
+### Verified
+6 new tests in `assessment-schedule-academic-year-fallback.test.js`, seeded with the real production shape: a null-tagged schedule entry is returned when a real `academicYearId` is requested (the reported bug, reproduced and fixed); a genuinely different-year entry is still correctly excluded (proving this isn't a blanket "ignore the year" regression); with no `academicYearId` at all, everything still returns (unchanged); the same three assertions repeated for `GET /marks` and `GET /marks/summary`. Writing these surfaced the identical missing-`$or`/`$exists` support in two PRE-EXISTING test files' own hand-rolled Mongo-filter mocks (`assessment-analytics.test.js`, `report-cards-term-scope.test.js`) — both silently treated a filter containing `$or` as never matching anything, since their `matches()` helpers only handled `$in`/`$ne`/`$nin`. Fixed both mocks before trusting their results, the same class of test-harness gap found and corrected multiple times elsewhere this session (`teachers-teaching-only-filter.test.js`, `hr-coarse-permission-leak.test.js`). Full suite: 265 suites, 2747 tests, zero regressions.
+
+### Files
+- `server/routes/assessment.js` — `_yearFilterPart()` helper; applied to `GET /schedule`, `GET /marks`, `GET /marks/summary`, `GET /reminders`, `POST /reminders/notify`, `_aggregateAnalyticsPeriod`
+- `server/utils/academic-calc.js` — same helper; applied to `aggregateGrades`, `aggregateExamResults`, `aggregateAssessmentMarks`
+- `server/__tests__/routes/assessment-schedule-academic-year-fallback.test.js` — 6 new tests
+- `server/__tests__/routes/assessment-analytics.test.js`, `report-cards-term-scope.test.js` — mock `$or`/`$exists` support fixed

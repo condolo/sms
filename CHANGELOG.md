@@ -6,6 +6,29 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.166.0] — 2026-09-30 — fix(assessment): the Markbook's Assessment dropdown, marks, and report cards silently excluded every record stored without an academic year
+
+Raised directly, with screenshots: an assessment was scheduled and visible in Settings → Exams & Assessment → Configuration, but the Markbook's own "Assessment" dropdown showed "(none scheduled)" for the same school/subject/class.
+
+### Root cause
+Confirmed directly against the live database before touching any code. The Assessment Schedule config form has never had an academic-year selector, so it never sends `academicYearId` when saving — **every** real `assessment_schedule` document in production (8 of 8, checked directly) has `academicYearId: null`. The Markbook's Mark Entry Context always has a real academic year selected and sends it as `?academicYearId=<real id>` — `GET /schedule`'s strict equality filter could never match a null-tagged document, so the dropdown read empty for every real school, always.
+
+The identical strict-match bug existed in 5 more places: `GET /marks`, `GET /marks/summary`, `GET /reminders`, `POST /reminders/notify`, and the analytics period aggregator in `assessment.js`; plus `aggregateGrades`, `aggregateExamResults`, and `aggregateAssessmentMarks` in `academic-calc.js` — the shared engine report cards and gradebooks both depend on. Checked `exam_results` too (14 of 14 documents missing the field) — that specific field turned out unused by the exam-results lookup path (joined via `examId`, not `academicYearId`), and the `exams` collection that actually gates it had zero affected documents, so there was no live impact there — fixed anyway for consistency and to guard against the same regression if that ever changes.
+
+### Fix
+A requested `academicYearId` now also matches a stored `null` (or entirely absent) value, via a shared `_yearFilterPart()` helper added to both files — the same backward-compatible posture this codebase already established for the mark-save path (`PUT /marks`' existing dual-mode lookup).
+
+### Verified
+6 new tests in `assessment-schedule-academic-year-fallback.test.js` covering the exact reported scenario for `GET /schedule`, plus `GET /marks` and `GET /marks/summary`. Writing these surfaced the identical missing-`$or` support in two existing test files' own hand-rolled Mongo mocks (`assessment-analytics.test.js`, `report-cards-term-scope.test.js`) — fixed both mocks to correctly evaluate `$or`/`$exists`, the same class of test-harness gap found and fixed multiple times elsewhere this session. Full suite: 265 suites, 2747 tests, zero regressions.
+
+### Files
+- `server/routes/assessment.js` — `_yearFilterPart()` helper; applied to `GET /schedule`, `GET /marks`, `GET /marks/summary`, `GET /reminders`, `POST /reminders/notify`, `_aggregateAnalyticsPeriod`
+- `server/utils/academic-calc.js` — same helper; applied to `aggregateGrades`, `aggregateExamResults`, `aggregateAssessmentMarks`
+- `server/__tests__/routes/assessment-schedule-academic-year-fallback.test.js` — 6 new tests
+- `server/__tests__/routes/assessment-analytics.test.js`, `report-cards-term-scope.test.js` — mock `$or`/`$exists` support fixed
+
+---
+
 ## [v5.165.0] — 2026-09-30 — fix(lessons): topic writes had no class-ownership check; docx import assumed fixed differentiation columns
 
 Direct follow-up: asked to review the whole Lessons module for assumptions, then to fix them cleanly, no assumptions left standing.
