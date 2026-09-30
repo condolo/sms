@@ -190,6 +190,87 @@ describe('POST /api/lessons/topics — classId is required (2026-09 fix)', () =>
   });
 });
 
+/* Security Baseline Register (2026-09-30): POST/PUT/DELETE /topics had NO
+   class-ownership check at all — any account with the coarse lessons:
+   create/update/delete permission could write or delete a topic for ANY
+   class in the school, not just one they teach. GET /topics and GET
+   /coverage already enforced this via ScopeEngine.isClassInScope; these
+   tests prove the write paths now match. */
+describe('POST/PUT/DELETE /api/lessons/topics — class-ownership check (2026-09-30 fix)', () => {
+  test('POST: a teacher assigned to the target class succeeds', async () => {
+    asTeacherOf({ classId: 'cls_yr7', subjectId: 'subj_eng' });
+    const res = await supertest(buildApp()).post('/api/lessons/topics').send({
+      classId: 'cls_yr7', subjectId: 'subj_eng', subjectName: 'English', title: 'New Topic',
+    });
+    expect(res.status).toBe(201);
+  });
+
+  test('POST: a teacher NOT assigned to the target class is forbidden, not silently allowed', async () => {
+    asTeacherOf({ classId: 'cls_yr7', subjectId: 'subj_eng' }); // only teaches Year 7
+    const res = await supertest(buildApp()).post('/api/lessons/topics').send({
+      classId: 'cls_yr8', subjectId: 'subj_eng', subjectName: 'English', title: 'New Topic',
+    });
+    expect(res.status).toBe(403);
+  });
+
+  test('POST: a stream-only-scoped teacher (no whole-class grant) succeeds for their own stream', async () => {
+    mockJwtUser = { userId: 'usr_teacher', schoolId: SCHOOL_A, role: 'teacher', roles: ['teacher'] };
+    mockTeachingAssignments = mockMakeFakeCollection([
+      { schoolId: SCHOOL_A, teacherId: 'usr_teacher', classId: 'cls_yr7', subjectId: 'subj_eng', subjectName: 'English', className: 'Year 7', streamId: 'strm_7a' },
+    ]);
+    const res = await supertest(buildApp()).post('/api/lessons/topics').send({
+      classId: 'cls_yr7', streamId: 'strm_7a', subjectId: 'subj_eng', subjectName: 'English', title: 'New Topic',
+    });
+    expect(res.status).toBe(201);
+    // streamId is a scope-check hint only — never persisted on the topic (topics have no per-stream identity)
+    expect(res.body.data.streamId).toBeUndefined();
+  });
+
+  test('PUT: a teacher assigned to an already-scoped topic\'s class can edit it', async () => {
+    asTeacherOf({ classId: 'cls_yr7', subjectId: 'subj_eng' });
+    const res = await supertest(buildApp()).put(`/api/lessons/topics/${YEAR7_TOPIC.id}`).send({ title: 'Poetry (revised)' });
+    expect(res.status).toBe(200);
+  });
+
+  test('PUT: a teacher NOT assigned to a class-scoped topic\'s class is forbidden', async () => {
+    asTeacherOf({ classId: 'cls_yr7', subjectId: 'subj_eng' }); // only teaches Year 7
+    const res = await supertest(buildApp()).put(`/api/lessons/topics/${YEAR8_TOPIC.id}`).send({ title: 'hijacked' });
+    expect(res.status).toBe(403);
+  });
+
+  test('PUT: a legacy (classId-unset) topic can be edited by ANY teacher of that subject, regardless of which class', async () => {
+    asTeacherOf({ classId: 'cls_yr8', subjectId: 'subj_eng' }); // teaches Year 8, not Year 7 — but the topic isn't scoped to either
+    const res = await supertest(buildApp()).put(`/api/lessons/topics/${LEGACY_TOPIC.id}`).send({ title: 'Grammar Basics (revised)' });
+    expect(res.status).toBe(200);
+  });
+
+  test('PUT: a legacy topic is still forbidden to a teacher who does not teach that SUBJECT at all', async () => {
+    asTeacherOf({ classId: 'cls_yr7', subjectId: 'subj_math' }); // different subject entirely
+    const res = await supertest(buildApp()).put(`/api/lessons/topics/${LEGACY_TOPIC.id}`).send({ title: 'hijacked' });
+    expect(res.status).toBe(403);
+  });
+
+  test('DELETE: a teacher assigned to the topic\'s class can delete it', async () => {
+    asTeacherOf({ classId: 'cls_yr7', subjectId: 'subj_eng' });
+    const res = await supertest(buildApp()).delete(`/api/lessons/topics/${YEAR7_TOPIC.id}`);
+    expect(res.status).toBe(200);
+  });
+
+  test('DELETE: a teacher NOT assigned to the topic\'s class is forbidden', async () => {
+    asTeacherOf({ classId: 'cls_yr7', subjectId: 'subj_eng' });
+    const res = await supertest(buildApp()).delete(`/api/lessons/topics/${YEAR8_TOPIC.id}`);
+    expect(res.status).toBe(403);
+    // confirm it was NOT actually deleted
+    const stillThere = await supertest(buildApp()).get('/api/lessons/topics').query({ subjectId: 'subj_eng', classId: 'cls_yr8' });
+    expect(stillThere.body.data.map(t => t.id)).toContain(YEAR8_TOPIC.id);
+  });
+
+  test('an admin bypasses the ownership check entirely, for any class', async () => {
+    const res = await supertest(buildApp()).put(`/api/lessons/topics/${YEAR8_TOPIC.id}`).send({ title: 'Admin edit' });
+    expect(res.status).toBe(200);
+  });
+});
+
 describe('GET /api/lessons/topics — class isolation', () => {
   test('a Year 8-scoped topic never appears for a Year 7 query, even for the same subject', async () => {
     const res = await supertest(buildApp()).get('/api/lessons/topics').query({ subjectId: 'subj_eng', classId: 'cls_yr7' });

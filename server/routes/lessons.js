@@ -103,6 +103,17 @@ const TopicSchema = z.object({
   // already relies on disappears; only newly created topics are actually
   // scoped, and an existing topic can be assigned a class later via PUT.
   classId:      z.string().min(1),
+  // Security Baseline Register (2026-09-30) — POST/PUT /topics had no
+  // class-ownership check at all, unlike GET /topics and GET /coverage
+  // (which already run ScopeEngine.isClassInScope): any account with the
+  // coarse lessons:create/update permission could write a topic for ANY
+  // class in the school, not just one they actually teach. streamId is
+  // never persisted on the topic (topics have no per-stream identity —
+  // see the module header) — it exists purely so a stream-only-scoped
+  // teacher (no whole-class grant) is correctly recognized as in-scope
+  // for their own stream, the same streamAware check GET /coverage and
+  // POST /coverage already rely on.
+  streamId:     z.string().optional(),
   subjectId:    z.string().min(1),
   subjectName:  z.string().max(200).trim().optional(),
   academicYear: z.string().max(20).trim().optional(),
@@ -528,6 +539,16 @@ router.post('/topics', authMiddleware, PLAN, MODGATE, rbac('lessons', 'create'),
     const { data, error } = _validate(TopicSchema, req.body);
     if (error) return E.validation(res, error);
 
+    // Same class-ownership check as POST /coverage — see TopicSchema's own
+    // comment on streamId for why this was missing here.
+    if (!isAdmin(req)) {
+      const _originalScope = req.scope;
+      req.scope = await ScopeEngine.resolveLessonsScope(req);
+      const _inScope = ScopeEngine.isClassInScope(req, 'lessons', data.classId, data.streamId);
+      req.scope = _originalScope;
+      if (!_inScope) return E.forbidden(res, 'This class is not in your teaching assignments.');
+    }
+
     // Resolve subject name if not provided
     let subjectName = data.subjectName;
     if (!subjectName) {
@@ -575,6 +596,36 @@ router.put('/topics/:id', authMiddleware, PLAN, MODGATE, rbac('lessons', 'update
     const { data, error } = _validate(TopicSchema.partial(), req.body);
     if (error) return E.validation(res, error);
 
+    const existingForScope = await tenantModel('syllabus_topics', tenantContext(req))
+      .findOne({ id: req.params.id, schoolId }).select('classId subjectId').lean();
+    if (!existingForScope) return E.notFound(res, 'Topic not found');
+
+    // Same class-ownership check as POST — see TopicSchema's own comment on
+    // streamId. classId here comes from the EXISTING document, never the
+    // request body (the client stopped sending classId on edit entirely as
+    // of the "editing silently re-scoped a topic" fix — see LessonsPage.jsx)
+    // — using a client-supplied value here would reopen that exact hole.
+    // A legacy (classId-unset) topic isn't owned by any one class, so the
+    // bar is "do you teach this SUBJECT anywhere" instead of "is this exact
+    // class in your assignments".
+    if (!isAdmin(req)) {
+      let inScope;
+      if (existingForScope.classId) {
+        const _originalScope = req.scope;
+        req.scope = await ScopeEngine.resolveLessonsScope(req);
+        inScope = ScopeEngine.isClassInScope(req, 'lessons', existingForScope.classId, data.streamId);
+        req.scope = _originalScope;
+      } else {
+        const assignments = await _teacherAssignments(schoolId, userId);
+        inScope = assignments.some(a => a.subjectId === existingForScope.subjectId);
+      }
+      if (!inScope) return E.forbidden(res, 'This class is not in your teaching assignments.');
+    }
+
+    // streamId is never persisted on a topic (see TopicSchema's comment) —
+    // it exists in the request purely for the scope check above.
+    delete data.streamId;
+
     const update = { ...data, updatedBy: userId };
     // Ensure subtopic IDs
     if (update.subtopics) {
@@ -598,7 +649,33 @@ router.put('/topics/:id', authMiddleware, PLAN, MODGATE, rbac('lessons', 'update
 /* ── DELETE /api/lessons/topics/:id ─ delete topic ──────────── */
 router.delete('/topics/:id', authMiddleware, PLAN, MODGATE, rbac('lessons', 'delete'), async (req, res) => {
   try {
-    const { schoolId } = req.jwtUser;
+    const { schoolId, userId } = req.jwtUser;
+
+    // Same class-ownership check as POST/PUT above — deleting curriculum
+    // data for a class the caller doesn't teach is at least as serious as
+    // writing to it. See PUT /topics/:id's identical comment for the
+    // legacy (classId-unset) fallback rationale. Deliberately no streamId
+    // fallback here (unlike POST/PUT): removing a topic affects every
+    // stream in the class at once, so a stream-only assignment (no
+    // whole-class grant) isn't enough authority to delete it — the higher
+    // bar for the more destructive action is intentional, not an omission.
+    if (!isAdmin(req)) {
+      const existingForScope = await tenantModel('syllabus_topics', tenantContext(req))
+        .findOne({ id: req.params.id, schoolId }).select('classId subjectId').lean();
+      if (!existingForScope) return E.notFound(res, 'Topic not found');
+      let inScope;
+      if (existingForScope.classId) {
+        const _originalScope = req.scope;
+        req.scope = await ScopeEngine.resolveLessonsScope(req);
+        inScope = ScopeEngine.isClassInScope(req, 'lessons', existingForScope.classId);
+        req.scope = _originalScope;
+      } else {
+        const assignments = await _teacherAssignments(schoolId, userId);
+        inScope = assignments.some(a => a.subjectId === existingForScope.subjectId);
+      }
+      if (!inScope) return E.forbidden(res, 'This class is not in your teaching assignments.');
+    }
+
     const doc = await tenantModel('syllabus_topics', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId });
     if (!doc) return E.notFound(res, 'Topic not found');
     // Also remove coverage records for this topic

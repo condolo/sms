@@ -91,7 +91,7 @@ function ClassCard({ item, onClick }) {
 }
 
 /* ── Add / Edit Topic slide-over ─────────────────────────────── */
-function TopicSlideOver({ classId, subjectId, subjectName, academicYear, existing, onClose, onSaved }) {
+function TopicSlideOver({ classId, streamId, subjectId, subjectName, academicYear, existing, onClose, onSaved }) {
   const qc = useQueryClient();
   const [title,       setTitle]       = useState(existing?.title ?? '');
   const [description, setDescription] = useState(existing?.description ?? '');
@@ -129,6 +129,11 @@ function TopicSlideOver({ classId, subjectId, subjectName, academicYear, existin
       // that wants to scope an existing topic to a class needs a real,
       // explicit action for that (not built yet), not this implicit one.
       ...(existing ? {} : { classId }),
+      // streamId is sent on every save (create AND edit), never persisted
+      // server-side — it exists purely so a stream-only-scoped teacher (no
+      // whole-class grant) is correctly recognized as authorized for their
+      // own stream (server: lessons.js's POST/PUT /topics scope check).
+      streamId,
       subjectId, subjectName, academicYear,
       title: title.trim(),
       description: description.trim() || undefined,
@@ -472,6 +477,7 @@ function DrillDown({ item, onBack, canManage }) {
       {showSlider && (
         <TopicSlideOver
           classId={classId}
+          streamId={streamId}
           subjectId={subjectId}
           subjectName={subjectName}
           academicYear={academicYear}
@@ -487,7 +493,14 @@ function DrillDown({ item, onBack, canManage }) {
 /* ── Teacher: My Classes tab ─────────────────────────────────── */
 function MyClassesTab() {
   const { isAdmin, isHod } = useRole();
-  const canManage = true; // teachers can always manage their own topics
+  const can = useAuthStore(s => s.can.bind(s));
+  // Was: unconditional `true` ("teachers can always manage their own
+  // topics") — safe in effect today only because the SERVER'S OWN
+  // per-class ownership check (added 2026-09-30, lessons.js's POST/PUT/
+  // DELETE /topics) is the real backstop; this client gate had never
+  // actually reflected a revoked Settings grant. Matches the rest of the
+  // app's convention (real permission check, not a hardcoded assumption).
+  const canManage = isAdmin || can('lessons', 'create') || can('lessons', 'update');
   const [drilldown, setDrilldown] = useState(null);
 
   const { data: resp, isLoading } = useQuery({
