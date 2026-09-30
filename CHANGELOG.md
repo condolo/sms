@@ -6,6 +6,34 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.165.0] — 2026-09-30 — fix(lessons): topic writes had no class-ownership check; docx import assumed fixed differentiation columns
+
+Direct follow-up: asked to review the whole Lessons module for assumptions, then to fix them cleanly, no assumptions left standing.
+
+### 1. POST/PUT/DELETE /topics had no class-ownership check at all
+Any account holding the coarse `lessons:create`/`update`/`delete` permission could write or delete a syllabus topic for **any class in the school**, not just one they teach — unlike `GET /topics` and `GET /coverage`, which already enforce `ScopeEngine.isClassInScope`. Added the identical check `POST /coverage` already uses: a non-admin caller must hold a teaching assignment (whole-class, or — via a new `streamId` scope-check hint the client now sends on every save — their own stream) for the class being written to. A legacy (`classId`-unset) topic isn't owned by any one class, so editing one requires only "do you teach this subject anywhere." `DELETE` deliberately has no stream fallback: removing a topic affects every stream in the class at once, so a stream-only assignment isn't sufficient authority to delete it.
+
+Also replaced `MyClassesTab`'s hardcoded `canManage = true` ("teachers can always manage their own topics") with a real permission check (`isAdmin || can('lessons','create'/'update')`), matching the rest of the app's convention — the server-side check above is the real backstop either way.
+
+Checked the live database for topics that might have been damaged by the classId edit-scoping bug fixed earlier today (any topic created *before* that fix landed that now has a `classId` would be proof of it): zero found. Nothing to restore.
+
+### 2. The .docx import parser assumed fixed differentiation columns and silently dropped conflicting duplicate values
+Pulled the real fixture documents to ground this in evidence rather than guesses. Two confirmed issues:
+- Differentiation low/middle/high were read from fixed column positions, ignoring the header row's own labels ("LOW ABILITY"/"MIDDLE ABILITY"/"HIGH ABILITY" in the real sample) — worked only because that document's columns happen to be in that order. Now matched by label, the same keyword-match pattern the main content columns already use.
+- A duplicate `CLASS` cell across a lesson block's two meta rows silently kept the first value with no indication a conflict existed. The real sample document has exactly this case for one lesson ("x" vs "YEAR" — a genuine authoring error) — now surfaced as a warning instead of silently swallowed.
+
+### Verified
+23 tests in `lessons-topics-class-scope.test.js` (new ownership-check block) covering POST/PUT/DELETE for an in-scope teacher, an out-of-scope teacher (403), a stream-only-scoped teacher, a legacy topic editable subject-wide, and admin bypass. 45 tests in the docx-parser/resolver suites, including a lesson-2 test proving all three differentiation levels resolve correctly by label. Full suite: 264 suites, 2741 tests, zero regressions.
+
+### Files
+- `server/routes/lessons.js` — class-ownership check added to `POST`/`PUT`/`DELETE /topics`; `TopicSchema` gained a scope-check-only `streamId` field
+- `client/src/pages/lessons/LessonsPage.jsx` — sends `streamId` on every topic save; `MyClassesTab`'s `canManage` now a real permission check
+- `server/utils/lesson-plan-docx-parser.js` — differentiation matched by label; conflicting duplicate meta values now warned about
+- `server/__tests__/routes/lessons-topics-class-scope.test.js` — 9 new tests
+- `server/__tests__/lesson-plan-docx-parser.test.js` — 2 new/updated tests
+
+---
+
 ## [v5.163.0] — 2026-09-30 — fix(lessons): editing an existing topic silently re-scoped it to whatever class the editor was viewing it from
 
 Raised directly: "when teachers add topics and sub topics, they disappear. A teacher who added the topics already found that they can't be traced."

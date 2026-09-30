@@ -6004,3 +6004,42 @@ then, after the existing "day MONTHNAME [year]" match attempt, a new fallback: `
 ### Files
 - `server/utils/lesson-plan-import-resolver.js` — `resolveLessonDate` handles a "FROM/TO" range and numeric dd/mm/yy(yy) dates
 - `server/__tests__/lesson-plan-import-resolver.test.js` — 6 new tests
+
+## 104. A Full-Module Assumption Audit of Lessons — Topic Writes Had No Ownership Check; the docx Parser Assumed Fixed Differentiation Columns (v5.165.0)
+
+Direct follow-up to §102-103, same conversation: asked to review the whole Lessons module for assumptions made while building/updating it, then — once the list was presented — to "proceed, no assumptions," fixing what was verifiable and flagging what wasn't.
+
+### What was checked and found clean
+Confirmed via the actual `TopicSchema` that topic *definitions* have no `streamId` field — the "editing my stream updates the whole class" behavior the user asked about is architecturally intact, unaffected by anything touched this session. Confirmed via a live database query that the classId edit-scoping bug fixed in §102 left no damaged data behind (zero topics created before that fix now carry a `classId` — the one shape that would prove retroactive narrowing).
+
+### 1. POST/PUT/DELETE /topics had no class-ownership check at all
+`GET /topics` and `GET /coverage` already run `ScopeEngine.isClassInScope` (§ the coverage-read-scope work earlier this session). The three WRITE routes never did — any account holding the coarse `lessons:create`/`update`/`delete` permission (not scoped to any specific class) could write or delete a syllabus topic for any class in the school. Fixed with the identical pattern `POST /coverage` already uses:
+```js
+if (!isAdmin(req)) {
+  const _originalScope = req.scope;
+  req.scope = await ScopeEngine.resolveLessonsScope(req);
+  const _inScope = ScopeEngine.isClassInScope(req, 'lessons', classId, streamId);
+  req.scope = _originalScope;
+  if (!_inScope) return E.forbidden(res, 'This class is not in your teaching assignments.');
+}
+```
+`POST` checks the submitted `classId`/`streamId` directly (a new topic, nothing to derive scope from yet). `PUT` derives scope from the EXISTING document's own `classId` instead of anything in the request body — the client stopped sending `classId` on edit entirely in §102's fix, and trusting a client-supplied value here for authorization would reopen a different hole regardless. A legacy (`classId`-unset) topic isn't owned by one class, so its bar is "does this caller hold ANY teaching assignment for this subject" (checked via `_teacherAssignments`), not a class match. `DELETE` mirrors `PUT`'s derivation but deliberately has no stream-only fallback — removing a topic removes it for every stream in the class at once, so a partial (stream-only) assignment isn't treated as sufficient authority for that more destructive action.
+
+`TopicSchema` gained an optional `streamId` field used exclusively for this scope check — explicitly `delete`d before the PUT `update` object is built, and never included in the `POST` document literal, so it can never leak into a persisted topic (topics have no per-stream identity).
+
+`MyClassesTab`'s `canManage` was a hardcoded `true` ("teachers can always manage their own topics"). Replaced with `isAdmin || can('lessons','create') || can('lessons','update')`, matching the rest of the app's convention — the server-side check above was always the real backstop, but the client gate should reflect Settings the same way every other module's does.
+
+### 2. The docx import parser assumed fixed differentiation columns and silently dropped conflicting duplicates
+Pulled both real fixture documents (`sample-filled-english-y7.docx`, `blank-template.docx`) and inspected their actual raw rows before writing anything, per the "no assumptions" instruction:
+- The `DIFFERENTIATION` header row's real cells are `"LOW ABILITY"`, `"MIDDLE ABILITY"`, `"HIGH ABILITY"` — but the code read the DATA row's columns 1/2/3 by fixed position, never the header's own labels. Correct only because this one document's columns happen to be in that exact order. Fixed to match by label (`includes('low')`/`'middle'`/`'medium'`/`'average'`/`'high'`), the same keyword-match pattern `COLUMN_KEYWORDS` already uses for the main content columns.
+- `_parseMetaRows`' "first CLASS wins, ignore a duplicate" logic silently discarded a second value with no signal a conflict existed. The real sample document has exactly this case for lesson 2 (`"x"` in row 0, `"YEAR"` in row 1 — a genuine authoring error, not a harmless repeat, confirmed by inspecting the raw rows directly). Now returns a warning alongside the parsed meta (`_parseMetaRows` returns `{meta, warnings}` instead of just `meta`), giving the operator a concrete reason for whatever downstream "class could not be resolved" error follows, instead of no clue at all. First value still wins — this only changed from silent to visible.
+
+### Verified
+9 new tests in `lessons-topics-class-scope.test.js`'s new ownership-check block: POST/PUT/DELETE all succeed for an in-scope teacher and 403 for an out-of-scope one; a stream-only-scoped teacher succeeds via the `streamId` hint (and it's confirmed never persisted); a legacy topic is editable by any teacher of that subject but not one teaching a different subject; DELETE confirms the topic is genuinely NOT removed on a 403; admin bypasses the check entirely. 2 new/updated tests in `lesson-plan-docx-parser.test.js`: lesson 2's three differentiation levels resolve correctly by label (the strongest real-data proof position-based reading was wrong), and the exact real duplicate-CLASS conflict is asserted as a warning. Full suite: 264 suites, 2741 tests, zero regressions.
+
+### Files
+- `server/routes/lessons.js` — ownership check added to `POST`/`PUT`/`DELETE /topics`; `TopicSchema` gained a scope-check-only `streamId` field
+- `client/src/pages/lessons/LessonsPage.jsx` — sends `streamId` on every topic save; `MyClassesTab.canManage` now a real permission check
+- `server/utils/lesson-plan-docx-parser.js` — differentiation matched by label; conflicting duplicate meta values surfaced as a warning
+- `server/__tests__/routes/lessons-topics-class-scope.test.js` — 9 new tests
+- `server/__tests__/lesson-plan-docx-parser.test.js` — 2 new/updated tests
