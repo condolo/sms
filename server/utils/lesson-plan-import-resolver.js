@@ -72,9 +72,15 @@ function getTopicAndSubtopic(block) {
 
 /**
  * Parses a free-text date like "1ST SEPTEMBER", "FROM: 2ND SEPTEMBER",
- * "3 SEPTEMBER 2026" against a known term span. The year is never guessed
- * independently of the term — it's whichever of the term's own start/end
- * years makes the parsed day+month fall inside [term.startDate,
+ * "3 SEPTEMBER 2026", "28th/09/26", or "FROM: 28th/09/26 TO: 2nd/10/26"
+ * against a known term span. A "FROM: ... TO: ..." range (a lesson block
+ * spanning several calendar days/lessons under one shared header — real
+ * document, 2026-09-30) uses only the FROM date; nothing here tries to
+ * split it across the individual lessons that share the header, since the
+ * source document gives no per-lesson date to split by. The year is never
+ * guessed independently of the term — it's whichever of the term's own
+ * start/end years (or, for a 2-digit numeric year, whichever century-
+ * expansion) makes the parsed day+month fall inside [term.startDate,
  * term.endDate]. Returns {date} on success or {error} when the text can't
  * be parsed or falls outside the term entirely (never silently picks a
  * wrong year).
@@ -82,19 +88,35 @@ function getTopicAndSubtopic(block) {
 function resolveLessonDate(dateRaw, term) {
   const cleaned = (dateRaw || '')
     .replace(/^\s*FROM:?\s*/i, '')
-    .replace(/(\d+)(ST|ND|RD|TH)/i, '$1')
+    .replace(/\s*[-–—]?\s*\bTO\b:?.*$/i, '') // a range only ever needs its start date — \b guards against matching "TO" inside "OCTOBER"
+    .replace(/(\d+)(ST|ND|RD|TH)\b/gi, '$1')
     .replace(/\s+/g, ' ')
     .trim();
 
-  const m = cleaned.match(/^(\d{1,2})\s+([A-Za-z]+)(?:\s+(\d{4}))?$/);
-  if (!m) return { error: `Could not parse date "${dateRaw}"` };
-  const day = parseInt(m[1], 10);
-  const month = MONTHS[m[2].toLowerCase()];
-  if (!month) return { error: `Unrecognized month in date "${dateRaw}"` };
+  let day, month, candidateYears;
 
-  const candidateYears = m[3]
-    ? [parseInt(m[3], 10)]
-    : [new Date(term.startDate).getFullYear(), new Date(term.endDate).getFullYear()];
+  const named = cleaned.match(/^(\d{1,2})\s+([A-Za-z]+)(?:\s+(\d{4}))?$/);
+  const numeric = named ? null : cleaned.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})$/);
+
+  if (named) {
+    day = parseInt(named[1], 10);
+    month = MONTHS[named[2].toLowerCase()];
+    if (!month) return { error: `Unrecognized month in date "${dateRaw}"` };
+    candidateYears = named[3]
+      ? [parseInt(named[3], 10)]
+      : [new Date(term.startDate).getFullYear(), new Date(term.endDate).getFullYear()];
+  } else if (numeric) {
+    day = parseInt(numeric[1], 10);
+    month = parseInt(numeric[2], 10);
+    if (month < 1 || month > 12) return { error: `Unrecognized month in date "${dateRaw}"` };
+    // A 2-digit year ("26") is expanded to this century (2026) — every
+    // real school term this app handles is 2020s/2030s, so there's no
+    // ambiguity worth guarding against here.
+    const rawYear = parseInt(numeric[3], 10);
+    candidateYears = [numeric[3].length <= 2 ? 2000 + rawYear : rawYear];
+  } else {
+    return { error: `Could not parse date "${dateRaw}"` };
+  }
 
   for (const year of [...new Set(candidateYears)]) {
     const iso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;

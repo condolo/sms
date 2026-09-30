@@ -69,6 +69,33 @@ describe('resolveLessonDate — against the real Term 1 2026-2027 span', () => {
   test('a real calendar date that is just outside the term is reported, not clamped', () => {
     expect(resolveLessonDate('25 DECEMBER 2026', TERM_1_2026).error).toMatch(/does not fall within/);
   });
+
+  // Real customer report, 2026-09-30: a docx block gave its date as a
+  // "FROM: ... TO: ..." range in numeric dd/mm/yy form (a multi-lesson
+  // block sharing one header), which the parser had never handled at all —
+  // it only ever recognized a single "day MONTHNAME [year]" date.
+  test('"FROM: 28th/09/26 TO: 2nd/10/26" — numeric range, uses the FROM date, 2-digit year expanded', () => {
+    expect(resolveLessonDate('FROM: 28th/09/26 TO: 2nd/10/26', TERM_1_2026)).toEqual({ date: '2026-09-28' });
+  });
+
+  test('a plain numeric date with no range and a 2-digit year', () => {
+    expect(resolveLessonDate('15/10/26', TERM_1_2026)).toEqual({ date: '2026-10-15' });
+  });
+
+  test('a plain numeric date with a 4-digit year, dash-separated', () => {
+    expect(resolveLessonDate('15-10-2026', TERM_1_2026)).toEqual({ date: '2026-10-15' });
+  });
+
+  test('an out-of-range numeric month is reported, not silently wrapped', () => {
+    expect(resolveLessonDate('15/13/26', TERM_1_2026).error).toMatch(/Unrecognized month/);
+  });
+
+  // Regression guard for the range-stripping fix above: "OCTOBER" contains
+  // the literal substring "TO" (oc-TO-ber) — a naive strip-from-"TO"-onward
+  // would have mangled this into "3 OC", breaking every October date.
+  test('"3 OCTOBER 2026" still parses correctly — "TO" inside "OCTOBER" is not mistaken for a range separator', () => {
+    expect(resolveLessonDate('3 OCTOBER 2026', TERM_1_2026)).toEqual({ date: '2026-10-03' });
+  });
 });
 
 describe('matchByName', () => {
