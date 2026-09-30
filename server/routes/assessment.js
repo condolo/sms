@@ -103,6 +103,26 @@ function _label(type, instance) {
   return (!instance || instance <= 1) ? type : `${type} ${instance}`;
 }
 
+/* A requested academicYearId must also match any record stored with
+   academicYearId: null — the Config screen's Assessment Schedule form
+   (and, historically, the Markbook mark-entry payload — see the dual-mode
+   lookup in PUT /marks below) has never required or sent a year, so
+   EVERY real assessment_schedule document in production carries
+   academicYearId: null (confirmed directly against the live database,
+   2026-09-30 — 8 of 8 documents, no exceptions). A strict equality filter
+   against a real yearId therefore matches nothing at all: the Markbook's
+   "Assessment" dropdown, the reminders panel, and the marks grid/summary
+   all read empty the moment the caller has a real academic year
+   selected — which is always, since that's the whole point of the
+   selector. Treating a stored null as "applies to every year" (the same
+   backward-compatible posture this file's own mark-save path already
+   uses) fixes the read side to match. */
+function _yearFilterPart(academicYearId) {
+  return academicYearId
+    ? { $or: [{ academicYearId }, { academicYearId: null }, { academicYearId: { $exists: false } }] }
+    : {};
+}
+
 /** Sync legacy weights/instances fields from customTypes for backward compat */
 function _syncLegacyFields(customTypes) {
   const weights   = Object.fromEntries(customTypes.map(t => [t.key, t.weight]));
@@ -256,8 +276,7 @@ const ScheduleEntrySchema = z.object({
 router.get('/schedule', authMiddleware, PLAN, MODGATE, rbac('assessment', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const filter = { schoolId };
-    if (req.query.academicYearId) filter.academicYearId = req.query.academicYearId;
+    const filter = { schoolId, ..._yearFilterPart(req.query.academicYearId) };
     if (req.query.termNumber)     filter.termNumber     = Number(req.query.termNumber);
 
     const docs = await tenantModel('assessment_schedule', tenantContext(req)).find(filter)
@@ -864,7 +883,7 @@ router.get('/marks', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), scop
     if (req.query.subjectId)      filter.subjectId      = req.query.subjectId;
     if (req.query.classId)        filter.classId        = req.query.classId;
     if (req.query.termNumber)     filter.termNumber     = Number(req.query.termNumber);
-    if (req.query.academicYearId) filter.academicYearId = req.query.academicYearId;
+    Object.assign(filter, _yearFilterPart(req.query.academicYearId));
     if (req.query.assessmentType) filter.assessmentType = req.query.assessmentType.toUpperCase();
     if (req.query.isPublished !== undefined) {
       filter.isPublished = req.query.isPublished === 'true';
@@ -1464,7 +1483,7 @@ function _periodLabel(p) {
    overall — avoids a second round trip for the "overall" KPI row. */
 async function _aggregateAnalyticsPeriod(Marks, baseFilter, academicYearId, termNumber, passMark) {
   if (!academicYearId || !termNumber) return { bySubject: [], overall: null };
-  const filter = { ...baseFilter, academicYearId, termNumber };
+  const filter = { ...baseFilter, ..._yearFilterPart(academicYearId), termNumber };
   const [result] = await Marks.aggregate([
     { $match: filter },
     { $facet: {
@@ -1645,8 +1664,7 @@ router.get('/reminders', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
     const futureDateStr = futureDate.toISOString().slice(0, 10);
 
     // Load schedule
-    const schedFilter = { schoolId };
-    if (academicYearId) schedFilter.academicYearId = academicYearId;
+    const schedFilter = { schoolId, ..._yearFilterPart(academicYearId) };
 
     const schedules = await tenantModel('assessment_schedule', tenantContext(req)).find(schedFilter).lean();
 
@@ -1721,7 +1739,7 @@ router.post('/reminders/notify', authMiddleware, PLAN, MODGATE, rbac('assessment
     // Schedules that are open, overdue, or opening within 3 days
     const schedules = await tenantModel('assessment_schedule', tenantContext(req)).find({
       schoolId,
-      ...(academicYearId ? { academicYearId } : {}),
+      ..._yearFilterPart(academicYearId),
       dateFrom: { $lte: upcomingStr },
     }).lean();
 
@@ -1813,10 +1831,9 @@ router.get('/marks/summary', authMiddleware, PLAN, MODGATE, rbac('grades', 'read
       return _err(res, 'This class is not in your assigned scope.', 403);
     }
 
-    const filter = { schoolId, classId };
+    const filter = { schoolId, classId, ..._yearFilterPart(academicYearId) };
     if (subjectId)      filter.subjectId      = subjectId;
     if (termNumber)     filter.termNumber     = Number(termNumber);
-    if (academicYearId) filter.academicYearId = academicYearId;
     if (streamId)       filter.streamId       = streamId;
 
     // classId is required (enforced above) — bounded to one class, safe ceiling

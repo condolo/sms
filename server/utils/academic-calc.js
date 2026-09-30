@@ -17,6 +17,22 @@ const { resolveGrade } = require('../routes/academic-config');
 /* ── Internal ───────────────────────────────────────────────── */
 function _round(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }
 
+/* A requested academicYearId must also match a record stored with
+   academicYearId: null/missing — confirmed directly against the live
+   database, 2026-09-30: 14 of 14 exam_results documents (100%) and every
+   pre-fix assessment_schedule/assessment_marks document carry no
+   academicYearId at all, since nothing ever required the caller to send
+   one when those were written. A strict equality filter against a real
+   yearId therefore silently returns zero results for exactly the schools
+   this matters for most — report cards and gradebooks going blank isn't
+   a cosmetic bug. Same dual-mode posture already established for marks
+   writes in assessment.js's PUT /marks. */
+function _yearFilterPart(academicYearId) {
+  return academicYearId
+    ? { $or: [{ academicYearId }, { academicYearId: null }, { academicYearId: { $exists: false } }] }
+    : {};
+}
+
 /* ══════════════════════════════════════════════════════════════
    GRADE DATA AGGREGATION
    ══════════════════════════════════════════════════════════════ */
@@ -34,9 +50,8 @@ function _round(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }
  * @param {string|null} studentId  — pass to scope to one student
  */
 async function aggregateGrades(schoolId, classId, termId, academicYearId, studentId = null) {
-  const filter = { schoolId, classId, isPublished: true };
+  const filter = { schoolId, classId, isPublished: true, ..._yearFilterPart(academicYearId) };
   if (termId)         filter.termId         = termId;
-  if (academicYearId) filter.academicYearId = academicYearId;
   if (studentId)      filter.studentId      = studentId;
 
   const grades  = await _model('grades').find(filter).lean();
@@ -83,10 +98,10 @@ async function aggregateGrades(schoolId, classId, termId, academicYearId, studen
 async function aggregateExamResults(schoolId, classId, termId, academicYearId, studentId = null) {
   const examsFilter = {
     schoolId, classId,
-    status: { $in: ['completed', 'moderated', 'approved', 'locked', 'published', 'archived'] }
+    status: { $in: ['completed', 'moderated', 'approved', 'locked', 'published', 'archived'] },
+    ..._yearFilterPart(academicYearId),
   };
-  if (termId)         examsFilter.termId         = termId;
-  if (academicYearId) examsFilter.academicYearId = academicYearId;
+  if (termId) examsFilter.termId = termId;
 
   const exams = await _model('exams').find(examsFilter).lean();
   if (!exams.length) return { data: {}, examStatuses: [] };
@@ -156,10 +171,9 @@ async function aggregateExamResults(schoolId, classId, termId, academicYearId, s
  * @param {string|null} studentId      — pass to scope to one student
  */
 async function aggregateAssessmentMarks(schoolId, classId, termNumber = null, academicYearId = null, studentId = null) {
-  const filter = { schoolId, classId, isPublished: true };
-  if (termNumber != null) filter.termNumber     = termNumber;
-  if (academicYearId)     filter.academicYearId = academicYearId;
-  if (studentId)          filter.studentId      = studentId;
+  const filter = { schoolId, classId, isPublished: true, ..._yearFilterPart(academicYearId) };
+  if (termNumber != null) filter.termNumber = termNumber;
+  if (studentId)          filter.studentId  = studentId;
 
   // Safety ceiling: 10,000 marks ≈ 50 students × 14 subjects × 4 types × 3–4 instances
   const marks = await _model('assessment_marks').find(filter).limit(10000).lean();

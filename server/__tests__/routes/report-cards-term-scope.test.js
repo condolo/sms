@@ -27,10 +27,15 @@ function makeCollection(seed = []) {
   const docs = seed.map(d => ({ ...d }));
   function matches(doc, filter) {
     return Object.entries(filter || {}).every(([k, v]) => {
+      if (k === '$or') return v.some(sub => matches(doc, sub));
       if (v && typeof v === 'object' && !Array.isArray(v)) {
         if ('$in' in v)  return v.$in.includes(doc[k]);
         if ('$ne' in v)  return doc[k] !== v.$ne;
         if ('$nin' in v) return !v.$nin.includes(doc[k]);
+        if ('$exists' in v) {
+          const has = Object.prototype.hasOwnProperty.call(doc, k) && doc[k] !== undefined;
+          return v.$exists ? has : !has;
+        }
       }
       return doc[k] === v;
     });
