@@ -57,7 +57,15 @@ function mockMatchesFilter(doc, filter) {
   });
 }
 function mockMakeFakeCollection(seed = []) {
-  const docs = [...seed];
+  // Deep-clone the seed — findOneAndUpdate below mutates a doc in place
+  // (Object.assign), and the module-level fixture consts (YEAR7_TOPIC,
+  // LEGACY_TOPIC, ...) are reused as literal object references across
+  // every test's beforeEach reseed. Without cloning, a PUT test that
+  // actually changes a field (as any real findOneAndUpdate does) leaks
+  // that mutation into every later test in the file, since "resetting"
+  // the collection just puts the SAME already-mutated objects back —
+  // found writing the first PUT test this file ever had.
+  const docs = seed.map(d => JSON.parse(JSON.stringify(d)));
   return {
     find:             jest.fn((filter) => mockChainArr(docs.filter(d => mockMatchesFilter(d, filter)))),
     findOne:          jest.fn((filter) => mockChainObj(docs.find(d => mockMatchesFilter(d, filter)) || null)),
@@ -211,6 +219,50 @@ describe('GET /api/lessons/topics — class isolation', () => {
     expect(res.status).toBe(200);
     const ids = res.body.data.map(t => t.id);
     expect(ids).toEqual(expect.arrayContaining(['topic_yr7', 'topic_yr8', 'topic_legacy']));
+  });
+});
+
+/* Real customer report, 2026-09-30: a teacher edited a legacy (classId-
+   unset) topic while viewing it from one particular class, and it
+   disappeared from every OTHER class that used to see it. Root cause:
+   TopicSlideOver (client) sent the CURRENT class/stream context's classId
+   on every save, not just on create — so a normal edit ("fix a typo")
+   silently re-scoped a previously-universal topic down to whatever class
+   the editor happened to be viewing it from. Fixed client-side (the edit
+   payload no longer includes classId at all); these tests pin down the
+   server-side contract that fix relies on — PUT never touches classId
+   unless the caller explicitly sends it — so a future client regression
+   would fail loudly here instead of silently narrowing topics again. Also
+   closes the doc comment's own item (6), which described this guarantee
+   but was never actually tested. */
+describe('PUT /api/lessons/topics/:id — classId is only ever touched when the caller sends it', () => {
+  test('editing a legacy topic WITHOUT classId in the body leaves it classId-unset — still visible to every class', async () => {
+    const res = await supertest(buildApp()).put(`/api/lessons/topics/${LEGACY_TOPIC.id}`).send({
+      title: 'Grammar Basics (revised)',
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.data.classId).toBeUndefined();
+
+    const yr7 = await supertest(buildApp()).get('/api/lessons/topics').query({ subjectId: 'subj_eng', classId: 'cls_yr7' });
+    const yr8 = await supertest(buildApp()).get('/api/lessons/topics').query({ subjectId: 'subj_eng', classId: 'cls_yr8' });
+    expect(yr7.body.data.map(t => t.id)).toContain(LEGACY_TOPIC.id);
+    expect(yr8.body.data.map(t => t.id)).toContain(LEGACY_TOPIC.id);
+  });
+
+  test('editing an already class-scoped topic WITHOUT classId in the body leaves its existing scope untouched', async () => {
+    const res = await supertest(buildApp()).put(`/api/lessons/topics/${YEAR7_TOPIC.id}`).send({
+      title: 'Poetry (revised)',
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.data.classId).toBe('cls_yr7');
+  });
+
+  test('a topic CAN still be explicitly (re-)assigned a class via PUT when the caller deliberately sends classId', async () => {
+    const res = await supertest(buildApp()).put(`/api/lessons/topics/${LEGACY_TOPIC.id}`).send({
+      classId: 'cls_yr8',
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.data.classId).toBe('cls_yr8');
   });
 });
 

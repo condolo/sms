@@ -116,7 +116,20 @@ function TopicSlideOver({ classId, subjectId, subjectName, academicYear, existin
     if (!title.trim()) { setError('Topic title is required'); return; }
     const validSubs = subtopics.map(s => s.trim()).filter(Boolean);
     mutation.mutate({
-      classId, subjectId, subjectName, academicYear,
+      // classId is only sent on CREATE. On EDIT, this slide-over is always
+      // opened from whatever class/stream the teacher happens to be
+      // viewing (see the classId={classId} prop above, from DrillDown's
+      // own ambient scope) — sending it unconditionally on every save used
+      // to silently re-scope the topic to THAT class, even a pre-scoping
+      // legacy topic with no classId at all (shared across every class
+      // that teaches the subject). Editing a typo in "English" from a
+      // Year 7 view would silently make that topic disappear from Year 8,
+      // Year 9, etc. — real customer report, 2026-09-30. classId remains
+      // settable, just not as a side effect of an unrelated edit; a school
+      // that wants to scope an existing topic to a class needs a real,
+      // explicit action for that (not built yet), not this implicit one.
+      ...(existing ? {} : { classId }),
+      subjectId, subjectName, academicYear,
       title: title.trim(),
       description: description.trim() || undefined,
       subtopics: validSubs.map((t, i) => ({ title: t, order: i })),
