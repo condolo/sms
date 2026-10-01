@@ -258,9 +258,21 @@ router.get('/:id/students', authMiddleware, PLAN, MODGATE, rbac('students', 'rea
     // additive, same convention as classes.js's own GET / attendanceScope/
     // assignedOnly/lessonsScope flags: every other caller of this route
     // (Exams marks entry, Report Cards picker) is unaffected.
+    //
+    // `?assessmentScope=true` — the identical gap, for the Markbook. Raised
+    // directly: "ensure the markbook allows class select and streams filter
+    // for each teacher... a teacher is assigned stream(s) per class." The
+    // ordinary-teacher path already worked (MarkbookTab's own
+    // needsStreamSelection picker + this route's stream-narrowing below) —
+    // this closes the same "school-level-for-another-module role with a
+    // real stream assignment sees the whole class" gap Attendance/Lessons
+    // already had fixed, now for Grades/Assessment too (ScopeEngine.
+    // resolveAssessmentScope).
     const originalScope = req.scope;
     if (req.query.attendanceScope === 'true') {
       req.scope = await ScopeEngine.resolveAttendanceScope(req);
+    } else if (req.query.assessmentScope === 'true') {
+      req.scope = await ScopeEngine.resolveAssessmentScope(req);
     }
     const inWholeClassScope = ScopeEngine.isClassInScope(req, 'students', cls.id);
     let myStreamIds = req.scope?.streamIds ?? [];

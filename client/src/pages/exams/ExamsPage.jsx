@@ -658,7 +658,11 @@ function MarkbookTab({ years }) {
       : ['classes', classId, 'students'],
     queryFn: () => needsStreamSelection
       ? streamsApi.students(streamId, { limit: 500, status: 'active' })
-      : classesApi.students(classId, { limit: 500, status: 'active' }),
+      // assessmentScope=true: closes the same school-level-role-with-a-
+      // real-stream-assignment gap already fixed for Attendance/Lessons —
+      // see classes.js's GET /:id/students and scopeEngine.js's
+      // resolveAssessmentScope.
+      : classesApi.students(classId, { limit: 500, status: 'active', assessmentScope: true }),
     enabled:  needsStreamSelection ? !!streamId : !!classId,
     staleTime: 5 * 60_000,
   });

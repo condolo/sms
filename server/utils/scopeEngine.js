@@ -518,6 +518,59 @@ async function resolveLessonsClassPickerScope(req) {
   return _foldStreamsToParentClasses(req, scope);
 }
 
+/**
+ * A dedicated, Markbook/Assessment-only floor — same reasoning as
+ * resolveAttendanceScope/resolveLessonsScope above, same gap: a role that's
+ * ROLE_SCOPE_LEVEL 'school' for its OWN module (exams_officer/
+ * admissions_officer/finance/hr/timetabler/discipline_committee) is also
+ * fully unrestricted for Grades/Assessment purely as a side effect of
+ * scopeMiddleware computing one scope per request, not per module — the
+ * same architectural gap already closed for Attendance and Lessons.
+ * Prompted directly: "ensure the markbook allows class select and streams
+ * filter for each teacher... a teacher is assigned stream(s) per class" —
+ * the ordinary-teacher picker/roster path already worked correctly
+ * (MarkbookTab's own needsStreamSelection + classes.js's assignedOnly
+ * fold), but a person holding one of the above roles AND a real, narrow
+ * teaching assignment in a stream would see/write the WHOLE class's marks
+ * instead of just their stream, via classes.js's GET /:id/students falling
+ * back to the generic (null = unrestricted) scope. This gives that route
+ * an opt-in `assessmentScope=true` floor to use instead, mirroring
+ * `attendanceScope`/`lessonsScope` exactly.
+ *
+ * @param {import('express').Request} req
+ * @returns {Promise<null|{level:string, classIds:string[], subjectIds:string[], streamIds:string[]}>}
+ *   null = unrestricted (floor role)
+ */
+const ASSESSMENT_FLOOR_ROLES = new Set(['admin', 'superadmin', 'principal', 'deputy_principal', 'deputy']);
+
+async function resolveAssessmentScope(req) {
+  const { userId, schoolId, role, roles = [] } = req.jwtUser ?? {};
+  const effectiveRole = role || roles[0] || '';
+  if (ASSESSMENT_FLOOR_ROLES.has(effectiveRole)) return null;
+  if (!userId || !schoolId) return { level: 'assigned', classIds: [], subjectIds: [], streamIds: [] };
+
+  const assigned = await _loadAssigned(userId, schoolId);
+  const homeroomStreamIds = await resolveHomeroomStreamIds(req);
+  return {
+    level:      'assigned',
+    classIds:   assigned.classIds,
+    subjectIds: assigned.subjectIds,
+    streamIds:  [...new Set([...assigned.streamIds, ...homeroomStreamIds])],
+  };
+}
+
+/* Assessment-only counterpart to resolveClassPickerScope above — same
+   stream-to-parent-class fold, sourced from resolveAssessmentScope instead
+   of the generic req.scope. Not currently wired to any route (the Markbook's
+   class-list picker already works correctly via the generic assignedOnly
+   fold — see classes.js's own GET / comment on why that's fine for this
+   module's picker specifically), but provided for symmetry/future use the
+   same way Attendance/Lessons each have one. */
+async function resolveAssessmentClassPickerScope(req) {
+  const scope = await resolveAssessmentScope(req);
+  return _foldStreamsToParentClasses(req, scope);
+}
+
 /* Timetable's own floor — deliberately NOT a resolveXScope() function like
    Attendance/Lessons above. Those narrow a QUERY down to a caller's own
    assigned classIds; Timetable's admin console (Class Grid/Teacher View/
@@ -544,5 +597,6 @@ module.exports = {
   resolveClassPickerScope, resolveHomeroomStreamIds, foldHomeroomScope,
   resolveAttendanceScope, resolveAttendanceClassPickerScope, ATTENDANCE_FLOOR_ROLES,
   resolveLessonsScope, resolveLessonsClassPickerScope, LESSONS_FLOOR_ROLES,
+  resolveAssessmentScope, resolveAssessmentClassPickerScope, ASSESSMENT_FLOOR_ROLES,
   TIMETABLE_FLOOR_ROLES,
 };
