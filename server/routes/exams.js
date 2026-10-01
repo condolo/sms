@@ -21,7 +21,7 @@ const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E, strParam } = require('../utils/response');
 const { isYearArchived } = require('../utils/archival');
 const { getConfig: _getAssessmentConfig } = require('./assessment');
-const { mergeConfig, resolveGrade } = require('./academic-config');
+const { mergeConfig, resolveGrade, resolveCurrentPeriod } = require('./academic-config');
 const { _model } = require('../utils/model');
 const { notifyGuardiansForStudents } = require('../utils/notify-students');
 const email = require('../utils/email');
@@ -504,6 +504,74 @@ async function _checkExamFKs(schoolId, ctx, { subjectId, classId }) {
   return null;
 }
 
+/**
+ * Resolve (or create) the assessment_schedule entry — the Markbook "window"
+ * — that this exam's marks belong to, and return its id for scheduleEntryId.
+ *
+ * Architecture lock (consolidating all mark entry into the Markbook): an
+ * exam is scheduling/logistics only; it no longer stores marks itself
+ * (POST /:id/results is retired). But every exam still needs to open the
+ * matching Markbook window automatically, the same way a CA/HW entry
+ * configured directly in Assessment Schedule does — otherwise a Mid-Term
+ * exam could exist with nowhere for its subject teacher to actually enter
+ * marks. `exams.js`'s own ExamSchema already had a scheduleEntryId field,
+ * but only the teacher /announce route ever set it (picking an existing
+ * entry the exam office had configured) — the general admin "Create Exam"
+ * flow left it undefined, which is exactly how the reported Biology CA
+ * exam (bc4dfbd5...) ended up with no corresponding Markbook row at all.
+ *
+ * assessment_schedule has no instance concept worth exposing here — exams
+ * default to instance 1 (a school running multiple sittings of the same
+ * exam type in one term is the rare case this simplification accepts, same
+ * posture the migration script takes for exam_results -> assessment_marks).
+ * If data.scheduleEntryId is already set (the /announce path, or a client
+ * that already knows which window it wants), it's trusted as-is.
+ */
+async function _resolveScheduleLink(schoolId, ctx, data) {
+  if (data.scheduleEntryId) return data.scheduleEntryId;
+  if (!data.assessmentType) return null; // nothing to link without a type
+
+  let academicYearId = data.academicYearId || null;
+  let termNumber = null;
+
+  if (data.termId) {
+    const year = academicYearId
+      ? await tenantModel('academic_years', ctx).findOne({ schoolId, id: academicYearId }).select('terms').lean()
+      : null;
+    if (year) {
+      const idx = (year.terms || []).findIndex(t => t.id === data.termId);
+      if (idx >= 0) termNumber = idx + 1;
+    }
+  }
+
+  if (!academicYearId || termNumber == null) {
+    const years = await tenantModel('academic_years', ctx).find({ schoolId }).lean();
+    const resolved = resolveCurrentPeriod(years);
+    academicYearId = academicYearId || resolved.year?.id || null;
+    termNumber = termNumber ?? resolved.termNumber ?? 1;
+  }
+
+  const naturalKey = { schoolId, termNumber, assessmentType: data.assessmentType, instance: 1 };
+  const Schedule = tenantModel('assessment_schedule', ctx);
+  // Adopt a legacy null-tagged entry for this key if one already exists
+  // (same precedent as PUT /schedule's own adoption logic) rather than
+  // creating a second, parallel schedule row under the resolved year.
+  const existing = await Schedule.findOne({ ...naturalKey, $or: [{ academicYearId }, { academicYearId: null }] })
+    .sort({ academicYearId: -1 })
+    .lean();
+  if (existing) return existing.id;
+
+  const newEntry = await Schedule.findOneAndUpdate(
+    { ...naturalKey, academicYearId },
+    {
+      $set: { dateFrom: data.date || new Date().toISOString().slice(0, 10), dateTo: data.date || new Date().toISOString().slice(0, 10), label: data.assessmentLabel || data.assessmentType },
+      $setOnInsert: { id: uuidv4(), schoolId },
+    },
+    { new: true, upsert: true }
+  ).lean();
+  return newEntry.id;
+}
+
 router.post('/', authMiddleware, PLAN, MODGATE, rbac('exams', 'create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
@@ -516,6 +584,8 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('exams', 'create'), async (
 
     const typeError = await _resolveAssessmentType(schoolId, data);
     if (typeError) return E.badRequest(res, typeError);
+
+    data.scheduleEntryId = await _resolveScheduleLink(schoolId, ctx, data);
 
     const doc = await tenantModel('exams', ctx).create({ ...data, id: uuidv4(), schoolId, createdBy: userId, updatedBy: userId });
     return created(res, doc.toObject ? doc.toObject() : doc);
