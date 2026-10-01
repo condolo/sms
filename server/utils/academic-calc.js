@@ -268,7 +268,23 @@ function computeFinalScores(gradesData, examData, assessmentWeights, gradingSche
     for (const sub of allSubjects) {
       const gradeTypes = gradesData[sid]?.[sub] || {};
       const examTypes  = examData[sid]?.[sub]   || {};
-      const allTypes   = { ...gradeTypes, ...examTypes };
+      // gradesData (the Markbook — assessment_marks, merged on top of the
+      // legacy gradebook by report-cards.js's own _mergeGradeData, "CA
+      // marks win on per-type conflict") is spread LAST so it overrides
+      // examData (exam_results, the separate Exams-tab "Create Exam" +
+      // Results entry path) on any shared assessmentType key. Was the
+      // other way around — exam data silently won — which broke the
+      // Markbook's whole premise: a teacher entering/correcting a CA mark
+      // there had no effect on the report card the moment ANY exam record
+      // of that same type already had a score for that student, with no
+      // indication anything had been overridden. Direct instruction,
+      // 2026-10-01: "the markbook... is where all marks are supposed to
+      // be updated and reflect on the report card module." exam-only
+      // types (nothing ever entered in the Markbook for that type, e.g. a
+      // school that still runs MT/ET purely through Exams -> Results)
+      // still flow through untouched — this only changes which source
+      // wins when BOTH have a value for the same student+subject+type.
+      const allTypes   = { ...examTypes, ...gradeTypes };
 
       let weightedSum     = 0;
       let totalWeightUsed = 0;

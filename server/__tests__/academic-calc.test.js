@@ -231,6 +231,31 @@ describe('computeFinalScores', () => {
     const result = computeFinalScores(gradesData, {}, WEIGHTS, SCHEMA);
     expect(result.stu1.gpa).toBe(3.5);   // (4.0 + 3.0) / 2
   });
+
+  // ── Markbook (gradesData) wins over Exams (examData) on conflict ──
+  // Report cards must reflect whatever is in the Markbook, per the
+  // 2026-10-01 instruction: "the markbook... is where all marks are
+  // supposed to be updated and reflect on the report card module."
+  // report-cards.js's own _mergeGradeData already makes CA/Markbook
+  // win over the legacy gradebook ("CA marks win on per-type
+  // conflict") — this proves computeFinalScores now stays consistent
+  // with that precedent one level up, instead of letting exam_results
+  // silently override a teacher's Markbook entry for the same type.
+  test('gradesData (Markbook) overrides examData (Exams) when both have the same assessment type', () => {
+    const gradesData = { stu1: { sub1: { classwork: 80 } } };
+    const examData   = { stu1: { sub1: { classwork: 30, midterm: 70 } } };
+
+    const result = computeFinalScores(gradesData, examData, WEIGHTS, SCHEMA);
+    // classwork must come from the Markbook (80), not Exams (30);
+    // midterm has no Markbook entry so it still falls back to Exams (70).
+    // (80*20 + 70*30) / (20+30) = (1600+2100)/50 = 74
+    expect(result.stu1.subjects.sub1.finalScore).toBe(74);
+  });
+
+  test('examData alone (nothing in Markbook for that type) still contributes — exam-only schools unaffected', () => {
+    const result = computeFinalScores({}, { stu1: { sub1: { final: 90 } } }, WEIGHTS, SCHEMA);
+    expect(result.stu1.subjects.sub1.finalScore).toBe(90);
+  });
 });
 
 /* ══════════════════════════════════════════════════════════════
