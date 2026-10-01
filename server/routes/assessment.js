@@ -32,6 +32,7 @@ const { isYearArchived, firstArchivedYear } = require('../utils/archival');
 const { canWriteSubject, unassignedPairs } = require('../utils/subject-scope');
 const ScopeEngine         = require('../utils/scopeEngine');
 const { scopeMiddleware } = require('../middleware/scopeMiddleware');
+const { MARK_STATES }     = require('../utils/mark-states');
 
 const router = express.Router();
 const PLAN   = planGate('grades');
@@ -314,21 +315,46 @@ router.put('/schedule', authMiddleware, PLAN, MODGATE, rbac('assessment', 'updat
     }
 
     const label = d.label || _label(d.assessmentType, d.instance);
+    const Schedule = tenantModel('assessment_schedule', tenantContext(req));
+    const naturalKey = { schoolId, termNumber: d.termNumber, assessmentType: d.assessmentType, instance: d.instance };
 
-    const doc = await tenantModel('assessment_schedule', tenantContext(req)).findOneAndUpdate(
-      {
-        schoolId,
-        academicYearId: d.academicYearId || null,
-        termNumber:     d.termNumber,
-        assessmentType: d.assessmentType,
-        instance:       d.instance,
-      },
-      {
-        $set: { dateFrom: d.dateFrom, dateTo: d.dateTo, label },
-        $setOnInsert: { id: uuidv4(), schoolId, academicYearId: d.academicYearId || null },
-      },
-      { new: true, upsert: true }
-    ).lean();
+    let doc;
+    if (d.academicYearId) {
+      // Explicit year given (e.g. scheduling ahead for next year) — exact
+      // match/create for that year only, unchanged behavior, never touches
+      // a legacy null-tagged row under this same key.
+      doc = await Schedule.findOneAndUpdate(
+        { ...naturalKey, academicYearId: d.academicYearId },
+        {
+          $set: { dateFrom: d.dateFrom, dateTo: d.dateTo, label },
+          $setOnInsert: { id: uuidv4(), schoolId, academicYearId: d.academicYearId },
+        },
+        { new: true, upsert: true }
+      ).lean();
+    } else {
+      // Default to the school's current academic year instead of ever
+      // persisting another null. Every one of the 8 live schedule documents
+      // (checked directly) had a null academicYearId — the root cause of
+      // the Markbook's "none scheduled" bug (v5.166.0). Legacy null rows
+      // keep matching reads via _yearFilterPart's own fallback; this stops
+      // NEW rows from joining them — and adopts/backfills an existing
+      // legacy row for this same key the moment it's saved again, same
+      // precedent as POST /marks' own adoption logic, so re-saving an old
+      // entry doesn't upsert a duplicate instead of updating it.
+      const years = await tenantModel('academic_years', tenantContext(req)).find({ schoolId }).lean();
+      const { year } = resolveCurrentPeriod(years);
+      const resolvedYearId = year?.id ?? null;
+
+      const existing = await Schedule.findOne({ ...naturalKey, academicYearId: null }).lean();
+      doc = await Schedule.findOneAndUpdate(
+        { ...naturalKey, academicYearId: existing ? null : resolvedYearId },
+        {
+          $set: { dateFrom: d.dateFrom, dateTo: d.dateTo, label, academicYearId: resolvedYearId },
+          $setOnInsert: { id: uuidv4(), schoolId },
+        },
+        { new: true, upsert: true }
+      ).lean();
+    }
 
     return _ok(res, doc);
   } catch (err) {
@@ -853,7 +879,13 @@ const MarkSchema = z.object({
   termNumber:     z.number().int().min(1).max(3),
   assessmentType: z.string().min(1).max(20),
   instance:       z.number().int().min(1).max(10).default(1),
-  rawScore:       z.number().min(0).max(100),
+  rawScore:       z.number().min(0).max(100).optional(),
+  // Mark state — present/ABS/MIS/EXM/INC, shared with the (now legacy)
+  // exam_results vocabulary (server/utils/mark-states.js), since the
+  // Markbook is becoming the one place every assessment type's marks are
+  // entered, including absent/exempted/incomplete cases that previously
+  // only the Exams → Results screen could represent.
+  markState:      z.enum(MARK_STATES).default('present'),
   label:          z.string().max(100).optional(),
   isPublished:    z.boolean().default(true),
   // Optimistic concurrency (mirrors exam_results/ResultSchema's _v — see
@@ -861,6 +893,10 @@ const MarkSchema = z.object({
   // check entirely, same "no behavior change until a client sends it"
   // contract as the exam-results endpoint.
   _v:             z.number().int().min(0).optional(),
+}).superRefine((d, ctx) => {
+  if (d.markState === 'present' && d.rawScore == null) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['rawScore'], message: 'rawScore is required when markState is "present"' });
+  }
 });
 
 const BulkMarkSchema = z.object({
@@ -914,7 +950,13 @@ router.post('/marks', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), a
     if (!rawParsed.success) {
       return _err(res, rawParsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; '));
     }
-    const d = { ...rawParsed.data, assessmentType: rawParsed.data.assessmentType.toUpperCase() };
+    const d = {
+      ...rawParsed.data,
+      assessmentType: rawParsed.data.assessmentType.toUpperCase(),
+      // A non-present state carries no score — nulled server-side so a
+      // stale client-supplied rawScore can never masquerade as a real mark.
+      rawScore: rawParsed.data.markState === 'present' ? rawParsed.data.rawScore : null,
+    };
 
     // Guard: reject writes to archived academic years
     if (d.academicYearId && await isYearArchived(schoolId, d.academicYearId)) {
@@ -992,6 +1034,7 @@ router.post('/marks', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), a
       {
         $set: {
           rawScore:      d.rawScore,
+          markState:     d.markState,
           classId:       d.classId,
           streamId:      markStudent?.streamId ?? null,
           label,
@@ -1029,7 +1072,11 @@ router.post('/marks/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
     if (!bulkParsed.success) {
       return _err(res, bulkParsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; '));
     }
-    const marks = bulkParsed.data.marks.map(d => ({ ...d, assessmentType: d.assessmentType.toUpperCase() }));
+    const marks = bulkParsed.data.marks.map(d => ({
+      ...d,
+      assessmentType: d.assessmentType.toUpperCase(),
+      rawScore: d.markState === 'present' ? d.rawScore : null,
+    }));
 
     // Guard: reject if any mark targets an archived academic year
     const yearIds = marks.map(d => d.academicYearId).filter(Boolean);
@@ -1210,6 +1257,7 @@ router.post('/marks/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
           update: {
             $set: {
               rawScore:    d.rawScore,
+              markState:   d.markState,
               classId:     d.classId,
               streamId:    streamByStudent[d.studentId] ?? null,
               label:       d.label || _label(d.assessmentType, d.instance),

@@ -443,40 +443,68 @@ function ExamsTab({ years, assessmentWeights, subjectsList, canCreate }) {
    Unified mark entry: Class → Subject → Assessment (from schedule) → Grid
    ══════════════════════════════════════════════════════════════ */
 
+/* ─── Mark state (present/ABS/MIS/EXM/INC) — consolidated here from the
+   retired Exams → Results screen, since the Markbook is now where every
+   assessment type's marks, including absent/exempt/incomplete, are
+   entered. Kept in sync with server/utils/mark-states.js's MARK_STATES. */
+const MARKBOOK_STATE_OPTIONS = [
+  { value: 'present', label: '—',   title: 'Present' },
+  { value: 'ABS',      label: 'ABS', title: 'Absent' },
+  { value: 'MIS',      label: 'MIS', title: 'Missing — not yet entered' },
+  { value: 'EXM',      label: 'EXM', title: 'Exempt — excluded from averaging' },
+  { value: 'INC',      label: 'INC', title: 'Incomplete — blocks report approval' },
+];
+
 /* ─── Grid cell ─────────────────────────────────────────────── */
-function GridCell({ value, rowIdx, colIdx, isLocked, hasConflict, onChange, onNavigate, cellRef }) {
+function GridCell({ value, markState = 'present', rowIdx, colIdx, isLocked, hasConflict, onChange, onStateChange, onNavigate, cellRef }) {
+  const nonPresent = markState !== 'present';
   return (
-    <input
-      ref={cellRef}
-      type="number" min="0" max="100" step="0.5"
-      disabled={isLocked}
-      value={value ?? ''}
-      title={hasConflict ? 'Not saved — someone else edited this first. Save again to overwrite.' : undefined}
-      onChange={e => {
-        const v = e.target.value === '' ? undefined : Number(e.target.value);
-        if (v === undefined || (v >= 0 && v <= 100)) onChange(v);
-      }}
-      onKeyDown={e => {
-        if (e.key === 'Tab')        { e.preventDefault(); onNavigate(rowIdx, colIdx, e.shiftKey ? -1 : 1, 0); }
-        else if (e.key === 'Enter') { e.preventDefault(); onNavigate(rowIdx, colIdx, 0, 1); }
-        else if (e.key === 'ArrowRight') { e.preventDefault(); onNavigate(rowIdx, colIdx, 1, 0); }
-        else if (e.key === 'ArrowLeft')  { e.preventDefault(); onNavigate(rowIdx, colIdx, -1, 0); }
-        else if (e.key === 'ArrowDown')  { e.preventDefault(); onNavigate(rowIdx, colIdx, 0, 1); }
-        else if (e.key === 'ArrowUp')    { e.preventDefault(); onNavigate(rowIdx, colIdx, 0, -1); }
-      }}
-      className={`w-full rounded border px-2 py-1 text-right text-sm tabular-nums focus:outline-none transition
-        ${isLocked
-          ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
-          : hasConflict
-            ? 'border-red-300 bg-red-50 focus:border-red-500 ring-1 ring-red-200'
-            : value == null
-              ? 'border-slate-200 bg-white focus:border-slate-400 focus:ring-1 focus:ring-slate-900/10'
-              : value >= 50
-                ? 'border-emerald-200 bg-emerald-50/40 focus:border-emerald-400'
-                : 'border-red-200 bg-red-50/40 focus:border-red-400'
-        }`}
-      placeholder="—"
-    />
+    <div className="flex items-center gap-1">
+      <input
+        ref={cellRef}
+        type="number" min="0" max="100" step="0.5"
+        disabled={isLocked || nonPresent}
+        value={nonPresent ? '' : (value ?? '')}
+        title={hasConflict ? 'Not saved — someone else edited this first. Save again to overwrite.' : undefined}
+        onChange={e => {
+          const v = e.target.value === '' ? undefined : Number(e.target.value);
+          if (v === undefined || (v >= 0 && v <= 100)) onChange(v);
+        }}
+        onKeyDown={e => {
+          if (e.key === 'Tab')        { e.preventDefault(); onNavigate(rowIdx, colIdx, e.shiftKey ? -1 : 1, 0); }
+          else if (e.key === 'Enter') { e.preventDefault(); onNavigate(rowIdx, colIdx, 0, 1); }
+          else if (e.key === 'ArrowRight') { e.preventDefault(); onNavigate(rowIdx, colIdx, 1, 0); }
+          else if (e.key === 'ArrowLeft')  { e.preventDefault(); onNavigate(rowIdx, colIdx, -1, 0); }
+          else if (e.key === 'ArrowDown')  { e.preventDefault(); onNavigate(rowIdx, colIdx, 0, 1); }
+          else if (e.key === 'ArrowUp')    { e.preventDefault(); onNavigate(rowIdx, colIdx, 0, -1); }
+        }}
+        className={`w-full min-w-0 rounded border px-2 py-1 text-right text-sm tabular-nums focus:outline-none transition
+          ${isLocked || nonPresent
+            ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
+            : hasConflict
+              ? 'border-red-300 bg-red-50 focus:border-red-500 ring-1 ring-red-200'
+              : value == null
+                ? 'border-slate-200 bg-white focus:border-slate-400 focus:ring-1 focus:ring-slate-900/10'
+                : value >= 50
+                  ? 'border-emerald-200 bg-emerald-50/40 focus:border-emerald-400'
+                  : 'border-red-200 bg-red-50/40 focus:border-red-400'
+          }`}
+        placeholder={nonPresent ? markState : '—'}
+      />
+      <select
+        value={markState}
+        disabled={isLocked}
+        onChange={e => onStateChange(e.target.value)}
+        title="Mark state"
+        className={`w-10 shrink-0 rounded border px-0.5 py-1 text-center text-[10px] font-medium focus:outline-none transition
+          ${isLocked ? 'cursor-not-allowed text-slate-300 border-slate-200 bg-slate-100'
+            : nonPresent ? 'text-amber-700 border-amber-200 bg-amber-50' : 'text-slate-400 border-slate-200 bg-white'}`}
+      >
+        {MARKBOOK_STATE_OPTIONS.map(o => (
+          <option key={o.value} value={o.value} title={o.title}>{o.label}</option>
+        ))}
+      </select>
+    </div>
   );
 }
 
@@ -508,6 +536,10 @@ function MarkbookTab({ years }) {
   const [subjectId,  setSubjectId]  = useState('');
   const [scheduleId, setScheduleId] = useState('');
   const [scores,     setScores]     = useState({});
+  // Per-cell mark state (present/ABS/MIS/EXM/INC), mirrors `scores`' shape.
+  // Defaults to 'present' when absent from the map — see GridCell/MARK_
+  // STATE_OPTIONS below. A non-present cell carries no numeric score.
+  const [markStates, setMarkStates] = useState({});
   const [dirty,      setDirty]      = useState(false);
   const [toast,      setToast]      = useState(null);
   // BUG-003 (live endpoint) — per-cell version, mirrors `scores`' shape.
@@ -693,6 +725,7 @@ function MarkbookTab({ years }) {
   useEffect(() => {
     if (!existingData?.data) return;
     const vMap = {};
+    const sMap = {};
     setScores(prev => {
       // BUG-003 (live endpoint) — a cell still showing an unresolved
       // conflict keeps the teacher's typed value; every other cell syncs
@@ -703,7 +736,9 @@ function MarkbookTab({ years }) {
         const colId = m.instance > 1 ? `${m.assessmentType}_${m.instance}` : m.assessmentType;
         map[m.studentId] ??= {};
         vMap[m.studentId] ??= {};
+        sMap[m.studentId] ??= {};
         vMap[m.studentId][colId] = m._v ?? 0;
+        sMap[m.studentId][colId] = m.markState ?? 'present';
         const key = `${m.studentId}|${colId}`;
         map[m.studentId][colId] = conflictedCellKeys.has(key)
           ? (prev[m.studentId]?.[colId] ?? m.rawScore)
@@ -712,14 +747,25 @@ function MarkbookTab({ years }) {
       return map;
     });
     setVersions(vMap);
+    setMarkStates(sMap);
     setDirty(conflictedCellKeys.size > 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [existingData]);
 
-  useEffect(() => { setScores({}); setVersions({}); setConflicts([]); setDirty(false); }, [classId, streamId, subjectId, scheduleId]);
+  useEffect(() => { setScores({}); setVersions({}); setMarkStates({}); setConflicts([]); setDirty(false); }, [classId, streamId, subjectId, scheduleId]);
 
   const setCell = useCallback((studentId, colId, value) => {
     setScores(prev => ({ ...prev, [studentId]: { ...(prev[studentId] ?? {}), [colId]: value } }));
+    setDirty(true);
+  }, []);
+
+  const setCellState = useCallback((studentId, colId, state) => {
+    setMarkStates(prev => ({ ...prev, [studentId]: { ...(prev[studentId] ?? {}), [colId]: state } }));
+    // Switching away from 'present' clears any typed score so a stale
+    // number can never be silently sent alongside a non-present state.
+    if (state !== 'present') {
+      setScores(prev => ({ ...prev, [studentId]: { ...(prev[studentId] ?? {}), [colId]: undefined } }));
+    }
     setDirty(true);
   }, []);
 
@@ -763,7 +809,12 @@ function MarkbookTab({ years }) {
         const sid = s.id ?? s._id;
         for (const col of cols) {
           const v = scores[sid]?.[col.colId];
-          if (v == null) continue;
+          const markState = markStates[sid]?.[col.colId] ?? 'present';
+          // A truly untouched cell (no score, still the default 'present')
+          // has nothing to save. A cell explicitly set to a non-present
+          // state (Absent/Missing/Exempt/Incomplete) IS saved even with no
+          // numeric score — that state is itself the value being recorded.
+          if (v == null && markState === 'present') continue;
           const existingV = versions[sid]?.[col.colId];
           marksToSave.push({
             studentId: sid, subjectId, classId,
@@ -776,7 +827,8 @@ function MarkbookTab({ years }) {
             termNumber:     selectedEntry.termNumber,
             assessmentType: col.typeKey,
             instance:       col.instance,
-            rawScore:       v,
+            markState,
+            ...(markState === 'present' ? { rawScore: v } : {}),
             // BUG-003 (live endpoint) — only send _v for a cell that has a
             // known prior version (editing something that already
             // exists). A brand-new cell has nothing to conflict with;
@@ -1066,7 +1118,7 @@ function MarkbookTab({ years }) {
                   <th className="text-left text-xs font-medium text-slate-500 px-4 py-2.5 w-8 sticky left-0 bg-slate-50 z-10">#</th>
                   <th className="text-left text-xs font-medium text-slate-500 px-3 py-2.5 sticky left-8 bg-slate-50 z-10 min-w-[160px]">Student</th>
                   {cols.map(col => (
-                    <th key={col.colId} className="text-center text-xs font-medium text-slate-500 px-2 py-2.5 min-w-[76px]">
+                    <th key={col.colId} className="text-center text-xs font-medium text-slate-500 px-2 py-2.5 min-w-[118px]">
                       <TypePill type={col.colLabel} color={col.color} />
                     </th>
                   ))}
@@ -1086,10 +1138,12 @@ function MarkbookTab({ years }) {
                         <td key={col.colId} className="px-2 py-1.5">
                           <GridCell
                             value={scores[sid]?.[col.colId]}
+                            markState={markStates[sid]?.[col.colId] ?? 'present'}
                             rowIdx={rowIdx} colIdx={colIdx}
                             isLocked={selectedEntry?.isLocked ?? false}
                             hasConflict={conflictedCellKeys.has(`${sid}|${col.colId}`)}
                             onChange={v => setCell(sid, col.colId, v)}
+                            onStateChange={st => setCellState(sid, col.colId, st)}
                             onNavigate={navigate}
                             cellRef={el => { cellRefs.current[`${rowIdx}_${colIdx}`] = el; }}
                           />

@@ -157,13 +157,9 @@ const TRANSITION_ROLES = {
   archived:    ['exams_officer', 'admin', 'superadmin'],
 };
 
-/* Mark states — distinct from absent boolean for backward compat */
-const MARK_STATES = ['present', 'ABS', 'MIS', 'EXM', 'INC'];
-// present = has a valid score
-// ABS     = absent (not treated as zero — excluded from averages unless school config says otherwise)
-// MIS     = missing mark — teacher has not entered score yet (flags for action)
-// EXM     = exempted — excluded from averaging entirely
-// INC     = incomplete — blocks report approval until resolved
+/* Mark states — now shared with the Markbook (assessment.js), since marks
+   entry is being consolidated there. See server/utils/mark-states.js. */
+const { MARK_STATES, resolveMarkState: _resolveMarkState } = require('../utils/mark-states');
 
 const ExamSchema = z.object({
   title:          z.string().min(1).max(200).trim(),
@@ -299,19 +295,6 @@ function _checkTransition(fromStatus, toStatus, userRole, grants = {}) {
     return `Your role ("${userRole}") cannot set status to "${toStatus}"`;
   }
   return null;
-}
-
-/** Resolve markState + absent for backward compat.
- *  If markState is given, derive absent from it.
- *  If only absent is given, derive markState from it. */
-function _resolveMarkState(data) {
-  if (data.markState && data.markState !== 'present') {
-    return { markState: data.markState, absent: data.markState === 'ABS', score: null };
-  }
-  if (data.absent === true && (!data.markState || data.markState === 'present')) {
-    return { markState: 'ABS', absent: true, score: null };
-  }
-  return { markState: 'present', absent: false, score: data.score ?? null };
 }
 
 /* ══════════════════════════════════════════════════════════════
