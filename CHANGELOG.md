@@ -6,6 +6,29 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.167.0] — 2026-10-01 — fix(assessment): marks entered through Exams → Results silently overrode the Markbook on the report card, with no indication either had happened
+
+Raised directly, with a screenshot of the Exams tab: "I have saved makes for this class and subject for CA 1, it saves but still empty as if i need to add another marks for the same subject. also i need you to verify when marks are added through this channel, how about through this other channel which looks more presentable? how does this work?"
+
+### Root cause
+Two parallel, unsynced mark-entry systems exist: the Markbook (`assessment_marks`, driven by `assessment_schedule`) and Exams → [exam] → Results (`exam_results`, keyed by `examId`, independent of the Schedule — `exams.js` intentionally allows `assessmentType: 'CA'`/`'HW'`, not just `'MT'`/`'ET'`). Verified the exact reported case directly against the live database: a real "Continuous Assessment — Biology" exam had 3 real `exam_results` (90, 67, 70); `assessment_marks` for that same class/subject was completely empty — confirming the marks were saved via Exams → Results, while the Markbook tab reads the other, empty collection.
+
+Beyond the immediate symptom: `computeFinalScores` in `academic-calc.js` (the function both report-card generation call sites use) merged Markbook-sourced and exam-sourced data as `{ ...gradeTypes, ...examTypes }` — exam data silently won on any overlapping assessment type, with no warning. A teacher correcting a mark in the Markbook would have it silently discarded in favor of a stale exam-sourced value. Asked the user directly how the two channels should relate; the answer given was the governing principle: "the name markbook means this is where all marks are supposed to be updated and reflect on the report card module." This matches an already-established precedent one level up in `report-cards.js`'s `_mergeGradeData` ("CA marks win on per-type conflict").
+
+### Fix
+Reversed the merge order in `computeFinalScores` so Markbook data (`gradeTypes`) wins over exam data (`examTypes`) on any shared assessment-type key, while exam-only types (nothing ever entered in the Markbook) still flow through unaffected.
+
+### Verified
+Confirmed no existing test in `academic-calc.test.js` depends on the old merge order (none use an overlapping key between the two inputs). Added 2 new tests: Markbook wins on a genuinely overlapping key; an exam-only type with no Markbook entry still contributes. Full suite: 265 suites, 2747 tests, zero regressions.
+
+**Scope note**: this fixes which source wins on the report card's computed final score. It does not make the Markbook grid itself display marks already entered via Exams → Results — that remains a separate, optional follow-up (migration or a Markbook-read-side merge) if requested.
+
+### Files
+- `server/utils/academic-calc.js` — `computeFinalScores` merge-order fix
+- `server/__tests__/academic-calc.test.js` — 2 new tests
+
+---
+
 ## [v5.166.0] — 2026-09-30 — fix(assessment): the Markbook's Assessment dropdown, marks, and report cards silently excluded every record stored without an academic year
 
 Raised directly, with screenshots: an assessment was scheduled and visible in Settings → Exams & Assessment → Configuration, but the Markbook's own "Assessment" dropdown showed "(none scheduled)" for the same school/subject/class.

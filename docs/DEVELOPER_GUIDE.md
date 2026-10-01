@@ -6088,3 +6088,40 @@ Applied everywhere a bare `if (academicYearId) filter.academicYearId = academicY
 - `server/utils/academic-calc.js` — same helper; applied to `aggregateGrades`, `aggregateExamResults`, `aggregateAssessmentMarks`
 - `server/__tests__/routes/assessment-schedule-academic-year-fallback.test.js` — 6 new tests
 - `server/__tests__/routes/assessment-analytics.test.js`, `report-cards-term-scope.test.js` — mock `$or`/`$exists` support fixed
+
+## 106. Marks Entered Through Exams → Results Silently Overrode the Markbook on the Report Card, With No Indication Either Had Happened (v5.167.0)
+
+Raised directly, with a screenshot of the Exams tab showing "Continuous Assessment — Biology" (Completed) with a "Results" link: "I have saved makes for this class and subject for CA 1, it saves but still empty as if i need to add another marks for the same subject. also i need you to verify when marks are added through this channel, how about through this other channel which looks more presentable? how does this work?"
+
+### Root cause
+The platform has **two parallel, unsynced mark-entry systems** that were never reconciled:
+- **Markbook** (`ExamsPage.jsx`'s Markbook tab) — writes to `assessment_marks`, driven by `assessment_schedule` entries, grid UI.
+- **Exams → [exam] → Results** — writes to `exam_results`, keyed by `examId`, completely independent of the Schedule. `exams.js`'s `assessmentType` field can legitimately be `'CA'`/`'HW'`, not just `'MT'`/`'ET'` (confirmed intentional via an existing code comment: `// customTypes[].key, e.g. 'MT', 'ET', 'CA'`) — a teacher can "announce a sitting" (`POST /announce`) directly from a schedule entry, or an admin can create a CA/HW exam from scratch with no schedule link at all.
+
+Verified the exact reported case directly against the live database (school `sch_demo`, class `cls_demo_f1a` "Form 1A", subject `subj_demo_bio` "Biology"): a real "Continuous Assessment — Biology" exam (status `completed`, `scheduleEntryId: undefined`) had 3 real `exam_results` (90, 67, 70). `assessment_marks` for that exact class/subject was completely empty. This confirmed the user's marks WERE saved — via Exams → Results — while the Markbook tab reads the other, empty collection, producing exactly the "saves but still empty" symptom reported.
+
+Beyond the immediate symptom, traced a second, more dangerous consequence in `computeFinalScores` (`academic-calc.js`), the function both `report-cards.js` call sites (lines 423, 628) use to build the final per-subject score: it merged `gradeTypes` (Markbook-sourced, via `report-cards.js`'s `mergedGrades`) and `examTypes` (`exam_results`-sourced) with `{ ...gradeTypes, ...examTypes }` — **exam data silently won on any overlapping assessmentType key**, with no warning anywhere. A teacher later correcting a CA mark in the Markbook — the tool whose whole premise is "this is where marks get updated" — would have that correction silently discarded in favor of a stale or wrong exam-sourced value, with zero indication to anyone that an override had happened.
+
+Posed the architectural question back to the user with three options (restrict Exams tab to true exam types only; keep both but surface conflicts; one-time migrate CA/HW exam_results into assessment_marks). The actual answer given didn't pick one of the three — it stated the governing principle directly: **"the name markbook means this is where all marks are supposed to be updated and reflect on the report card module."**
+
+This is also already the established precedent one level up: `report-cards.js`'s own `_mergeGradeData(gradesData, caData)` merges the legacy `grades` collection with Markbook `assessment_marks` data as `{ ...(oldSubjects[sub] || {}), ...(caSubjects[sub] || {}) }`, with its own in-code comment: "Spread old first, then CA overwrites individual type keys." Markbook/CA data was already designed to win over the legacy gradebook — `computeFinalScores` was the one place in the chain that broke that chain by letting `examData` win over the now-CA-prioritized `mergedGrades` one level further up.
+
+### Fix
+Changed `computeFinalScores`'s per-subject merge in `academic-calc.js` from:
+```js
+const allTypes = { ...gradeTypes, ...examTypes };
+```
+to:
+```js
+const allTypes = { ...examTypes, ...gradeTypes };
+```
+`gradeTypes` (the Markbook, already merged on top of the legacy gradebook by `report-cards.js`) now wins on any assessmentType key present in both. A type with nothing ever entered in the Markbook (e.g. a school still running MT/ET purely through Exams → Results) still flows through from `examData` untouched — this only changes which source wins when **both** have a value for the same student+subject+assessmentType. `assessment.js`'s own `GET /report` call site (`computeFinalScores(aggregated, {}, ...)`) passes an empty object for `examData` entirely and is unaffected — left alone as out of scope, it isn't a priority-order issue there.
+
+**Explicit scope note, given directly to the user**: this fixes which source wins on the **report card's final score**. It does **not** make the Markbook grid itself display the 3 existing Biology exam-sourced scores (90/67/70) — those remain visible/editable only in the Exams tab unless a separate migration or a Markbook-read-side merge is explicitly requested as a follow-up.
+
+### Verified
+Read the full existing `computeFinalScores` describe block in `academic-calc.test.js` first — none of the existing tests use an overlapping assessmentType key between `gradesData` and `examData` for the same student+subject (they use disjoint keys like `classwork`/`midterm` vs `final`), confirming the merge-order change couldn't regress any of them. Added 2 new tests: one proving `gradesData` now wins on a genuinely overlapping key (`classwork` in both, with a different value in each — Markbook's value is reflected in the computed `finalScore`, Exams' is not), one proving an exam-only type with no Markbook entry still contributes normally. Full suite: 265 suites, 2747 tests, zero regressions.
+
+### Files
+- `server/utils/academic-calc.js` — `computeFinalScores`'s merge-order spread, with inline rationale comment
+- `server/__tests__/academic-calc.test.js` — 2 new tests
