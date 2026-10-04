@@ -997,6 +997,23 @@ router.post('/marks', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), a
       }
     }
 
+    // Guard: reject if the relevant schedule entry is locked by admin, if
+    // this specific mark is already locked (post-approval), or if its
+    // mark_submissions record is under review (submitted/approved but not
+    // yet locked). /marks/bulk — the Markbook grid's own save path — has
+    // always had the first two checks; this single-mark route had none of
+    // them at all, a real gap now that the Markbook is the only mark-entry
+    // surface. Kept separate from /marks/bulk's own (near-identical) guards
+    // rather than factored out, since the two routes' data shapes differ
+    // (one mark vs an array) enough that a shared helper would need its own
+    // array-wrapping boilerplate at each call site anyway.
+    const lockedScheduleEntry = await tenantModel('assessment_schedule', tenantContext(req)).findOne({
+      schoolId, isLocked: true, assessmentType: d.assessmentType, termNumber: d.termNumber,
+    }).lean();
+    if (lockedScheduleEntry) {
+      return _err(res, `"${lockedScheduleEntry.label || lockedScheduleEntry.assessmentType}" for Term ${lockedScheduleEntry.termNumber} has been locked by admin. Mark entry is not allowed until it is unlocked.`, 403);
+    }
+
     const label = d.label || _label(d.assessmentType, d.instance);
     const Marks = tenantModel('assessment_marks', tenantContext(req));
     const naturalKey = {
@@ -1007,6 +1024,18 @@ router.post('/marks', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), a
       assessmentType: d.assessmentType,
       instance:       d.instance,
     };
+
+    const lockedExisting = await Marks.findOne({ ...naturalKey, isLocked: true }).lean();
+    if (lockedExisting) {
+      return _err(res, 'This mark is locked. Submit an unlock request via the approval workflow.', 403);
+    }
+    const underReview = await tenantModel('mark_submissions', tenantContext(req)).findOne({
+      schoolId, classId: d.classId, subjectId: d.subjectId, termNumber: d.termNumber,
+      assessmentType: d.assessmentType, instance: d.instance, status: { $in: ['submitted', 'approved'] },
+    }).lean();
+    if (underReview) {
+      return _err(res, `These marks are ${underReview.status} for review and cannot be edited — recall the submission first.`, 403);
+    }
 
     // Which existing document (if any) this save should land on. Every mark
     // entered before this fix was saved with academicYearId: null (the
@@ -1172,6 +1201,30 @@ router.post('/marks/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
         academicYearId: d.academicYearId || null,
       })),
     }).lean();
+    // Guard: reject if the relevant mark_submissions record is under review
+    // (submitted or already approved, but not yet locked — the terminal
+    // 'locked' state is already caught above via assessment_marks.isLocked,
+    // which mark-submissions.js's own lock route sets). Closes a real gap:
+    // before this, a teacher could submit a class/subject's marks for
+    // review and then keep silently editing them right up until an admin
+    // got around to locking — defeating the entire point of "submitted".
+    // Matched on the same key mark-submissions.js itself uses by default
+    // (no academicYearId — that field is optional there too, same
+    // null-prone legacy posture every other assessment collection has).
+    const subOr = [...new Set(marks.map(d => `${d.classId}::${d.subjectId}::${d.termNumber}::${d.assessmentType}::${d.instance}`))]
+      .map(k => {
+        const [classId, subjectId, termNumber, assessmentType, instance] = k.split('::');
+        return { classId, subjectId, termNumber: Number(termNumber), assessmentType, instance: Number(instance) };
+      });
+    const underReview = await tenantModel('mark_submissions', tenantContext(req)).findOne({
+      schoolId,
+      status: { $in: ['submitted', 'approved'] },
+      $or: subOr,
+    }).lean();
+    if (underReview) {
+      return _err(res, `These marks are ${underReview.status} for review and cannot be edited — recall the submission first.`, 403);
+    }
+
     if (lockedSample) {
       return _err(res, 'Some marks in this batch are locked. Submit an unlock request via the approval workflow.', 403);
     }

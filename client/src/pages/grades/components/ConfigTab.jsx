@@ -7,10 +7,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence } from 'framer-motion';
 import {
   AlertTriangle, CheckCircle2, Loader2, Save, Plus, Trash2,
-  Info, Star, ChevronDown, ChevronUp,
+  Info, Star, ChevronDown, ChevronUp, XCircle, Send,
   GraduationCap, Lock, LockOpen,
 } from 'lucide-react';
-import { assessment as api } from '@/api/client.js';
+import { assessment as api, classes as classesApi, subjects as subjectsApi, markSubmissions as markSubmissionsApi } from '@/api/client.js';
 import {
   DEFAULT_CUSTOM_TYPES, VALID_TYPE_COLORS, COLOR_PILL,
   DEFAULT_GRADE_SCALE, TERM_NUMBERS, _round,
@@ -572,6 +572,213 @@ function GradeScalesSection({ toast: setToast }) {
 }
 
 /* ══════════════════════════════════════════════════════════════
+   Moderation — the Markbook's mark_submissions workflow (draft ->
+   submitted -> approved/rejected -> locked -> unlock-request -> re-
+   approve, 24h auto-relock). The backend (server/routes/mark-
+   submissions.js) was fully built and tested but had no UI anywhere
+   until now — this gives the exam office/section heads a queue to
+   actually review submissions, approve/reject, and lock/unlock, rather
+   than inventing a second moderation chain on top of it.
+   ══════════════════════════════════════════════════════════════ */
+const SUBMISSION_STATUS_META = {
+  submitted: { label: 'Submitted', cls: 'text-amber-700 bg-amber-50 border-amber-200' },
+  approved:  { label: 'Approved',  cls: 'text-emerald-700 bg-emerald-50 border-emerald-200' },
+  rejected:  { label: 'Rejected',  cls: 'text-red-700 bg-red-50 border-red-200' },
+  locked:    { label: 'Locked',    cls: 'text-slate-600 bg-slate-100 border-slate-200' },
+};
+
+function ModerationSection({ toast: setToast }) {
+  const qc = useQueryClient();
+  const [unlockId, setUnlockId] = useState(null);
+  const [unlockReason, setUnlockReason] = useState('');
+  const [rejectingId, setRejectingId] = useState(null);
+  const [rejectReason, setRejectReason] = useState('');
+
+  const { data: subsData, isLoading } = useQuery({
+    queryKey: ['mark-submissions', 'moderation-queue'],
+    queryFn:  () => markSubmissionsApi.list(),
+    staleTime: 15_000,
+  });
+  const { data: classesData } = useQuery({ queryKey: ['classes', 'all-names'], queryFn: () => classesApi.list({ limit: 200 }), staleTime: 5 * 60_000 });
+  const { data: subjectsData } = useQuery({ queryKey: ['subjects', 'all-names'], queryFn: () => subjectsApi.list({ limit: 500 }), staleTime: 5 * 60_000 });
+  const classNameById   = Object.fromEntries((classesData?.data ?? []).map(c => [c.id ?? c._id, c.name]));
+  const subjectNameById = Object.fromEntries((subjectsData?.data ?? []).map(s => [s.id ?? s._id, s.name]));
+
+  // Only non-draft submissions are moderation-relevant; a draft is just a
+  // teacher's work in progress, nothing for an admin to act on yet.
+  const submissions = (subsData?.data ?? []).filter(s => s.status !== 'draft');
+
+  function invalidate() { qc.invalidateQueries({ queryKey: ['mark-submissions', 'moderation-queue'] }); }
+
+  const { mutate: review, isPending: reviewing } = useMutation({
+    mutationFn: ({ id, action, rejectionReason }) => markSubmissionsApi.review(id, { action, rejectionReason }),
+    onSuccess: (_res, vars) => {
+      invalidate();
+      setRejectingId(null); setRejectReason('');
+      setToast({ msg: vars.action === 'approve' ? 'Submission approved.' : 'Submission rejected.', type: 'success' });
+    },
+    onError: err => setToast({ msg: err?.message ?? 'Failed to review submission.', type: 'error' }),
+  });
+
+  const { mutate: lock, isPending: locking } = useMutation({
+    mutationFn: (id) => markSubmissionsApi.lock(id),
+    onSuccess: () => { invalidate(); setToast({ msg: 'Marks locked.', type: 'success' }); },
+    onError: err => setToast({ msg: err?.message ?? 'Failed to lock.', type: 'error' }),
+  });
+
+  const { mutate: unlock, isPending: unlocking } = useMutation({
+    mutationFn: ({ id, reason }) => markSubmissionsApi.unlock(id, reason),
+    onSuccess: () => {
+      invalidate();
+      setUnlockId(null); setUnlockReason('');
+      setToast({ msg: 'Marks unlocked — will auto-relock in 24h if not relocked sooner.', type: 'success' });
+    },
+    onError: err => setToast({ msg: err?.message ?? 'Failed to unlock.', type: 'error' }),
+  });
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-5">
+      <h3 className="text-sm font-semibold text-slate-800 mb-1">Moderation</h3>
+      <p className="text-xs text-slate-400 mb-4">
+        Review marks teachers have submitted, approve or reject them, and lock a class/subject's marks once finalised.
+      </p>
+
+      {isLoading ? (
+        <Skeleton className="h-20" />
+      ) : submissions.length === 0 ? (
+        <p className="text-sm text-slate-400 text-center py-4">No submissions awaiting moderation.</p>
+      ) : (
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-100">
+              <th className="text-left text-xs font-medium text-slate-500 px-3 py-2.5">Class / Subject</th>
+              <th className="text-left text-xs font-medium text-slate-500 px-3 py-2.5">Assessment</th>
+              <th className="text-left text-xs font-medium text-slate-500 px-3 py-2.5">Status</th>
+              <th className="text-right text-xs font-medium text-slate-500 px-3 py-2.5"></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {submissions.map(s => {
+              const sid = s.id ?? s._id;
+              const meta = SUBMISSION_STATUS_META[s.status];
+              return (
+                <tr key={sid} className="hover:bg-slate-50 transition">
+                  <td className="px-3 py-2.5">
+                    <div className="text-sm text-slate-800">{classNameById[s.classId] ?? s.classId}</div>
+                    <div className="text-xs text-slate-400">{subjectNameById[s.subjectId] ?? s.subjectId}</div>
+                  </td>
+                  <td className="px-3 py-2.5 text-slate-600">
+                    {s.assessmentType}{s.instance > 1 ? ` ${s.instance}` : ''} · Term {s.termNumber}
+                  </td>
+                  <td className="px-3 py-2.5">
+                    {meta && (
+                      <span className={`inline-flex items-center gap-1 text-[10px] font-semibold rounded-full px-2 py-0.5 border ${meta.cls}`}>
+                        {s.status === 'approved' && <CheckCircle2 size={9} />}
+                        {s.status === 'rejected' && <XCircle size={9} />}
+                        {s.status === 'locked'   && <Lock size={9} />}
+                        {meta.label}
+                      </span>
+                    )}
+                    {s.status === 'rejected' && s.rejectionReason && (
+                      <div className="text-[11px] text-red-500 mt-0.5 max-w-[220px]">{s.rejectionReason}</div>
+                    )}
+                    {s.unlockRequestStatus === 'pending' && (
+                      <div className="text-[11px] text-amber-600 mt-0.5">Unlock requested: {s.unlockRequestReason}</div>
+                    )}
+                  </td>
+                  <td className="px-3 py-2.5 text-right">
+                    <div className="flex items-center justify-end gap-1.5">
+                      {s.status === 'submitted' && rejectingId !== sid && (
+                        <>
+                          <button
+                            onClick={() => review({ id: sid, action: 'approve' })}
+                            disabled={reviewing}
+                            className="flex items-center gap-1 text-[11px] font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2 py-1 rounded-lg transition disabled:opacity-50"
+                          >
+                            <CheckCircle2 size={11} /> Approve
+                          </button>
+                          <button
+                            onClick={() => { setRejectingId(sid); setRejectReason(''); }}
+                            className="flex items-center gap-1 text-[11px] font-medium text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 px-2 py-1 rounded-lg transition"
+                          >
+                            <XCircle size={11} /> Reject
+                          </button>
+                        </>
+                      )}
+                      {s.status === 'submitted' && rejectingId === sid && (
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="text" value={rejectReason} onChange={e => setRejectReason(e.target.value)}
+                            placeholder="Reason for rejection" autoFocus
+                            className="text-xs px-2 py-1 rounded-lg border border-red-300 focus:outline-none focus:ring-2 focus:ring-red-400/30 w-48"
+                          />
+                          <button
+                            onClick={() => review({ id: sid, action: 'reject', rejectionReason: rejectReason })}
+                            disabled={!rejectReason.trim() || reviewing}
+                            className="text-[11px] font-medium text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 px-2.5 py-1 rounded-lg transition"
+                          >
+                            Confirm
+                          </button>
+                          <button onClick={() => setRejectingId(null)} className="text-[11px] text-slate-400 hover:text-slate-600 px-1">Cancel</button>
+                        </div>
+                      )}
+                      {s.status === 'approved' && (
+                        <button
+                          onClick={() => lock(sid)}
+                          disabled={locking}
+                          className="flex items-center gap-1 text-[11px] font-medium text-slate-600 bg-slate-50 hover:bg-slate-100 border border-slate-200 px-2 py-1 rounded-lg transition disabled:opacity-50"
+                        >
+                          <Lock size={10} /> Lock
+                        </button>
+                      )}
+                      {s.status === 'locked' && (
+                        <button
+                          onClick={() => { setUnlockId(sid); setUnlockReason(''); }}
+                          className="flex items-center gap-1 text-[11px] font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2 py-1 rounded-lg transition"
+                        >
+                          <LockOpen size={11} /> Unlock
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+
+      {unlockId && (
+        <div className="mt-4 p-4 rounded-xl bg-amber-50 border border-amber-200 space-y-3">
+          <div className="flex items-center gap-2">
+            <LockOpen size={14} className="text-amber-600 shrink-0" />
+            <p className="text-sm font-semibold text-amber-800">Unlock submission</p>
+          </div>
+          <p className="text-xs text-amber-700">Provide a reason for unlocking. This will be recorded in the audit log and auto-relocks after 24 hours.</p>
+          <input
+            type="text" value={unlockReason} onChange={e => setUnlockReason(e.target.value)}
+            placeholder="Reason for unlocking"
+            className="w-full text-sm px-3 py-2 rounded-lg border border-amber-300 bg-white focus:outline-none focus:ring-2 focus:ring-amber-400/30"
+            autoFocus
+          />
+          <div className="flex gap-2 justify-end">
+            <button onClick={() => { setUnlockId(null); setUnlockReason(''); }} className="text-xs text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg transition">Cancel</button>
+            <button
+              onClick={() => unlock({ id: unlockId, reason: unlockReason })}
+              disabled={!unlockReason.trim() || unlocking}
+              className="flex items-center gap-1.5 bg-amber-700 hover:bg-amber-800 disabled:opacity-50 text-white text-xs font-medium px-4 py-1.5 rounded-lg transition"
+            >
+              {unlocking ? <Loader2 size={11} className="animate-spin" /> : <LockOpen size={11} />}
+              Confirm unlock
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
    Main ConfigTab component
    ══════════════════════════════════════════════════════════════ */
 export default function ConfigTab() {
@@ -938,6 +1145,9 @@ export default function ConfigTab() {
           </>
         )}
       </div>
+
+      {/* ══ Moderation ═════════════════════════════════════════ */}
+      <ModerationSection toast={setToast} />
 
     </div>
   );

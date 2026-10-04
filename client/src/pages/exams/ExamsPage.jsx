@@ -14,7 +14,7 @@ import {
   Search, Save, Check, PenLine, Bell,
   Users2, GraduationCap, Filter, Percent, Settings,
   Tag, Layers, Info, ClipboardPaste, Lock,
-  BookMarked, LockOpen, Send, ClipboardEdit,
+  BookMarked, LockOpen, Send, ClipboardEdit, XCircle, RotateCcw,
 } from 'lucide-react';
 import {
   exams as examsApi,
@@ -24,6 +24,7 @@ import {
   subjects as subjectsApi,
   assessment as assessmentApi,
   teachingAssignments as taApi,
+  markSubmissions as markSubmissionsApi,
 } from '@/api/client.js';
 import RemindersTab   from '../grades/components/RemindersTab.jsx';
 import CAConfigTab    from '../grades/components/ConfigTab.jsx';
@@ -455,6 +456,39 @@ const MARKBOOK_STATE_OPTIONS = [
   { value: 'INC',      label: 'INC', title: 'Incomplete — blocks report approval' },
 ];
 
+/* ─── Submission status badge (mark_submissions) ───────────────
+   draft/no-submission renders nothing (the ordinary, most common state —
+   a badge for "not yet submitted" on every column would just be noise). */
+const SUBMISSION_BADGE = {
+  submitted: { label: 'Submitted', cls: 'text-amber-700 bg-amber-50 border-amber-200' },
+  approved:  { label: 'Approved',  cls: 'text-emerald-700 bg-emerald-50 border-emerald-200' },
+  rejected:  { label: 'Rejected',  cls: 'text-red-700 bg-red-50 border-red-200' },
+  locked:    { label: 'Locked',    cls: 'text-slate-600 bg-slate-100 border-slate-200' },
+};
+function SubmissionBadge({ submission, onRecall }) {
+  if (!submission || submission.status === 'draft') return null;
+  const meta = SUBMISSION_BADGE[submission.status];
+  if (!meta) return null;
+  return (
+    <div className="flex flex-col items-center gap-0.5 mt-1">
+      <span className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full border ${meta.cls}`}>
+        {submission.status === 'approved' && <CheckCircle2 size={9} />}
+        {submission.status === 'rejected' && <XCircle size={9} />}
+        {submission.status === 'locked'   && <Lock size={9} />}
+        {meta.label}
+      </span>
+      {submission.status === 'submitted' && onRecall && (
+        <button onClick={onRecall} className="flex items-center gap-0.5 text-[10px] text-slate-400 hover:text-slate-600" title="Recall to draft">
+          <RotateCcw size={9} /> Recall
+        </button>
+      )}
+      {submission.status === 'rejected' && submission.rejectionReason && (
+        <span className="text-[10px] text-red-500 max-w-[100px] truncate" title={submission.rejectionReason}>{submission.rejectionReason}</span>
+      )}
+    </div>
+  );
+}
+
 /* ─── Grid cell ─────────────────────────────────────────────── */
 function GridCell({ value, markState = 'present', rowIdx, colIdx, isLocked, hasConflict, onChange, onStateChange, onNavigate, cellRef }) {
   const nonPresent = markState !== 'present';
@@ -773,6 +807,50 @@ function MarkbookTab({ years }) {
     const el = cellRefs.current[`${Math.max(0, Math.min(students.length - 1, rowIdx + dr))}_${Math.max(0, Math.min(cols.length - 1, colIdx + dc))}`];
     if (el) { el.focus(); el.select(); }
   }, [cols.length, students.length]);
+
+  /* ── Submission / moderation status (mark_submissions) ──
+     Wires the existing submit -> review/approve -> lock -> unlock-request
+     workflow (server/routes/mark-submissions.js) into the Markbook — it
+     was fully built and tested but had no UI anywhere. One submission
+     record exists per (class, subject, term, assessmentType, instance),
+     so a multi-instance assessment type (e.g. CA 1/CA 2) can have each
+     instance at a different stage — tracked per column, not as one
+     grid-wide status. */
+  const { data: submissionsData, refetch: refetchSubmissions } = useQuery({
+    queryKey: ['markSubmissions', { classId, subjectId, termNumber: selectedEntry?.termNumber, assessmentType: selectedEntry?.assessmentType }],
+    queryFn:  () => markSubmissionsApi.list({ classId, subjectId, termNumber: selectedEntry.termNumber, assessmentType: selectedEntry.assessmentType }),
+    enabled:  canQuery,
+    staleTime: 15_000,
+  });
+  const submissionByInstance = useMemo(() => {
+    const map = {};
+    for (const s of submissionsData?.data ?? []) map[s.instance] = s;
+    return map;
+  }, [submissionsData]);
+  const isInstanceReadOnly = useCallback(
+    (instance) => ['submitted', 'approved', 'locked'].includes(submissionByInstance[instance]?.status),
+    [submissionByInstance]
+  );
+
+  const { mutate: submitForReview, isPending: submitting } = useMutation({
+    mutationFn: () => Promise.all(
+      cols
+        .filter(c => !isInstanceReadOnly(c.instance))
+        .map(c => markSubmissionsApi.submit({
+          classId, subjectId, termNumber: selectedEntry.termNumber,
+          academicYearId: selectedEntry.academicYearId || undefined,
+          assessmentType: c.typeKey, instance: c.instance,
+        }))
+    ),
+    onSuccess: () => { refetchSubmissions(); setToast({ msg: 'Submitted for review.', type: 'success' }); },
+    onError:   () => setToast({ msg: 'Could not submit for review — try again.', type: 'error' }),
+  });
+
+  const { mutate: recallSubmission } = useMutation({
+    mutationFn: (id) => markSubmissionsApi.recall(id),
+    onSuccess: () => { refetchSubmissions(); setToast({ msg: 'Recalled to draft.', type: 'success' }); },
+    onError:   () => setToast({ msg: 'Could not recall — it may already be approved or locked.', type: 'error' }),
+  });
 
   /* ── Clipboard paste (TSV from Excel/Sheets) ── */
   const handlePaste = useCallback((e) => {
@@ -1100,14 +1178,27 @@ function MarkbookTab({ years }) {
                 </span>
               )}
             </div>
-            <button
-              onClick={() => saveAll()}
-              disabled={saving || !dirty || selectedEntry?.isLocked}
-              className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white text-sm font-medium px-4 py-2 rounded-lg transition shrink-0"
-            >
-              {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-              {saving ? 'Saving…' : dirty ? 'Save marks' : 'Saved'}
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={() => saveAll()}
+                disabled={saving || !dirty || selectedEntry?.isLocked}
+                className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
+              >
+                {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                {saving ? 'Saving…' : dirty ? 'Save marks' : 'Saved'}
+              </button>
+              {!selectedEntry?.isLocked && cols.some(c => !isInstanceReadOnly(c.instance)) && (
+                <button
+                  onClick={() => submitForReview()}
+                  disabled={submitting || dirty}
+                  title={dirty ? 'Save your changes before submitting for review' : 'Submit for review'}
+                  className="flex items-center gap-1.5 bg-white border border-slate-300 hover:bg-slate-50 disabled:opacity-40 text-slate-700 text-sm font-medium px-4 py-2 rounded-lg transition"
+                >
+                  {submitting ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+                  {submitting ? 'Submitting…' : 'Submit for review'}
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Grid */}
@@ -1120,6 +1211,10 @@ function MarkbookTab({ years }) {
                   {cols.map(col => (
                     <th key={col.colId} className="text-center text-xs font-medium text-slate-500 px-2 py-2.5 min-w-[118px]">
                       <TypePill type={col.colLabel} color={col.color} />
+                      <SubmissionBadge
+                        submission={submissionByInstance[col.instance]}
+                        onRecall={() => recallSubmission(submissionByInstance[col.instance].id)}
+                      />
                     </th>
                   ))}
                 </tr>
@@ -1140,7 +1235,7 @@ function MarkbookTab({ years }) {
                             value={scores[sid]?.[col.colId]}
                             markState={markStates[sid]?.[col.colId] ?? 'present'}
                             rowIdx={rowIdx} colIdx={colIdx}
-                            isLocked={selectedEntry?.isLocked ?? false}
+                            isLocked={(selectedEntry?.isLocked ?? false) || isInstanceReadOnly(col.instance)}
                             hasConflict={conflictedCellKeys.has(`${sid}|${col.colId}`)}
                             onChange={v => setCell(sid, col.colId, v)}
                             onStateChange={st => setCellState(sid, col.colId, st)}
