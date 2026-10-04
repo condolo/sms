@@ -6157,4 +6157,11 @@ Read the full existing `computeFinalScores` describe block in `academic-calc.tes
 ### Open items
 - Classroom identity mapping and `markbookScheduleId` targets are not established. Nothing is written until both are.
 - Four "Testing" `exam_results` rows have no assessment type and remain unmigrated.
-- The `exam_results` notification registry entry in `utils/notif-settings.js` is dead (its only sender was removed). It still says `implemented: true`.
+- The `exam_results` notification registry entry in `utils/notif-settings.js` has no sender. Its only sender was the publish handler removed in Phase 6. It is marked `implemented: false`, so Settings shows it disabled with a "Coming soon" badge. The entry is kept so saved preferences still resolve. Verified in the browser. The "Coming soon" wording is inaccurate for a retired feature. Changing it is a UI change and is not made here.
+
+### Notification setting: deprecated, not removed
+- Evidence: the only `eventKey: 'exam_results'` sender before Phase 6 was `_notifyExamResultsPublished` in `routes/exams.js`. The Settings endpoint serves the registry to the UI, and the UI disables any entry with `implemented: false`. The server never reads the flag.
+- Change: `implemented: true` becomes `implemented: false`. The entry stays registered. The regression test is `server/__tests__/notif-exam-results-deprecated.test.js`.
+
+### Regression fixed during verification
+Removing the legacy grades export in Phase 6 left a dangling `grades` reference in `client/src/api/client.js`. The app failed to load with "grades is not defined", and a build cannot catch it. Check changed client files with a no-undef lint, not only a build.

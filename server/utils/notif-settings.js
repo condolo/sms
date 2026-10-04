@@ -73,7 +73,10 @@ const EVENT_REGISTRY = {
     group:       'academic',
     audience:    ['parents', 'students'],
     channels:    { email: true, inApp: true },
-    implemented: true,
+    // No sender since the Exams → Results retirement (v5.168.0). Disabled in
+    // Settings until a publish path exists again; kept so saved preferences
+    // still resolve.
+    implemented: false,
   },
   report_comment_step: {
     label:       'Report Comment Ready For You',

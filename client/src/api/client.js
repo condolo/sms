@@ -1055,7 +1055,6 @@ const api = {
   finance,
   behaviour,
   exams,
-  grades,
   assessment,
   admissions,
   timetable,

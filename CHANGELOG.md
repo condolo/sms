@@ -28,12 +28,13 @@ Architecture change, delivered as seven phases (Phase 0 to Phase 6). This entry 
 ### Verified
 - Form 1A Biology CA: 70 / 67 / 90 before and after migration, on both the exam-sourced and Markbook-sourced paths.
 - The historical moderation state is evidence-backed. The old exams were completed and never approved. A publish batch for them failed with "not yet approved". Nothing in the database records an approval, lock or publication. So their migrated marks stay provisional. An approval is carried forward only when an old status proves one (approved, locked, published, archived). No live data has such a status.
-- Test suite: 266 suites, 2776 tests passing. The client builds.
+- Test suite: 267 suites, 2778 tests passing. The client builds.
+- Regression found in browser verification and fixed: the Phase 6 removal of the legacy grades export left a dangling `grades` reference in the client API default export. The app failed to load at runtime with "grades is not defined". A build cannot catch this. A no-undef lint over the changed client files now passes, apart from false positives from the lint's minimal globals.
 
 ### Open items (deliberately unresolved)
 1. Google Classroom to Markbook is blocked. There is no deterministic link between a Google account and a student record, and no coursework has a markbookScheduleId. The webhook writes nothing and logs the reason. Live: zero coursework links, zero tokens, zero linked accounts, zero Classroom-sourced marks.
 2. Four "Testing" exam_results rows (scores 45, 98, 64, 90) have no assessment type. They are not migrated and not read by any report-card or portal path. They are left untouched pending a decision.
-3. The exam_results notification setting ("Exam Results Released") is dead. Its only sender was the publish handler removed in this arc. The registry still marks it implemented: true, so Settings shows an enabled toggle that nothing sends. Fix: mark it not implemented, or remove it. Not changed yet.
+3. The exam_results notification setting ("Exam Results Released") is dead. Its only sender was the publish handler removed in this arc. Its registry entry (utils/notif-settings.js) is now marked implemented: false, so Settings shows it disabled with a "Coming soon" badge. The entry is kept so saved preferences still resolve. Verified in the browser: the toggle and frequency selector are disabled, and an implemented row stays enabled. Note: the "Coming soon" wording is inaccurate for a retired feature. Changing that label is a UI change and is not made here.
 
 ### Files
 - server/routes/exams.js, server/routes/assessment.js, server/routes/report-cards.js, server/routes/elearning.js, server/routes/growth-profile.js, server/routes/analytics.js, server/routes/classes.js
