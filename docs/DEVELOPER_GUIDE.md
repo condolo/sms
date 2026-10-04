@@ -6165,3 +6165,13 @@ Read the full existing `computeFinalScores` describe block in `academic-calc.tes
 
 ### Regression fixed during verification
 Removing the legacy grades export in Phase 6 left a dangling `grades` reference in `client/src/api/client.js`. The app failed to load with "grades is not defined", and a build cannot catch it. Check changed client files with a no-undef lint, not only a build.
+
+### Intended rule: partial weighting (kept deliberately)
+A subject's final score is the weighted average over the assessment types that have marks so far, normalised to those weights. One 20% assessment therefore reads as a full mark. This is the intended behaviour and is not a bug. Changing it is a policy decision for the school, not a code fix.
+
+### Where a school's grade scale and report template apply (live, verified)
+- **Grade scale:** one school-wide default (`grade_boundaries`, `isDefault: true`). Report generation uses it for every class and section, so KG and Primary cannot have different scales. A per-section scale does not exist.
+- **Report template:** section-scoped (`sectionId`), with a school-wide default fallback. Resolved per student's section. Trinitas has no templates, so it uses the built-in `legacy_tabular` layout for every class.
+- **Assessment weights:** one configuration per school and academic year, not per section.
+- **Trinitas:** four sections (KG, Primary, Secondary, A-Level), one default grade scale, no templates.
+- **Trinity:** one section (KG), no grade scale in either `grade_boundaries` or the legacy `academic_config.gradingSchema`. Report generation receives an empty scale, and `computeFinalScores` throws on an empty `gradingSchema`. Not reproduced end-to-end, because I don't have Trinity's admin login.
