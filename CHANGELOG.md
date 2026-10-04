@@ -6,6 +6,28 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.168.2] — 2026-10-04 — feat(grades): grade scales are section-scoped, like report-card templates
+
+Requested directly: the report card template and the grade scale should both be section-based, so a school with several sections (Trinitas: KG, Primary, Secondary, A-Level) can grade each section on its own scale and template. Before this, report generation used one school-wide default scale for every class, so KG and Primary could not differ.
+
+**What changed**
+- `server/utils/grade-scale.js` (new): `sectionIdForClass` resolves a class to its section via `classes.sectionKey` → `sections.key`, and `resolveGradeScale` applies the order section default → school default → explicitly saved legacy schema. It returns `null` when none exists.
+- `server/routes/report-cards.js`: `/generate` and `/publish` grade a class by its section's scale. Templates are keyed to the class's section, not the student's (student `sectionId` is unreliable: 0 of 315 Trinitas students had one). Snapshots record `gradeScaleId` and `gradeScaleSource`. `/publish` fails the batch when no scale resolves.
+- `client/src/pages/grades/components/ConfigTab.jsx`: the create form gains an "Applies to" picker (School default, or a section). The list shows the section's name. A new scale becomes that scope's default only if the scope has none yet.
+
+**Decisions**
+- The built-in `DEFAULT_GRADING_SCHEMA` (used by `mergeConfig` when nothing is saved) is never treated as a school's scale. A school with no scale is refused with a message, not silently graded on defaults. This was caught by the new tests: the first version still fell through to the built-in default.
+- No data is migrated. Existing scales keep `sectionId` null, so they stay school defaults.
+
+**Tests**
+- `server/__tests__/routes/report-cards-section-scale.test.js` (new, 8 tests): resolution order; section-from-class; a KG class graded by its section scale, not the school default; refusal with a message when no scale exists.
+- `server/__tests__/routes/report-cards-term-scope.test.js`: mock gap fixed (`findOne().select()`), and a school default scale seeded, since generation now requires one.
+- Full server suite: 268 of 268 suites, 2786 tests passing.
+
+**Not yet done**
+- Trinitas templates are still unset (legacy layout for all classes).
+- Trinity needs a scale created for its KG section (or a school default) before it can generate reports. It is refused until then.
+
 ## [v5.168.1] — 2026-10-04 — fix(lessons): people with teaching assignments could not plan lessons unless their role was teacher
 
 Raised directly: Collins (principal, Trinitas) had a subject/class/stream assignment but could not create lesson plans. He could only open Overview and Template. Other admin-level users with assignments had the same problem.

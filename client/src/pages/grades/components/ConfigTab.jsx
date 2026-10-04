@@ -10,7 +10,7 @@ import {
   Info, Star, ChevronDown, ChevronUp, XCircle, Send,
   GraduationCap, Lock, LockOpen,
 } from 'lucide-react';
-import { assessment as api, classes as classesApi, subjects as subjectsApi, markSubmissions as markSubmissionsApi } from '@/api/client.js';
+import { assessment as api, classes as classesApi, subjects as subjectsApi, markSubmissions as markSubmissionsApi, sections as sectionsApi } from '@/api/client.js';
 import {
   DEFAULT_CUSTOM_TYPES, VALID_TYPE_COLORS, COLOR_PILL,
   DEFAULT_GRADE_SCALE, TERM_NUMBERS, _round,
@@ -321,6 +321,10 @@ function GradeScalesSection({ toast: setToast }) {
   const [expandedId, setExpandedId] = useState(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newScaleName, setNewScaleName] = useState('');
+  const [newScaleSection, setNewScaleSection] = useState('');
+  const { data: sectionsData } = useQuery({ queryKey: ['sections'], queryFn: () => sectionsApi.list(), staleTime: 5 * 60_000 });
+  const sectionList = sectionsData?.data ?? [];
+  const sectionName = (id) => sectionList.find(x => x.id === id)?.name ?? null;
   const [addErr, setAddErr] = useState('');
 
   const { data: scalesData, isLoading, refetch } = useQuery({
@@ -396,9 +400,12 @@ function GradeScalesSection({ toast: setToast }) {
     setAddErr('');
     const name = newScaleName.trim();
     if (!name) { setAddErr('Scale name is required'); return; }
+    const sectionId = newScaleSection || null;
+    const inScope = scales.filter(sc => (sc.sectionId || null) === sectionId);
     createScale({
       name,
-      isDefault: scales.length === 0,
+      sectionId,
+      isDefault: inScope.length === 0,
       bands: DEFAULT_GRADE_SCALE,
     });
   }
@@ -426,6 +433,13 @@ function GradeScalesSection({ toast: setToast }) {
       {/* ── Add scale inline form ── */}
       {showAddForm && (
         <div className="mt-3 p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-end gap-2 flex-wrap">
+          <div className="flex flex-col gap-1 min-w-[160px]">
+            <label className="text-xs font-medium text-slate-600">Applies to</label>
+            <select value={newScaleSection} onChange={e => setNewScaleSection(e.target.value)} className={iCls()}>
+              <option value="">School default</option>
+              {sectionList.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
+            </select>
+          </div>
           <div className="flex flex-col gap-1 flex-1 min-w-[200px]">
             <label className="text-xs font-medium text-slate-600">Scale name</label>
             <input
@@ -489,7 +503,7 @@ function GradeScalesSection({ toast: setToast }) {
                       </span>
                     )}
                     {scale.sectionId && (
-                      <span className="shrink-0 text-[10px] text-slate-500 bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5">{scale.sectionId}</span>
+                      <span className="shrink-0 text-[10px] text-slate-500 bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5">{sectionName(scale.sectionId) ?? scale.sectionId}</span>
                     )}
                     <span className="shrink-0 text-[10px] text-slate-400">{scale.bands?.length ?? 0} bands</span>
                   </div>

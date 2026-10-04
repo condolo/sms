@@ -37,10 +37,11 @@ const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 const { rankStudents, mergeRankings, bestPerSubject, computeRankingScore } = require('../utils/ranking');
-const { mergeConfig, resolveGrade, resolveCurrentPeriod, OBSERVATION_RATING_VALUES } = require('./academic-config');
+const { mergeConfig, resolveGrade, resolveCurrentPeriod, OBSERVATION_RATING_VALUES, DEFAULT_GRADING_SCHEMA } = require('./academic-config');
 const { getConfig: _getAssessmentConfig } = require('./assessment');
 const { resolveTemplate } = require('./report-card-templates');
 const { getLayout }       = require('../utils/report-layouts');
+const { sectionIdForClass, resolveGradeScale } = require('../utils/grade-scale');
 const { isYearArchived } = require('../utils/archival');
 const AuditService       = require('../services/audit');
 const { sanitisePdfStr } = require('../utils/sanitisePdf');
@@ -185,14 +186,22 @@ function _hashSnapshot(snap) {
  * returns a populated, weight-complete array (never empty/null).
  */
 async function _loadCaConfig(schoolId) {
-  const [assessmentCfg, defaultScale] = await Promise.all([
-    _getAssessmentConfig(schoolId, null),
-    tenantModel('grade_boundaries', { schoolId }).findOne({ schoolId, isDefault: true }).lean(),
-  ]);
-  return {
-    customTypes: assessmentCfg.customTypes,
-    gradeScale:  defaultScale ?? null,
-  };
+  const assessmentCfg = await _getAssessmentConfig(schoolId, null);
+  return { customTypes: assessmentCfg.customTypes };
+}
+
+/* Grade scales are section-scoped: a report is for one class, and a class
+   belongs to one section. Refusing with a clear message beats computing with
+   an undefined scale. */
+/* mergeConfig() substitutes DEFAULT_GRADING_SCHEMA when nothing is saved. That
+   built-in default must not count as a school's scale, or a school with no
+   scale would be graded silently. Only an explicitly saved schema is legacy. */
+function _savedLegacySchema(config) {
+  return config.gradingSchema === DEFAULT_GRADING_SCHEMA ? null : config.gradingSchema;
+}
+
+function _noScaleMessage(classId) {
+  return `No grade scale is set for this class's section (class ${classId}). Add one under Settings → Assessment → Grade Scales, for this section or as the school default.`;
 }
 
 /**
@@ -386,8 +395,10 @@ router.post('/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
     ]);
 
     const activeWeights = _convertCustomTypesToWeights(caConfig.customTypes);
-    // Prefer grade_boundaries default scale over legacy academic_config.gradingSchema
-    const activeSchema  = caConfig.gradeScale?.bands ?? config.gradingSchema;
+    const reportSectionId = await sectionIdForClass(schoolId, classId);
+    const scale = await resolveGradeScale(schoolId, reportSectionId, _savedLegacySchema(config));
+    if (!scale) return E.badRequest(res, _noScaleMessage(classId));
+    const activeSchema = scale.bands;
 
     const allReports = computeFinalScores(caMarksData, {}, activeWeights, activeSchema);
 
@@ -544,8 +555,13 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
     ]);
 
     const activeWeights = _convertCustomTypesToWeights(caConfig.customTypes);
-    // Prefer grade_boundaries default scale over legacy academic_config.gradingSchema
-    const activeSchema  = caConfig.gradeScale?.bands ?? config.gradingSchema;
+    const classSectionId = await sectionIdForClass(schoolId, classId);
+    const scale = await resolveGradeScale(schoolId, classSectionId, _savedLegacySchema(config));
+    if (!scale) {
+      await Batches.updateOne({ id: batchId }, { status: 'failed', failureReason: 'No grade scale for this section', completedAt: now });
+      return E.badRequest(res, _noScaleMessage(classId));
+    }
+    const activeSchema = scale.bands;
 
     // ── Step 2: Moderation guard ─────────────────────────────
     // RC9 — enforcement is now policy-driven, default true (today's exact
@@ -660,7 +676,7 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
     // call per student. resolveTemplate() itself already falls through
     // section-default → school-default → Legacy Tabular, so a student
     // with no sectionId just resolves against the `null` bucket.
-    const distinctSectionIds = [...new Set(Object.values(studentMap).map(s => s.sectionId || null))];
+    const distinctSectionIds = [classSectionId];
     const templateBySection = {};
     for (const secId of distinctSectionIds) {
       templateBySection[secId ?? '__none__'] = await resolveTemplate(tenantContext(req), schoolId, secId);
@@ -706,7 +722,7 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
         const stu  = studentMap[r.studentId] || {};
         const prev = existingMap[r.studentId];
         const draft = draftCommentsMap[r.studentId];
-        const template = templateBySection[stu.sectionId || '__none__'];
+        const template = templateBySection[classSectionId ?? '__none__'];
 
         // RC9 — Publication Policy completeness gates. Per-student, not
         // batch-wide: one student missing a comment doesn't block the
@@ -757,6 +773,8 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
 
           // Immutable config snapshot — use active (CA-system-aware) weights and schema
           gradingSchema:          activeSchema,
+          gradeScaleId:           scale.id,
+          gradeScaleSource:       scale.source,
           assessmentWeights:      activeWeights,
           passMark:               config.passMark,
           gradingType:            config.gradingType,

@@ -70,7 +70,7 @@ jest.mock('../../utils/archival', () => ({ isYearArchived: jest.fn().mockResolve
 // An unseeded collection just returns nothing instead of throwing.
 const mockEmptyCollection = {
   find:    () => ({ select: () => ({ lean: () => Promise.resolve([]) }), lean: () => Promise.resolve([]) }),
-  findOne: () => ({ lean: () => Promise.resolve(null) }),
+  findOne: () => ({ select: () => ({ lean: () => Promise.resolve(null) }), lean: () => Promise.resolve(null) }),
   create:  async (doc) => doc,
 };
 jest.mock('../../utils/model', () => ({ _model: jest.fn((col) => mockStores[col] || mockEmptyCollection) }));
@@ -117,7 +117,8 @@ beforeEach(() => {
   mockStores = {
     academic_years:    makeCollection([yearOld, yearCur]),
     academic_config:   makeCollection([]),
-    grade_boundaries:  makeCollection([]),
+    // A school default scale: generation now refuses without one (no built-in fallback).
+    grade_boundaries:  makeCollection([{ id: 'sc_default', schoolId: SCHOOL, name: 'Default', isDefault: true, bands: [{ grade: 'A', min: 80, points: 4 }, { grade: 'E', min: 0, points: 0 }] }]),
     assessment_config: makeCollection([]),
     assessment_marks:  makeCollection([markOld, markCur]),
     mark_submissions:  makeCollection([]),
