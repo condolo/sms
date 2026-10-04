@@ -47,6 +47,9 @@ const crypto         = require('crypto');
 const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
+const { v4: uuidv4 } = require('uuid');
+const { resolveCurrentPeriod } = require('./academic-config');
+const { CLASSROOM_ASSESSMENT_TYPE, classroomInstanceFor, planClassroomMark } = require('../utils/classroom-mark-plan');
 
 const router = express.Router();
 
@@ -590,31 +593,59 @@ router.post('/gc-webhook', async (req, res) => {
     // Find course link to get subjectId + classId
     const CourseLinks = tenantModel('elearning_course_links', tenantContext(req));
     const courseLink  = await CourseLinks.findOne({ gcCourseId: courseId, schoolId: cwLink.schoolId }).lean();
+    if (!courseLink?.classId || !courseLink?.subjectId) return res.sendStatus(204);
 
-    // Write / update grade in Msingi Grades module
-    const Grades = tenantModel('grades', tenantContext(req));
-    await Grades.updateOne(
-      {
-        schoolId:       cwLink.schoolId,
-        studentId:      student.id,
-        gcCourseWorkId: courseWorkId,
-      },
+    // The Markbook is the only mark store — Classroom grades land there as an
+    // HW instance, under the same locks a teacher typing the mark would hit.
+    const schoolId = cwLink.schoolId;
+    const ctx = tenantContext(req);
+    const years = await tenantModel('academic_years', ctx).find({ schoolId }).lean();
+    const { year, termNumber } = resolveCurrentPeriod(years);
+    if (!year || termNumber == null) return res.sendStatus(204);
+
+    const Marks = tenantModel('assessment_marks', ctx);
+    const period = { schoolId, classId: courseLink.classId, subjectId: courseLink.subjectId, termNumber, assessmentType: CLASSROOM_ASSESSMENT_TYPE, academicYearId: year.id };
+    const courseWorkMarks = await Marks.find({ ...period, gcCourseWorkId: { $exists: true } }).select('instance gcCourseWorkId').lean();
+    const instanceByCourseWork = new Map(courseWorkMarks.map(m => [m.gcCourseWorkId, m.instance]));
+    const instance = classroomInstanceFor(courseWorkId, instanceByCourseWork);
+
+    // Marks key on the student record, not the user account. Only write when
+    // that exact record exists — never guess a mapping.
+    const studentRec = await tenantModel('students', ctx).findOne({ schoolId, id: student.id }).select('id streamId').lean();
+    if (!studentRec) {
+      console.warn(`[elearning/gc-webhook] no student record for user ${student.id} — Classroom grade not written to Markbook`);
+      return res.sendStatus(204);
+    }
+
+    const existing = await Marks.findOne({ ...period, studentId: studentRec.id, instance }).lean();
+    const scheduleLocked = !!(await tenantModel('assessment_schedule', ctx).findOne({ schoolId, assessmentType: CLASSROOM_ASSESSMENT_TYPE, termNumber, isLocked: true }).lean());
+    const underReview = !!(await tenantModel('mark_submissions', ctx).findOne({ ...period, instance, status: { $in: ['submitted', 'approved'] } }).lean());
+
+    const plan = planClassroomMark({
+      assignedGrade: sub.assignedGrade,
+      maxScore: cwLink.maxScore || sub.maxPoints,
+      instance,
+      locks: { scheduleLocked, markLocked: !!existing?.isLocked, underReview },
+    });
+    if (plan.action !== 'upsert') {
+      console.warn(`[elearning/gc-webhook] not written to Markbook (${plan.reason}) — student ${student.id}, coursework ${courseWorkId}`);
+      return res.sendStatus(204);
+    }
+
+    await Marks.updateOne(
+      { ...period, studentId: studentRec.id, instance },
       {
         $set: {
-          schoolId:       cwLink.schoolId,
-          studentId:      student.id,
-          subjectId:      courseLink?.subjectId || null,
-          classId:        courseLink?.classId   || null,
-          gcCourseId:     courseId,
+          rawScore:       plan.rawScore,
+          markState:      plan.markState,
+          streamId:       studentRec.streamId ?? null,
+          label:          cwLink.gcCourseWorkTitle,
           gcCourseWorkId: courseWorkId,
-          title:          cwLink.gcCourseWorkTitle,
-          type:           'elearning_assignment',
-          score:          sub.assignedGrade,
-          maxScore:       cwLink.maxScore || sub.maxPoints,
-          source:         'google_classroom',
-          autoSynced:     true,
-          gradedAt:       new Date().toISOString(),
+          isPublished:    true,
+          updatedBy:      'google_classroom',
         },
+        $setOnInsert: { id: uuidv4(), createdBy: 'google_classroom' },
+        $inc: { _v: 1 },
       },
       { upsert: true }
     );

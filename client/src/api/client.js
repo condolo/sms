@@ -376,10 +376,6 @@ export const exams = {
   statusHistory: (id)       => _get(`/exams/${id}/status-history`),
 };
 
-export const grades = {
-  report: (params) => _get('/grades/report', params),
-};
-
 export const assessment = {
   // Config
   getConfig:    (params)     => _get('/assessment/config', params),

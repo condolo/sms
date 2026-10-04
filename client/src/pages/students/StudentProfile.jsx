@@ -20,7 +20,7 @@ import {
   attendance as attendanceApi,
   finance    as financeApi,
   behaviour  as behaviourApi,
-  grades     as gradesApi,
+  assessment as assessmentApi,
   settings   as settingsApi,
 } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
@@ -149,8 +149,8 @@ export default function StudentProfile() {
   });
 
   const { data: gradesData, isLoading: gradesLoading } = useQuery({
-    queryKey: ['grades', 'report', studentId],
-    queryFn:  () => gradesApi.report({ studentId }),
+    queryKey: ['assessment', 'report', studentId],
+    queryFn:  () => assessmentApi.report({ studentId }),
     enabled:  tab === 'grades' && !!studentId,
     staleTime: 5 * 60_000,
   });
@@ -484,7 +484,7 @@ td:last-child{font-weight:500}
               <BehaviourTab data={bpsData?.data} loading={bpsLoading} studentId={studentId} />
             )}
             {tab === 'grades' && (
-              <GradesTab data={gradesData?.data?.student?.subjects} loading={gradesLoading} />
+              <GradesTab data={gradesData?.data?.students?.[0]?.subjects} loading={gradesLoading} />
             )}
             {tab === 'medical' && (
               <MedicalTab student={student} saving={saving} onSave={updateStudent} canEdit={can('students')} />

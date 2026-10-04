@@ -139,32 +139,20 @@ router.get('/:studentId/academic', authMiddleware, PLAN, MODGATE, rbac('growth_p
 
     // Parallel fetch from existing collections — read-only aggregation
     const [gradesAgg, attendanceAgg, recentReports] = await Promise.all([
-      // Grades: weighted average per subject (mirrors /api/grades/report logic)
-      tenantModel('grades', tenantContext(req)).aggregate([
-        { $match: { schoolId, studentId, isPublished: true } },
+      // Grades: average Markbook percentage per subject. Markbook marks are
+      // already 0-100 percentages and carry no per-row weight, so this is a
+      // plain per-subject average of present marks.
+      tenantModel('assessment_marks', tenantContext(req)).aggregate([
+        { $match: { schoolId, studentId, isPublished: true, markState: 'present', rawScore: { $ne: null } } },
         {
           $group: {
-            _id:             '$subjectId',
-            weightedScoreSum: { $sum: { $multiply: [{ $divide: ['$score', { $max: ['$maxScore', 1] }] }, '$weight'] } },
-            totalWeight:      { $sum: '$weight' },
-            rawAvg:           { $avg: { $multiply: [{ $divide: ['$score', { $max: ['$maxScore', 1] }] }, 100] } },
-            entries:          { $sum: 1 },
-            latestDate:       { $max: '$date' },
+            _id:        '$subjectId',
+            rawAvg:     { $avg: '$rawScore' },
+            entries:    { $sum: 1 },
+            latestDate: { $max: '$updatedAt' },
           }
         },
-        {
-          $addFields: {
-            weightedAverage: {
-              $round: [{
-                $cond: [
-                  { $gt: ['$totalWeight', 0] },
-                  { $multiply: [{ $divide: ['$weightedScoreSum', '$totalWeight'] }, 100] },
-                  '$rawAvg'
-                ]
-              }, 1]
-            }
-          }
-        },
+        { $addFields: { weightedAverage: { $round: ['$rawAvg', 1] } } },
         { $sort: { '_id': 1 } }
       ]),
 

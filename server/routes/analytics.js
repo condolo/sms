@@ -160,32 +160,19 @@ async function _computeLeadershipSnapshot(schoolId, days) {
     /* 4. ACADEMIC HEALTH ────────────────────────────────
        Published grades → weighted avg per student → class avg.
        Shows how each class is performing academically.           */
-    tenantModel('grades', { schoolId }).aggregate([
-      // createdAt >= since — same fix as Fee Exposure above: this
-      // aggregation previously ignored the days/date window entirely,
-      // always showing all-time published grades regardless of the
-      // selector. Now scoped to grades recorded within the selected period.
-      { $match: { schoolId, isPublished: true, createdAt: { $gte: since } } },
+    // Markbook marks (assessment_marks) only — rawScore is already a 0-100
+    // percentage and there's no per-row weight, so a student's average is the
+    // mean of their present marks. createdAt >= since keeps the selector's window.
+    tenantModel('assessment_marks', { schoolId }).aggregate([
+      { $match: { schoolId, isPublished: true, markState: 'present', rawScore: { $ne: null }, createdAt: { $gte: since } } },
       {
         $group: {
-          _id:              { classId: '$classId', studentId: '$studentId' },
-          weightedScoreSum: { $sum: { $multiply: [{ $divide: ['$score', { $max: ['$maxScore', 1] }] }, '$weight'] } },
-          totalWeight:      { $sum: '$weight' },
-          rawAvg:           { $avg: { $multiply: [{ $divide: ['$score', { $max: ['$maxScore', 1] }] }, 100] } },
+          _id:    { classId: '$classId', studentId: '$studentId' },
+          rawAvg: { $avg: '$rawScore' },
         }
       },
       {
-        $addFields: {
-          studentAvg: {
-            $round: [{
-              $cond: [
-                { $gt: ['$totalWeight', 0] },
-                { $multiply: [{ $divide: ['$weightedScoreSum', '$totalWeight'] }, 100] },
-                '$rawAvg',
-              ]
-            }, 1]
-          }
-        }
+        $addFields: { studentAvg: { $round: ['$rawAvg', 1] } }
       },
       {
         $group: {
