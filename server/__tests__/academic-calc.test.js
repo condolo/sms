@@ -15,6 +15,10 @@ let mockExams          = [];   // exams.find().lean() result
 let mockExamResults    = [];   // exam_results.find().lean() result
 let mockAcademicYears  = [];   // academic_years.find().lean() result
 let mockAttendanceDocs = [];   // attendance records (countDocuments matches against these)
+let mockMarks = [];            // assessment_marks rows (aggregateUnmoderatedMarks)
+let mockSubmissions = [];      // mark_submissions rows
+let mockSubjectDocs = [];      // subjects (name lookup for titles)
+const mockChainOf = (arr) => ({ select: () => mockChainOf(arr), lean: () => Promise.resolve(arr) });
 
 function mockAttMatches(doc, filter) {
   return Object.entries(filter).every(([k, v]) => {
@@ -36,6 +40,15 @@ jest.mock('../utils/model', () => ({
     }
     if (col === 'exam_results') {
       return { find: jest.fn().mockReturnValue({ lean: jest.fn(() => Promise.resolve(mockExamResults)) }) };
+    }
+    if (col === 'assessment_marks') {
+      return { find: jest.fn(() => mockChainOf(mockMarks)) };
+    }
+    if (col === 'mark_submissions') {
+      return { find: jest.fn(() => mockChainOf(mockSubmissions)) };
+    }
+    if (col === 'subjects') {
+      return { find: jest.fn(() => mockChainOf(mockSubjectDocs)) };
     }
     if (col === 'academic_years') {
       return { find: jest.fn().mockReturnValue({ lean: jest.fn(() => Promise.resolve(mockAcademicYears)) }) };
@@ -62,7 +75,7 @@ jest.mock('../routes/academic-config', () => ({
   }),
 }));
 
-const { computeFinalScores, attachDeviations, behaviourSummary, computeTermDeviation, aggregateExamResults, attendanceSummary } = require('../utils/academic-calc');
+const { computeFinalScores, attachDeviations, behaviourSummary, computeTermDeviation, aggregateUnmoderatedMarks, attendanceSummary } = require('../utils/academic-calc');
 
 beforeEach(() => {
   mockLastReset      = [];
@@ -71,6 +84,9 @@ beforeEach(() => {
   mockExamResults    = [];
   mockAcademicYears  = [];
   mockAttendanceDocs = [];
+  mockMarks = [];
+  mockSubmissions = [];
+  mockSubjectDocs = [];
 });
 
 /* ── Fixtures ───────────────────────────────────────────────── */
@@ -259,50 +275,49 @@ describe('computeFinalScores', () => {
 });
 
 /* ══════════════════════════════════════════════════════════════
-   aggregateExamResults
+   aggregateUnmoderatedMarks — Markbook moderation, from mark_submissions
    ══════════════════════════════════════════════════════════════ */
-describe('aggregateExamResults', () => {
-  test('groups by exam.assessmentType (the school-configured weight key), not exam.type', async () => {
-    // exam.type ('terminal') never matches a school's customTypes key
-    // (CA/HW/MT/ET etc.) — grouping by it silently zero-weights every
-    // exam result out of computeFinalScores. assessmentType ('ET') is
-    // the real link, set by _resolveAssessmentType() at exam create time.
-    mockExams = [{
-      id: 'ex1', schoolId: 'sch1', classId: 'c1', subjectId: 'math',
-      type: 'terminal', assessmentType: 'ET', maxScore: 100, status: 'completed',
-    }];
-    mockExamResults = [{ examId: 'ex1', studentId: 's1', score: 80, markState: 'present', absent: false }];
-
-    const { data } = await aggregateExamResults('sch1', 'c1', null, null);
-    expect(data.s1.math).toEqual({ ET: 80 });
-    expect(data.s1.math.terminal).toBeUndefined();
+describe("aggregateUnmoderatedMarks", () => {
+  test("no marks at all → nothing to moderate", async () => {
+    mockMarks = [];
+    expect(await aggregateUnmoderatedMarks("sch1", "c1", 1, null)).toEqual([]);
   });
 
-  test('falls back to exam.type when assessmentType was never set (pre-fix / legacy exam)', async () => {
-    mockExams = [{
-      id: 'ex2', schoolId: 'sch1', classId: 'c1', subjectId: 'sci',
-      type: 'mock', maxScore: 50, status: 'completed',
-    }];
-    mockExamResults = [{ examId: 'ex2', studentId: 's1', score: 40, markState: 'present', absent: false }];
-
-    const { data } = await aggregateExamResults('sch1', 'c1', null, null);
-    expect(data.s1.sci).toEqual({ mock: 80 }); // 40/50 = 80%
+  test("marks with no submission are unmoderated, titled by subject and assessment", async () => {
+    mockMarks = [{ subjectId: "math", assessmentType: "ET", instance: 1 }];
+    mockSubjectDocs = [{ id: "math", name: "Mathematics" }];
+    const out = await aggregateUnmoderatedMarks("sch1", "c1", 1, null);
+    expect(out).toEqual([{ id: "math|ET|1", title: "Mathematics — ET", status: "not_submitted" }]);
   });
 
-  test('excludes absent/no-score results and returns exam status metadata', async () => {
-    mockExams = [{
-      id: 'ex3', schoolId: 'sch1', classId: 'c1', subjectId: 'eng',
-      type: 'terminal', assessmentType: 'ET', title: 'End Term English', maxScore: 100, status: 'moderated',
-    }];
-    mockExamResults = [
-      { examId: 'ex3', studentId: 's1', score: 70, markState: 'present', absent: false },
-      { examId: 'ex3', studentId: 's2', markState: 'ABS', absent: true },
+  test("an approved or locked submission clears the combination", async () => {
+    mockMarks = [
+      { subjectId: "math", assessmentType: "CA", instance: 1 },
+      { subjectId: "eng",  assessmentType: "CA", instance: 1 },
     ];
+    mockSubmissions = [
+      { subjectId: "math", assessmentType: "CA", instance: 1, status: "approved" },
+      { subjectId: "eng",  assessmentType: "CA", instance: 1, status: "locked" },
+    ];
+    expect(await aggregateUnmoderatedMarks("sch1", "c1", 1, null)).toEqual([]);
+  });
 
-    const { data, examStatuses } = await aggregateExamResults('sch1', 'c1', null, null);
-    expect(data.s1.eng).toEqual({ ET: 70 });
-    expect(data.s2).toBeUndefined();
-    expect(examStatuses).toEqual([{ id: 'ex3', status: 'moderated', title: 'End Term English', subjectId: 'eng' }]);
+  test("a submitted (not yet approved) submission is still unmoderated and reports its status", async () => {
+    mockMarks = [{ subjectId: "math", assessmentType: "ET", instance: 1 }];
+    mockSubmissions = [{ subjectId: "math", assessmentType: "ET", instance: 1, status: "submitted" }];
+    const out = await aggregateUnmoderatedMarks("sch1", "c1", 1, null);
+    expect(out).toHaveLength(1);
+    expect(out[0].status).toBe("submitted");
+  });
+
+  test("each instance of a multi-instance assessment is judged separately", async () => {
+    mockMarks = [
+      { subjectId: "math", assessmentType: "CA", instance: 1 },
+      { subjectId: "math", assessmentType: "CA", instance: 2 },
+    ];
+    mockSubmissions = [{ subjectId: "math", assessmentType: "CA", instance: 1, status: "approved" }];
+    const out = await aggregateUnmoderatedMarks("sch1", "c1", 1, null);
+    expect(out.map(o => o.title)).toEqual(["math — CA 2"]);
   });
 });
 

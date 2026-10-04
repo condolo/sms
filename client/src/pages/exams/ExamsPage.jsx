@@ -1557,10 +1557,9 @@ function AnnounceSittingSlideOver({ onClose, onCreated }) {
    quiz mark entry against assessment_config.customTypes weights;
    this is formal exam administration (its own maxScore/status/
    moderation/audit trail/guardian notification). Both ultimately
-   feed the same report-card weighted score via academic-calc.js's
-   aggregateAssessmentMarks/aggregateExamResults, merged in
-   computeFinalScores — see the report-cards.js dependency note in
-   the exam.assessmentType grouping fix in academic-calc.js.
+   feed the report-card weighted score via academic-calc.js's
+   aggregateAssessmentMarks — see the exam.assessmentType grouping fix
+   in academic-calc.js.
    ══════════════════════════════════════════════════════════════ */
 const MARK_STATE_OPTIONS = [
   { value: 'present', label: 'Present' },

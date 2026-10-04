@@ -50,9 +50,8 @@ const { getWorkflowConfig, saveWorkflowConfig, resolveStep, resolveAssigneeLabel
 const { dispatchNotification } = require('../utils/notify-dispatch');
 const email = require('../utils/email');
 const {
-  aggregateGrades,
-  aggregateExamResults,
   aggregateAssessmentMarks,
+  aggregateUnmoderatedMarks,
   computeFinalScores,
   attendanceSummary,
   behaviourSummary,
@@ -227,26 +226,6 @@ function _normalizeGradeScaleBands(bands) {
 }
 
 /**
- * Merge old gradebook data (grades collection) with new CA marks data (assessment_marks).
- * CA marks win on conflict per assessmentType within the same student+subject.
- */
-function _mergeGradeData(gradesData, caData) {
-  const merged = {};
-  const allStudents = new Set([...Object.keys(gradesData), ...Object.keys(caData)]);
-  for (const sid of allStudents) {
-    merged[sid] = {};
-    const oldSubjects = gradesData[sid] || {};
-    const caSubjects  = caData[sid]     || {};
-    const allSubjects = new Set([...Object.keys(oldSubjects), ...Object.keys(caSubjects)]);
-    for (const sub of allSubjects) {
-      // Spread old first, then CA overwrites individual type keys
-      merged[sid][sub] = { ...(oldSubjects[sub] || {}), ...(caSubjects[sub] || {}) };
-    }
-  }
-  return merged;
-}
-
-/**
  * RC5 — closes the draft-to-published comment carry-forward gap
  * (docs/audits/REPORT_CARD_COMMENT_LIFECYCLE_REVIEW.md, "Recommendation 1").
  * On a student's first-ever publish for a term, there is no `prev` snapshot
@@ -399,28 +378,18 @@ router.post('/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
       _loadCaConfig(schoolId),
     ]);
 
-    const [gradesData, { data: examData, examStatuses }, caMarksData] = await Promise.all([
-      aggregateGrades(schoolId, classId, scope.termId, scope.academicYearId, studentId),
-      aggregateExamResults(schoolId, classId, scope.termId, scope.academicYearId, studentId),
+    const [caMarksData, unmoderatedExams] = await Promise.all([
       aggregateAssessmentMarks(schoolId, classId, termNum ?? null, scope.academicYearId, studentId),
+      // Same moderation gate /publish enforces — a warning here, never a block,
+      // since a preview is a legitimate, earlier use than /publish's.
+      aggregateUnmoderatedMarks(schoolId, classId, termNum ?? null, scope.academicYearId),
     ]);
-
-    // Same moderation gate /publish enforces — this is only a warning here,
-    // never a block, since a preview showing "here's what it'll look like
-    // once X is moderated" is a legitimate, earlier use than /publish's.
-    // Without this flag a reviewer had no way to tell a final-looking
-    // preview from one built on marks that could still change.
-    const PREVIEW_APPROVED_STATES = ['approved', 'locked', 'published', 'archived'];
-    const unmoderatedExams = (examStatuses || []).filter(e => !PREVIEW_APPROVED_STATES.includes(e.status));
 
     const activeWeights = _convertCustomTypesToWeights(caConfig.customTypes);
     // Prefer grade_boundaries default scale over legacy academic_config.gradingSchema
     const activeSchema  = caConfig.gradeScale?.bands ?? config.gradingSchema;
 
-    // Merge old gradebook data with CA marks — CA marks win on per-type conflict
-    const mergedGrades = _mergeGradeData(gradesData, caMarksData);
-
-    const allReports = computeFinalScores(mergedGrades, examData, activeWeights, activeSchema);
+    const allReports = computeFinalScores(caMarksData, {}, activeWeights, activeSchema);
 
     // Attach class deviations (requires full class data)
     if (!studentId) attachDeviations(allReports);
@@ -581,7 +550,7 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
     // ── Step 2: Moderation guard ─────────────────────────────
     // RC9 — enforcement is now policy-driven, default true (today's exact
     // hardcoded behavior for every school that hasn't opted out).
-    const { data: examData, examStatuses } = await aggregateExamResults(schoolId, classId, scope.termId, scope.academicYearId);
+    const unmoderatedAtPublish = await aggregateUnmoderatedMarks(schoolId, classId, termNum ?? null, scope.academicYearId);
 
     if (skipModerationCheck) {
       // Write audit entry for the bypass — this is mandatory, non-negotiable
@@ -593,12 +562,11 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
         editedBy:  userId,
         reason:    skipReason,
         timestamp: now,
-        examStatusAtBypass: examStatuses.map(e => ({ id: e.id, title: e.title, status: e.status })),
+        submissionStatusAtBypass: unmoderatedAtPublish.map(e => ({ id: e.id, title: e.title, status: e.status })),
       });
       console.warn(`[REPORT-CARDS] ⚠️  Moderation check BYPASSED — batch ${batchId} by ${userId}: "${skipReason}"`);
     } else if (policy.require_moderation_complete) {
-      const APPROVED_STATES = ['approved', 'locked', 'published', 'archived'];
-      const unmoderated = examStatuses.filter(e => !APPROVED_STATES.includes(e.status));
+      const unmoderated = unmoderatedAtPublish;
       if (unmoderated.length > 0) {
         await Batches.updateOne({ id: batchId }, {
           status: 'failed',
@@ -615,17 +583,10 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
     }
 
     // ── Step 3: Aggregate grades + CA marks, then compute scores ──
-    const [gradesData, caMarksData] = await Promise.all([
-      aggregateGrades(schoolId, classId, scope.termId, scope.academicYearId),
-      // scope.academicYearId — see _resolveTermScope's comment above.
-      // Markbook now tags marks with the real year and adopts/backfills
-      // any legacy null-tagged record on first touch, so this can resolve
-      // the year the same way grades does.
-      aggregateAssessmentMarks(schoolId, classId, termNum ?? null, scope.academicYearId),
-    ]);
-    // Merge old gradebook data with CA marks — CA marks win on per-type conflict
-    const mergedGrades = _mergeGradeData(gradesData, caMarksData);
-    const allReports = computeFinalScores(mergedGrades, examData, activeWeights, activeSchema);
+    // Markbook is the only mark source. scope.academicYearId — see
+    // _resolveTermScope's comment above.
+    const caMarksData = await aggregateAssessmentMarks(schoolId, classId, termNum ?? null, scope.academicYearId);
+    const allReports = computeFinalScores(caMarksData, {}, activeWeights, activeSchema);
     attachDeviations(allReports);
 
     if (Object.keys(allReports).length === 0) {

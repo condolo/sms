@@ -38,127 +38,47 @@ function _yearFilterPart(academicYearId) {
    ══════════════════════════════════════════════════════════════ */
 
 /**
- * Aggregate published gradebook entries (continuous assessment)
- * per student per subject per assessmentType.
+ * Markbook moderation status, sourced from mark_submissions (the
+ * submit -> approve -> lock workflow). A (subject, assessmentType, instance)
+ * with marks in this class/term is provisional until its submission is
+ * approved or locked. Replaces exam-status gating (exam_results is legacy).
  *
- * Returns: { [studentId]: { [subjectId]: { [assessmentType]: avgPercentage } } }
- *
- * @param {string}  schoolId
- * @param {string}  classId
- * @param {string|null} termId
- * @param {string|null} academicYearId
- * @param {string|null} studentId  — pass to scope to one student
+ * Returns: [{ id, title, status }] for every unmoderated combination; empty
+ * when everything is approved. status is the submission status, or
+ * "not_submitted" when no submission exists yet.
  */
-async function aggregateGrades(schoolId, classId, termId, academicYearId, studentId = null) {
-  const filter = { schoolId, classId, isPublished: true, ..._yearFilterPart(academicYearId) };
-  if (termId)         filter.termId         = termId;
-  if (studentId)      filter.studentId      = studentId;
+async function aggregateUnmoderatedMarks(schoolId, classId, termNumber = null, academicYearId = null) {
+  const scope = { schoolId, classId, ..._yearFilterPart(academicYearId) };
+  if (termNumber != null) scope.termNumber = termNumber;
 
-  const grades  = await _model('grades').find(filter).lean();
-  const grouped = {};
-
-  for (const g of grades) {
-    const { studentId: sid, subjectId, assessmentType } = g;
-    const pct = g.percentage ?? (g.maxScore > 0 ? _round((g.score / g.maxScore) * 100) : null);
-    if (pct === null || !subjectId || !assessmentType) continue;
-
-    grouped[sid]                    ??= {};
-    grouped[sid][subjectId]         ??= {};
-    grouped[sid][subjectId][assessmentType] ??= [];
-    grouped[sid][subjectId][assessmentType].push(pct);
+  const marks = await _model("assessment_marks").find({ ...scope, isPublished: true })
+    .select("subjectId assessmentType instance").lean();
+  const combos = new Map();
+  for (const m of marks) {
+    if (!m.subjectId || !m.assessmentType) continue;
+    combos.set(`${m.subjectId}|${m.assessmentType}|${m.instance ?? 1}`, m);
   }
+  if (!combos.size) return [];
 
-  // Average within each assessmentType bucket
-  const result = {};
-  for (const [sid, subjects] of Object.entries(grouped)) {
-    result[sid] = {};
-    for (const [sub, types] of Object.entries(subjects)) {
-      result[sid][sub] = {};
-      for (const [type, pcts] of Object.entries(types)) {
-        result[sid][sub][type] = _round(pcts.reduce((s, n) => s + n, 0) / pcts.length);
-      }
-    }
+  const subs = await _model("mark_submissions").find(scope)
+    .select("subjectId assessmentType instance status").lean();
+  const statusByCombo = new Map(subs.map(s => [`${s.subjectId}|${s.assessmentType}|${s.instance ?? 1}`, s.status]));
+
+  const subjectIds = [...new Set([...combos.values()].map(m => m.subjectId))];
+  const subjectDocs = await _model("subjects").find({ schoolId, id: { $in: subjectIds } }).select("id name").lean();
+  const subjectName = Object.fromEntries(subjectDocs.map(s => [s.id, s.name]));
+
+  const out = [];
+  for (const [key, m] of combos) {
+    const status = statusByCombo.get(key) ?? "not_submitted";
+    if (status === "approved" || status === "locked") continue;
+    const instance = m.instance ?? 1;
+    const label = instance > 1 ? `${m.assessmentType} ${instance}` : m.assessmentType;
+    out.push({ id: key, title: `${subjectName[m.subjectId] ?? m.subjectId} — ${label}`, status });
   }
-  return result;
+  return out;
 }
 
-/**
- * Aggregate exam results (terminal/mock exams) per student per subject per exam type.
- * Only includes results with valid scores (markState: present, not absent).
- * Maps exam.type → assessmentType for weight lookup.
- *
- * Returns: { data: same shape as aggregateGrades, examStatuses: [{ id, status, title }] }
- *
- * @param {string}  schoolId
- * @param {string}  classId
- * @param {string|null} termId
- * @param {string|null} academicYearId
- * @param {string|null} studentId  — pass to scope to one student
- */
-// LEGACY — read-only. exam_results is superseded by assessment_marks (every
-// row was migrated, v5.168.0). Do not reconnect this to the report-card
-// pipeline; report cards read the Markbook only.
-async function aggregateExamResults(schoolId, classId, termId, academicYearId, studentId = null) {
-  const examsFilter = {
-    schoolId, classId,
-    status: { $in: ['completed', 'moderated', 'approved', 'locked', 'published', 'archived'] },
-    ..._yearFilterPart(academicYearId),
-  };
-  if (termId) examsFilter.termId = termId;
-
-  const exams = await _model('exams').find(examsFilter).lean();
-  if (!exams.length) return { data: {}, examStatuses: [] };
-
-  const examMap      = Object.fromEntries(exams.map(e => [e.id, e]));
-  const examIds      = exams.map(e => e.id);
-  const examStatuses = exams.map(e => ({ id: e.id, status: e.status, title: e.title, subjectId: e.subjectId }));
-
-  const resultsFilter = {
-    schoolId,
-    examId: { $in: examIds },
-    markState: { $in: ['present', null] },
-    absent: { $ne: true }
-  };
-  if (studentId) resultsFilter.studentId = studentId;
-
-  const results = await _model('exam_results').find(resultsFilter).lean();
-
-  const grouped = {};
-  for (const r of results) {
-    const exam = examMap[r.examId];
-    if (!exam || r.score == null || !exam.subjectId) continue;
-    const pct = exam.maxScore > 0 ? _round((r.score / exam.maxScore) * 100) : null;
-    if (pct === null) continue;
-
-    // Group by exam.assessmentType (the school's real customTypes key, e.g.
-    // 'MT'/'ET' — set on the exam via _resolveAssessmentType() at create
-    // time) so this bucket lines up with assessmentWeights' keys in
-    // computeFinalScores(). exam.type ('test'/'mock'/'terminal'/etc.) is a
-    // separate, purely descriptive category — it never matches a school's
-    // configured weight keys, so grouping by it here silently zero-weighted
-    // every exam result out of the final score (weightMap[type] ?? 0 → 0,
-    // computeFinalScores skips w === 0). Falls back to exam.type only for
-    // exams that predate the assessmentType field ever being set.
-    const weightKey = exam.assessmentType || exam.type;
-    const sid = r.studentId;
-    grouped[sid]              ??= {};
-    grouped[sid][exam.subjectId] ??= {};
-    grouped[sid][exam.subjectId][weightKey] ??= [];
-    grouped[sid][exam.subjectId][weightKey].push(pct);
-  }
-
-  const data = {};
-  for (const [sid, subjects] of Object.entries(grouped)) {
-    data[sid] = {};
-    for (const [sub, types] of Object.entries(subjects)) {
-      data[sid][sub] = {};
-      for (const [type, pcts] of Object.entries(types)) {
-        data[sid][sub][type] = _round(pcts.reduce((s, n) => s + n, 0) / pcts.length);
-      }
-    }
-  }
-  return { data, examStatuses };
-}
 
 /**
  * Aggregate published CA marks (assessment_marks collection) per student per subject
@@ -223,8 +143,8 @@ async function aggregateAssessmentMarks(schoolId, classId, termNumber = null, ac
  *
  * Returns: { [studentId]: { studentId, subjects, totalScore, averageScore, gpa, subjectCount } }
  *
- * @param {Object} gradesData      — from aggregateGrades()
- * @param {Object} examData        — from aggregateExamResults().data
+ * @param {Object} gradesData      — from aggregateAssessmentMarks() (the Markbook)
+ * @param {Object} examData        — legacy exam_results input; report cards pass {} (Markbook-only)
  * @param {Array}  assessmentWeights — [{assessmentType, label, weight}], derived from
  *                                     assessment_config.customTypes (server/routes/assessment.js)
  * @param {Array}  gradingSchema     — from grade_boundaries, falls back to academic-config
@@ -490,9 +410,8 @@ function computeTermDeviation(currentSubjects, prevSubjects) {
 }
 
 module.exports = {
-  aggregateGrades,
-  aggregateExamResults,
   aggregateAssessmentMarks,
+  aggregateUnmoderatedMarks,
   computeFinalScores,
   attendanceSummary,
   behaviourSummary,

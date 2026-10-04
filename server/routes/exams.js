@@ -488,7 +488,7 @@ router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('exams', 'read'), scopeMi
 
 /* subjectId/classId are free-text FK strings on ExamSchema (no Mongoose
    ref) — a typo or stale id would silently create an exam that never
-   matches any aggregateExamResults()/report-cards.js filter, with no
+   matches the Markbook/report-card filters, with no
    error at write time. Checked here, not in the schema, since both
    fields stay optional (an exam can legitimately be created before its
    subject/class is finalised). */
