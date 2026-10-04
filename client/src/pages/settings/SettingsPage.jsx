@@ -3516,10 +3516,8 @@ const PERM_MODULES = [
     { key: 'export',           label: 'Export Grades (CSV)' },
   ]},
   { key: 'exams', label: 'Exams', subs: [
-    { key: 'view',    label: 'View Exams & Results' },
+    { key: 'view',    label: 'View Exams' },
     { key: 'create',  label: 'Create / Edit Exam' },
-    { key: 'lock',    label: 'Lock / Unlock Exam' },
-    { key: 'results', label: 'Enter Exam Results' },
     { key: 'delete',  label: 'Delete Exam' },
   ]},
   { key: 'assessment', label: 'Assessment Scheduling', subs: [

@@ -78,23 +78,4 @@ describe('exams — cross-tenant isolation (authenticated as School A)', () => {
     assertScopedToA(seen.examFindOne[0]);
     expect(seen.examFindOne[0].id).toBe('exam_belonging_to_B');
   });
-
-  test('POST /:id/results — exam lookup, results read, bulk ops, AND the auto-advance update are all School-A-scoped', async () => {
-    const res = await supertest(buildApp())
-      .post('/api/exams/exam_1/results')
-      .send({ results: [{ studentId: 's1', score: 80, markState: 'present' }] });
-    expect(res.status).toBe(201);
-
-    // exam ownership lookup scoped
-    assertScopedToA(seen.examFindOne[0]);
-    // existing-results read scoped
-    assertScopedToA(seen.resFind[0]);
-    // every bulk upsert op scoped
-    expect(seen.resBulk[0]).toHaveLength(1);
-    assertScopedToA(seen.resBulk[0][0].updateOne.filter);
-    expect(seen.resBulk[0][0].updateOne.update.$set.schoolId).toBe(SCHOOL_A);
-    // THE LATENT GAP: auto-advance exams.updateOne({id}) had no schoolId in source
-    assertScopedToA(seen.examUpdateOne[0].filter);
-    expect(seen.examUpdateOne[0].filter.id).toBe('exam_1');
-  });
 });

@@ -1,9 +1,8 @@
 /* ============================================================
-   Msingi — /api/exams  (Exam Scheduling + Results)
-   Sub-routes:
-     /api/exams              — exam definitions
-     /api/exams/:id/results  — results for one exam
-     /api/exams/results      — query all results (cross-exam)
+   Msingi — /api/exams  (Exam scheduling & logistics)
+   Marks and their moderation live in the Markbook (assessment_marks,
+   mark_submissions). An exam records the sitting: class, subject, date,
+   room, invigilator, duration, and a four-state scheduling status.
    Plan: standard | RBAC: exams:{read,create,update,delete}
    ============================================================ */
 const express = require('express');
@@ -12,40 +11,20 @@ const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware } = require('../middleware/auth');
 const { moduleGate }     = require('../middleware/module-gate');
-const { rbac, hasExplicitSubGrant } = require('../middleware/rbac');
+const { rbac } = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { scopeMiddleware } = require('../middleware/scopeMiddleware');
 const ScopeEngine        = require('../utils/scopeEngine');
-const { canWriteSubject } = require('../utils/subject-scope');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E, strParam } = require('../utils/response');
-const { isYearArchived } = require('../utils/archival');
 const { getConfig: _getAssessmentConfig } = require('./assessment');
-const { mergeConfig, resolveGrade, resolveCurrentPeriod } = require('./academic-config');
-const { _model } = require('../utils/model');
-const { notifyGuardiansForStudents } = require('../utils/notify-students');
-const email = require('../utils/email');
+const { resolveCurrentPeriod } = require('./academic-config');
 
 const router = express.Router();
 const PLAN   = planGate('exams');
 const MODGATE = moduleGate('grades');
 
 /* ── Helpers ────────────────────────────────────────────────── */
-function _round(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }
-
-/** Convert raw score to grade/percentage via the school's live grading
- *  scale — grade_boundaries' default scale, falling back to
- *  academic_config.gradingSchema (same resolution order assessment.js's
- *  GET /report and report-cards.js use — resolveGrade() is the single
- *  shared band-lookup, never duplicated per-route). Previously this read
- *  a per-exam `exam.gradeScale` field that no route ever set, so grade/
- *  percentage were silently null on every exam result ever entered. */
-function _calcGrade(score, maxScore, gradingSchema) {
-  if (!maxScore || maxScore === 0) return null;
-  const pct = _round((score / maxScore) * 100);
-  const { grade, points } = resolveGrade(pct, gradingSchema);
-  return { percentage: pct, grade, points };
-}
 
 /* ── Data scope (2026-09) ─────────────────────────────────────────
    Prompted directly: "a teacher should only see their streams and
@@ -114,52 +93,24 @@ function _examInScope(scope, doc) {
   return classOk && subjectOk;
 }
 
-/* ── Validation ─────────────────────────────────────────────── */
-/* ── Exam status state machine ──────────────────────────────────
-   Allowed transitions (server enforces — clients cannot skip states):
-     scheduled    → in_progress | cancelled
-     in_progress  → completed   | cancelled
-     completed    → moderated   | locked     (admin only)
-     moderated    → approved    | completed  (admin can reopen)
-     approved     → locked                   (admin only)
-     locked       → published   | approved   (unlock = back to approved)
-     published    → archived
+/* ── Exam status (scheduling tracker) ─────────────────────────────
+   Exams schedule a sitting. Marks and their moderation live in the Markbook
+   (assessment_marks / mark_submissions). Four states only:
+     scheduled   → in_progress | cancelled
+     in_progress → completed   | cancelled
    ─────────────────────────────────────────────────────────────── */
 const EXAM_TRANSITIONS = {
   scheduled:   ['in_progress', 'cancelled'],
-  in_progress: ['completed',   'cancelled'],
-  completed:   ['moderated',   'locked'],
-  moderated:   ['approved',    'completed'],
-  approved:    ['locked'],
-  locked:      ['published',   'approved'],   // 'approved' = unlock
-  published:   ['archived'],
-  archived:    [],
+  in_progress: ['completed', 'cancelled'],
+  completed:   [],
   cancelled:   [],
 };
 
-/* Roles allowed to drive each transition.
-   2026-09 Exams Officer fix: this list previously excluded 'exams_officer'
-   from EVERY entry, despite that role holding full exams:RCUD
-   (server/utils/repairPermissions.js) — an Exams Officer could create exams
-   and enter marks but could not move a single exam through its own
-   lifecycle, not even Start Exam. Added here for every transition except
-   'locked' and 'approved', which are handled separately in _checkTransition
-   below (see the comment there for why 'approved' can't just be added to
-   this list too — it's ambiguous between the Approve and Unlock actions). */
 const TRANSITION_ROLES = {
   in_progress: ['teacher', 'exams_officer', 'admin', 'superadmin'],
   completed:   ['teacher', 'exams_officer', 'admin', 'superadmin'],
   cancelled:   ['exams_officer', 'admin', 'superadmin'],
-  moderated:   ['exams_officer', 'admin', 'superadmin'],
-  approved:    ['exams_officer', 'admin', 'superadmin'],  // this list only ever governs moderated->approved (ordinary Approve) — locked->approved (unlock) is caught by its own earlier, stricter branch in _checkTransition before this list is even consulted
-  locked:      ['admin', 'superadmin'],  // see _checkTransition — the real floor is the admin/superadmin-or-explicit-grant check there, not this list
-  published:   ['exams_officer', 'admin', 'superadmin'],
-  archived:    ['exams_officer', 'admin', 'superadmin'],
 };
-
-/* Mark states — now shared with the Markbook (assessment.js), since marks
-   entry is being consolidated there. See server/utils/mark-states.js. */
-const { MARK_STATES, resolveMarkState: _resolveMarkState } = require('../utils/mark-states');
 
 const ExamSchema = z.object({
   title:          z.string().min(1).max(200).trim(),
@@ -177,10 +128,7 @@ const ExamSchema = z.object({
   invigilatorId:  z.string().optional(),
   instructions:   z.string().max(1000).optional(),
   // Extended status — old values (scheduled/in_progress/completed/cancelled) still valid
-  status: z.enum([
-    'scheduled', 'in_progress', 'completed', 'cancelled',
-    'moderated', 'approved', 'locked', 'published', 'archived'
-  ]).default('scheduled'),
+  status:         z.enum(['scheduled', 'in_progress', 'completed', 'cancelled']).default('scheduled'),
   // Teacher-subject ownership (set when creating — used for validation)
   ownerId:       z.string().optional(),   // userId of subject teacher who owns this exam
   // weightPercent/assessmentLabel are client-supplied hints only — _resolveAssessmentType()
@@ -197,25 +145,6 @@ const ExamSchema = z.object({
   endTime:                 z.string().optional(),           // HH:MM end time
   topics:                  z.string().max(500).optional(),  // topics / what to expect
   subjectTeacherAnnounced: z.boolean().optional(),          // true when created by subject teacher
-});
-
-const ResultSchema = z.object({
-  studentId:  z.string().min(1),
-  score:      z.number().min(0).optional(),  // optional — absent/missing/exempted have no score
-  // markState replaces absent:boolean — backward-compat: absent:true → ABS, absent:false → present
-  markState:  z.enum(MARK_STATES).default('present'),
-  absent:     z.boolean().default(false),    // kept for backward compat — derived from markState
-  notes:      z.string().max(500).optional(),
-  gradedBy:   z.string().optional(),         // overridden by JWT
-  // Audit: who entered/changed this result
-  actingAs:   z.string().optional(),         // if admin acting as teacher: teacherId
-  // Optimistic concurrency — the _v the client last read for this result.
-  // Omit to skip the check (backward compatible with clients that don't send it).
-  _v:         z.number().int().min(0).optional(),
-});
-
-const BulkResultSchema = z.object({
-  results: z.array(ResultSchema).min(1).max(500),
 });
 
 function _validate(schema, data) {
@@ -244,51 +173,11 @@ async function _resolveAssessmentType(schoolId, data) {
   return null;
 }
 
-/**
- * Validate exam status transition — returns error string or null.
- *
- * 2026-09 Exams Officer fix — `grants` carries PRE-RESOLVED
- * hasExplicitSubGrant() booleans for 'lock'/'unlock' (the caller resolves
- * these async, before calling this function, so this stays a plain
- * synchronous function — matching the Permission Granularity Plan's §4a
- * "Option A" note that this was achievable without making _checkTransition
- * itself async). Two targets are handled OUTSIDE the plain TRANSITION_ROLES
- * list because a flat toStatus-keyed list can't express what they actually
- * need:
- *   - toStatus === 'locked': must require the admin/superadmin floor OR an
- *     explicit exams.lock grant — exactly what POST /:id/lock already
- *     enforces. Before this fix, POST /:id/lock computed that grant check
- *     correctly but then called this function unchanged, which re-rejected
- *     a legitimately-granted non-floor caller anyway (the grant check was
- *     real but silently overridden one line later) — the tracked-open item
- *     from the Permission Granularity Plan's §4a. Fixed by having both
- *     call sites pass their already-computed grant through.
- *   - fromStatus 'locked' -> toStatus 'approved' IS the unlock transition
- *     (this state machine reuses the 'approved' status for both "reviewed
- *     and signed off" and "unlocked"). It needs the SAME floor-or-grant
- *     check as POST /:id/unlock. The much more common 'moderated' ->
- *     'approved' transition (the ordinary post-moderation Approve action)
- *     is a different, less sensitive action that happens to share the same
- *     target status — it stays governed by TRANSITION_ROLES like every
- *     other transition, now including exams_officer. Blanket-adding
- *     exams_officer to TRANSITION_ROLES.approved instead of handling this
- *     split would have silently also granted them (and anyone else on that
- *     list) the unlock transition via PUT /:id, bypassing the explicit
- *     exams.lock/exams.unlock grant system entirely.
- */
-function _checkTransition(fromStatus, toStatus, userRole, grants = {}) {
+/** Validate an exam status transition — returns an error string, or null when allowed. */
+function _checkTransition(fromStatus, toStatus, userRole) {
   const allowed = EXAM_TRANSITIONS[fromStatus] || [];
   if (!allowed.includes(toStatus)) {
     return `Cannot transition from "${fromStatus}" to "${toStatus}". Allowed next states: [${allowed.join(', ')}]`;
-  }
-  const isFloorRole = ['admin', 'superadmin'].includes(userRole);
-  if (toStatus === 'locked') {
-    if (isFloorRole || grants.lock) return null;
-    return `Your role ("${userRole}") cannot set status to "locked" — ask your admin to grant exams.lock in Settings, or use an admin/superadmin account`;
-  }
-  if (fromStatus === 'locked' && toStatus === 'approved') {
-    if (isFloorRole || grants.unlock) return null;
-    return `Your role ("${userRole}") cannot unlock this exam — ask your admin to grant exams.unlock in Settings, or use an admin/superadmin account`;
   }
   const roleOk = TRANSITION_ROLES[toStatus] || [];
   if (roleOk.length && !roleOk.includes(userRole)) {
@@ -608,31 +497,11 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('exams', 'update'), async
     const existing = await tenantModel('exams', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!existing) return E.notFound(res, 'Exam not found');
 
-    // Block edits to locked/published/archived exams (except by admin via unlock flow)
-    if (['locked', 'published', 'archived'].includes(existing.status) && !data.status) {
-      return E.badRequest(res, `Exam is "${existing.status}" — use the unlock endpoint to allow edits`);
-    }
-
     // Validate status transition if status is being changed
     if (data.status && data.status !== existing.status) {
-      // Only resolve the exams.lock/exams.unlock grants when this transition
-      // could actually need them (into 'locked', or 'locked'->'approved' i.e.
-      // unlock) — an extra DB read on every other status change (Start Exam,
-      // Mark Completed, Moderate, Approve, Publish, Archive) would be waste.
-      // This is what closes the previously tracked-open gap: PUT /:id now
-      // respects the same Settings-granted exams.lock/exams.unlock as the
-      // dedicated endpoints, instead of being blind to them (see
-      // _checkTransition's own comment for the full reasoning).
-      const grants = {};
-      if (data.status === 'locked') {
-        grants.lock = await hasExplicitSubGrant(req, 'exams', 'lock', 'update');
-      } else if (existing.status === 'locked' && data.status === 'approved') {
-        grants.unlock = await hasExplicitSubGrant(req, 'exams', 'unlock', 'update');
-      }
-      const transitionError = _checkTransition(existing.status, data.status, role, grants);
+      const transitionError = _checkTransition(existing.status, data.status, role);
       if (transitionError) return E.badRequest(res, transitionError);
 
-      // Log the transition in audit
       data.statusChangedBy = userId;
       data.statusChangedAt = new Date().toISOString();
       data.statusHistory   = [
@@ -647,54 +516,9 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('exams', 'update'), async
       { new: true, runValidators: false }
     ).lean();
 
-    if (data.status === 'published' && existing.status !== 'published') {
-      _notifyExamResultsPublished(req, doc).catch(err => console.error('[exams/:id notify]', err));
-    }
-
     return ok(res, doc);
   } catch (err) { console.error('[exams PUT/:id]', err); return E.serverError(res); }
 });
-
-/* Notify each student's parent(s)/guardian(s) that this exam's results were
-   published — school-configured channel + frequency, same shared mechanism
-   as behaviour_incident/report_published. One dispatch per student sitting
-   the exam, resolved from exam_results (the exam doc itself has no student
-   list). */
-async function _notifyExamResultsPublished(req, exam) {
-  const { schoolId } = req.jwtUser;
-  const ctx = tenantContext(req);
-
-  const [results, school] = await Promise.all([
-    tenantModel('exam_results', ctx).find({ schoolId, examId: exam.id }).select('studentId').lean(),
-    _model('schools').findOne({ id: schoolId }).select('name systemEmail').lean(),
-  ]);
-  const studentIds = [...new Set(results.map(r => r.studentId).filter(Boolean))];
-  if (!studentIds.length) return;
-
-  const students = await tenantModel('students', ctx).find({ id: { $in: studentIds } }).select('id firstName lastName').lean();
-  const nameById = Object.fromEntries(students.map(s => [s.id, `${s.firstName} ${s.lastName}`]));
-  const schoolName  = school?.name || '';
-  const schoolEmail = school?.systemEmail || '';
-
-  await notifyGuardiansForStudents({
-    ctx, schoolId, eventKey: 'exam_results',
-    items: studentIds.map(studentId => {
-      const studentName = nameById[studentId] || studentId;
-      return {
-        studentId,
-        inAppSubject: `Exam results published for ${studentName}`,
-        inAppBody:    `Results for "${exam.title || 'the exam'}" are now available for ${studentName}.`,
-        emailDigestSubject: `Exam results published — ${studentName}`,
-        emailDigestBody:    `Results for "${exam.title || 'the exam'}" are now available.`,
-        sendEmail: (recipient) => email.sendExamResultsAlert({
-          recipientName: recipient.name, recipientEmail: recipient.email,
-          studentName, examName: exam.title || 'Exam',
-          schoolName, schoolEmail, schoolId,
-        }),
-      };
-    }),
-  });
-}
 
 router.delete('/:id', authMiddleware, PLAN, MODGATE, rbac('exams', 'delete'), async (req, res) => {
   try {
@@ -713,95 +537,6 @@ router.delete('/:id', authMiddleware, PLAN, MODGATE, rbac('exams', 'delete'), as
    EXAM STATUS MANAGEMENT
    ══════════════════════════════════════════════════════════════ */
 
-/** POST /api/exams/:id/lock — admin locks an exam (approved → locked) */
-router.post('/:id/lock', authMiddleware, PLAN, MODGATE, rbac('exams', 'update'), async (req, res) => {
-  try {
-    const { schoolId, userId, role } = req.jwtUser;
-    // Permission Granularity Plan 2026-09, Priority 0 — Option A, completed
-    // 2026-09-05. The admin/superadmin floor stays (never weakened); a
-    // school can additionally grant exams.lock via Settings. Uses
-    // hasExplicitSubGrant (no coarse-grant fallback), same reasoning as
-    // report_generate/mark_submissions: falling back to plain exams:update
-    // would hand lock authority to anyone who can merely create/edit exams.
-    //
-    // BUG FIXED HERE (was the tracked-open item from the Plan §4a): this
-    // grant check was computed correctly but then _checkTransition() below
-    // was called WITHOUT it, so it re-rejected the very caller this check
-    // had just approved — TRANSITION_ROLES.locked never included anyone but
-    // admin/superadmin, so an explicitly-granted Exams Officer got PAST this
-    // check only to be silently blocked one line later. _checkTransition now
-    // takes this same boolean and honours it — no other behavior here
-    // changed (the floor is still never weakened, and this is still the
-    // only place a plain exams:update grant is insufficient on its own).
-    const isFloorRole = ['admin', 'superadmin'].includes(role);
-    const hasLockGrant = await hasExplicitSubGrant(req, 'exams', 'lock', 'update');
-    if (!isFloorRole && !hasLockGrant) {
-      return E.forbidden(res, 'Only admins, superadmins, or explicitly granted staff can lock exams');
-    }
-
-    const exam = await tenantModel('exams', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
-    if (!exam) return E.notFound(res, 'Exam not found');
-
-    const transitionError = _checkTransition(exam.status, 'locked', role, { lock: hasLockGrant });
-    if (transitionError) return E.badRequest(res, transitionError);
-
-    const now = new Date().toISOString();
-    const doc = await tenantModel('exams', tenantContext(req)).findOneAndUpdate(
-      { id: req.params.id, schoolId },
-      {
-        status: 'locked', lockedBy: userId, lockedAt: now, updatedBy: userId,
-        $push: { statusHistory: { from: exam.status, to: 'locked', by: userId, at: now, reason: req.body.reason || 'Admin locked' } }
-      },
-      { new: true }
-    ).lean();
-
-    console.log(`[EXAMS] Locked exam "${exam.title}" by ${userId}`);
-    return ok(res, doc);
-  } catch (err) { console.error('[exams/:id/lock]', err); return E.serverError(res); }
-});
-
-/** POST /api/exams/:id/unlock — admin unlocks (locked → approved) with mandatory reason */
-router.post('/:id/unlock', authMiddleware, PLAN, MODGATE, rbac('exams', 'update'), async (req, res) => {
-  try {
-    const { schoolId, userId, role } = req.jwtUser;
-    // Same design as /lock above, using the separate exams.unlock grant —
-    // deliberately independent (a role granted lock is not automatically
-    // granted unlock, and vice versa; see the Plan §4a for why these are
-    // two rows, not one).
-    const isFloorRole = ['admin', 'superadmin'].includes(role);
-    if (!isFloorRole && !(await hasExplicitSubGrant(req, 'exams', 'unlock', 'update'))) {
-      return E.forbidden(res, 'Only admins, superadmins, or explicitly granted staff can unlock exams');
-    }
-
-    const reason = (req.body.reason || '').trim();
-    if (!reason) return E.badRequest(res, 'A reason is required when unlocking an exam');
-
-    const exam = await tenantModel('exams', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
-    if (!exam) return E.notFound(res, 'Exam not found');
-    if (exam.status !== 'locked') return E.badRequest(res, `Exam is "${exam.status}" — only locked exams can be unlocked`);
-
-    const now = new Date().toISOString();
-    const doc = await tenantModel('exams', tenantContext(req)).findOneAndUpdate(
-      { id: req.params.id, schoolId },
-      {
-        status: 'approved', unlockedBy: userId, unlockedAt: now, unlockReason: reason, updatedBy: userId,
-        $push: { statusHistory: { from: 'locked', to: 'approved', by: userId, at: now, reason } }
-      },
-      { new: true }
-    ).lean();
-
-    // Write to audit log
-    await tenantModel('mark_audit_log', tenantContext(req)).create({
-      action: 'EXAM_UNLOCKED', examId: req.params.id, schoolId,
-      editedBy: userId, reason, timestamp: now
-    });
-
-    console.log(`[EXAMS] Unlocked exam "${exam.title}" by ${userId}: ${reason}`);
-    return ok(res, doc);
-  } catch (err) { console.error('[exams/:id/unlock]', err); return E.serverError(res); }
-});
-
-/** GET /api/exams/:id/status-history — audit trail of status changes */
 router.get('/:id/status-history', authMiddleware, PLAN, MODGATE, rbac('exams', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
@@ -816,270 +551,6 @@ router.get('/:id/status-history', authMiddleware, PLAN, MODGATE, rbac('exams', '
    ══════════════════════════════════════════════════════════════ */
 
 /* GET /api/exams/:id/results */
-// LEGACY — exam_results is superseded by assessment_marks (migrated in
-// v5.168.0). The results routes are retired in Phase 6; do not reconnect
-// exam_results to the report-card pipeline.
-router.get('/:id/results', authMiddleware, PLAN, MODGATE, rbac('exams', 'read'), scopeMiddleware, async (req, res) => {
-  try {
-    const { schoolId } = req.jwtUser;
-    const { page, limit, skip } = parsePagination(req.query);
 
-    const exam = await tenantModel('exams', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
-    if (!exam) return E.notFound(res, 'Exam not found');
-
-    // Was reachable by ANY caller with plain exams:read, regardless of
-    // whether they teach this exam's class/subject — GET / and GET /:id
-    // (the exam metadata itself) were already scoped this way; this route
-    // (the actual scores) was not, a real gap even though the current UI
-    // never surfaces an out-of-scope examId to click through to (GET /
-    // already excludes it from the list a teacher would pick from).
-    const scope = await _examClassScope(req);
-    if (!_examInScope(scope, exam)) {
-      return E.forbidden(res, 'This exam is not in your assigned scope.');
-    }
-
-    const filter = { schoolId, examId: req.params.id };
-    if (req.query.studentId) filter.studentId = req.query.studentId;
-    if (req.query.absent === 'true') filter.absent = true;
-
-    const Results = tenantModel('exam_results', tenantContext(req));
-    const [docs, total] = await Promise.all([
-      Results.find(filter).sort({ score: -1 }).skip(skip).limit(limit).select('-__v').lean(),
-      Results.countDocuments(filter)
-    ]);
-
-    // Compute class statistics server-side
-    const allScores  = docs.filter(d => !d.absent).map(d => d.score);
-    const stats      = allScores.length ? {
-      count:   allScores.length,
-      highest: Math.max(...allScores),
-      lowest:  Math.min(...allScores),
-      average: _round(allScores.reduce((s, n) => s + n, 0) / allScores.length),
-      passCount: exam.passMark != null ? allScores.filter(s => s >= exam.passMark).length : null,
-    } : null;
-
-    return ok(res, { results: docs, stats, exam: { id: exam.id, title: exam.title, maxScore: exam.maxScore, passMark: exam.passMark } }, paginate(page, limit, total));
-  } catch (err) { console.error('[exams/:id/results GET]', err); return E.serverError(res); }
-});
-
-/* POST /api/exams/:id/results  — bulk upsert results for this exam */
-router.post('/:id/results', authMiddleware, PLAN, MODGATE, rbac('exams', 'create'), async (req, res) => {
-  try {
-    const { schoolId, userId, role } = req.jwtUser;
-    const { data, error } = _validate(BulkResultSchema, req.body);
-    if (error) return E.validation(res, error);
-
-    const exam = await tenantModel('exams', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
-    if (!exam) return E.notFound(res, 'Exam not found');
-
-    // Block writes to locked/published/archived exams
-    if (['locked', 'published', 'archived'].includes(exam.status)) {
-      return E.badRequest(res, `Exam is "${exam.status}" — results are read-only. An admin must unlock it to allow changes.`);
-    }
-
-    // Block writes to archived academic years — log the attempt for auditability
-    if (await isYearArchived(schoolId, exam.academicYearId)) {
-      tenantModel('mark_audit_log', tenantContext(req)).create({
-        action:        'WRITE_BLOCKED_ARCHIVED_YEAR',
-        schoolId,
-        academicYearId: exam.academicYearId,
-        examId:        req.params.id,
-        route:         'POST /api/exams/:id/results',
-        attemptedBy:   userId,
-        payload:       { resultCount: data.results.length },
-        timestamp:     new Date().toISOString(),
-      }).catch(e => console.error('[exams/results] audit log failed:', e.message));
-      return E.badRequest(res, `Academic year for this exam has been archived — results are permanently read-only.`);
-    }
-
-    // Teacher ownership check. exam.ownerId is set by the /announce path
-    // (the teacher who scheduled that sitting) but is optional and never
-    // forced on the general admin POST / create path — an exam created
-    // there had NO ownership check at all before this fix, since the old
-    // condition's `exam.ownerId &&` short-circuited to "allowed" whenever
-    // ownerId was unset. Now falls back to a real teaching_assignments
-    // check (the same {classId, subjectId} pair canWriteSubject enforces
-    // for marks) whenever the caller isn't the recorded owner — an exam
-    // with no classId/subjectId at all has nothing to check and is
-    // allowed through unchanged, same as canWriteSubject's own callers
-    // elsewhere in this codebase never widen access, only narrow it.
-    const isOwner     = !!exam.ownerId && exam.ownerId === userId;
-    const isAdminRole = ['admin', 'superadmin'].includes(role);
-    if (!isOwner && !isAdminRole) {
-      const hasAssignment = (exam.classId && exam.subjectId)
-        ? await canWriteSubject(req, exam.classId, exam.subjectId)
-        : true;
-      if (!hasAssignment) {
-        return E.forbidden(res, 'You are not assigned to teach this class/subject — only the assigned subject teacher (or an admin) can enter results for this exam.');
-      }
-    }
-
-    // If admin is acting as teacher, require actingAs field
-    const actingAs = req.body.actingAs || null;
-    if (['admin', 'superadmin'].includes(role) && actingAs) {
-      // Will be written to audit log
-    }
-
-    // Validate scores — only 'present' results require a score; ABS/MIS/EXM/INC do not
-    const presentResults = data.results.filter(r => r.markState === 'present' && !r.absent);
-    const overscored = presentResults.filter(r => r.score != null && r.score > exam.maxScore);
-    if (overscored.length) {
-      return E.badRequest(res, `${overscored.length} result(s) exceed the exam maximum score of ${exam.maxScore}`);
-    }
-
-    // Fetch existing results for audit trail + the school's live grading
-    // scale (grade_boundaries default, falling back to academic_config) —
-    // same resolution order as assessment.js/report-cards.js.
-    const [existingResults, defaultScale, academicCfg] = await Promise.all([
-      tenantModel('exam_results', tenantContext(req)).find({
-        schoolId, examId: req.params.id,
-        studentId: { $in: data.results.map(r => r.studentId) }
-      }).lean(),
-      tenantModel('grade_boundaries', tenantContext(req)).findOne({ schoolId, isDefault: true }).lean(),
-      tenantModel('academic_config', tenantContext(req)).findOne({ schoolId }).lean(),
-    ]);
-    const existingMap   = Object.fromEntries(existingResults.map(r => [r.studentId, r]));
-    const gradingSchema = defaultScale?.bands ?? mergeConfig(academicCfg).gradingSchema;
-
-    // Optimistic concurrency — split off any result whose client-supplied _v
-    // doesn't match the current DB value (two teachers editing the same
-    // student's marks at the same time). These are never sent to bulkWrite:
-    // encoding _v into an upsert filter would make a stale version silently
-    // create a duplicate document instead of correctly failing to match.
-    // Conflicting entries are reported back, not written. Omitting _v (as
-    // every client does today) skips this check entirely — no behavior
-    // change until a client actually starts sending it.
-    const conflicts = [];
-    const writableResults = [];
-    for (const r of data.results) {
-      const existing = existingMap[r.studentId];
-      if (existing && r._v != null && Number(r._v) !== (existing._v ?? 0)) {
-        conflicts.push({
-          studentId:        r.studentId,
-          yourVersion:      Number(r._v),
-          currentVersion:   existing._v ?? 0,
-          currentScore:     existing.score,
-          currentMarkState: existing.markState,
-        });
-        continue;
-      }
-      writableResults.push(r);
-    }
-
-    const now    = new Date().toISOString();
-    const auditEntries = [];
-    const Results = tenantModel('exam_results', tenantContext(req));
-
-    const ops = writableResults.map(r => {
-      const resolved  = _resolveMarkState(r);
-      const gradeInfo = resolved.markState === 'present' && resolved.score != null
-        ? _calcGrade(resolved.score, exam.maxScore, gradingSchema)
-        : null;
-
-      // Build audit entry if score changed
-      const existing = existingMap[r.studentId];
-      if (existing && existing.score !== resolved.score) {
-        auditEntries.push({
-          action:        'RESULT_UPDATED',
-          examId:        req.params.id,
-          studentId:     r.studentId,
-          subjectId:     exam.subjectId,
-          schoolId,
-          editedBy:      userId,
-          actingAs:      actingAs || null,
-          previousValue: existing.score,
-          previousState: existing.markState || (existing.absent ? 'ABS' : 'present'),
-          newValue:      resolved.score,
-          newState:      resolved.markState,
-          reason:        r.notes || '',
-          timestamp:     now,
-        });
-      }
-
-      return {
-        updateOne: {
-          filter: { schoolId, examId: req.params.id, studentId: r.studentId },
-          update: {
-            $set: {
-              score:      resolved.score,
-              markState:  resolved.markState,
-              absent:     resolved.absent,          // backward compat
-              notes:      r.notes || '',
-              gradedBy:   userId,
-              updatedBy:  userId,
-              examId:     req.params.id,
-              schoolId,
-              studentId:  r.studentId,
-              classId:    exam.classId,
-              subjectId:  exam.subjectId,
-              updatedAt:  now,
-              ...(gradeInfo || {}),
-            },
-            $setOnInsert: { id: uuidv4(), createdBy: userId, createdAt: now },
-            $inc: { _v: 1 },
-          },
-          upsert: true
-        }
-      };
-    });
-
-    const [result] = await Promise.all([
-      ops.length ? Results.bulkWrite(ops, { ordered: false }) : Promise.resolve({ upsertedCount: 0, modifiedCount: 0 }),
-      auditEntries.length ? tenantModel('mark_audit_log', tenantContext(req)).insertMany(auditEntries) : Promise.resolve()
-    ]);
-
-    // Auto-advance exam to 'completed' when marks are first entered
-    if (['scheduled', 'in_progress'].includes(exam.status)) {
-      await tenantModel('exams', tenantContext(req)).updateOne({ id: req.params.id }, { status: 'completed', updatedBy: userId });
-    }
-
-    // Check for any INC/MIS marks remaining — surface as warning, not error
-    const incCount = data.results.filter(r => ['INC', 'MIS'].includes(r.markState)).length;
-
-    return ok(res, {
-      upserted:  result.upsertedCount,
-      modified:  result.modifiedCount,
-      total:     data.results.length,
-      audited:   auditEntries.length,
-      conflicts,
-      warnings:  incCount ? [`${incCount} result(s) marked as INC/MIS — resolve before approving`] : [],
-    }, null, 201);
-  } catch (err) { console.error('[exams/:id/results POST]', err); return E.serverError(res); }
-});
-
-/* GET /api/exams/results — cross-exam results query */
-router.get('/results/all', authMiddleware, PLAN, MODGATE, rbac('exams', 'read'), scopeMiddleware, async (req, res) => {
-  try {
-    const { schoolId } = req.jwtUser;
-    const { page, limit, skip } = parsePagination(req.query);
-
-    const filter = { schoolId };
-    if (req.query.studentId)    filter.studentId    = req.query.studentId;
-    if (req.query.classId)      filter.classId      = req.query.classId;
-    if (req.query.subjectId)    filter.subjectId    = req.query.subjectId;
-    if (req.query.examId)       filter.examId       = req.query.examId;
-
-    // This took an arbitrary ?classId= with zero scope check — the one
-    // real gap that had no mitigating "the list itself is already scoped"
-    // story, since it accepts a classId directly rather than requiring a
-    // caller to have discovered an exam through GET /. Same treatment as
-    // GET / above: narrow by class first, then by subject.
-    const originalScope = req.scope;
-    req.scope = await _examClassScope(req);
-    ScopeEngine.applyToFilter(req, 'exams', filter);
-    _applySubjectScope(req, filter);
-    req.scope = originalScope;
-
-    const Results = tenantModel('exam_results', tenantContext(req));
-    const [docs, total] = await Promise.all([
-      Results.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).select('-__v').lean(),
-      Results.countDocuments(filter)
-    ]);
-    return ok(res, docs, paginate(page, limit, total));
-  } catch (err) { console.error('[exams/results/all GET]', err); return E.serverError(res); }
-});
-
-// Exposed for direct unit testing (same convention as report-cards.js).
-router._notifyExamResultsPublished = _notifyExamResultsPublished;
 
 module.exports = router;

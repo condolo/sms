@@ -14,7 +14,7 @@ import {
   Search, Save, Check, PenLine, Bell,
   Users2, GraduationCap, Filter, Percent, Settings,
   Tag, Layers, Info, ClipboardPaste, Lock,
-  BookMarked, LockOpen, Send, ClipboardEdit, XCircle, RotateCcw,
+  BookMarked, LockOpen, Send, XCircle, RotateCcw,
 } from 'lucide-react';
 import {
   exams as examsApi,
@@ -161,17 +161,11 @@ export default function ExamsPage() {
 
 /* ── Status badge ────────────────────────────────────────────── */
 const STATUS_CFG = {
-  draft:       { label: 'Draft',       cls: 'bg-slate-100 text-slate-600 border-slate-200'      },
   scheduled:   { label: 'Scheduled',   cls: 'bg-blue-50   text-blue-700  border-blue-200'       },
   in_progress: { label: 'In Progress', cls: 'bg-amber-50  text-amber-700 border-amber-200'      },
-  active:      { label: 'Active',      cls: 'bg-violet-50 text-violet-700 border-violet-200'    },
   completed:   { label: 'Completed',   cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-  moderated:   { label: 'Moderated',   cls: 'bg-indigo-50 text-indigo-700 border-indigo-200'   },
-  approved:    { label: 'Approved',    cls: 'bg-teal-50   text-teal-700  border-teal-200'       },
-  locked:      { label: 'Locked',      cls: 'bg-slate-100 text-slate-700 border-slate-300'      },
-  published:   { label: 'Published',   cls: 'bg-green-50  text-green-700 border-green-200'      },
-  archived:    { label: 'Archived',    cls: 'bg-slate-50  text-slate-500 border-slate-200'      },
-  cancelled:   { label: 'Cancelled',   cls: 'bg-red-50    text-red-700   border-red-200'        },
+  cancelled:   { label: 'Cancelled',   cls: 'bg-rose-50   text-rose-700  border-rose-200'       },
+  draft:       { label: 'Draft',       cls: 'bg-slate-100 text-slate-600 border-slate-200'      },
 };
 function StatusBadge({ status }) {
   const cfg = STATUS_CFG[status] ?? STATUS_CFG.draft;
@@ -200,7 +194,6 @@ function ExamsTab({ years, assessmentWeights, subjectsList, canCreate }) {
   const [search, setSearch] = useState('');
   const [showAdd,      setShowAdd]      = useState(false);
   const [showAnnounce, setShowAnnounce] = useState(false);
-  const [resultsExam,  setResultsExam]  = useState(null);
 
   const [filterYearId, setFilterYearId]               = useState('');
   const [filterTermLabel, setFilterTermLabel]           = useState('');
@@ -395,14 +388,6 @@ function ExamsTab({ years, assessmentWeights, subjectsList, canCreate }) {
                   <td className="px-4 py-3 text-right text-xs text-slate-400">
                     {e.date ? new Date(e.date).toLocaleDateString('en-GB') : '—'}
                   </td>
-                  <td className="px-4 py-3 text-right">
-                    <button
-                      onClick={() => setResultsExam(e)}
-                      className="flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 px-2.5 py-1.5 rounded-lg transition-colors ml-auto"
-                    >
-                      <ClipboardEdit size={12} /> Results
-                    </button>
-                  </td>
                 </tr>
               ))}
             </tbody>
@@ -425,13 +410,6 @@ function ExamsTab({ years, assessmentWeights, subjectsList, canCreate }) {
           <AnnounceSittingSlideOver
             onClose={() => setShowAnnounce(false)}
             onCreated={() => { setShowAnnounce(false); qc.invalidateQueries({ queryKey: ['exams'] }); }}
-          />
-        )}
-        {resultsExam && (
-          <ResultsSlideOver
-            exam={resultsExam}
-            onClose={() => setResultsExam(null)}
-            onChanged={() => qc.invalidateQueries({ queryKey: ['exams', 'list'] })}
           />
         )}
       </AnimatePresence>
@@ -1540,383 +1518,6 @@ function AnnounceSittingSlideOver({ onClose, onCreated }) {
         </div>
       </div>
     </motion.div>
-  );
-}
-
-/* ══════════════════════════════════════════════════════════════
-   RESULTS SLIDE-OVER — enter/view results for one exam, plus its
-   status workflow (scheduled → … → published → archived).
-
-   The server side of this (POST/GET /:id/results, lock/unlock,
-   status transitions, moderation, publish-notifies-guardians) was
-   fully built out earlier but had no client screen calling it at
-   all — an exam could be created and scheduled with nowhere to
-   actually record results. This is that missing screen.
-
-   Deliberately separate from Markbook: Markbook is day-to-day CA/
-   quiz mark entry against assessment_config.customTypes weights;
-   this is formal exam administration (its own maxScore/status/
-   moderation/audit trail/guardian notification). Both ultimately
-   feed the report-card weighted score via academic-calc.js's
-   aggregateAssessmentMarks — see the exam.assessmentType grouping fix
-   in academic-calc.js.
-   ══════════════════════════════════════════════════════════════ */
-const MARK_STATE_OPTIONS = [
-  { value: 'present', label: 'Present' },
-  { value: 'ABS',      label: 'Absent' },
-  { value: 'MIS',      label: 'Missing' },
-  { value: 'EXM',      label: 'Exempted' },
-  { value: 'INC',      label: 'Incomplete' },
-];
-
-/* Client-side mirror of exams.js's EXAM_TRANSITIONS — labels/role gates
-   for which buttons to show; the server is the actual enforcer and
-   rejects anything not in its own transition table regardless of what
-   the client sends. 'lock'/'unlock' kinds route through the dedicated
-   POST /:id/lock /unlock endpoints instead of a raw status PUT, since
-   only those set lockedBy/lockedAt and (unlock) enforce a mandatory
-   reason — a plain PUT {status} bypasses both. */
-const STATUS_ACTIONS = {
-  scheduled:   [{ to: 'in_progress', label: 'Start Exam' }],
-  in_progress: [{ to: 'completed',   label: 'Mark Completed' }],
-  completed:   [{ to: 'moderated',   label: 'Moderate', adminOnly: true },
-                { to: 'locked',      label: 'Lock', adminOnly: true, kind: 'lock' }],
-  moderated:   [{ to: 'approved',    label: 'Approve', adminOnly: true },
-                { to: 'completed',   label: 'Reopen', adminOnly: true }],
-  approved:    [{ to: 'locked',      label: 'Lock', adminOnly: true, kind: 'lock' }],
-  locked:      [{ to: 'published',   label: 'Publish Results', adminOnly: true,
-                  confirm: 'Publish results? Parents/guardians will be notified immediately.' },
-                { to: 'approved',    label: 'Unlock', adminOnly: true, kind: 'unlock' }],
-  published:   [{ to: 'archived',    label: 'Archive', adminOnly: true }],
-  archived:    [],
-  cancelled:   [],
-};
-
-function ResultsSlideOver({ exam, onClose, onChanged }) {
-  const qc = useQueryClient();
-  const role = useAuthStore(s => s.session?.user?.role ?? '');
-  const can  = useAuthStore(s => s.can);
-  const isAdmin = ['admin', 'superadmin'].includes(role);
-  const isTeacher = role === 'teacher';
-  // Exams Officer has full exams:RCUD (server/utils/repairPermissions.js) and
-  // can now drive the exam status lifecycle just like admin — EXCEPT lock/
-  // unlock, which stay deliberately more restrictive (see below): locking
-  // freezes results, so it requires the admin/superadmin floor OR an explicit
-  // exams.lock/exams.unlock grant from Settings, matching exactly what
-  // server/routes/exams.js's _checkTransition and POST /:id/lock enforce —
-  // this button visibility is not a separate decision, it mirrors the server.
-  const isExamsOfficer = role === 'exams_officer';
-  const canManageLifecycle = isAdmin || isExamsOfficer;
-  const canLockExams   = isAdmin || can('exams__lock',   'update');
-  const canUnlockExams = isAdmin || can('exams__unlock', 'update');
-  const [toast, setToast] = useState(null);
-  const [rows, setRows] = useState({}); // studentId -> { score, markState }
-  const [showUnlock, setShowUnlock] = useState(false);
-  const [unlockReason, setUnlockReason] = useState('');
-  const [confirmAction, setConfirmAction] = useState(null);
-
-  const readOnly = ['locked', 'published', 'archived'].includes(exam.status);
-
-  /* ── Stream picker — exams are shared class-wide (exams.js's own
-     _examClassScope comment: "there is only one exam for the class"), so
-     entering RESULTS for a teacher assigned to 2+ streams of this exam's
-     subject/class is where the per-stream boundary actually needs to be
-     drawn — same reasoning and same derivation as MarkbookTab's own
-     myStreamsForClass, just scoped to this one exam's class+subject
-     instead of a live class/subject picker. A teacher assigned to exactly
-     one stream (or a whole-class grant) needs no picker — classesApi.
-     students' own server-side narrowing already scopes correctly either
-     way. */
-  const { data: taData } = useQuery({
-    queryKey: ['teaching-assignments', 'mine'],
-    queryFn:  () => taApi.list(),
-    staleTime: 10 * 60_000,
-    enabled:  isTeacher,
-  });
-  const myAssignments = taData?.data ?? [];
-  const myStreamsForExam = useMemo(() => {
-    if (!isTeacher) return [];
-    const seen = new Set();
-    return myAssignments
-      .filter(a => a.classId === exam.classId && a.subjectId === exam.subjectId && a.streamId)
-      .map(a => ({ id: a.streamId, name: a.streamName }))
-      .filter(s => s.id && !seen.has(s.id) && seen.add(s.id));
-  }, [isTeacher, myAssignments, exam.classId, exam.subjectId]);
-  const needsStreamSelection = myStreamsForExam.length > 1;
-  const [streamId, setStreamId] = useState('');
-
-  const { data: studentsData, isLoading: loadingStudents } = useQuery({
-    queryKey: needsStreamSelection
-      ? ['streams', streamId, 'students']
-      : ['classes', exam.classId, 'students'],
-    queryFn: () => needsStreamSelection
-      ? streamsApi.students(streamId, { limit: 500 })
-      : classesApi.students(exam.classId),
-    enabled:  needsStreamSelection ? !!streamId : !!exam.classId,
-    staleTime: 5 * 60_000,
-  });
-  const students = studentsData?.data ?? [];
-
-  const { data: resultsData, isLoading: loadingResults, refetch: refetchResults } = useQuery({
-    queryKey: ['exams', exam.id, 'results'],
-    queryFn:  () => examsApi.results.list(exam.id, { limit: 500 }),
-  });
-  const existingResults = resultsData?.data?.results ?? [];
-  const stats           = resultsData?.data?.stats ?? null;
-  const existingMap = useMemo(
-    () => Object.fromEntries(existingResults.map(r => [r.studentId, r])),
-    [existingResults]
-  );
-
-  // Seed local editable rows from students + existing results — only for
-  // studentIds not already seeded, so an in-progress edit is never
-  // clobbered by a background refetch.
-  useEffect(() => {
-    if (!students.length) return;
-    setRows(prev => {
-      let changed = false;
-      const next = { ...prev };
-      for (const s of students) {
-        const sid = s.id ?? s._id;
-        if (next[sid]) continue;
-        const existing = existingMap[sid];
-        next[sid] = {
-          score:     existing?.score != null ? String(existing.score) : '',
-          markState: existing?.markState ?? 'present',
-        };
-        changed = true;
-      }
-      return changed ? next : prev;
-    });
-  }, [students, existingMap]);
-
-  function setRow(sid, patch) {
-    setRows(r => ({ ...r, [sid]: { ...r[sid], ...patch } }));
-  }
-
-  const { mutate: saveResults, isPending: saving } = useMutation({
-    mutationFn: () => {
-      const payload = students.map(s => {
-        const sid = s.id ?? s._id;
-        const row = rows[sid] ?? { score: '', markState: 'present' };
-        const existing = existingMap[sid];
-        return {
-          studentId: sid,
-          markState: row.markState,
-          score:     row.markState === 'present' && row.score !== '' ? Number(row.score) : undefined,
-          _v:        existing?._v,
-        };
-      });
-      return examsApi.results.bulkUpsert(exam.id, { results: payload });
-    },
-    onSuccess: (res) => {
-      const conflicts = res?.data?.conflicts ?? [];
-      qc.invalidateQueries({ queryKey: ['exams', exam.id, 'results'] });
-      refetchResults();
-      onChanged?.();
-      setToast(conflicts.length
-        ? { msg: `${conflicts.length} result(s) were changed by someone else and were not saved — reload to see the latest.`, type: 'error' }
-        : { msg: 'Results saved.', type: 'success' });
-    },
-    onError: err => setToast({ msg: err?.message ?? 'Failed to save results.', type: 'error' }),
-  });
-
-  const { mutate: transition, isPending: transitioning } = useMutation({
-    mutationFn: ({ to, kind, reason }) => {
-      if (kind === 'lock')   return examsApi.lock(exam.id, { reason });
-      if (kind === 'unlock') return examsApi.unlock(exam.id, { reason });
-      return examsApi.update(exam.id, { status: to });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['exams', exam.id, 'results'] });
-      onChanged?.();
-      setShowUnlock(false);
-      setUnlockReason('');
-      setConfirmAction(null);
-      setToast({ msg: 'Status updated.', type: 'success' });
-    },
-    onError: err => setToast({ msg: err?.message ?? 'Failed to update status.', type: 'error' }),
-  });
-
-  function handleAction(action) {
-    if (action.kind === 'unlock') { setShowUnlock(true); return; }
-    if (action.confirm)           { setConfirmAction(action); return; }
-    transition({ to: action.to, kind: action.kind });
-  }
-
-  const availableActions = (STATUS_ACTIONS[exam.status] ?? []).filter(a => {
-    if (!a.adminOnly) return true;
-    if (a.kind === 'lock')   return canLockExams;
-    if (a.kind === 'unlock') return canUnlockExams;
-    return canManageLifecycle; // Moderate, Reopen, Approve, Publish Results, Archive
-  });
-
-  return (
-    <>
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-        className="fixed inset-0 bg-slate-900/30 backdrop-blur-sm z-40" onClick={onClose} />
-      <motion.div
-        initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
-        transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-        className="fixed right-0 top-0 h-full w-full max-w-3xl bg-white shadow-2xl z-50 flex flex-col"
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
-          <div className="min-w-0">
-            <h2 className="text-base font-semibold text-slate-900 truncate">{exam.title}</h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              {exam.subjectName ?? exam.subjectId} — {exam.className ?? exam.classId} · Max {exam.maxScore}
-            </p>
-          </div>
-          <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition shrink-0"><X size={16} /></button>
-        </div>
-
-        {/* Status + actions bar */}
-        <div className="px-6 py-3 border-b border-slate-100 bg-slate-50 flex items-center justify-between gap-3 flex-wrap shrink-0">
-          <div className="flex items-center gap-2">
-            <StatusBadge status={exam.status} />
-            {readOnly && <span className="text-xs text-slate-500 flex items-center gap-1"><Lock size={11} /> Read-only</span>}
-          </div>
-          {availableActions.length > 0 && (
-            <div className="flex items-center gap-2 flex-wrap">
-              {availableActions.map(a => (
-                <button key={a.to} onClick={() => handleAction(a)} disabled={transitioning}
-                  className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-50 transition flex items-center gap-1">
-                  {a.kind === 'unlock' ? <LockOpen size={11} /> : a.kind === 'lock' ? <Lock size={11} /> : a.to === 'published' ? <Send size={11} /> : null}
-                  {a.label}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="px-6 pt-3">
-          <AnimatePresence>{toast && <Toast msg={toast.msg} type={toast.type} onDismiss={() => setToast(null)} />}</AnimatePresence>
-        </div>
-
-        {showUnlock && (
-          <div className="mx-6 mt-1 p-4 rounded-xl bg-amber-50 border border-amber-200 space-y-2 shrink-0">
-            <p className="text-xs font-semibold text-amber-800 flex items-center gap-1.5"><LockOpen size={12} /> Unlock this exam</p>
-            <p className="text-xs text-amber-700">A reason is required — it's recorded in the audit log.</p>
-            <input type="text" value={unlockReason} onChange={e => setUnlockReason(e.target.value)}
-              placeholder="e.g. marks correction approved by principal"
-              className="w-full text-sm px-3 py-2 rounded-lg border border-amber-300 bg-white focus:outline-none focus:ring-2 focus:ring-amber-400/30" autoFocus />
-            <div className="flex gap-2 justify-end">
-              <button onClick={() => { setShowUnlock(false); setUnlockReason(''); }} className="text-xs text-slate-500 hover:text-slate-700 px-3 py-1.5">Cancel</button>
-              <button onClick={() => transition({ kind: 'unlock', reason: unlockReason })}
-                disabled={!unlockReason.trim() || transitioning}
-                className="text-xs font-semibold bg-amber-700 hover:bg-amber-800 disabled:opacity-50 text-white px-4 py-1.5 rounded-lg transition">
-                Confirm unlock
-              </button>
-            </div>
-          </div>
-        )}
-
-        {confirmAction && (
-          <div className="mx-6 mt-1 p-4 rounded-xl bg-indigo-50 border border-indigo-200 space-y-2 shrink-0">
-            <p className="text-xs text-indigo-800">{confirmAction.confirm}</p>
-            <div className="flex gap-2 justify-end">
-              <button onClick={() => setConfirmAction(null)} className="text-xs text-slate-500 hover:text-slate-700 px-3 py-1.5">Cancel</button>
-              <button onClick={() => transition({ to: confirmAction.to, kind: confirmAction.kind })} disabled={transitioning}
-                className="text-xs font-semibold bg-indigo-700 hover:bg-indigo-800 disabled:opacity-50 text-white px-4 py-1.5 rounded-lg transition">
-                Confirm
-              </button>
-            </div>
-          </div>
-        )}
-
-        {stats && (
-          <div className="mx-6 mt-3 grid grid-cols-4 gap-2 shrink-0">
-            {[
-              { label: 'Entered', value: stats.count },
-              { label: 'Average', value: stats.average },
-              { label: 'Highest', value: stats.highest },
-              { label: 'Lowest',  value: stats.lowest },
-            ].map(s => (
-              <div key={s.label} className="rounded-lg border border-slate-200 p-2 text-center">
-                <p className="text-[10px] text-slate-400 uppercase tracking-wide">{s.label}</p>
-                <p className="text-sm font-semibold text-slate-800">{s.value ?? '—'}</p>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Stream picker — this class has 2+ of the teacher's own assigned
-           streams for this exam's subject; enter results one stream at a
-           time (see myStreamsForExam's own comment above). */}
-        {needsStreamSelection && (
-          <div className="mx-6 mt-3 shrink-0">
-            <label className="block text-xs font-medium text-slate-600 mb-1.5">Stream</label>
-            <select
-              value={streamId}
-              onChange={e => setStreamId(e.target.value)}
-              className="w-full text-sm px-3 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400"
-            >
-              <option value="">Select stream…</option>
-              {myStreamsForExam.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-          </div>
-        )}
-
-        {/* Results grid */}
-        <div className="flex-1 overflow-y-auto px-6 py-4">
-          {needsStreamSelection && !streamId ? (
-            <p className="text-sm text-slate-400 text-center py-8">Select a stream above — you teach {myStreamsForExam.length} streams of this class.</p>
-          ) : loadingStudents || loadingResults ? (
-            <div className="space-y-2">{[...Array(6)].map((_, i) => <div key={i} className="h-10 rounded-lg bg-slate-100 animate-pulse" />)}</div>
-          ) : students.length === 0 ? (
-            <p className="text-sm text-slate-400 text-center py-8">No students found in this class.</p>
-          ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-100">
-                  <th className="text-left py-2 text-xs font-semibold text-slate-500 uppercase">Student</th>
-                  <th className="text-left py-2 text-xs font-semibold text-slate-500 uppercase w-36">Status</th>
-                  <th className="text-right py-2 text-xs font-semibold text-slate-500 uppercase w-28">Score</th>
-                  <th className="text-right py-2 text-xs font-semibold text-slate-500 uppercase w-20">Grade</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {students.map(s => {
-                  const sid = s.id ?? s._id;
-                  const row = rows[sid] ?? { score: '', markState: 'present' };
-                  const existing = existingMap[sid];
-                  return (
-                    <tr key={sid}>
-                      <td className="py-2 text-slate-700">{s.name ?? `${s.firstName ?? ''} ${s.lastName ?? ''}`.trim()}</td>
-                      <td className="py-2">
-                        <select value={row.markState} disabled={readOnly}
-                          onChange={e => setRow(sid, { markState: e.target.value, score: e.target.value !== 'present' ? '' : row.score })}
-                          className="text-xs px-2 py-1.5 rounded-lg border border-slate-200 bg-white disabled:opacity-50 disabled:bg-slate-50">
-                          {MARK_STATE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                        </select>
-                      </td>
-                      <td className="py-2 text-right">
-                        <input type="number" min="0" max={exam.maxScore} step="0.1"
-                          value={row.score} disabled={readOnly || row.markState !== 'present'}
-                          onChange={e => setRow(sid, { score: e.target.value })}
-                          className="w-20 text-sm text-right px-2 py-1.5 rounded-lg border border-slate-200 disabled:opacity-50 disabled:bg-slate-50" />
-                      </td>
-                      <td className="py-2 text-right text-xs font-semibold text-slate-600">{existing?.grade ?? '—'}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-        </div>
-
-        {!readOnly && (
-          <div className="px-6 py-4 border-t border-slate-200 flex items-center justify-end shrink-0 bg-white">
-            <button onClick={() => saveResults()} disabled={saving || students.length === 0}
-              className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-sm font-medium px-5 py-2 rounded-lg transition">
-              {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-              {saving ? 'Saving…' : 'Save results'}
-            </button>
-          </div>
-        )}
-      </motion.div>
-    </>
   );
 }
 
