@@ -6125,3 +6125,36 @@ Read the full existing `computeFinalScores` describe block in `academic-calc.tes
 ### Files
 - `server/utils/academic-calc.js` — `computeFinalScores`'s merge-order spread, with inline rationale comment
 - `server/__tests__/academic-calc.test.js` — 2 new tests
+
+
+## 107. The Markbook Is the Single Source of Truth for Marks (v5.168.0)
+
+### Architecture contract
+- **Markbook** owns every assessment mark: `assessment_marks`, with mark states (present, ABS, MIS, EXM, INC). Its windows are `assessment_schedule` and its moderation is `mark_submissions`.
+- **Exams** own the sitting only: `exams`, with date, room, invigilator, duration, class, subject, and a four-state status (scheduled, in_progress, completed, cancelled). Creating an exam links it to its Markbook window via `scheduleEntryId`.
+- **Report cards** read `assessment_marks` only. `aggregateUnmoderatedMarks` (academic-calc.js) gives the provisional state from `mark_submissions`. Retired: `exam_results`, the legacy `grades` collection, `aggregateExamResults`, and `aggregateGrades`.
+
+### Data model
+- `assessment_marks`: `markState` (present, ABS, MIS, EXM, INC). A non-present mark carries no `rawScore`. `rawScore` is a 0–100 percentage. `migratedFromExamResultId` and `gcCourseWorkId` are provenance fields.
+- `assessment_schedule`: defaults `academicYearId` to the current year. Legacy rows with a null year still match via `_yearFilterPart`.
+- `mark_submissions`: draft, submitted, approved, rejected, locked. Writes to a submitted or approved key are rejected by `POST /assessment/marks` and `/marks/bulk`.
+
+### Migration (exam_results to assessment_marks)
+`server/scripts/migrate-exam-results-to-markbook.js`. Dry run by default; `--apply` writes. Rules:
+- `rawScore = score / maxScore * 100`.
+- Term from the exam's `termId` index. Instance by date for sittings of the same type.
+- An existing Markbook value that differs is a conflict and is never overwritten.
+- Re-running is idempotent (keyed on `migratedFromExamResultId`).
+- Approval is carried forward only when the old exam status proves it (`legacyApprovalFor`).
+
+### Classroom to Markbook (blocked, deliberately)
+`routes/elearning.js` writes a grade only when the coursework names a configured `assessment_schedule` entry (`markbookScheduleId`, validated on creation), the course has a class and subject, and the Google account resolves to a student record in that class. Otherwise it logs and writes nothing. No HW instances are created automatically. The pure rules are in `utils/classroom-mark-plan.js`.
+
+### Verification
+- Form 1A Biology CA: 70 / 67 / 90 on the exam-sourced and Markbook-sourced paths.
+- Tests cover the Markbook write rules, the migration planner, `aggregateUnmoderatedMarks`, report-card term scoping, the four-state exam transitions, and the retired routes returning 404.
+
+### Open items
+- Classroom identity mapping and `markbookScheduleId` targets are not established. Nothing is written until both are.
+- Four "Testing" `exam_results` rows have no assessment type and remain unmigrated.
+- The `exam_results` notification registry entry in `utils/notif-settings.js` is dead (its only sender was removed). It still says `implemented: true`.

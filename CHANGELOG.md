@@ -6,6 +6,45 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.168.0] — 2026-10-04 — refactor(markbook): all mark entry consolidated into the Markbook; Exams are scheduling-only; report cards read the Markbook only
+
+Architecture change, delivered as seven phases (Phase 0 to Phase 6). This entry and the DEVELOPER_GUIDE section are Phase 7. Before this, marks were entered in two unsynced systems: the Markbook (assessment_marks) and Exams → Results (exam_results). Report cards read both, plus a legacy grades collection.
+
+### The contract
+- The Markbook is the single source of truth for every assessment mark: CA, HW, MT, ET and custom types.
+- Exams records the sitting only (date, room, invigilator, duration, class, subject) and a four-state status: scheduled, in_progress, completed, cancelled.
+- Report cards read assessment_marks only. exam_results and the legacy grades collection are not read by any report-card path.
+- Moderation uses mark_submissions (draft, submitted, approved, rejected, locked, with unlock requests and a 24h relock). Nothing new was invented.
+
+### What changed
+- Phase 0: a per-module scope floor for the Markbook roster (assessmentScope=true), parallel to Attendance and Lessons. It closes a leak where a role with school-level scope for another module and a real stream assignment saw the whole class.
+- Phase 1: mark states (present, ABS, MIS, EXM, INC) on assessment_marks. A non-present mark carries no score. Schedule windows default to the current academic year, so new rows never carry a null year.
+- Phase 2: creating an exam links it to its Markbook window (assessment_schedule), creating the window if needed.
+- Phase 3: the Markbook shows per-column submission status, with Submit, Recall, and rejection reasons. Grid cells are read-only while submitted, approved or locked. The Configuration tab has a Moderation queue (Approve, Reject, Lock, Unlock). Writes are rejected while a submission is under review.
+- Phase 4: exam_results migrated into assessment_marks (10 rows on the demo school), via a dry-run-first script (server/scripts/migrate-exam-results-to-markbook.js). Verified: Form 1A Biology CA reads 90 / 67 / 70 on both the old and new paths. exam_results is retained as legacy.
+- Phase 5: report cards read the Markbook only. Moderation is sourced from mark_submissions. Growth Profile and the Academic Health KPI aggregate assessment_marks. The student profile grades tab calls the Markbook report, which fixes a 404.
+- Phase 6: removed GET and POST /exams/:id/results, GET /exams/results/all, the lock and unlock endpoints, the eight-state moderation chain, the publish notification that read exam_results, the Results screen, the exams lock, unlock and results permission keys, and the unmounted routes/grades.js.
+
+### Verified
+- Form 1A Biology CA: 70 / 67 / 90 before and after migration, on both the exam-sourced and Markbook-sourced paths.
+- The historical moderation state is evidence-backed. The old exams were completed and never approved. A publish batch for them failed with "not yet approved". Nothing in the database records an approval, lock or publication. So their migrated marks stay provisional. An approval is carried forward only when an old status proves one (approved, locked, published, archived). No live data has such a status.
+- Test suite: 266 suites, 2776 tests passing. The client builds.
+
+### Open items (deliberately unresolved)
+1. Google Classroom to Markbook is blocked. There is no deterministic link between a Google account and a student record, and no coursework has a markbookScheduleId. The webhook writes nothing and logs the reason. Live: zero coursework links, zero tokens, zero linked accounts, zero Classroom-sourced marks.
+2. Four "Testing" exam_results rows (scores 45, 98, 64, 90) have no assessment type. They are not migrated and not read by any report-card or portal path. They are left untouched pending a decision.
+3. The exam_results notification setting ("Exam Results Released") is dead. Its only sender was the publish handler removed in this arc. The registry still marks it implemented: true, so Settings shows an enabled toggle that nothing sends. Fix: mark it not implemented, or remove it. Not changed yet.
+
+### Files
+- server/routes/exams.js, server/routes/assessment.js, server/routes/report-cards.js, server/routes/elearning.js, server/routes/growth-profile.js, server/routes/analytics.js, server/routes/classes.js
+- server/utils/academic-calc.js, server/utils/scopeEngine.js, server/utils/mark-states.js, server/utils/classroom-mark-plan.js
+- server/scripts/migrate-exam-results-to-markbook.js (dry run by default)
+- server/config/moduleRegistry.js
+- client/src/pages/exams/ExamsPage.jsx, client/src/pages/grades/components/ConfigTab.jsx, client/src/pages/students/StudentProfile.jsx, client/src/pages/settings/SettingsPage.jsx, client/src/api/client.js
+- Removed: server/routes/grades.js and its two route tests; the four retired-feature exams test files
+
+---
+
 ## [v5.167.0] — 2026-10-01 — fix(assessment): marks entered through Exams → Results silently overrode the Markbook on the report card, with no indication either had happened
 
 Raised directly, with a screenshot of the Exams tab: "I have saved makes for this class and subject for CA 1, it saves but still empty as if i need to add another marks for the same subject. also i need you to verify when marks are added through this channel, how about through this other channel which looks more presentable? how does this work?"
