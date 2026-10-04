@@ -1860,9 +1860,21 @@ export default function LessonsPage() {
   const defaultTab = (isAdmin || isHod) ? 'overview' : 'my-classes';
   const [tab, setTab] = useState(defaultTab);
 
+  // Teaching tabs follow what a person actually teaches, not only the
+  // 'teacher' role: a principal or other admin-level user with class/subject
+  // assignments plans lessons like any teacher. Same query MyClassesTab uses,
+  // so the cache is shared.
+  const { data: myClassesData } = useQuery({
+    queryKey: ['lessons', 'my-classes'],
+    queryFn:  () => lessonsApi.myClasses(),
+    staleTime: 5 * 60_000,
+  });
+  const hasAssignments = (myClassesData?.data ?? []).length > 0;
+  const canTeach = isTeacher || hasAssignments;
+
   const tabs = [
-    ...(isTeacher ? [{ key: 'my-classes', label: 'Topics & Coverage', Icon: BookCheck }] : []),
-    ...(isTeacher ? [{ key: 'plans',      label: 'Lesson Plans',      Icon: NotebookPen }] : []),
+    ...(canTeach ? [{ key: 'my-classes', label: 'Topics & Coverage', Icon: BookCheck }] : []),
+    ...(canTeach ? [{ key: 'plans',      label: 'Lesson Plans',      Icon: NotebookPen }] : []),
     ...((isAdmin || isHod) ? [{ key: 'overview', label: 'Overview', Icon: BarChart3 }] : []),
     ...(canConfigureTemplate ? [{ key: 'template', label: 'Template', Icon: Settings }] : []),
   ];

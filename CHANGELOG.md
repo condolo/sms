@@ -6,6 +6,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.168.1] — 2026-10-04 — fix(lessons): people with teaching assignments could not plan lessons unless their role was teacher
+
+Raised directly: Collins (principal, Trinitas) had a subject/class/stream assignment but could not create lesson plans. He could only open Overview and Template. Other admin-level users with assignments had the same problem.
+
+Root cause: the Lessons page showed the Topics & Coverage and Lesson Plans tabs only when the role was teacher or hod. Admin-level roles saw Overview and configuration, never the planning tabs. The server already allowed these users to plan (isAdmin, plus the lessons create permission), so this was a client gate.
+
+Fix: the teaching tabs now appear when the user has teaching assignments (same my-classes query the page already uses), as well as for teacher and hod.
+
+Verified: principal demo account with no assignments sees Overview and Template only. The teacher demo account still sees the teaching tabs. Build passes. A positive check for a principal with assignments needs that user to sign in, or an assignment in the demo school.
+
+Open: Trinity has no teaching assignment for Collins and no teacher record, so he will not see the teaching tabs there until one is created. The same email is on two accounts, one in each school. Not changed.
+
+---
+
 ## [v5.168.0] — 2026-10-04 — refactor(markbook): all mark entry consolidated into the Markbook; Exams are scheduling-only; report cards read the Markbook only
 
 Architecture change, delivered as seven phases (Phase 0 to Phase 6). This entry and the DEVELOPER_GUIDE section are Phase 7. Before this, marks were entered in two unsynced systems: the Markbook (assessment_marks) and Exams → Results (exam_results). Report cards read both, plus a legacy grades collection.
