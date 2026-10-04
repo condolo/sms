@@ -816,6 +816,9 @@ router.get('/:id/status-history', authMiddleware, PLAN, MODGATE, rbac('exams', '
    ══════════════════════════════════════════════════════════════ */
 
 /* GET /api/exams/:id/results */
+// LEGACY — exam_results is superseded by assessment_marks (migrated in
+// v5.168.0). The results routes are retired in Phase 6; do not reconnect
+// exam_results to the report-card pipeline.
 router.get('/:id/results', authMiddleware, PLAN, MODGATE, rbac('exams', 'read'), scopeMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;

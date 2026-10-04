@@ -95,6 +95,9 @@ async function aggregateGrades(schoolId, classId, termId, academicYearId, studen
  * @param {string|null} academicYearId
  * @param {string|null} studentId  — pass to scope to one student
  */
+// LEGACY — read-only. exam_results is superseded by assessment_marks (every
+// row was migrated, v5.168.0). Do not reconnect this to the report-card
+// pipeline; report cards read the Markbook only.
 async function aggregateExamResults(schoolId, classId, termId, academicYearId, studentId = null) {
   const examsFilter = {
     schoolId, classId,
