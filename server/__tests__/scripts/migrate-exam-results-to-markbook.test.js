@@ -133,3 +133,16 @@ describe('planExamStatusRemap — legacy exam statuses fold into completed', () 
     expect(planExamStatusRemap({ status })).toEqual({ action: 'none' });
   });
 });
+
+describe('legacyApprovalFor — only states the old system proves become an approval record', () => {
+  const { legacyApprovalFor } = require('../../scripts/migrate-exam-results-to-markbook');
+  test('approved carries forward as approved', () => {
+    expect(legacyApprovalFor('approved')).toBe('approved');
+  });
+  test.each(['locked', 'published', 'archived'])('%s carries forward as locked', (status) => {
+    expect(legacyApprovalFor(status)).toBe('locked');
+  });
+  test.each(['completed', 'moderated', 'in_progress', 'scheduled', undefined])('%s proves no approval, so nothing is invented', (status) => {
+    expect(legacyApprovalFor(status)).toBeNull();
+  });
+});

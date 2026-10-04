@@ -115,6 +115,16 @@ function planResult({ result, exam, studentStreamId, termNumber, instance, exist
   return { action: 'migrate', doc };
 }
 
+/* What the old exam status proves about approval. Only states that mean the
+   exam was approved are carried forward as a mark_submissions record. completed,
+   moderated, in_progress and scheduled prove nothing was approved, so the marks
+   stay unapproved (provisional) rather than having a state invented for them. */
+function legacyApprovalFor(examStatus) {
+  if (examStatus === 'approved') return 'approved';
+  if (examStatus === 'locked' || examStatus === 'published' || examStatus === 'archived') return 'locked';
+  return null;
+}
+
 function planExamStatusRemap(exam) {
   if (LEGACY_EXAM_STATUSES.includes(exam.status)) return { action: 'remap', from: exam.status, to: 'completed' };
   return { action: 'none' };
@@ -206,7 +216,35 @@ if (require.main === module) {
       if (planExamStatusRemap(exam).action === 'remap') report.examStatusRemap++;
     }
 
+    // Approval state the old system actually recorded, carried into mark_submissions.
+    const submissionKey = d => [d.classId, d.subjectId, d.termNumber, d.assessmentType, d.instance].join('|');
+    const legacySubs = new Map();
+    for (const { plan, examId } of planned) {
+      const approval = legacyApprovalFor(examById[examId]?.status);
+      if (!approval) continue;
+      const k = submissionKey(plan.doc);
+      if (!legacySubs.has(k)) legacySubs.set(k, { status: approval, examId, doc: plan.doc });
+    }
+    report.legacySubmissions = [...legacySubs.values()].map(v => ({ status: v.status, examId: v.examId, classId: v.doc.classId, subjectId: v.doc.subjectId, termNumber: v.doc.termNumber, assessmentType: v.doc.assessmentType, instance: v.doc.instance }));
+    report.provisionalByLegacyStatus = planned.filter(({ examId }) => !legacyApprovalFor(examById[examId]?.status)).length;
+
     if (apply) {
+      for (const v of legacySubs.values()) {
+        const exists = await _model('mark_submissions').findOne({ schoolId, classId: v.doc.classId, subjectId: v.doc.subjectId, termNumber: v.doc.termNumber, assessmentType: v.doc.assessmentType, instance: v.doc.instance }).lean();
+        if (exists) continue;
+        const now = new Date().toISOString();
+        await _model('mark_submissions').insertOne({
+          id: crypto.randomUUID(), schoolId,
+          classId: v.doc.classId, subjectId: v.doc.subjectId, termNumber: v.doc.termNumber,
+          assessmentType: v.doc.assessmentType, instance: v.doc.instance, academicYearId: v.doc.academicYearId,
+          examSeriesId: null, notes: null, status: v.status,
+          submittedBy: 'migration:exam_results', submittedAt: now,
+          reviewedBy: 'migration:exam_results', reviewedAt: now, rejectionReason: null,
+          marksSnapshot: [], createdAt: now, updatedAt: now,
+          migratedFromExamId: v.examId,
+        });
+        report.applied.submissionsInserted = (report.applied.submissionsInserted || 0) + 1;
+      }
       if (planned.length) {
         const ops = planned.map(({ plan, resultId }) => ({
           insertOne: { document: {
@@ -264,4 +302,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { toRawScore, resolveTermNumber, assignInstances, planResult, planExamStatusRemap, LEGACY_EXAM_STATUSES };
+module.exports = { toRawScore, resolveTermNumber, assignInstances, planResult, planExamStatusRemap, legacyApprovalFor, LEGACY_EXAM_STATUSES };

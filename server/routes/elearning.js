@@ -48,8 +48,7 @@ const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { v4: uuidv4 } = require('uuid');
-const { resolveCurrentPeriod } = require('./academic-config');
-const { CLASSROOM_ASSESSMENT_TYPE, classroomInstanceFor, planClassroomMark } = require('../utils/classroom-mark-plan');
+const { planClassroomMark } = require('../utils/classroom-mark-plan');
 
 const router = express.Router();
 
@@ -357,6 +356,7 @@ router.get('/courses/:id/coursework', authMiddleware, rbac('elearning', 'read'),
      individualStudentsIds: [gcStudentId, ...],  // if INDIVIDUAL_STUDENTS
      driveFileId: string,          // optional — pre-uploaded Drive file ID
      driveFileName: string,
+     assessmentScheduleId: string, // optional — the configured Markbook assessment this work feeds
    }
 */
 router.post('/courses/:id/coursework', authMiddleware, rbac('elearning', 'create'), async (req, res) => {
@@ -376,9 +376,19 @@ router.post('/courses/:id/coursework', authMiddleware, rbac('elearning', 'create
       individualStudentIds = [],
       driveFileId,
       driveFileName,
+      assessmentScheduleId,
     } = req.body;
 
     if (!title) return res.status(400).json({ error: 'title is required.' });
+
+    // A grade only lands in the Markbook when this work names a configured
+    // assessment window explicitly. Validate it now, before creating anything
+    // in Google Classroom.
+    if (assessmentScheduleId) {
+      const target = await tenantModel('assessment_schedule', tenantContext(req))
+        .findOne({ schoolId: req.jwtUser.schoolId, id: assessmentScheduleId }).lean();
+      if (!target) return res.status(400).json({ error: 'assessmentScheduleId does not match a configured assessment for this school.' });
+    }
 
     const body = {
       title,
@@ -428,6 +438,7 @@ router.post('/courses/:id/coursework', authMiddleware, rbac('elearning', 'create
       type:            cw.workType,
       dueDate:         dueDate || null,
       maxScore:        maxPoints || cw.maxPoints || null,
+      markbookScheduleId: assessmentScheduleId || null,
       createdBy:       req.jwtUser.userId,
       createdAt:       new Date().toISOString(),
     });
@@ -593,51 +604,51 @@ router.post('/gc-webhook', async (req, res) => {
     // Find course link to get subjectId + classId
     const CourseLinks = tenantModel('elearning_course_links', tenantContext(req));
     const courseLink  = await CourseLinks.findOne({ gcCourseId: courseId, schoolId: cwLink.schoolId }).lean();
-    if (!courseLink?.classId || !courseLink?.subjectId) return res.sendStatus(204);
 
-    // The Markbook is the only mark store — Classroom grades land there as an
-    // HW instance, under the same locks a teacher typing the mark would hit.
+    // Deterministic mapping only: the coursework names a configured Markbook
+    // assessment window (markbookScheduleId), and the student must be a real
+    // record in the course's class. Anything else is skipped and logged for
+    // admin resolution — never guessed, never auto-created.
     const schoolId = cwLink.schoolId;
     const ctx = tenantContext(req);
-    const years = await tenantModel('academic_years', ctx).find({ schoolId }).lean();
-    const { year, termNumber } = resolveCurrentPeriod(years);
-    if (!year || termNumber == null) return res.sendStatus(204);
+    const schedule = cwLink.markbookScheduleId
+      ? await tenantModel('assessment_schedule', ctx).findOne({ schoolId, id: cwLink.markbookScheduleId }).lean()
+      : null;
+    const studentRec = await tenantModel('students', ctx).findOne({ schoolId, id: student.id })
+      .select('id classId streamId').lean();
+
+    const period = schedule ? {
+      schoolId, classId: courseLink?.classId, subjectId: courseLink?.subjectId,
+      termNumber: schedule.termNumber, assessmentType: schedule.assessmentType,
+      instance: schedule.instance ?? 1, academicYearId: schedule.academicYearId ?? null,
+    } : null;
 
     const Marks = tenantModel('assessment_marks', ctx);
-    const period = { schoolId, classId: courseLink.classId, subjectId: courseLink.subjectId, termNumber, assessmentType: CLASSROOM_ASSESSMENT_TYPE, academicYearId: year.id };
-    const courseWorkMarks = await Marks.find({ ...period, gcCourseWorkId: { $exists: true } }).select('instance gcCourseWorkId').lean();
-    const instanceByCourseWork = new Map(courseWorkMarks.map(m => [m.gcCourseWorkId, m.instance]));
-    const instance = classroomInstanceFor(courseWorkId, instanceByCourseWork);
-
-    // Marks key on the student record, not the user account. Only write when
-    // that exact record exists — never guess a mapping.
-    const studentRec = await tenantModel('students', ctx).findOne({ schoolId, id: student.id }).select('id streamId').lean();
-    if (!studentRec) {
-      console.warn(`[elearning/gc-webhook] no student record for user ${student.id} — Classroom grade not written to Markbook`);
-      return res.sendStatus(204);
-    }
-
-    const existing = await Marks.findOne({ ...period, studentId: studentRec.id, instance }).lean();
-    const scheduleLocked = !!(await tenantModel('assessment_schedule', ctx).findOne({ schoolId, assessmentType: CLASSROOM_ASSESSMENT_TYPE, termNumber, isLocked: true }).lean());
-    const underReview = !!(await tenantModel('mark_submissions', ctx).findOne({ ...period, instance, status: { $in: ['submitted', 'approved'] } }).lean());
+    const existing = period && studentRec ? await Marks.findOne({ ...period, studentId: studentRec.id }).lean() : null;
+    const underReview = period
+      ? !!(await tenantModel('mark_submissions', ctx).findOne({ ...period, status: { $in: ['submitted', 'approved'] } }).lean())
+      : false;
 
     const plan = planClassroomMark({
       assignedGrade: sub.assignedGrade,
       maxScore: cwLink.maxScore || sub.maxPoints,
-      instance,
-      locks: { scheduleLocked, markLocked: !!existing?.isLocked, underReview },
+      schedule,
+      courseLink,
+      studentRec,
+      locks: { scheduleLocked: !!schedule?.isLocked, markLocked: !!existing?.isLocked, underReview },
     });
     if (plan.action !== 'upsert') {
-      console.warn(`[elearning/gc-webhook] not written to Markbook (${plan.reason}) — student ${student.id}, coursework ${courseWorkId}`);
+      console.warn(`[elearning/gc-webhook] Classroom grade not written to Markbook (${plan.reason}) — student ${student.id}, coursework ${courseWorkId}`);
       return res.sendStatus(204);
     }
 
     await Marks.updateOne(
-      { ...period, studentId: studentRec.id, instance },
+      { ...period, studentId: studentRec.id },
       {
         $set: {
           rawScore:       plan.rawScore,
           markState:      plan.markState,
+          classId:        courseLink.classId,
           streamId:       studentRec.streamId ?? null,
           label:          cwLink.gcCourseWorkTitle,
           gcCourseWorkId: courseWorkId,
