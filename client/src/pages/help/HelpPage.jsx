@@ -767,11 +767,11 @@ const SECTIONS = [
       },
       {
         q: 'How do I share a resource?',
-        a: "Go to Resources → 'Share a Resource'. Give it a title, choose the audience (school-wide, a class, or staff only), and either paste a link or upload a file. Click Share.",
+        a: "Go to Resources → 'Share a Resource'. Give it a title, choose who can see it (the whole school, or a targeted group by role and/or class), and either paste a link or upload a file. Click Share.",
       },
       {
         q: 'Who can see a shared resource?',
-        a: 'Only the audience you selected when sharing it. A resource shared with "Form 3A" is visible to that class\'s students, parents, and teachers only — not the whole school.',
+        a: 'Only the people the resource was shared with. A resource set to the whole school is visible to everyone. A targeted resource is visible only to the roles and/or classes you chose when sharing it.',
       },
       {
         q: 'Can I edit or remove a resource after sharing it?',
@@ -797,19 +797,15 @@ const SECTIONS = [
       },
       {
         q: 'How do I add a growth record for a student?',
-        a: "Open the student's profile → Growth tab → 'Add Record'. Select the growth area, term, and add notes or a rating. Records are visible to the student and their parents.",
+        a: 'Open Growth Profile from the sidebar and choose the student. Pick the section you need (Academic, Behaviour, Leadership, Activities, Projects, Service, Awards, Recommendations or Aspirations) and add the record there.',
       },
       {
         q: 'What are growth aspirations?',
-        a: 'Aspirations let students or teachers record career goals, subject interests, and personal ambitions. These are referenced when writing teacher comments on report cards and pastoral notes.',
-      },
-      {
-        q: 'How does Growth Profile link to report cards?',
-        a: 'Teacher comments on report cards can reference a student\'s growth records and aspirations. This makes comments more personal and evidence-based rather than generic.',
+        a: 'The Aspirations section records a student\'s goals, such as career, university or subject interests. It is one of the nine Growth Profile sections.',
       },
       {
         q: 'Who can view or edit a student\'s aspirations?',
-        a: 'Staff with the Edit Aspirations permission can write on any student\'s behalf. A student can always view and edit their own aspirations — this self-service access is separate from the general staff permission and cannot be seen or edited by other students.',
+        a: 'Viewing and editing are set by the Growth Profile permissions in Settings → Roles & Permissions. The Edit Aspirations permission controls who can change them.',
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
@@ -877,11 +873,11 @@ const SECTIONS = [
       },
       {
         q: 'How do I record a book return?',
-        a: "Go to Library → Returns. Find the active loan by student or book → click 'Return'. The system records the return date and restores the available copy count.",
+        a: "Go to Library → Loans. Find the active loan and click 'Return'. The return is recorded and the available copy count goes back up.",
       },
       {
         q: 'Can I see which books are overdue?',
-        a: 'Yes. Library → Overdue shows all loans past their due date, with the student name, book title, due date, and number of days overdue.',
+        a: 'Yes. The Library page shows an Overdue Loans count. Loans past their due date are marked overdue on the Loans tab. Use "Sync overdue" to refresh the overdue statuses.',
       },
       {
         q: 'Can I search the catalogue?',
@@ -933,11 +929,11 @@ const SECTIONS = [
     articles: [
       {
         q: 'How do I add a hostel block and rooms?',
-        a: "Go to Hostel → Blocks → 'Add Block'. Enter the block name and gender assignment. Then open the block and add rooms with their bed capacity.",
+        a: "Go to Hostel → Hostels tab → 'New Hostel'. Enter the hostel's name, warden, capacity and fee per term. Then open the Rooms tab and click 'Add Room' for each room.",
       },
       {
         q: 'How do I assign a student to a room?',
-        a: "Go to Hostel → Allocations → 'Allocate Student'. Select the student, block, room, and bed number. The room's occupancy count updates automatically.",
+        a: "Go to Hostel → Assignments tab → 'Assign Student'. Choose the student and the room. The assignment list shows who is in which room.",
       },
       {
         q: 'How do I manage hostel capacity?',
@@ -945,11 +941,11 @@ const SECTIONS = [
       },
       {
         q: 'How do hostel fees work?',
-        a: 'Boarding fees are set up in Finance → Fee Structures as a "Boarding" fee type and invoiced to students allocated to the hostel, the same way as tuition fees.',
+        a: 'Each hostel has a fee per term, recorded on the hostel. Hostel fees are not invoiced automatically. To bill boarding, add a boarding line to a fee structure in Finance → Fee Structure and generate invoices for the students allocated to the hostel.',
       },
       {
         q: 'Can I see which students are in which rooms?',
-        a: 'Yes. Open any room to see the full occupancy list with student names, class, and stream. You can also see a student\'s hostel allocation from their profile → Hostel tab.',
+        a: 'Yes. The Assignments tab lists each student with their hostel and room. The Rooms tab shows each room and its occupancy.',
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
@@ -967,7 +963,7 @@ const SECTIONS = [
     articles: [
       {
         q: 'How do I record a clinic visit?',
-        a: "Go to Medical Centre → \"Record Visit\". Select the student, enter the complaint, observation, and action taken (medication given, sent home, or referred elsewhere), and Save.",
+        a: "Go to Medical Centre → Log Visit. Select the student, enter the complaint and observation, record the action taken, and Save. The Visits tab lists earlier visits.",
       },
       {
         q: 'What are Medical Alerts?',
@@ -975,7 +971,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can see a student\'s full clinic history?',
-        a: 'Only roles with the View Clinic Visits permission — typically admin, principal, deputy principal, and medical/nursing staff. A teacher with only the Alerts permission sees flags, not the underlying visit records.',
+        a: 'Only roles granted the View Clinic Visits permission, set in Settings → Roles & Permissions. A role with only the Alerts permission sees the condition flags, not the underlying visit records.',
       },
       {
         q: 'Where else does medical information appear?',
@@ -983,7 +979,7 @@ const SECTIONS = [
       },
       {
         q: 'How do I run a medical report?',
-        a: 'Go to Medical Centre → Reports for a summary view (visit counts, common complaints, referral rates) over a selected period.',
+        a: 'Go to Medical Centre → Reports. The tab appears only if your role has the medical reports permission. It gives a summary of visits for a period you choose.',
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
@@ -1001,27 +997,23 @@ const SECTIONS = [
     articles: [
       {
         q: 'Who can access Reports & Analytics?',
-        a: 'Reports & Analytics is visible to roles with the analytics permission — typically Admin, Deputy Principal, and Section Head. Teachers see their own class data only.',
+        a: 'Reports & Analytics is visible to roles that have been granted the analytics permission, set in Settings → Roles & Permissions. Your role\'s access is shown in the sidebar: if you cannot see it, ask your school admin.',
       },
       {
         q: 'What does the Academic Health panel show?',
-        a: 'Average score per class for published grades, sorted from lowest to highest. Classes below 50% average are flagged so leadership can identify where intervention is needed.',
+        a: 'The average score for each class, from the published grades. The class with the lowest average is shown first. If that average is below 50%, it is flagged in red so leadership can see where intervention is needed.',
       },
       {
         q: 'What does the Attendance analytics section show?',
-        a: 'School-wide attendance rate, per-class breakdown, and a list of at-risk students (below 80% attendance). Clicking a student opens their full attendance history.',
+        a: 'The school-wide attendance rate, with a list of at-risk students: those below 80% attendance.',
       },
       {
         q: 'What does the Finance summary show?',
-        a: 'Total fees invoiced vs. collected, outstanding balance by class, and a list of students with overdue invoices. Useful for fee collection follow-up.',
-      },
-      {
-        q: 'Can I export analytics reports?',
-        a: 'Yes. Most analytics panels have a Download or Export button that produces a CSV or PDF summary of the visible data.',
+        a: 'The total invoiced, the amount collected, the outstanding balance, and the students with overdue invoices. Useful for fee collection follow-up.',
       },
       {
         q: 'What is the Admissions Pipeline chart?',
-        a: 'A bar chart on the dashboard showing the count of active applications at each stage (Enquiry → Enrolled). It updates in real time as applications move through stages.',
+        a: 'A bar chart on the Dashboard showing the number of applications at each stage, from Enquiry to Enrolled.',
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
@@ -1055,7 +1047,7 @@ const SECTIONS = [
       },
       {
         q: 'Who configures the requisition approval workflow?',
-        a: 'Go to Inventory → Requisition Settings (requires the Configure Requisition Approval Workflow permission) to set who needs to approve a requisition before it can be fulfilled — a single approver or a multi-step chain.',
+        a: 'The approval chain for requisitions is set by a user with the Configure Requisition Approval Workflow permission. Requisitions are raised and tracked from the Requisitions tab on the Inventory page.',
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
