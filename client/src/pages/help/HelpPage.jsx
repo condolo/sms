@@ -719,7 +719,7 @@ const SECTIONS = [
       },
       {
         q: 'Can a staff member have multiple roles?',
-        a: 'Yes. A user has one main role and can also hold additional roles. The sidebar combines the modules that all of their roles allow. Check a user's roles in Settings → Users.',
+        a: 'Yes. A user has one main role and can also hold additional roles. The sidebar combines the modules that all of their roles allow. Check a user\'s roles in Settings → Users.',
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
