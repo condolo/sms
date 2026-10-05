@@ -117,4 +117,15 @@ describe('GET /api/lessons/topics/diagnostic', () => {
     expect(lines[1]).toContain('"Plants"');
     expect(lines[1]).toContain('"Year 6"');
   });
+
+  test('each topic shows who created it by name, not only by user ID', async () => {
+    mockStores.users = mockMakeCollection([{ id: 'usr_mwangi', schoolId: SCHOOL, name: 'Mr Samuel Ojiambo' }]);
+    mockStores.syllabus_topics = mockMakeCollection([
+      { id: 't3', schoolId: SCHOOL, title: 'Cells', subjectId: 'sub_sci_a', classId: 'cls_y6', createdBy: 'usr_mwangi', createdAt: new Date('2026-10-03T09:00:00+03:00') },
+      { id: 't4', schoolId: SCHOOL, title: 'Ghost', subjectId: 'sub_sci_a', classId: 'cls_y6', createdBy: 'usr_deleted', createdAt: new Date('2026-10-03T10:00:00+03:00') },
+    ]);
+    const res = await supertest(buildApp()).get('/api/lessons/topics/diagnostic');
+    expect(res.body.data.topics.find(t => t.id === 't3').createdByName).toBe('Mr Samuel Ojiambo');
+    expect(res.body.data.topics.find(t => t.id === 't4').createdByName).toBe('(user not found)');
+  });
 });

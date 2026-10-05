@@ -1946,7 +1946,8 @@ function TopicDiagnostic() {
                           <th className="px-3 py-2 font-semibold">Subject record</th>
                           <th className="px-3 py-2 font-semibold">Class</th>
                           <th className="px-3 py-2 font-semibold">Academic year</th>
-                          <th className="px-3 py-2 font-semibold">IDs (subject · class)</th>
+                          <th className="px-3 py-2 font-semibold">Created by</th>
+                          <th className="px-3 py-2 font-semibold">Record IDs (subject · class)</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
@@ -1970,6 +1971,7 @@ function TopicDiagnostic() {
                                 )}
                               </td>
                               <td className="px-3 py-2 text-slate-700">{t.academicYear ?? '—'}</td>
+                              <td className="px-3 py-2 text-slate-700">{t.createdByName ?? '—'}</td>
                               <td className="px-3 py-2 font-mono text-[10px] text-slate-500 break-all">{t.subjectId ?? '—'} · {t.classId ?? '—'}</td>
                             </tr>
                           );

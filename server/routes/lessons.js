@@ -553,14 +553,16 @@ router.get('/topics/diagnostic', authMiddleware, PLAN, MODGATE, async (req, res)
     const fromMs = req.query.dateFrom ? new Date(`${req.query.dateFrom}T00:00:00+03:00`).getTime() : null;
     const toMs   = req.query.dateTo   ? new Date(`${req.query.dateTo}T23:59:59.999+03:00`).getTime() : null;
 
-    const [allTopics, subjects, classes] = await Promise.all([
+    const [allTopics, subjects, classes, users] = await Promise.all([
       tenantModel('syllabus_topics', tenantContext(req)).find({ schoolId }).sort({ createdAt: -1 }).limit(10000).lean(),
       tenantModel('subjects', tenantContext(req)).find({ schoolId }).select('id name code departmentId').lean(),
       tenantModel('classes', tenantContext(req)).find({ schoolId }).select('id name status').lean(),
+      tenantModel('users', tenantContext(req)).find({ schoolId }).select('id name').lean(),
     ]);
 
     const subjectById = Object.fromEntries(subjects.map(s => [s.id, s]));
     const classById   = Object.fromEntries(classes.map(c => [c.id, c]));
+    const userNameById = Object.fromEntries(users.map(u => [u.id, u.name]));
     const matchSubject = (s) => !subjectFilter || (s.name || '').toLowerCase().includes(subjectFilter.toLowerCase());
 
     // Stream is deliberately not a filter: a topic is saved against the class,
@@ -578,6 +580,7 @@ router.get('/topics/diagnostic', authMiddleware, PLAN, MODGATE, async (req, res)
         title:             t.title,
         createdAt:         t.createdAt ?? null,
         createdBy:         t.createdBy ?? null,
+        createdByName:     (t.createdBy && userNameById[t.createdBy]) || (t.createdBy ? '(user not found)' : null),
         subjectId:         t.subjectId ?? null,
         subjectNameSaved:  t.subjectName ?? null,
         subjectRecordName: subjectById[t.subjectId]?.name ?? '(no subject record with this subjectId)',
@@ -588,11 +591,11 @@ router.get('/topics/diagnostic', authMiddleware, PLAN, MODGATE, async (req, res)
 
     if (format === 'csv') {
       const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-      const header = ['Added (Africa/Nairobi)', 'Topic', 'Subject record', 'Subject name saved', 'Class', 'Academic year', 'Subject ID', 'Class ID', 'Created by', 'Topic ID'];
+      const header = ['Added (Africa/Nairobi)', 'Topic', 'Subject record', 'Subject name saved', 'Class', 'Academic year', 'Subject ID', 'Class ID', 'Created by (name)', 'Created by (user ID)', 'Topic ID'];
       const lines = topics.map(t => [
         t.createdAt ? new Date(t.createdAt).toLocaleString('en-GB', { timeZone: 'Africa/Nairobi' }) : '',
         t.title, t.subjectRecordName, t.subjectNameSaved, t.className, t.academicYear,
-        t.subjectId, t.classId, t.createdBy, t.id,
+        t.subjectId, t.classId, t.createdByName, t.createdBy, t.id,
       ].map(cell).join(','));
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', 'attachment; filename="topic-diagnostic.csv"');
