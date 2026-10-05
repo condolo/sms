@@ -1687,6 +1687,9 @@ function LessonPlansTab() {
 /* ── Admin: Overview tab ─────────────────────────────────────── */
 function OverviewTab() {
   const [search, setSearch] = useState('');
+  // Opening a row shows the same topic list a teacher sees, read-only, so an
+  // admin can check what teachers actually added (not only the progress %).
+  const [drill, setDrill] = useState(null);
   const school  = useAuthStore(s => s.session?.school);
 
   const { data: resp, isLoading } = useQuery({
@@ -1712,6 +1715,10 @@ function OverviewTab() {
     if (pct >= 80) return 'bg-emerald-50 text-emerald-700 border-emerald-200';
     if (pct >= 50) return 'bg-amber-50 text-amber-700 border-amber-200';
     return 'bg-red-50 text-red-700 border-red-200';
+  }
+
+  if (drill) {
+    return <DrillDown item={drill} onBack={() => setDrill(null)} canManage={false} />;
   }
 
   return (
@@ -1746,7 +1753,7 @@ function OverviewTab() {
             </thead>
             <tbody className="divide-y divide-slate-50">
               {filtered.map((r, i) => (
-                <tr key={i} className="hover:bg-slate-50/50 transition-colors">
+                <tr key={i} onClick={() => setDrill(r)} className="hover:bg-slate-50/50 transition-colors cursor-pointer">
                   <td className="px-4 py-3 font-medium text-slate-800">{r.teacherName}</td>
                   <td className="px-4 py-3 text-slate-600">{r.className}{r.streamName ? ` · ${r.streamName}` : ''}</td>
                   <td className="px-4 py-3 text-slate-600">{r.subjectName}</td>
