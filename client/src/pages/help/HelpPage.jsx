@@ -93,7 +93,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Classes — see the class/stream list\n• Create Class — add a new class\n• Edit Class — change name, section, or year\n• Delete Class — permanently remove a class\n• Export Classes (CSV) — download the class list\n• Import Classes (CSV) — bulk-create from a spreadsheet\n• Manage Sections & Streams — add/edit streams and the Section groupings above classes\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Classes\n• Create Class\n• Edit Class\n• Delete Class\n• Export Classes (CSV)\n• Import Classes (CSV)\n• Manage Sections & Streams\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -139,7 +139,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Subjects & Departments — see the catalogue\n• Create Subject / Department — add a subject or department\n• Edit Subject — change name, code, department or teacher\n• Delete Subject — deactivate a subject (its records are kept)\nA role with none of these shows a plain "no access" message instead of the Subjects page. Your role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Subjects & Departments\n• Create Subject / Department\n• Edit Subject\n• Delete Subject\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -185,7 +185,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Student List — see the roster with filters and search\n• View Student Profile — open a student\'s full record\n• Add Student — create a new student record\n• Edit Student — update an existing record\n• Deactivate Student — set status to inactive (reversible — see "Can I reactivate a deactivated student?" below)\n• Export Students (CSV) — download the roster\n• Import Students (CSV) — bulk-create records from a spreadsheet\n• Promote Students to Next Class — move a whole class/stream up at year-end\n• Manage Student Portal Accounts — create/reset the student\'s own portal login (separate from parent portal accounts)\n• Resolve Duplicate Student Records — merge accidental duplicate records\n• Permanently Delete Students — irreversible removal, separate from (and far more restrictive than) Deactivate\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Student List\n• View Student Profile\n• Add Student\n• Edit Student\n• Deactivate Student\n• Export Students (CSV)\n• Import Students (CSV)\n• Promote Students to Next Class\n• Manage Student Portal Accounts\n• Resolve Duplicate Student Records\n• Permanently Delete Students\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
       {
         q: 'Can I reactivate a deactivated student?',
@@ -231,7 +231,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Teacher List — see the staff roster\n• View Teacher Profile — open a teacher\'s full record\n• Add Teacher — create a new staff account\n• Edit Teacher — update an existing record\n• Delete Teacher — mark a record inactive (its history is kept)\n• Export Teachers (CSV) — download the staff list\n• Import Teachers (CSV) — bulk-create staff accounts from a spreadsheet\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Teacher List\n• View Teacher Profile\n• Add Teacher\n• Edit Teacher\n• Delete Teacher\n• Export Teachers (CSV)\n• Import Teachers (CSV)\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -269,7 +269,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Pipeline — see all applications and their stage\n• Add Applicant — create a new application\n• Edit Applicant Details — update an application\n• Move Pipeline Stage — advance/move an application through the funnel\n• Delete Applicant — permanently remove an application\n• Export Applicants (CSV) — download the pipeline data\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Pipeline\n• Add Applicant\n• Edit Applicant Details\n• Move Pipeline Stage\n• Delete Applicant\n• Export Applicants (CSV)\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -311,7 +311,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Register — see attendance already marked\n• Mark Attendance — record present/absent/late/excused\n• Edit Records — change attendance after it has been saved\n• Export / Print Register — download or print the register\n• School-Wide Report — the aggregate per-class/stream count view across the whole school, not just your own register\n• View Absent Students & Contact Details — the real per-student absentee list with guardian phone/email, for calling home\n• Attendance Conflicts — the queue of same-day present/absent mismatches (a student marked both in different classes) awaiting resolution\nThe last three are each a separate, more restrictive grant on top of the first four — holding View Register or Mark Attendance does not automatically include them, since each reveals data beyond your own register. Their tabs only appear at all once you hold the matching permission (or you\'re an admin/principal/deputy) — Your role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Register\n• Mark Attendance\n• Edit Records\n• Export / Print Register\n• School-Wide Report\n• View Absent Students & Contact Details\n• Attendance Conflicts (Present/Absent Mismatch)\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
       {
         q: 'Can I take attendance straight from my dashboard?',
@@ -365,7 +365,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Timetable — see the schedule\n• Edit Timetable — assign subjects/teachers/rooms to periods\n• Manage Rooms — add/edit rooms\n• Configure Bell Schedule — set period start/end times\n• Manage Teaching Assignments — set which teacher delivers which subject to which class (pre-timetabling)\n• Import Timetable (CSV) — bulk-load a schedule\n• Export Timetable (CSV) — download the schedule\n• Manage Whole-School Timetable (Admin Console) — reach the full Scheduling Engine at all, instead of your own read-only Portal (see above); Admin/Principal/Deputy Principal/Deputy/Timetabler always have this, everyone else needs it explicitly granted\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Timetable\n• Edit Timetable\n• Manage Rooms\n• Configure Bell Schedule\n• Manage Teaching Assignments\n• Import Timetable (CSV)\n• Export Timetable (CSV)\n• Manage Whole-School Timetable (Admin Console)\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -403,7 +403,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Courses & Resources — browse available content\n• Create / Upload Content — add new courses/resources\n• Edit Content — update existing content\n• Delete Content — remove content\n• Enroll Students — add students to a course\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Courses & Resources\n• Create / Upload Content\n• Edit Content\n• Delete Content\n• Enroll Students\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -461,7 +461,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Invoices — see issued invoices\n• Create Invoice — issue a new invoice\n• Void Invoice — cancel an issued invoice\n• View Payments — see recorded payments\n• Record Payment — log a payment against an invoice\n• Print Receipts / Invoices — generate printable documents\n• Manage Fee Structures — create/edit fee structure templates\n• Import Finance Data (CSV) — bulk-load invoices/opening balances\n• Run Term Billing — preview and create term invoices (its own permission, not covered by the general finance rights)\n• Confirm Early Payment — confirm an early payment, or change its deadline or percentage before confirming (its own permission)\n• Manage Extra-Curricular Activities & Enrolments — create or change activities, and enrol or end students (its own permission)\n• Configure M-Pesa Integration — set up Daraja API credentials\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Invoices\n• Create Invoice\n• Void Invoice\n• View Payments\n• Record Payment\n• Print Receipts / Invoices\n• Manage Fee Structures\n• Import Finance Data (CSV)\n• Configure M-Pesa Integration\n• Run Term Billing\n• Confirm Early Payment\n• Manage Extra-Curricular Activities & Enrolments\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -499,7 +499,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Incidents & BPS — see the incident log and point totals\n• Record Incident / Award Points — log a new merit or demerit\n• Edit Records — update an existing incident\n• Delete Records — permanently remove an incident\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Incidents & BPS\n• Record Incident / Award Points\n• Edit Records\n• Delete Records\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -529,7 +529,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Exams — see scheduled exams\n• Create / Edit Exam — set up or change an exam\n• Delete Exam — remove an exam\nMarks are a separate permission, under Grades & Marks below. Your role\'s exact access is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Exams\n• Create / Edit Exam\n• Delete Exam\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -575,7 +575,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Grades & Marks — see marks and grade summaries\n• Enter / Edit Marks — record scores in the markbook\n• Review / Approve Mark Submissions — sign off a teacher\'s submitted marks before they count\n• Manage Comment Banks — maintain the reusable teacher-comment library\n• Generate / Publish Report Cards — compile and release report cards to students/parents\n• Export Grades (CSV) — download markbook data\n• Lock / Unlock Assessment Schedule — a separate "Assessment Scheduling" permission (see above)\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Grades & Marks\n• Enter / Edit Marks\n• Review / Approve Mark Submissions\n• Manage Comment Banks\n• Generate / Publish Report Cards\n• Export Grades (CSV)\n• Lock / Unlock Assessment Schedule\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -613,7 +613,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• Manage Draft Comments — write/edit teacher comments before publishing\n• Configure Approval Workflow — set up the report-card sign-off chain (e.g. class teacher → section head)\n• Configure Publication Policy — set rules like fee-clearance thresholds that gate downloading\nThese three are the "Report Card Settings" module — configuration, not the actual generate/publish action. Generating and publishing report cards is a separate permission (Generate / Publish Report Cards, under Grades & Marks above) — a role can have one without the other. Your role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• Manage Draft Comments\n• Configure Approval Workflow\n• Configure Publication Policy\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -651,7 +651,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Lesson Plans — see planned/logged lessons\n• Create Lesson Plan — add a new lesson plan\n• Edit Lesson Plan — update an existing plan\n• Delete Lesson Plan — remove a plan\n• Mark Lesson Coverage — mark a syllabus topic as taught\n• Configure Lesson Plan Template — set the fields every teacher in the school sees on every future lesson plan; a separate, more restrictive grant from Edit Lesson Plan (which only affects your own plans)\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Lesson Plans\n• Create Lesson Plan\n• Edit Lesson Plan\n• Delete Lesson Plan\n• Mark Lesson Coverage\n• Configure Lesson Plan Template\n• Bulk Import Lesson Plans\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -681,7 +681,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Events — see the calendar\n• Create Event — add a new event\n• Edit Event — update an existing event\n• Delete Event — remove an event\n• Export Events (CSV) — download the calendar\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Events\n• Create Event\n• Edit Event\n• Delete Event\n• Export Events (CSV)\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -723,7 +723,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Leave Requests — see submitted leave applications\n• Approve / Reject Leave — decide on a leave request\n• View Payroll — see payroll records\n• Export Payroll (CSV) — download payroll data\n• Manage Staff Documents — upload/manage staff document files\n• Configure Leave/Payroll Approval Workflow — set up the approval chain\nStaff profiles are governed by the separate Teachers module permission, not HR & Payroll. Your role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Leave Requests\n• Approve / Reject Leave\n• View Payroll\n• Export Payroll (CSV)\n• Manage Staff Documents\n• Configure Leave/Payroll Approval Workflow\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -749,7 +749,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Messages — see conversations\n• Send Messages — start or reply to a conversation\n• Delete Own Messages — remove a message you sent\n• Delete Any Message (Moderation) — remove someone else\'s message, e.g. for safeguarding or compliance; a separate, more restrictive grant from Delete Own Messages\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Messages\n• Send Messages\n• Delete Own Messages\n• Delete Any Message (Moderation)\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -779,7 +779,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Resources — see shared resources\n• Share a Resource — add a new one\n• Edit a Resource — update an existing one\n• Delete a Resource — remove one\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Resources\n• Share a Resource\n• Edit a Resource\n• Delete a Resource\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -809,7 +809,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Growth Profiles — see a student\'s Growth Profile\n• Add Records (Leadership / Activities / Service / Awards) — log a new entry\n• Edit Own Records — update entries you created\n• Delete Records — remove entries\n• Add / Edit Projects — manage the Projects section (has a supervisor reference)\n• Write Recommendations — add a staff recommendation for a student\n• Edit Aspirations — set career/university goals (students can always edit their own)\n• Verify / Approve Records — mark an entry as institution-verified or staff-verified\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Growth Profiles\n• Add Records (Leadership / Activities / Service / Awards)\n• Edit Own Records\n• Delete Records\n• Add / Edit Projects\n• Write Recommendations\n• Edit Aspirations\n• Verify / Approve Records\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -851,7 +851,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Weekly Snapshots — see a class roster and open individual student snapshots\n• Manage Weekly Snapshot Settings — reserved for future school-level configuration of this feature\nParent and student access to their own/their child\'s snapshot does not go through this permission at all — it works the same way attendance, fees, and report cards already do for self-service accounts: gated by who the record belongs to, not by a Roles & Permissions toggle. Staff access is set in Settings → Roles & Permissions.',
+        a: '• View Weekly Snapshots\n• Manage Weekly Snapshot Settings\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -885,7 +885,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Catalogue & Records — browse books and loan records\n• Issue / Return Books — check out and check in books\n• Add / Edit Catalogue Items — manage the book catalogue\n• Delete Catalogue Items — remove a book from the catalogue\n• View Library Reports — see overdue/usage reports\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Catalogue & Records\n• Issue / Return Books\n• Add / Edit Catalogue Items\n• Delete Catalogue Items\n• View Library Reports\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -915,7 +915,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Routes — see routes and their fares\n• Add / Edit Routes & Stops — manage routes, stops and fares\n• Assign Students to Routes — allocate students to a route, with a fare\n• Delete Routes — remove a route\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Routes & Vehicles\n• Add / Edit Routes & Stops\n• Assign Students to Routes\n• Delete Routes / Vehicles\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -949,7 +949,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Rooms & Allocations — see blocks, rooms, and who is allocated where\n• Add / Edit Rooms & Blocks — manage the physical hostel structure\n• Assign Students to Rooms — allocate a student to a room/bed\n• Delete Rooms / Blocks — remove a room or block\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Rooms & Allocations\n• Add / Edit Rooms & Blocks\n• Assign Students to Rooms\n• Delete Rooms / Blocks\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -983,7 +983,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Clinic Visits — see full visit records\n• Record Clinic Visit — log a new visit\n• Delete Clinic Visit — remove a visit record\n• View Medical Alerts — condition flags only, not full visit records\n• View Medical Reports — see summary reports\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Clinic Visits\n• Record Clinic Visit\n• Delete Clinic Visit\n• View Medical Alerts (condition flags only, not full profile)\n• View Medical Reports\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -1017,7 +1017,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Reports — see the Reports & Analytics area\n• Export Reports (CSV) — download report data\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Reports\n• Export Reports (CSV)\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -1051,7 +1051,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Inventory & Categories — see items and stock levels\n• Add / Edit Items & Categories — manage the catalogue\n• Record Stock Transactions — receive, issue, return, or adjust stock\n• Raise Requisitions — request items (many roles get only this, not full inventory management — e.g. a teacher requesting classroom supplies)\n• Configure Requisition Approval Workflow — set up the approval chain\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Inventory & Categories\n• Add / Edit Items & Categories\n• Record Stock Transactions (Receive/Issue/Return/Adjust)\n• Raise Requisitions\n• Configure Requisition Approval Workflow\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -1081,7 +1081,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Leadership Analytics — see the panel\nThis module has a single view permission — there is no separate edit/export action here, since the panel is read-only by nature. Your role\'s exact access is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Leadership Analytics\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -1119,7 +1119,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• Edit School Settings — change branding, academic year, SMTP, and similar school-wide configuration\n• Manage Users / Invites — create/edit user accounts and send invites\n• Manage Roles & Permissions — edit the Roles & Permissions grid itself\n• View System Info — see system/version/audit information\nThis page you\'re reading is visible to everyone regardless of these permissions — the ACTIONS inside Settings are what\'s individually gated. Your role\'s exact access to each is set in Settings → Roles & Permissions itself — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• Edit School Settings\n• Manage Users / Invites\n• Manage Roles & Permissions\n• View System Info\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
