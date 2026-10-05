@@ -1818,12 +1818,16 @@ function OverviewTab() {
 function TopicDiagnostic() {
   const [open, setOpen]       = useState(false);
   const [subject, setSubject] = useState('science');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo]     = useState('');
+  const [classId, setClassId]   = useState('');
   // Topics added on or after Saturday 3 Oct 2026 (Africa/Nairobi) are highlighted.
   const SINCE = new Date('2026-10-03T00:00:00+03:00');
+  const filters = { subject, dateFrom, dateTo, classId };
 
   const { data: resp, isLoading, error } = useQuery({
-    queryKey: ['lessons', 'topic-diagnostic', subject],
-    queryFn:  () => lessonsApi.topics.diagnostic({ subject }),
+    queryKey: ['lessons', 'topic-diagnostic', filters],
+    queryFn:  () => lessonsApi.topics.diagnostic(filters),
     enabled:  open,
     staleTime: 0,
   });
@@ -1843,11 +1847,39 @@ function TopicDiagnostic() {
 
       {open && (
         <>
-          <input
-            value={subject} onChange={e => setSubject(e.target.value)}
-            placeholder="Subject name filter (e.g. science)"
-            className="w-full max-w-xs text-sm px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/10"
-          />
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="flex flex-col gap-1 text-xs text-slate-500">
+              Subject record name
+              <input
+                value={subject} onChange={e => setSubject(e.target.value)}
+                placeholder="e.g. science"
+                className="text-sm px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/10 w-44"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-slate-500">
+              Added from
+              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="text-sm px-3 py-2 border border-slate-200 rounded-lg" />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-slate-500">
+              Added to
+              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="text-sm px-3 py-2 border border-slate-200 rounded-lg" />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-slate-500">
+              Class
+              <select value={classId} onChange={e => setClassId(e.target.value)} className="text-sm px-3 py-2 border border-slate-200 rounded-lg bg-white min-w-[10rem]">
+                <option value="">All classes</option>
+                {(d?.classes ?? []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={() => lessonsApi.topics.diagnosticCsv(filters).catch(err => window.alert(err?.message ?? 'Download failed'))}
+              className="flex items-center gap-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-medium px-3 py-2 rounded-lg"
+            >
+              <FileText size={13} /> Download CSV
+            </button>
+          </div>
+          <p className="text-[11px] text-slate-400">Topics are saved against a class, not a stream, so the diagnostic filters by date and class only. The CSV uses the same filters.</p>
 
           {isLoading && <div className="flex justify-center py-6"><Loader2 className="animate-spin text-indigo-400" size={20} /></div>}
           {error && <p className="text-xs text-red-600">{error.message ?? 'Could not load diagnostic'}</p>}

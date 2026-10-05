@@ -544,8 +544,15 @@ router.get('/topics/diagnostic', authMiddleware, PLAN, MODGATE, async (req, res)
     if (!isAdmin(req)) return E.forbidden(res, 'Topic diagnostics are for school leadership only.');
 
     const subjectFilter = (req.query.subject || '').trim();
-    const [topics, subjects, classes] = await Promise.all([
-      tenantModel('syllabus_topics', tenantContext(req)).find({ schoolId }).sort({ createdAt: -1 }).limit(2000).lean(),
+    const classFilter   = (req.query.classId || '').trim();
+    const format        = req.query.format === 'csv' ? 'csv' : 'json';
+    // Dates are school-local days (Africa/Nairobi, UTC+3): dateFrom starts at
+    // 00:00 on that day, dateTo runs to the end of its day, both inclusive.
+    const fromMs = req.query.dateFrom ? new Date(`${req.query.dateFrom}T00:00:00+03:00`).getTime() : null;
+    const toMs   = req.query.dateTo   ? new Date(`${req.query.dateTo}T23:59:59.999+03:00`).getTime() : null;
+
+    const [allTopics, subjects, classes] = await Promise.all([
+      tenantModel('syllabus_topics', tenantContext(req)).find({ schoolId }).sort({ createdAt: -1 }).limit(10000).lean(),
       tenantModel('subjects', tenantContext(req)).find({ schoolId }).select('id name code departmentId').lean(),
       tenantModel('classes', tenantContext(req)).find({ schoolId }).select('id name status').lean(),
     ]);
@@ -554,19 +561,44 @@ router.get('/topics/diagnostic', authMiddleware, PLAN, MODGATE, async (req, res)
     const classById   = Object.fromEntries(classes.map(c => [c.id, c]));
     const matchSubject = (s) => !subjectFilter || (s.name || '').toLowerCase().includes(subjectFilter.toLowerCase());
 
-    return ok(res, {
-      topics: topics.map(t => ({
-        id:               t.id,
-        title:            t.title,
-        createdAt:        t.createdAt ?? null,
-        createdBy:        t.createdBy ?? null,
-        subjectId:        t.subjectId ?? null,
-        subjectNameSaved: t.subjectName ?? null,
+    // Stream is deliberately not a filter: a topic is saved against the class,
+    // not the stream (see TopicSchema), so there is no stream to filter on.
+    const topics = allTopics
+      .filter(t => !classFilter || t.classId === classFilter)
+      .filter(t => {
+        if (fromMs == null && toMs == null) return true;
+        const at = t.createdAt ? new Date(t.createdAt).getTime() : null;
+        if (at == null) return false;
+        return (fromMs == null || at >= fromMs) && (toMs == null || at <= toMs);
+      })
+      .map(t => ({
+        id:                t.id,
+        title:             t.title,
+        createdAt:         t.createdAt ?? null,
+        createdBy:         t.createdBy ?? null,
+        subjectId:         t.subjectId ?? null,
+        subjectNameSaved:  t.subjectName ?? null,
         subjectRecordName: subjectById[t.subjectId]?.name ?? '(no subject record with this subjectId)',
-        classId:          t.classId ?? null,
-        className:        t.classId ? (classById[t.classId]?.name ?? '(no class record with this classId)') : '(legacy: no class)',
-        academicYear:     t.academicYear ?? null,
-      })),
+        classId:           t.classId ?? null,
+        className:         t.classId ? (classById[t.classId]?.name ?? '(no class record with this classId)') : '(legacy: no class)',
+        academicYear:      t.academicYear ?? null,
+      }));
+
+    if (format === 'csv') {
+      const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+      const header = ['Added (Africa/Nairobi)', 'Topic', 'Subject record', 'Subject name saved', 'Class', 'Academic year', 'Subject ID', 'Class ID', 'Created by', 'Topic ID'];
+      const lines = topics.map(t => [
+        t.createdAt ? new Date(t.createdAt).toLocaleString('en-GB', { timeZone: 'Africa/Nairobi' }) : '',
+        t.title, t.subjectRecordName, t.subjectNameSaved, t.className, t.academicYear,
+        t.subjectId, t.classId, t.createdBy, t.id,
+      ].map(cell).join(','));
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename="topic-diagnostic.csv"');
+      return res.send('﻿' + [header.map(cell).join(','), ...lines].join('\r\n'));
+    }
+
+    return ok(res, {
+      topics,
       subjects: subjects.filter(matchSubject).map(s => ({ id: s.id, name: s.name, code: s.code ?? null, departmentId: s.departmentId ?? null })),
       classes:  classes.map(c => ({ id: c.id, name: c.name, status: c.status ?? null })),
     });

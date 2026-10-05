@@ -912,6 +912,8 @@ export const lessons = {
     reorder: (data)       => _post('/lessons/topics/reorder', data),
     copyFrom: (data)      => _post('/lessons/topics/copy-from', data),
     diagnostic: (params)  => _get('/lessons/topics/diagnostic', params),
+    // Same filters as the panel; the server returns the CSV attachment.
+    diagnosticCsv: (params) => _downloadPdf('/lessons/topics/diagnostic', 'topic-diagnostic.csv', { ...params, format: 'csv' }),
   },
   /* Coverage (per teacher per class) */
   coverage: {

@@ -94,4 +94,27 @@ describe('GET /api/lessons/topics/diagnostic', () => {
     expect(stores.syllabus_topics.updateOne).not.toHaveBeenCalled();
     expect(stores.syllabus_topics.deleteMany).not.toHaveBeenCalled();
   });
+
+  test('a date range is school-local (Africa/Nairobi) and inclusive of both days', async () => {
+    // t1 was added 3 Oct 2026 08:00 Nairobi; t2 in Sept 2025.
+    const res = await supertest(buildApp()).get('/api/lessons/topics/diagnostic?dateFrom=2026-10-03&dateTo=2026-10-03');
+    expect(res.body.data.topics.map(t => t.id)).toEqual(['t1']);
+  });
+
+  test('a class filter keeps only topics saved against that class', async () => {
+    const res = await supertest(buildApp()).get('/api/lessons/topics/diagnostic?classId=cls_y6');
+    expect(res.body.data.topics.map(t => t.id)).toEqual(['t1']);
+  });
+
+  test('format=csv returns the same filtered rows as a downloadable CSV', async () => {
+    const res = await supertest(buildApp()).get('/api/lessons/topics/diagnostic?format=csv&dateFrom=2026-10-03&dateTo=2026-10-03');
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/text\/csv/);
+    expect(res.headers['content-disposition']).toMatch(/attachment; filename="topic-diagnostic\.csv"/);
+    const lines = res.text.replace(/^﻿/, '').split('\r\n');
+    expect(lines[0]).toContain('"Subject record"');
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toContain('"Plants"');
+    expect(lines[1]).toContain('"Year 6"');
+  });
 });
