@@ -103,7 +103,20 @@ router.get('/invoices', authMiddleware, PLAN, MODGATE, rbac('finance', 'read'), 
     const _ay  = strParam(req.query.academicYearId);
     const _tid = strParam(req.query.termId);
     if (_sid) filter.studentId    = _sid;
-    if (_st)  filter.status       = _st.includes(',') ? { $in: _st.split(',').filter(Boolean) } : _st;
+    if (_st) {
+      // 'overdue' is not a stored status. It means an unpaid or partly paid
+      // invoice whose due date is before today (school's local day). Stored
+      // statuses are matched as they are.
+      const statuses = _st.split(',').filter(Boolean);
+      const wantsOverdue = statuses.includes('overdue');
+      const plain = statuses.filter(s => s !== 'overdue');
+      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Nairobi' });
+      const overdueClause = { status: { $in: ['unpaid', 'partial'] }, dueDate: { $ne: null, $lt: today } };
+      let cond;
+      if (wantsOverdue) cond = plain.length ? { $or: [{ status: { $in: plain } }, overdueClause] } : overdueClause;
+      else cond = plain.length === 1 ? { status: plain[0] } : { status: { $in: plain } };
+      filter.$and = [...(filter.$and || []), cond];
+    }
     if (_ay)  filter.academicYearId = _ay;
     if (_tid) filter.termId       = _tid;
 
