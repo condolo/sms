@@ -48,6 +48,12 @@ function mockFakeCollection(seed = []) {
     _docs: () => docs,
     find:     jest.fn((filter) => mockChainArr(docs.filter(d => matchesFilter(d, filter)))),
     findOne:  jest.fn((filter) => mockChainObj(docs.find(d => matchesFilter(d, filter)) || null)),
+    findOneAndUpdate: jest.fn((filter, update) => {
+      const d = docs.find(x => matchesFilter(x, filter));
+      if (!d) return mockChainObj(null);
+      Object.assign(d, update.$set || {});
+      return mockChainObj(d);
+    }),
     distinct: jest.fn((field, filter) => Promise.resolve([...new Set(docs.filter(d => matchesFilter(d, filter)).map(d => d[field]))])),
     create:   jest.fn((doc) => { docs.push(doc); return Promise.resolve(doc); }),
   };
@@ -152,7 +158,62 @@ describe('POST /term-billing/generate — due date and early payment', () => {
     const res = await supertest(buildApp()).post('/api/finance/term-billing/generate').send({ termId: 'term_1' });
     expect(res.status).toBe(200);
     const inv = mockStores.invoices._docs().find(d => d.studentId === 'stu1');
-    expect(inv).toMatchObject({ earlyPaymentPct: 5, earlyPaymentDeadline: '2026-09-04', earlyPaymentApplied: false });
+    // Early payment is paid BEFORE the term starts (1 Sep 2026): deadline is 31 Aug.
+    expect(inv).toMatchObject({ earlyPaymentPct: 5, earlyPaymentDeadline: '2026-08-31', earlyPaymentApplied: false, earlyPaymentManual: true });
+  });
+});
+
+describe('bursar early payment (term invoices)', () => {
+  let invoiceId;
+  beforeEach(async () => {
+    mockStores.discount_policies = mockFakeCollection([
+      { id: 'dp1', schoolId: SCHOOL, type: 'early_payment', active: true, flatPct: 5, daysBeforeDue: 3 },
+    ]);
+    await supertest(buildApp()).post('/api/finance/term-billing/generate').send({ termId: 'term_1' });
+    invoiceId = mockStores.invoices._docs().find(d => d.studentId === 'stu1').id;
+  });
+
+  test('confirming with no payment on or before the deadline is refused', async () => {
+    const res = await supertest(buildApp()).post(`/api/finance/invoices/${invoiceId}/early-payment/confirm`);
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toMatch(/No payment was received on or before 2026-08-31/);
+  });
+
+  test('a payment after the deadline does not qualify', async () => {
+    mockStores.payments = mockFakeCollection([{ id: 'p1', schoolId: SCHOOL, invoiceId, paidAt: '2026-09-02T09:00:00Z', amount: 1000 }]);
+    const res = await supertest(buildApp()).post(`/api/finance/invoices/${invoiceId}/early-payment/confirm`);
+    expect(res.status).toBe(400);
+  });
+
+  test('a payment on or before the deadline lets the bursar confirm the discount, once', async () => {
+    mockStores.payments = mockFakeCollection([{ id: 'p1', schoolId: SCHOOL, invoiceId, paidAt: '2026-08-20T09:00:00Z', amount: 1000 }]);
+    const res = await supertest(buildApp()).post(`/api/finance/invoices/${invoiceId}/early-payment/confirm`);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ earlyPaymentApplied: true, discountPct: 5 });
+    expect(res.body.data.total).toBeLessThan(35000);
+    const again = await supertest(buildApp()).post(`/api/finance/invoices/${invoiceId}/early-payment/confirm`);
+    expect(again.status).toBe(409);
+  });
+
+  test('the deadline can be changed by the bursar until the discount is confirmed', async () => {
+    const changed = await supertest(buildApp()).put(`/api/finance/invoices/${invoiceId}/early-payment`).send({ deadline: '2026-08-25' });
+    expect(changed.status).toBe(200);
+    expect(changed.body.data.earlyPaymentDeadline).toBe('2026-08-25');
+    const bad = await supertest(buildApp()).put(`/api/finance/invoices/${invoiceId}/early-payment`).send({ deadline: '25/08/2026' });
+    expect(bad.status).toBe(422);
+  });
+
+  test('after confirmation the deadline and percentage are locked', async () => {
+    mockStores.payments = mockFakeCollection([{ id: 'p1', schoolId: SCHOOL, invoiceId, paidAt: '2026-08-20T09:00:00Z', amount: 1000 }]);
+    await supertest(buildApp()).post(`/api/finance/invoices/${invoiceId}/early-payment/confirm`);
+    const res = await supertest(buildApp()).put(`/api/finance/invoices/${invoiceId}/early-payment`).send({ pct: 10 });
+    expect(res.status).toBe(409);
+  });
+
+  test('the term list shows each invoice\'s early-payment status', async () => {
+    const res = await supertest(buildApp()).get('/api/finance/term-billing/early-payments?termId=term_1');
+    expect(res.status).toBe(200);
+    expect(res.body.data.find(i => i.id === invoiceId)).toMatchObject({ earlyPaymentDeadline: '2026-08-31', earlyPaymentApplied: false });
   });
 });
 

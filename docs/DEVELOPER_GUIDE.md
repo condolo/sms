@@ -6198,7 +6198,8 @@ A subject's final score is the weighted average over the assessment types that h
 - Preview is read-only. Generate skips students already billed for the term.
 - A run does not re-bill a later change for the same term (new enrolment, changed fare). That needs a new invoice.
 - Lines are copied into the invoice. Later edits to a fare or activity amount do not change existing invoices.
-- Due date: the seventh day counting the term's start date as day 1 (`_termDueDate` in `finance.js`). Early-payment eligibility is stamped against that date, the same way fee-structure invoices do it.
+- Due date: the seventh day counting the term's start date as day 1 (`_termDueDate` in `finance.js`).
+- Early payment is paid BEFORE the term starts. The deadline is the day before the term's start (`_dayBefore`). Term invoices are `earlyPaymentManual`: the payment path (`POST /payments`) never applies the discount for them. The bursar confirms (`POST /invoices/:id/early-payment/confirm`, rbac finance:create), and the server requires a payment on or before the deadline before it applies the discount. Before confirmation the bursar can change the deadline or percentage (`PUT /invoices/:id/early-payment`). Fee-structure invoices keep the automatic rule.
 - Generation is manual, per term. Automatic (scheduled) generation needs a decision on timing.
 
 **Tests:** `__tests__/utils/term-billing.test.js` (rules), `__tests__/routes/finance-term-billing.test.js` (preview, generate, idempotency, refusals).

@@ -5,12 +5,94 @@
    preview shows exactly what would be billed and what would be skipped, and
    why, before any invoice is created. Running it again for the same term is
    safe: students already billed are skipped.
+
+   Early payment (paid before the term starts) is confirmed by the bursar,
+   per invoice, below. Confirming applies the discount only if a payment was
+   received on or before the deadline; the server checks that.
    ============================================================ */
 import { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
 import { finance as financeApi } from '@/api/client.js';
 import AcademicPeriodPicker from './AcademicPeriodPicker.jsx';
+
+function EarlyPaymentPanel({ termId, money, canConfirm }) {
+  const qc = useQueryClient();
+  const [error, setError] = useState('');
+  const { data: resp, isLoading } = useQuery({
+    queryKey: ['finance', 'term-early-payments', termId],
+    queryFn:  () => financeApi.termBilling.earlyPayments(termId),
+    enabled:  !!termId,
+    staleTime: 0,
+  });
+  const rows = resp?.data ?? [];
+  const refresh = () => qc.invalidateQueries({ queryKey: ['finance', 'term-early-payments', termId] });
+
+  const confirmMut = useMutation({
+    mutationFn: (id) => financeApi.termBilling.confirmEarlyPayment(id),
+    onSuccess: () => { setError(''); refresh(); },
+    onError: (e) => setError(e.message ?? 'Could not confirm early payment'),
+  });
+  const changeMut = useMutation({
+    mutationFn: ({ id, deadline }) => financeApi.termBilling.changeEarlyPayment(id, { deadline }),
+    onSuccess: () => { setError(''); refresh(); },
+    onError: (e) => setError(e.message ?? 'Could not change the deadline'),
+  });
+
+  return (
+    <section className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
+      <h3 className="text-sm font-semibold text-slate-800">Early payment (bursar confirms)</h3>
+      <p className="text-xs text-slate-500">
+        Early payment is paid before the term starts. Confirm it here once the payment has been received. The deadline can be changed until it is confirmed.
+      </p>
+      {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>}
+      {isLoading ? <Loader2 className="animate-spin text-slate-400" size={18} /> : rows.length === 0 ? (
+        <p className="text-xs text-slate-400">No early-payment terms on this term's invoices. A policy must be active when the term is billed.</p>
+      ) : (
+        <table className="w-full text-sm">
+          <thead><tr className="text-left text-xs text-slate-500">
+            <th className="py-2 font-semibold">Student</th>
+            <th className="py-2 font-semibold">Invoice</th>
+            <th className="py-2 font-semibold">Pay by</th>
+            <th className="py-2 font-semibold text-right">Discount</th>
+            <th className="py-2 font-semibold">Status</th>
+            {canConfirm && <th />}
+          </tr></thead>
+          <tbody className="divide-y divide-slate-100">
+            {rows.map(r => (
+              <tr key={r.id}>
+                <td className="py-2">{r.studentName}</td>
+                <td className="py-2 text-xs">{r.invoiceNumber}</td>
+                <td className="py-2 text-xs">{r.earlyPaymentDeadline}</td>
+                <td className="py-2 text-right text-xs">{r.earlyPaymentPct}%</td>
+                <td className="py-2 text-xs">
+                  {r.earlyPaymentApplied
+                    ? <span className="text-emerald-700">Confirmed {r.earlyPaymentConfirmedAt ? new Date(r.earlyPaymentConfirmedAt).toLocaleDateString('en-GB') : ''}</span>
+                    : <span className="text-amber-700">Awaiting confirmation</span>}
+                </td>
+                {canConfirm && (
+                  <td className="py-2 text-right whitespace-nowrap">
+                    {!r.earlyPaymentApplied && (
+                      <>
+                        <button onClick={() => {
+                          const deadline = window.prompt('New pay-by date (YYYY-MM-DD)', r.earlyPaymentDeadline);
+                          if (deadline) changeMut.mutate({ id: r.id, deadline });
+                        }} className="text-xs text-slate-600 hover:underline mr-3">Change date</button>
+                        <button onClick={() => confirmMut.mutate(r.id)} disabled={confirmMut.isPending}
+                          className="text-xs text-indigo-600 hover:underline">Confirm early payment</button>
+                      </>
+                    )}
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {termId && rows.length > 0 && <p className="text-[11px] text-slate-400">Confirmation fails unless a payment was received on or before the pay-by date.</p>}
+    </section>
+  );
+}
 
 export default function TermBillingTab({ fmtCurrency, canCreate }) {
   const qc = useQueryClient();
@@ -84,7 +166,6 @@ export default function TermBillingTab({ fmtCurrency, canCreate }) {
           {preview.dueDate && (
             <p className="text-xs text-slate-600">
               Due by <span className="font-medium">{preview.dueDate}</span> (end of the term's first week).
-              Early-payment deadlines are shown per student where a policy applies.
             </p>
           )}
           {preview.billable.length === 0 ? (
@@ -122,6 +203,10 @@ export default function TermBillingTab({ fmtCurrency, canCreate }) {
             </>
           )}
         </section>
+      )}
+
+      {period.termId && (
+        <EarlyPaymentPanel termId={period.termId} money={money} canConfirm={canCreate} />
       )}
     </div>
   );

@@ -380,7 +380,10 @@ router.post('/payments', authMiddleware, PLAN, MODGATE, rbac('finance', 'create'
     // if it's genuinely higher than whatever auto-discount already sits on
     // the invoice, matching the "only one discount, highest wins" rule the
     // rest of _resolveAutoDiscounts() already follows.
-    if (invoice.earlyPaymentPct && !invoice.earlyPaymentApplied && invoice.earlyPaymentDeadline
+    // Term-billing invoices are earlyPaymentManual: the bursar confirms early
+    // payment (POST /invoices/:id/early-payment/confirm), so a payment alone
+    // never applies it. Fee-structure invoices keep the automatic rule.
+    if (invoice.earlyPaymentPct && !invoice.earlyPaymentApplied && !invoice.earlyPaymentManual && invoice.earlyPaymentDeadline
         && effectivePaidAt.slice(0, 10) <= invoice.earlyPaymentDeadline
         && invoice.earlyPaymentPct > (invoice.discountPct || 0)) {
       const newTotals = _calcInvoiceTotals(invoice.lineItems, invoice.earlyPaymentPct, invoice.taxPct);
@@ -736,6 +739,14 @@ function _validatePolicyShape(data) {
    payment may land on to still qualify. Returns null when the fee
    structure carries no dueDate at all (nothing to count back from), in
    which case Early Payment simply never applies to that invoice. */
+/* The day before a term starts (YYYY-MM-DD): the last day for early payment,
+   which is paid before the term opens. UTC arithmetic, as _termDueDate. */
+function _dayBefore(dateStr) {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
 /* Term fees are due by the end of the term's first week: the seventh day
    counting the term's start date as day 1. UTC arithmetic keeps the date
    exact regardless of the server's timezone. */
@@ -1021,14 +1032,13 @@ async function _runTermBilling(req, res, { dryRun }) {
     ? await _resolveAutoDiscounts(schoolId, ctx, billable.map(b => b.studentId))
     : new Map();
   // Fees for a term are due by the end of its first week (see _termDueDate).
-  // Early-payment eligibility is stamped against that date, exactly as the
-  // fee-structure path does; POST /payments applies it later if paid in time.
+  // Early payment is paid BEFORE the term starts: the deadline is the day
+  // before the term's start date. The bursar confirms it by hand; it is not
+  // applied automatically on payment (see earlyPaymentManual below).
   const dueDate = _termDueDate(term.startDate);
   const earlyPaymentPolicy = await tenantModel('discount_policies', ctx)
     .findOne({ schoolId, type: 'early_payment', active: true }).lean();
-  const earlyPaymentDeadline = earlyPaymentPolicy
-    ? _computeEarlyPaymentDeadline(dueDate, earlyPaymentPolicy.daysBeforeDue)
-    : null;
+  const earlyPaymentDeadline = earlyPaymentPolicy ? _dayBefore(term.startDate) : null;
 
   const rows = billable.map(b => {
     const discountPct = discounts.get(b.studentId) ?? 0;
@@ -1076,6 +1086,7 @@ async function _runTermBilling(req, res, { dryRun }) {
           earlyPaymentPct:      earlyPaymentPolicy.flatPct,
           earlyPaymentDeadline,
           earlyPaymentApplied:  false,
+          earlyPaymentManual:   true,
         } : {}),
         createdBy:         userId,
         updatedBy:         userId,
@@ -1102,6 +1113,111 @@ router.post('/term-billing/preview', authMiddleware, PLAN, MODGATE, rbac('financ
 router.post('/term-billing/generate', authMiddleware, PLAN, MODGATE, rbac('finance', 'create'), async (req, res) => {
   try { return await _runTermBilling(req, res, { dryRun: false }); }
   catch (err) { console.error('[finance POST /term-billing/generate]', err); return E.serverError(res); }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   TERM EARLY PAYMENT — the bursar's manual step.
+
+   Early payment is paid BEFORE the term starts. A term invoice carries
+   earlyPaymentManual: its deadline is the day before the term's start, and
+   a payment alone never applies the discount. Until the bursar confirms:
+   • PUT   /invoices/:id/early-payment   change the deadline and/or percentage
+   • POST  /invoices/:id/early-payment/confirm   apply the discount. The server
+     checks that a payment was received on or before the deadline; it does not
+     take that on trust.
+   • GET   /term-billing/early-payments?termId=   each term invoice's status
+   ══════════════════════════════════════════════════════════════ */
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+router.get('/term-billing/early-payments', authMiddleware, PLAN, MODGATE, rbac('finance', 'read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const termId = typeof req.query.termId === 'string' ? req.query.termId : '';
+    if (!termId) return E.validation(res, [{ field: 'termId', message: 'termId is required' }]);
+    const docs = await tenantModel('invoices', tenantContext(req))
+      .find({ schoolId, termBillingTermId: termId, earlyPaymentManual: true })
+      .select('studentName invoiceNumber dueDate discountPct total amountPaid balance status earlyPaymentPct earlyPaymentDeadline earlyPaymentApplied earlyPaymentConfirmedBy earlyPaymentConfirmedAt')
+      .sort({ studentName: 1 }).lean();
+    return ok(res, docs);
+  } catch (err) { console.error('[finance GET /term-billing/early-payments]', err); return E.serverError(res); }
+});
+
+router.put('/invoices/:id/early-payment', authMiddleware, PLAN, MODGATE, rbac('finance', 'update'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const { deadline, pct } = req.body ?? {};
+    if (deadline === undefined && pct === undefined) {
+      return E.validation(res, [{ field: 'deadline', message: 'Give a deadline or a percentage to change' }]);
+    }
+    if (deadline !== undefined && (typeof deadline !== 'string' || !ISO_DAY.test(deadline))) {
+      return E.validation(res, [{ field: 'deadline', message: 'Deadline must be a date (YYYY-MM-DD)' }]);
+    }
+    if (pct !== undefined && (typeof pct !== 'number' || !(pct >= 0 && pct <= 100))) {
+      return E.validation(res, [{ field: 'pct', message: 'Percentage must be between 0 and 100' }]);
+    }
+
+    const Invoices = tenantModel('invoices', tenantContext(req));
+    const inv = await Invoices.findOne({ id: req.params.id, schoolId }).lean();
+    if (!inv) return E.notFound(res, 'Invoice not found');
+    if (!inv.earlyPaymentManual) return E.badRequest(res, 'This invoice has no manual early-payment terms');
+    if (inv.earlyPaymentApplied) return E.conflict(res, 'Early payment is already confirmed for this invoice');
+
+    const $set = { updatedBy: userId };
+    if (deadline !== undefined) $set.earlyPaymentDeadline = deadline;
+    if (pct !== undefined)      $set.earlyPaymentPct = pct;
+    const updated = await Invoices.findOneAndUpdate(
+      { id: req.params.id, schoolId, earlyPaymentApplied: { $ne: true } },
+      { $set },
+      { new: true },
+    ).lean();
+    if (!updated) return E.conflict(res, 'Early payment was confirmed while you were editing. Refresh and check.');
+
+    AuditService.log({ action: 'finance.early_payment_changed', actor: req.jwtUser, schoolId, target: { type: 'invoice', id: inv.id, label: inv.invoiceNumber }, details: { before: { deadline: inv.earlyPaymentDeadline, pct: inv.earlyPaymentPct }, after: { deadline: updated.earlyPaymentDeadline, pct: updated.earlyPaymentPct } }, req });
+    return ok(res, updated);
+  } catch (err) { console.error('[finance PUT /invoices/:id/early-payment]', err); return E.serverError(res); }
+});
+
+// Same permission as recording a payment: confirming a discount is a money action.
+router.post('/invoices/:id/early-payment/confirm', authMiddleware, PLAN, MODGATE, rbac('finance', 'create'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const Invoices = tenantModel('invoices', tenantContext(req));
+    const inv = await Invoices.findOne({ id: req.params.id, schoolId }).lean();
+    if (!inv) return E.notFound(res, 'Invoice not found');
+    if (!inv.earlyPaymentManual) return E.badRequest(res, 'This invoice has no manual early-payment terms');
+    if (inv.earlyPaymentApplied) return E.conflict(res, 'Early payment is already confirmed for this invoice');
+    if (!inv.earlyPaymentPct || !inv.earlyPaymentDeadline) return E.badRequest(res, 'This invoice has no early-payment terms set');
+    if (inv.earlyPaymentPct <= (inv.discountPct || 0)) {
+      return E.badRequest(res, `The early-payment discount (${inv.earlyPaymentPct}%) is not higher than the discount already on this invoice (${inv.discountPct || 0}%)`);
+    }
+
+    // Verified, not trusted: a payment must actually have been received on or
+    // before the deadline. Paid later does not qualify.
+    const payments = await tenantModel('payments', tenantContext(req))
+      .find({ schoolId, invoiceId: inv.id }).select('paidAt amount').lean();
+    const earlyPayments = payments.filter(p => (p.paidAt || '').slice(0, 10) <= inv.earlyPaymentDeadline);
+    if (earlyPayments.length === 0) {
+      return E.badRequest(res, `No payment was received on or before ${inv.earlyPaymentDeadline}, so early payment cannot be confirmed.`);
+    }
+
+    const newTotals = _calcInvoiceTotals(inv.lineItems, inv.earlyPaymentPct, inv.taxPct);
+    const updated = await Invoices.findOneAndUpdate(
+      { id: inv.id, schoolId, earlyPaymentApplied: { $ne: true } },
+      { $set: {
+          discountPct: inv.earlyPaymentPct, ...newTotals,
+          earlyPaymentApplied: true,
+          earlyPaymentConfirmedBy: userId,
+          earlyPaymentConfirmedAt: new Date().toISOString(),
+          balance: _round(newTotals.total - (inv.amountPaid || 0)),
+          updatedBy: userId,
+      } },
+      { new: true },
+    ).lean();
+    if (!updated) return E.conflict(res, 'Early payment was already confirmed');
+
+    AuditService.log({ action: 'finance.early_payment_confirmed', actor: req.jwtUser, schoolId, target: { type: 'invoice', id: inv.id, label: inv.invoiceNumber }, details: { discountPct: inv.earlyPaymentPct, newTotal: newTotals.total, deadline: inv.earlyPaymentDeadline, earlyPaymentsCount: earlyPayments.length }, req });
+    return ok(res, updated);
+  } catch (err) { console.error('[finance POST /invoices/:id/early-payment/confirm]', err); return E.serverError(res); }
 });
 
 /* ── POST /api/finance/fee-structures/:id/generate ─ Bulk invoices */

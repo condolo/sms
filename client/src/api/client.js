@@ -301,6 +301,10 @@ export const finance = {
   termBilling: {
     preview:  (data) => _post('/finance/term-billing/preview', data),
     generate: (data) => _post('/finance/term-billing/generate', data),
+    // Bursar's early-payment step: change the deadline or percentage, then confirm.
+    earlyPayments:      (termId) => _get('/finance/term-billing/early-payments', { termId }),
+    changeEarlyPayment: (id, data) => _put(`/finance/invoices/${id}/early-payment`, data),
+    confirmEarlyPayment: (id) => _post(`/finance/invoices/${id}/early-payment/confirm`),
   },
   invoices: {
     ..._resource('finance/invoices'),
