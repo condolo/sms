@@ -741,7 +741,7 @@ const SECTIONS = [
       },
       {
         q: 'Are messages private?',
-        a: 'Messages are sent to the recipients you chose. Staff with the Delete Any Message (Moderation) permission can remove someone else\'s message, for safeguarding or compliance. Ask your school admin if you need that permission.',
+        a: 'Messages are sent to the recipients you chose, and a message to a group is visible to everyone in that group. Staff with the Delete Any Message (Moderation) permission can remove someone else\'s message, for safeguarding or compliance. Ask your school admin if you need that permission.',
       },
       {
         q: 'Can I message a whole group at once?',
@@ -775,7 +775,7 @@ const SECTIONS = [
       },
       {
         q: 'Can I edit or remove a resource after sharing it?',
-        a: 'Yes, if your role has the Edit / Delete permission for Resources. Open the resource and use the Edit or Delete action. Removing a resource removes it from every viewer\'s list immediately.',
+        a: 'Yes, if your role has the Edit / Delete permission for Resources. Open the resource and use the Edit or Delete action. Deleting a resource removes it from the shared list.',
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
