@@ -29,6 +29,8 @@ function mockMatchesFilter(doc, filter) {
       if ('$in' in v) return v.$in.includes(doc[k]);
       return true;
     }
+    // Mongo: a null filter matches a missing field too.
+    if (v === null) return doc[k] == null;
     return doc[k] === v;
   });
 }

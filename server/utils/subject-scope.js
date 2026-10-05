@@ -123,4 +123,4 @@ async function unassignedPairs(req, pairs) {
   return pairs.filter(p => !isAssigned(p));
 }
 
-module.exports = { isSubjectAssignmentEnforced, canWriteSubject, unassignedPairs };
+module.exports = { isSubjectAssignmentEnforced, canWriteSubject, unassignedPairs, isManagement: _isManagement };

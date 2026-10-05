@@ -59,6 +59,7 @@ function mockChainObj(obj) { return { select: () => mockChainObj(obj), lean: () 
 function mockMatchesFilter(doc, filter) {
   return Object.entries(filter || {}).every(([k, v]) => {
     if (k === '$or') return v.some(sub => mockMatchesFilter(doc, sub));
+    if (k === '$and') return v.every(sub => mockMatchesFilter(doc, sub));
     if (v && typeof v === 'object' && !Array.isArray(v)) {
       if ('$in' in v) return v.$in.includes(doc[k]);
       if ('$exists' in v) return (doc[k] !== undefined) === v.$exists;
@@ -91,6 +92,7 @@ function mockFakeMarksAggregate(pipeline) {
   return Promise.resolve([{ bySubject, overall: overall ? [overall] : [] }]);
 }
 
+let mockAssignmentRows = [];
 jest.mock('../../utils/tenant-model', () => ({
   tenantModel: jest.fn((collection) => {
     if (collection === 'academic_years')   return { find: () => mockChainArr(mockYears) };
@@ -99,6 +101,7 @@ jest.mock('../../utils/tenant-model', () => ({
     if (collection === 'subjects')         return { find: (filter) => mockChainArr(mockSubjectDocs.filter(d => mockMatchesFilter(d, filter))) };
     if (collection === 'classes')          return { find: (filter) => mockChainArr(mockClassDocs.filter(d => mockMatchesFilter(d, filter))) };
     if (collection === 'streams')          return { find: (filter) => mockChainArr(mockStreamDocs.filter(d => mockMatchesFilter(d, filter))) };
+    if (collection === 'teaching_assignments') return { find: (filter) => mockChainArr(mockAssignmentRows.filter(d => mockMatchesFilter(d, filter))) };
     return { find: () => mockChainArr([]), findOne: () => mockChainObj(null) };
   }),
   tenantContext: jest.fn((req) => ({ schoolId: req.jwtUser.schoolId })),
@@ -160,6 +163,8 @@ describe('GET /api/assessment/analytics — scoped teacher view', () => {
   beforeEach(() => {
     mockJwtUser = { userId: 'usr_teacher', schoolId: SCHOOL, role: 'teacher', roles: ['teacher'] };
     mockScope = { level: 'assigned', classIds: ['cls_a'] };
+    // The teacher teaches maths in cls_a only.
+    mockAssignmentRows = [{ schoolId: SCHOOL, teacherId: 'usr_teacher', classId: 'cls_a', subjectId: 'sub_math', streamId: null }];
   });
 
   test("a scoped teacher's whole-school totals never include another class's marks", async () => {

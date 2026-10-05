@@ -13,6 +13,7 @@ const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { scopeMiddleware } = require('../middleware/scopeMiddleware');
 const ScopeEngine         = require('../utils/scopeEngine');
+const { isElective, enrolledStudentIds, canTeachElective } = require('../utils/elective-scope');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 const { applyOptimisticLock } = require('../utils/optimistic-lock');
@@ -75,7 +76,7 @@ function _validate(schema, data) {
 // they're the more restrictive of the two.
 router.get(
   '/', authMiddleware, PLAN, MODGATE, rbac('classes', 'read'),
-  (req, res, next) => (req.query.assignedOnly === 'true' || req.query.attendanceScope === 'true' || req.query.lessonsScope === 'true' ? scopeMiddleware(req, res, next) : next()),
+  (req, res, next) => (req.query.assignedOnly === 'true' || req.query.attendanceScope === 'true' || req.query.lessonsScope === 'true' || req.query.assessmentScope === 'true' ? scopeMiddleware(req, res, next) : next()),
   async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
@@ -102,6 +103,17 @@ router.get(
     } else if (req.query.lessonsScope === 'true') {
       const originalScope = req.scope;
       req.scope = await ScopeEngine.resolveLessonsClassPickerScope(req);
+      ScopeEngine.applyToFilter(req, 'classes', filter);
+      const noAssignments = ScopeEngine.hasNoAssignments(req, 'classes');
+      req.scope = originalScope;
+      if (noAssignments) {
+        return ok(res, [], { ...paginate(page, limit, 0), noAssignments: true });
+      }
+    } else if (req.query.assessmentScope === 'true') {
+      // Markbook's class picker: the same class list Attendance shows, minus homeroom-only classes
+      // (marks follow teaching assignments, see resolveAssessmentScope).
+      const originalScope = req.scope;
+      req.scope = await ScopeEngine.resolveAssessmentClassPickerScope(req);
       ScopeEngine.applyToFilter(req, 'classes', filter);
       const noAssignments = ScopeEngine.hasNoAssignments(req, 'classes');
       req.scope = originalScope;
@@ -268,6 +280,19 @@ router.get('/:id/students', authMiddleware, PLAN, MODGATE, rbac('students', 'rea
     // real stream assignment sees the whole class" gap Attendance/Lessons
     // already had fixed, now for Grades/Assessment too (ScopeEngine.
     // resolveAssessmentScope).
+    // Elective roster: the class's students enrolled in this subject, across all streams.
+    // Only the Markbook asks for it, and only for an elective (see elective-scope.js).
+    let electiveIds = null;
+    if (req.query.electiveSubjectId) {
+      const subjectId = String(req.query.electiveSubjectId);
+      if (await isElective(req, cls.id, subjectId)) {
+        if (!(await canTeachElective(req, cls.id, subjectId))) {
+          return E.forbidden(res, 'You are not assigned to teach this elective in this class.');
+        }
+        electiveIds = [...(await enrolledStudentIds(req, subjectId))];
+      }
+    }
+
     const originalScope = req.scope;
     if (req.query.attendanceScope === 'true') {
       req.scope = await ScopeEngine.resolveAttendanceScope(req);
@@ -309,7 +334,7 @@ router.get('/:id/students', authMiddleware, PLAN, MODGATE, rbac('students', 'rea
           .select('id').lean().then(docs => docs.map(d => d.id))
       : [];
 
-    if (!inWholeClassScope && relevantStreamIds.length === 0) {
+    if (!electiveIds && !inWholeClassScope && relevantStreamIds.length === 0) {
       return E.forbidden(res, 'This class is not in your assigned scope.');
     }
 
@@ -317,7 +342,9 @@ router.get('/:id/students', authMiddleware, PLAN, MODGATE, rbac('students', 'rea
     // Match students stored under ANY identifier form of this class —
     // UUID `id` or Mongo `_id` string (pre-migration / imported records)
     const filter   = { schoolId, classId: { $in: classIdForms } };
-    if (!inWholeClassScope) {
+    if (electiveIds) {
+      filter.id = { $in: electiveIds };
+    } else if (!inWholeClassScope) {
       // Stream-scoped only: narrow to just the caller's own stream(s) within
       // this class.
       filter.streamId = { $in: relevantStreamIds };

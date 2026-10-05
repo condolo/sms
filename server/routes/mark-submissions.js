@@ -26,6 +26,9 @@ const AuditService = require('../services/audit');
 const { getWorkflowConfig, resolveStep } = require('../utils/workflow-config');
 const { enqueueJob, registerHandler } = require('../utils/job-queue');
 const { _model } = require('../utils/model');
+const { isManagement } = require('../utils/subject-scope');
+const { isElective, canTeachElective } = require('../utils/elective-scope');
+const { restrictToTaught, taughtPairs } = require('../utils/teaching-scope');
 
 const router = express.Router();
 const PLAN   = planGate('mark_submissions');
@@ -43,6 +46,9 @@ const SubmitSchema = z.object({
   assessmentType: z.string().min(1),
   instance:       z.number().int().min(1).default(1),
   examSeriesId:   z.string().optional().nullable(),
+  // A submission is per stream: a teacher submits the stream they teach. Absent =
+  // legacy whole-class submission (covers every stream), kept for existing rows.
+  streamId:       z.string().optional().nullable(),
   notes:          z.string().max(1000).optional(),
 });
 
@@ -69,7 +75,11 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), async (re
     if (req.query.assessmentType) filter.assessmentType = req.query.assessmentType;
     if (req.query.status)         filter.status         = req.query.status;
     if (req.query.examSeriesId)   filter.examSeriesId   = req.query.examSeriesId;
+    // Same rule the mark guards use: this stream's submissions, plus legacy whole-class ones.
+    if (req.query.streamId)       filter.streamId       = { $in: [req.query.streamId, null] };
 
+    // Submissions carry marks snapshots: only the subjects this caller teaches.
+    await restrictToTaught(req, filter);
     const docs = await tenantModel('mark_submissions', tenantContext(req))
       .find(filter)
       .sort({ createdAt: -1 })
@@ -88,6 +98,10 @@ router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), async 
     const { schoolId } = req.jwtUser;
     const doc = await tenantModel('mark_submissions', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!doc) return E.notFound(res, 'Submission not found');
+    const pairs = await taughtPairs(req);
+    if (pairs && !pairs.some(p => p.classId === doc.classId && p.subjectId === doc.subjectId && (!p.streamId || !doc.streamId || p.streamId === doc.streamId))) {
+      return E.forbidden(res, 'You do not teach this subject in this class.');
+    }
     return ok(res, doc);
   } catch (err) {
     console.error('[mark-submissions GET /:id]', err);
@@ -102,6 +116,24 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), async 
     const { data, error } = _validate(SubmitSchema, req.body);
     if (error) return E.validation(res, error);
 
+    // A teacher whose assignment is for one stream submits that stream. A whole-class
+    // submission (no streamId) would lock every stream of the class, so it is only
+    // open to management and to a whole-class assignment.
+    // An elective is one group across streams: no stream, and the caller must teach it.
+    const elective = await isElective(req, data.classId, data.subjectId);
+    if (elective) {
+      data.streamId = null;
+      if (!(await canTeachElective(req, data.classId, data.subjectId))) {
+        return E.forbidden(res, 'You are not assigned to teach this elective in this class.');
+      }
+    } else if (!data.streamId && !isManagement(req)) {
+      const wholeClass = await tenantModel('teaching_assignments', tenantContext(req)).findOne({
+        schoolId, teacherId: userId, classId: data.classId, subjectId: data.subjectId,
+        $or: [{ streamId: null }, { streamId: { $exists: false } }],
+      }).select('id').lean();
+      if (!wholeClass) return E.forbidden(res, 'Submit marks per stream — choose the stream you teach.');
+    }
+
     // Snapshot current marks for audit trail
     const markFilter = {
       schoolId,
@@ -112,6 +144,7 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), async 
       instance:       data.instance,
     };
     if (data.academicYearId) markFilter.academicYearId = data.academicYearId;
+    if (data.streamId) markFilter.streamId = data.streamId;
     const marks = await tenantModel('assessment_marks', tenantContext(req)).find(markFilter).select('studentId rawScore').lean();
 
     // Upsert: one submission per class/subject/term/type/instance combination
@@ -294,6 +327,7 @@ async function _autoRelock(payload) {
   const markFilter = {
     schoolId, classId: sub.classId, subjectId: sub.subjectId,
     termNumber: sub.termNumber, assessmentType: sub.assessmentType, instance: sub.instance,
+    ...(sub.streamId ? { streamId: sub.streamId } : {}),
   };
   await _model('assessment_marks').updateMany(markFilter, { $set: { isLocked: true, lockedAt: now, lockedBySubmissionId: sub.id } });
   await AuditService.log({
@@ -404,6 +438,7 @@ router.post('/:id/lock', authMiddleware, PLAN, MODGATE, rbac('grades', 'update')
       termNumber:     sub.termNumber,
       assessmentType: sub.assessmentType,
       instance:       sub.instance,
+      ...(sub.streamId ? { streamId: sub.streamId } : {}),
     };
     await tenantModel('assessment_marks', tenantContext(req)).updateMany(markFilter, {
       $set: { isLocked: true, lockedAt: new Date().toISOString(), lockedBySubmissionId: sub.id },
@@ -469,6 +504,7 @@ router.post('/:id/unlock', authMiddleware, PLAN, MODGATE, rbac('grades', 'update
       termNumber:     sub.termNumber,
       assessmentType: sub.assessmentType,
       instance:       sub.instance,
+      ...(sub.streamId ? { streamId: sub.streamId } : {}),
     };
     await tenantModel('assessment_marks', ctx).updateMany(markFilter, {
       $set: { isLocked: false, unlockedAt: now },

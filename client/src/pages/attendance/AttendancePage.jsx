@@ -13,7 +13,7 @@ import {
   CheckSquare, Square, BarChart3, ChevronLeft, ChevronRight, Printer, Download,
   Layers,
 } from 'lucide-react';
-import { attendance as attendanceApi, classes as classesApi, streams as streamsApi, timetable as timetableApi } from '@/api/client.js';
+import { attendance as attendanceApi, classes as classesApi, streams as streamsApi, timetable as timetableApi, classSubjects as classSubjectsApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 import SchoolReportPanel from './components/SchoolReportPanel.jsx';
 import AbsenteesPanel from './components/AbsenteesPanel.jsx';
@@ -62,6 +62,8 @@ export default function AttendancePage() {
   const [viewMode, setViewMode] = useState('register');
   const [classId, setClassId] = useState(() => searchParams.get('classId') ?? '');
   const [streamId, setStreamId] = useState(() => searchParams.get('streamId') ?? '');
+  // An elective group register (e.g. French across streams). Empty = the class/stream register.
+  const [electiveSubjectId, setElectiveSubjectId] = useState('');
   const [edits, setEdits]     = useState({});   // { studentId: status }
   const [toast, setToast]     = useState(null); // { type: 'success'|'error', msg: string }
   const qc = useQueryClient();
@@ -132,12 +134,22 @@ export default function AttendancePage() {
   // has more than one stream, nothing is fetched until a specific stream
   // is chosen — there is no meaningful "whole class" register anymore.
   const effectiveStreamId = needsStreamSelection ? streamId : (streamList[0]?.id ?? '');
-  const canLoadRegister = !!classId && (!needsStreamSelection || !!streamId);
+  const canLoadRegister = !!classId && (!!electiveSubjectId || !needsStreamSelection || !!streamId);
+
+  /* ── Electives: subjects not compulsory for this class. Each is its own group register. ── */
+  const { data: classSubjectsData } = useQuery({
+    queryKey: ['class-subjects', classId],
+    queryFn:  () => classSubjectsApi.list({ classId }),
+    enabled:  !!classId,
+    staleTime: 5 * 60_000,
+  });
+  const electives = (classSubjectsData?.data ?? []).filter(r => r.isCompulsoryForClass === false);
+  useEffect(() => { setElectiveSubjectId(''); }, [classId]);
 
   /* ── Attendance records for selected class/stream + date ───── */
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ['attendance', 'list', { classId, streamId: effectiveStreamId, date }],
-    queryFn:  () => attendanceApi.list({ classId, ...(effectiveStreamId ? { streamId: effectiveStreamId } : {}), date, limit: 200 }),
+    queryKey: ['attendance', 'list', { classId, streamId: effectiveStreamId, subjectId: electiveSubjectId, date }],
+    queryFn:  () => attendanceApi.list({ classId, ...(electiveSubjectId ? { subjectId: electiveSubjectId } : (effectiveStreamId ? { streamId: effectiveStreamId } : {})), date, limit: 200 }),
     enabled:  canLoadRegister,
   });
   const rows = data?.data ?? [];
@@ -147,9 +159,11 @@ export default function AttendancePage() {
      roster (already correctly scoped server-side — see
      streams.js's GET /:id/students) instead of the whole class's. */
   const { data: studentsData, isLoading: studentsLoading } = useQuery({
-    queryKey: needsStreamSelection
-      ? ['streams', streamId, 'students']
-      : ['classes', classId, 'students'],
+    queryKey: electiveSubjectId
+      ? ['classes', classId, 'elective', electiveSubjectId, 'students']
+      : needsStreamSelection
+        ? ['streams', streamId, 'students']
+        : ['classes', classId, 'students'],
     // attendanceScope on the classes.js fallback (single-stream classes only
     // — needsStreamSelection is false) matches the SAME narrow floor the
     // stream picker above already used to decide there was nothing to pick:
@@ -157,9 +171,11 @@ export default function AttendancePage() {
     // module (exams_officer/timetabler/etc.) but scoped to just one real
     // stream here would get the WHOLE class's roster instead of their own
     // stream's — see classes.js's own attendanceScope comment on this route.
-    queryFn: () => needsStreamSelection
-      ? streamsApi.students(streamId, { limit: 500, status: 'active' })
-      : classesApi.students(classId, { limit: 500, status: 'active', attendanceScope: true }),
+    queryFn: () => electiveSubjectId
+      ? classesApi.students(classId, { limit: 500, status: 'active', electiveSubjectId })
+      : needsStreamSelection
+        ? streamsApi.students(streamId, { limit: 500, status: 'active' })
+        : classesApi.students(classId, { limit: 500, status: 'active', attendanceScope: true }),
     enabled: canLoadRegister,
     staleTime: 5 * 60_000,
   });
@@ -294,7 +310,7 @@ export default function AttendancePage() {
         date,
         status: edits[r.studentId] ?? r.status ?? 'absent',
       }));
-      return attendanceApi.bulkMark({ classId, ...(effectiveStreamId ? { streamId: effectiveStreamId } : {}), date, records });
+      return attendanceApi.bulkMark({ classId, ...(electiveSubjectId ? { subjectId: electiveSubjectId } : (effectiveStreamId ? { streamId: effectiveStreamId } : {})), date, records });
     },
     onSuccess: () => {
       setEdits({});
@@ -498,7 +514,22 @@ export default function AttendancePage() {
                time, sometimes a different room), so a class with multiple
                streams needs a register PER STREAM, never one list merging
                every stream a teacher can see. */}
-            {classId && needsStreamSelection && (
+            {classId && electives.length > 0 && (
+              <div className="relative">
+                <select
+                  value={electiveSubjectId}
+                  onChange={e => { setElectiveSubjectId(e.target.value); setEdits({}); }}
+                  className="text-sm text-slate-700 font-medium bg-white border border-slate-200 rounded-lg pl-3 pr-8 py-2 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400 appearance-none cursor-pointer"
+                >
+                  <option value="">Class / stream register</option>
+                  {electives.map(r => (
+                    <option key={r.subjectId} value={r.subjectId}>{r.subject?.name ?? r.subjectId} — elective group</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {classId && needsStreamSelection && !electiveSubjectId && (
               <div className="relative">
                 <select
                   value={streamId}
@@ -599,7 +630,7 @@ export default function AttendancePage() {
             <p className="text-sm font-medium text-slate-600">Select a class to view the register</p>
             <p className="text-xs mt-1">Choose a class from the dropdown above</p>
           </div>
-        ) : needsStreamSelection && !streamId ? (
+        ) : needsStreamSelection && !streamId && !electiveSubjectId ? (
           <div className="flex flex-col items-center justify-center py-24 text-slate-400">
             <Layers size={36} className="mb-3 opacity-40" />
             <p className="text-sm font-medium text-slate-600">Select a stream to view the register</p>

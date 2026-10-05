@@ -155,6 +155,18 @@ export default function ReportCardsTab() {
     }),
   });
 
+  const { mutateAsync: saveSubjectComment } = useMutation({
+    mutationFn: ({ studentId, subjectId, comment }) =>
+      reportCardsApi.draftComments.saveSubject(studentId, subjectId, {
+        classId,
+        termNumber: Number(termNum),
+        comment,
+      }),
+    onSuccess: () => qc.invalidateQueries({
+      queryKey: ['reportCards', 'draftComments', { classId, termNum }],
+    }),
+  });
+
   /* ── Derived data ─────────────────────────────────────── */
 
   // generate returns ok(res, { generated, config, students }) → { success, data: { generated, config, students } }
@@ -294,6 +306,7 @@ export default function ReportCardsTab() {
               instanceMarks={instanceMarksAll?.[student.studentId]}
               draftComment={commentsMap?.[student.studentId]}
               onSaveComment={(data) => saveComment({ studentId: student.studentId, data })}
+              onSaveSubjectComment={(subjectId, comment) => saveSubjectComment({ studentId: student.studentId, subjectId, comment })}
               termNum={Number(termNum)}
               school={school}
               academicYear={academicYear}

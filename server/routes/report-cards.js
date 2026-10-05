@@ -46,7 +46,10 @@ const { isYearArchived } = require('../utils/archival');
 const AuditService       = require('../services/audit');
 const { sanitisePdfStr } = require('../utils/sanitisePdf');
 const { notifyGuardiansForStudents } = require('../utils/notify-students');
-const { canWriteSubject, unassignedPairs } = require('../utils/subject-scope');
+const { canWriteSubject, unassignedPairs, isManagement } = require('../utils/subject-scope');
+const { studentPlacement, canWriteClassRemark, commentLockState, scopeDraftCommentsForCaller } = require('../utils/comment-scope');
+const { canViewFullReport, viewReportFor } = require('../utils/report-view-scope');
+const { isElective, enrolledStudentIds, canTeachElective } = require('../utils/elective-scope');
 const { getWorkflowConfig, saveWorkflowConfig, resolveStep, resolveAssigneeLabel } = require('../utils/workflow-config');
 const { dispatchNotification } = require('../utils/notify-dispatch');
 const email = require('../utils/email');
@@ -456,8 +459,10 @@ router.post('/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
       return { ...r, classTeacherId: formTeacherId ?? null, classTeacherName: classTeacherName ?? null };
     });
 
+    // A teacher sees their own subjects of each report; a form tutor sees their stream in full.
+    const viewable = (await Promise.all(students.map(s => viewReportFor(req, { ...s, classId, streamId: studentStreamMap[s.studentId] ?? null, comments: s.comments ?? {} })))).filter(Boolean);
     return ok(res, {
-      generated: students.length,
+      generated: viewable.length,
       // Advisory only — never blocks the preview. True when at least one
       // exam feeding these scores hasn't been moderated/approved yet, so
       // the numbers shown could still change before /publish would accept
@@ -1018,7 +1023,8 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), scopeMidd
         .select('-gradingSchema -assessmentWeights -subjects -__v').lean(),
       tenantModel('report_card_snapshots', tenantContext(req)).countDocuments(filter),
     ]);
-    return ok(res, docs, paginate(page, limit, total));
+    const views = (await Promise.all(docs.map(d => viewReportFor(req, d)))).filter(Boolean);
+    return ok(res, views, paginate(page, limit, total));
   } catch (err) { console.error('[report-cards GET]', err); return E.serverError(res); }
 });
 
@@ -1085,6 +1091,7 @@ router.get('/bulk-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), s
   try {
     const { schoolId, role } = req.jwtUser;
     if (!req.query.classId) return E.badRequest(res, 'classId query parameter is required');
+    if (!isManagement(req)) return E.forbidden(res, 'Bulk report downloads are for school management.');
 
     // Same class/stream narrowing GET /:id already enforces (v5.106.0) —
     // this route had none at all: any staff account with plain
@@ -1205,7 +1212,7 @@ router.get('/draft-comments', authMiddleware, PLAN, MODGATE, rbac('report_cards'
     if (req.query.classId)    filter.classId    = req.query.classId;
     if (req.query.termNumber) filter.termNumber = Number(req.query.termNumber);
     const docs = await tenantModel('report_card_draft_comments', tenantContext(req)).find(filter).lean();
-    return ok(res, docs);
+    return ok(res, await scopeDraftCommentsForCaller(req, docs));
   } catch (err) {
     console.error('[report-cards/draft-comments GET]', err);
     return E.serverError(res);
@@ -1341,7 +1348,9 @@ router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), scopeM
       return E.forbidden(res, 'This class is not in your assigned scope.');
     }
 
-    return ok(res, doc);
+    const view = await viewReportFor(req, doc);
+    if (!view) return E.forbidden(res, 'You do not teach any subject on this report card.');
+    return ok(res, view);
   } catch (err) { console.error('[report-cards GET/:id]', err); return E.serverError(res); }
 });
 
@@ -1854,6 +1863,7 @@ router.get('/:id/pdf', authMiddleware, PLAN, MODGATE, _pdfAccess, scopeMiddlewar
     if (!snap) return E.notFound(res, 'Report card snapshot not found');
 
     if (!(await _checkSnapshotAccess(req, res, snap))) return;
+    if (!(await canViewFullReport(req, snap.streamId))) return E.forbidden(res, 'Printed report cards are for school management and the stream form tutor.');
 
     let attData = snap.attendanceSummary;
     if (!attData) {
@@ -1907,6 +1917,7 @@ router.get('/:id/html', authMiddleware, PLAN, MODGATE, _pdfAccess, scopeMiddlewa
     if (!snap) return E.notFound(res, 'Report card snapshot not found');
 
     if (!(await _checkSnapshotAccess(req, res, snap))) return;
+    if (!(await canViewFullReport(req, snap.streamId))) return E.forbidden(res, 'Printed report cards are for school management and the stream form tutor.');
 
     let attData = snap.attendanceSummary;
     if (!attData) {
@@ -2049,14 +2060,28 @@ router.put('/draft-comments/:studentId', authMiddleware, PLAN, MODGATE, rbac('re
             subjectComments, observationRatings } = req.body;
     if (!termNumber) return E.badRequest(res, 'termNumber is required');
 
-    // Guard: subject-teacher scoping (RC6) — every subject key this caller
-    // is writing must be one they're assigned to teach in this class, only
-    // enforced when the school has turned on subjectAssignmentEnforced
-    if (subjectComments && typeof subjectComments === 'object' && classId) {
-      const pairs = Object.keys(subjectComments).map(subjectId => ({ classId, subjectId }));
-      const denied = await unassignedPairs(req, pairs);
-      if (denied.length > 0) {
-        return E.forbidden(res, `You are not assigned to teach: ${denied.map(p => p.subjectId).join(', ')}`);
+    // Subject comments are saved one subject at a time (PUT .../subject/:subjectId),
+    // so each save is checked against exactly the caller's own subject. Accepting a
+    // whole map here meant one unassigned key refused everything else in the save.
+    if (subjectComments !== undefined) {
+      return E.badRequest(res, 'Subject comments are saved per subject — use PUT /draft-comments/:studentId/subject/:subjectId');
+    }
+
+    // Class-teacher remark and principal remark have their own rights (comment-scope.js).
+    // A field the caller may not change is refused only when the submitted value differs
+    // from what is stored, so echoing unchanged fields back still succeeds.
+    const placement = await studentPlacement(req, studentId);
+    if (!placement) return E.notFound(res, 'Student not found');
+    const existing = await tenantModel('report_card_draft_comments', tenantContext(req))
+      .findOne({ schoolId, studentId, termNumber: Number(termNumber) }).lean();
+    if (classTeacherRemark !== undefined && (classTeacherRemark ?? '') !== (existing?.classTeacherRemark ?? '')) {
+      if (!(await canWriteClassRemark(req, placement.streamId))) {
+        return E.forbidden(res, "Only this stream's form teacher can write the class teacher remark.");
+      }
+    }
+    if (principalRemark !== undefined && (principalRemark ?? '') !== (existing?.principalRemark ?? '')) {
+      if (!['admin', 'superadmin'].includes(req.jwtUser.role)) {
+        return E.forbidden(res, 'Only admins can set the principal remark');
       }
     }
 
@@ -2095,16 +2120,6 @@ router.put('/draft-comments/:studentId', authMiddleware, PLAN, MODGATE, rbac('re
     };
     if (observationRatings !== undefined) setFields.observationRatings = observationRatings;
 
-    // Merge subject comments with dot-notation $set so each teacher only touches their own subject
-    // without wiping other teachers' comments on the same student record.
-    if (subjectComments && typeof subjectComments === 'object') {
-      for (const [subjectId, comment] of Object.entries(subjectComments)) {
-        if (typeof comment === 'string') {
-          setFields[`subjectComments.${subjectId}`] = comment;
-        }
-      }
-    }
-
     const doc = await tenantModel('report_card_draft_comments', tenantContext(req)).findOneAndUpdate(
       { schoolId, studentId, termNumber: Number(termNumber) },
       { $set: setFields },
@@ -2122,13 +2137,35 @@ router.put('/draft-comments/:studentId/subject/:subjectId', authMiddleware, PLAN
   try {
     const { schoolId, userId: updatedBy } = req.jwtUser;
     const { studentId, subjectId } = req.params;
-    const { classId, termNumber, comment } = req.body;
+    const { termNumber, comment } = req.body;
     if (!termNumber) return E.badRequest(res, 'termNumber is required');
     if (typeof comment !== 'string') return E.badRequest(res, 'comment must be a string');
+    if (comment.length > 500) return E.badRequest(res, 'comment must be 500 characters or fewer');
 
-    // Guard: subject-teacher scoping (RC6) — unconditional (see subject-scope.js)
-    if (!(await canWriteSubject(req, classId, subjectId))) {
+    // Same rights as marks: the caller must teach this subject in this student's stream.
+    // Class and stream come from the student record, never from the request body.
+    const placement = await studentPlacement(req, studentId);
+    if (!placement || !placement.classId) return E.notFound(res, 'Student not found');
+    const classId = placement.classId;
+    if (req.body.classId && req.body.classId !== classId) return E.badRequest(res, 'classId does not match this student');
+    if (await isElective(req, classId, subjectId)) {
+      if (!(await canTeachElective(req, classId, subjectId))) {
+        return E.forbidden(res, 'You are not assigned to teach this elective in this class.');
+      }
+      const enrolled = await enrolledStudentIds(req, subjectId);
+      if (!enrolled.has(studentId)) return E.forbidden(res, 'This student is not enrolled in this elective.');
+    } else if (!(await canWriteSubject(req, classId, subjectId, placement.streamId))) {
       return E.forbidden(res, 'You are not assigned to teach this subject in this class.');
+    }
+
+    // Lock: comments lock with the subject's mark submission. Management can still
+    // edit a locked comment; every such edit is audited.
+    const lock = await commentLockState(req, classId, subjectId, termNumber, placement.streamId);
+    if (lock.locked) {
+      if (!isManagement(req)) {
+        return E.forbidden(res, `These comments are locked because the marks for this subject are ${lock.status}. Only an administrator can change them.`);
+      }
+      AuditService.log({ action: 'report_comment.locked_edit', actor: req.jwtUser, schoolId, target: { type: 'report_card_draft_comments', id: `${studentId}_${termNumber}` }, details: { subjectId, classId, termNumber: Number(termNumber), markStatus: lock.status }, req });
     }
 
     const doc = await tenantModel('report_card_draft_comments', tenantContext(req)).findOneAndUpdate(

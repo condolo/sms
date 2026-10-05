@@ -14,6 +14,7 @@ const { planGate }        = require('../middleware/plan');
 const { scopeMiddleware } = require('../middleware/scopeMiddleware');
 const ScopeEngine         = require('../utils/scopeEngine');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
+const { isElective, enrolledStudentIds, canTeachElective } = require('../utils/elective-scope');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 const { _model } = require('../utils/model');
 const { notifyGuardiansForStudents } = require('../utils/notify-students');
@@ -99,6 +100,8 @@ const BulkAttendanceSchema = z.object({
   streamId:   z.string().optional(),
   date:       z.string().min(1),
   period:     z.string().optional(),
+  // Set for an elective group register (French across streams). Omitted = the class/stream register.
+  subjectId:  z.string().optional(),
   records:    z.array(z.object({
     studentId: z.string().min(1),
     status:    z.enum(['present', 'absent', 'late', 'authorised_absence', 'excluded', 'holiday']),
@@ -131,6 +134,11 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('attendance', 'read'), scope
     if (req.query.studentId)  filter.studentId = req.query.studentId;
     if (req.query.status)     filter.status    = req.query.status;
     if (req.query.period)     filter.period    = req.query.period;
+    // An elective group's register is stored with its subject. The class register
+    // (no subjectId) never includes elective records, and an elective register only
+    // returns its own records.
+    if (req.query.subjectId)  filter.subjectId = req.query.subjectId;
+    else                      filter.subjectId = null;
 
     // Date range support: ?dateFrom=2026-04-01&dateTo=2026-04-30
     if (req.query.date)       filter.date = req.query.date;
@@ -175,7 +183,8 @@ router.get('/summary', authMiddleware, PLAN, MODGATE, rbac('attendance', 'read')
   try {
     const { schoolId } = req.jwtUser;
 
-    const filter = { schoolId };
+    // Class-register records only: an elective group register is not a day register for the student.
+    const filter = { schoolId, subjectId: null };
     if (req.query.classId)   filter.classId   = req.query.classId;
     if (req.query.studentId) filter.studentId = req.query.studentId;
     if (req.query.dateFrom || req.query.dateTo) {
@@ -345,7 +354,7 @@ router.get('/school-report', authMiddleware, PLAN, MODGATE, rbac('attendance', '
         { $group: { _id: { classId: '$classId', streamId: '$streamId' }, roster: { $sum: 1 } } },
       ]),
       Attendance.aggregate([
-        { $match: { schoolId, date } },
+        { $match: { schoolId, date, subjectId: null } },
         { $group: { _id: { classId: '$classId', streamId: '$streamId', status: '$status' }, count: { $sum: 1 } } },
       ]),
     ]);
@@ -449,7 +458,7 @@ router.get('/absentees', authMiddleware, PLAN, MODGATE, rbac('attendance', 'read
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return E.badRequest(res, 'date must be in YYYY-MM-DD format');
 
     const ctx = tenantContext(req);
-    const filter = { schoolId, date, status: 'absent' };
+    const filter = { schoolId, date, status: 'absent', subjectId: null };
     if (req.query.classId)  filter.classId  = req.query.classId;
     if (req.query.streamId) filter.streamId = req.query.streamId;
 
@@ -714,7 +723,42 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('attendance', 'create')
     const { data, error } = _validate(BulkAttendanceSchema, req.body);
     if (error) return E.validation(res, error);
 
-    const { classId, streamId, date, period, records } = data;
+    const { classId, streamId, date, period, records, subjectId } = data;
+
+    if (subjectId) {
+      // Elective group register: one roster across streams, enrolled students only, and the
+      // caller must teach this elective. There is no stream to check against.
+      if (!(await isElective(req, classId, subjectId))) {
+        return E.badRequest(res, 'This subject is not an elective for this class — take its register by class or stream.');
+      }
+      if (streamId) return E.badRequest(res, 'An elective register has no stream.');
+      if (!(await canTeachElective(req, classId, subjectId))) {
+        return E.forbidden(res, 'You are not assigned to teach this elective in this class.');
+      }
+      const enrolled = await enrolledStudentIds(req, subjectId);
+      const outsiders = records.filter(r => !enrolled.has(r.studentId));
+      if (outsiders.length) {
+        return E.badRequest(res, `${outsiders.length} student(s) in this register are not enrolled in this elective.`);
+      }
+      const electiveOps = records.map(r => ({
+        updateOne: {
+          filter: { schoolId, studentId: r.studentId, date, classId, subjectId, ...(period ? { period } : {}) },
+          update: {
+            $set:         { status: r.status, note: r.note || '', streamId: null, subjectId, markedBy: userId, updatedBy: userId, classId, date, ...(period ? { period } : {}), schoolId },
+            $setOnInsert: { id: uuidv4(), createdBy: userId },
+          },
+          upsert: true,
+        },
+      }));
+      const electiveResult = await tenantModel('attendance', tenantContext(req)).bulkWrite(electiveOps, { ordered: false });
+      // Guardians hear about an elective absence exactly as they do a class absence.
+      const electiveAbsentees = records.filter(r => r.status === 'absent').map(r => ({ studentId: r.studentId, date }));
+      if (electiveAbsentees.length) {
+        _notifyAbsences(req, electiveAbsentees).catch(err => console.error('[attendance/elective absence notify]', err));
+        _notifyAbsenteeOfficer(req, electiveAbsentees).catch(err => console.error('[attendance/elective absentee-officer notify]', err));
+      }
+      return ok(res, { upserted: electiveResult.upsertedCount, modified: electiveResult.modifiedCount, total: records.length, skipped: 0 }, null, 201);
+    }
 
     // Attendance's own narrower floor (resolveAttendanceScope) for every
     // scope check in this route only — restored immediately after, never

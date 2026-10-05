@@ -30,6 +30,8 @@ const { mergeConfig, resolveCurrentPeriod } = require('./academic-config');
 const { aggregateAssessmentMarks, computeFinalScores } = require('../utils/academic-calc');
 const { isYearArchived, firstArchivedYear } = require('../utils/archival');
 const { canWriteSubject, unassignedPairs } = require('../utils/subject-scope');
+const { isElective, electiveMarkProblem } = require('../utils/elective-scope');
+const { restrictToTaught, taughtSubjectIds } = require('../utils/teaching-scope');
 const ScopeEngine         = require('../utils/scopeEngine');
 const { scopeMiddleware } = require('../middleware/scopeMiddleware');
 const { MARK_STATES }     = require('../utils/mark-states');
@@ -268,6 +270,8 @@ const ScheduleEntrySchema = z.object({
   dateFrom:       z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD'),
   dateTo:         z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD'),
   academicYearId: z.string().optional(),
+  // Per assessment: whether teachers are asked for a comment alongside marks in the Markbook.
+  commentsEnabled: z.boolean().optional(),
 });
 
 /**
@@ -326,7 +330,7 @@ router.put('/schedule', authMiddleware, PLAN, MODGATE, rbac('assessment', 'updat
       doc = await Schedule.findOneAndUpdate(
         { ...naturalKey, academicYearId: d.academicYearId },
         {
-          $set: { dateFrom: d.dateFrom, dateTo: d.dateTo, label },
+          $set: { dateFrom: d.dateFrom, dateTo: d.dateTo, label, ...(d.commentsEnabled === undefined ? {} : { commentsEnabled: d.commentsEnabled }) },
           $setOnInsert: { id: uuidv4(), schoolId, academicYearId: d.academicYearId },
         },
         { new: true, upsert: true }
@@ -349,7 +353,7 @@ router.put('/schedule', authMiddleware, PLAN, MODGATE, rbac('assessment', 'updat
       doc = await Schedule.findOneAndUpdate(
         { ...naturalKey, academicYearId: existing ? null : resolvedYearId },
         {
-          $set: { dateFrom: d.dateFrom, dateTo: d.dateTo, label, academicYearId: resolvedYearId },
+          $set: { dateFrom: d.dateFrom, dateTo: d.dateTo, label, academicYearId: resolvedYearId, ...(d.commentsEnabled === undefined ? {} : { commentsEnabled: d.commentsEnabled }) },
           $setOnInsert: { id: uuidv4(), schoolId },
         },
         { new: true, upsert: true }
@@ -929,6 +933,8 @@ router.get('/marks', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), scop
     // this route had none at all before, so any grades:read holder could
     // list every mark in the school regardless of class/stream assignment.
     ScopeEngine.applyToFilter(req, 'assessment', filter);
+    // Class and stream scope does not narrow by subject: only the subjects this caller teaches.
+    await restrictToTaught(req, filter);
 
     const docs = await tenantModel('assessment_marks', tenantContext(req)).find(filter)
       .sort({ termNumber: 1, assessmentType: 1, instance: 1 }).limit(5000).lean();
@@ -973,7 +979,10 @@ router.post('/marks', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), a
       .findOne({ schoolId, id: d.studentId }).select('streamId').lean();
 
     // Guard: subject-teacher scoping (RC6) — unconditional (see subject-scope.js)
-    if (!(await canWriteSubject(req, d.classId, d.subjectId, markStudent?.streamId))) {
+    // Electives: teaching and enrolment are checked per student, not by stream.
+    const electiveProblem = await electiveMarkProblem(req, [{ classId: d.classId, subjectId: d.subjectId, studentId: d.studentId }]);
+    if (electiveProblem) return _err(res, electiveProblem, 403);
+    if (!(await isElective(req, d.classId, d.subjectId)) && !(await canWriteSubject(req, d.classId, d.subjectId, markStudent?.streamId))) {
       return _err(res, 'You are not assigned to teach this subject in this class.', 403);
     }
 
@@ -1029,9 +1038,11 @@ router.post('/marks', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), a
     if (lockedExisting) {
       return _err(res, 'This mark is locked. Submit an unlock request via the approval workflow.', 403);
     }
+    // Per stream: only a submission for this student's stream (or a legacy whole-class one) locks this mark.
     const underReview = await tenantModel('mark_submissions', tenantContext(req)).findOne({
       schoolId, classId: d.classId, subjectId: d.subjectId, termNumber: d.termNumber,
       assessmentType: d.assessmentType, instance: d.instance, status: { $in: ['submitted', 'approved'] },
+      streamId: { $in: [markStudent?.streamId ?? null, null] },
     }).lean();
     if (underReview) {
       return _err(res, `These marks are ${underReview.status} for review and cannot be edited — recall the submission first.`, 403);
@@ -1136,7 +1147,14 @@ router.post('/marks/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
         return [`${d.classId}::${d.subjectId}::${streamId}`, { classId: d.classId, subjectId: d.subjectId, streamId }];
       })
     ).values()];
-    const denied = await unassignedPairs(req, distinctPairs);
+    // Elective pairs are checked by enrolment and teaching (elective-scope.js), not by stream.
+    const electiveKeys = new Set();
+    for (const p of distinctPairs) {
+      if (await isElective(req, p.classId, p.subjectId)) electiveKeys.add(`${p.classId}::${p.subjectId}`);
+    }
+    const electiveProblem = await electiveMarkProblem(req, marks);
+    if (electiveProblem) return _err(res, electiveProblem, 403);
+    const denied = await unassignedPairs(req, distinctPairs.filter(p => !electiveKeys.has(`${p.classId}::${p.subjectId}`)));
     if (denied.length > 0) {
       return _err(res, `You are not assigned to teach: ${denied.map(p => p.subjectId).join(', ')}`, 403);
     }
@@ -1211,10 +1229,10 @@ router.post('/marks/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
     // Matched on the same key mark-submissions.js itself uses by default
     // (no academicYearId — that field is optional there too, same
     // null-prone legacy posture every other assessment collection has).
-    const subOr = [...new Set(marks.map(d => `${d.classId}::${d.subjectId}::${d.termNumber}::${d.assessmentType}::${d.instance}`))]
+    const subOr = [...new Set(marks.map(d => `${d.classId}::${d.subjectId}::${d.termNumber}::${d.assessmentType}::${d.instance}::${streamByStudent[d.studentId] ?? ''}`))]
       .map(k => {
-        const [classId, subjectId, termNumber, assessmentType, instance] = k.split('::');
-        return { classId, subjectId, termNumber: Number(termNumber), assessmentType, instance: Number(instance) };
+        const [classId, subjectId, termNumber, assessmentType, instance, sid] = k.split('::');
+        return { classId, subjectId, termNumber: Number(termNumber), assessmentType, instance: Number(instance), streamId: { $in: [sid || null, null] } };
       });
     const underReview = await tenantModel('mark_submissions', tenantContext(req)).findOne({
       schoolId,
@@ -1481,10 +1499,12 @@ router.get('/report', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), sco
       examCount: Object.keys(data.breakdown || {}).length,
     }));
 
+    // Only the subjects this caller teaches (null = management, unrestricted).
+    const taught = await taughtSubjectIds(req, classId);
     const students = Object.values(finalScores).map(r => ({
       studentId: r.studentId,
       classId,
-      subjects:  _flattenSubjects(r.subjects),
+      subjects:  _flattenSubjects(r.subjects).filter(x => !taught || taught.has(x.subjectId)),
     }));
 
     // Attach config so frontend knows weights, types, and grade scale used
@@ -1667,6 +1687,8 @@ router.get('/analytics', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
     if (qClassId) baseFilter.classId = qClassId;
     ScopeEngine.applyToFilter(req, 'assessment', baseFilter);
     if (subjectId) baseFilter.subjectId = subjectId;
+    // Analytics totals are built only from the subjects this caller teaches.
+    await restrictToTaught(req, baseFilter);
 
     const Marks = tenantModel('assessment_marks', ctx);
     const [currentAgg, previousAgg] = await Promise.all([
@@ -1938,6 +1960,7 @@ router.get('/marks/summary', authMiddleware, PLAN, MODGATE, rbac('grades', 'read
     if (streamId)       filter.streamId       = streamId;
 
     // classId is required (enforced above) — bounded to one class, safe ceiling
+    await restrictToTaught(req, filter);
     const marks = await tenantModel('assessment_marks', tenantContext(req)).find(filter).limit(5000).lean();
 
     // Group by studentId → assessmentType+instance → rawScore

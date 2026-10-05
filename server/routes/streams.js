@@ -69,7 +69,7 @@ function _validate(schema, data) {
 // homeroom duty the way Attendance's does).
 router.get(
   '/', authMiddleware, PLAN, rbac('classes', 'read'),
-  (req, res, next) => (req.query.attendanceScope === 'true' || req.query.lessonsScope === 'true' ? scopeMiddleware(req, res, next) : next()),
+  (req, res, next) => (req.query.attendanceScope === 'true' || req.query.lessonsScope === 'true' || req.query.assessmentScope === 'true' ? scopeMiddleware(req, res, next) : next()),
   async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
@@ -86,6 +86,15 @@ router.get(
       if (!inWholeClassScope) {
         const myStreamIds = req.scope?.streamIds ?? [];
         filter.id = { $in: myStreamIds };
+      }
+      req.scope = originalScope;
+    } else if (req.query.assessmentScope === 'true' && req.query.classId) {
+      // Markbook's stream picker: only the streams this teacher is assigned to teach.
+      const originalScope = req.scope;
+      req.scope = await ScopeEngine.resolveAssessmentScope(req);
+      const inWholeClassScope = ScopeEngine.isClassInScope(req, 'assessment', req.query.classId);
+      if (!inWholeClassScope) {
+        filter.id = { $in: req.scope?.streamIds ?? [] };
       }
       req.scope = originalScope;
     } else if (req.query.lessonsScope === 'true' && req.query.classId) {

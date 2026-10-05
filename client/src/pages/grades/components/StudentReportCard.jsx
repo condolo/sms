@@ -27,7 +27,7 @@
      studentDeviations — { subjects: { [subjectId]: number|null }, mean: number|null } | null
      behaviourSummary — { merits, demerits, points, total } | null
    ============================================================ */
-import { Fragment, useState, useCallback, useEffect } from 'react';
+import { Fragment, useState, useCallback, useEffect, useRef } from 'react';
 import { Printer, Save, Check, BarChart2, MessageSquare, Award, CheckCircle, Loader2 } from 'lucide-react';
 import { DEFAULT_CUSTOM_TYPES, _gradeFromScale } from '../constants.js';
 import { reportCards as reportCardsApi } from '@/api/client.js';
@@ -52,6 +52,33 @@ function fmtDev(dev) {
 }
 
 /* ── Editable field ──────────────────────────────────────── */
+/* One subject's comment. Grows with its text; saves on blur, only when changed. */
+function SubjectCommentField({ label, value, onSave }) {
+  const [text, setText] = useState(value);
+  const ref = useRef(null);
+  useEffect(() => { setText(value); }, [value]);
+  useEffect(() => {
+    if (!ref.current) return;
+    ref.current.style.height = 'auto';
+    ref.current.style.height = `${ref.current.scrollHeight}px`;
+  }, [text]);
+  return (
+    <div className="flex gap-3 items-start rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2">
+      <span className="text-xs font-semibold text-slate-700 min-w-[120px] shrink-0 pt-1">{label}</span>
+      <textarea
+        ref={ref}
+        rows={1}
+        maxLength={500}
+        value={text}
+        onChange={e => setText(e.target.value)}
+        onBlur={() => { if (text !== value) onSave(text); }}
+        placeholder="No comment entered"
+        className="flex-1 min-w-0 text-xs text-slate-700 bg-white border border-slate-200 rounded-md px-2.5 py-1.5 resize-none overflow-hidden focus:outline-none focus:ring-1 focus:ring-indigo-400"
+      />
+    </div>
+  );
+}
+
 function Field({ label, value, onChange, multiline = false, readOnly = false, placeholder = '' }) {
   return (
     <div className="flex flex-col gap-1">
@@ -131,7 +158,7 @@ function SectionTab({ active, onClick, icon: Icon, label }) {
 export default function StudentReportCard({
   student, studentInfo, className, subjectMap,
   customTypes, gradeScale, instanceMarks,
-  draftComment, onSaveComment, termNum, school, academicYear,
+  draftComment, onSaveComment, onSaveSubjectComment, termNum, school, academicYear,
   studentDeviations, behaviourSummary, snapshot,
   observationConfig,
 }) {
@@ -193,17 +220,32 @@ export default function StudentReportCard({
   const [saved,  setSaved]  = useState(false);
   const set = (key) => (val) => setComment(c => ({ ...c, [key]: val }));
 
+  // Subject comments are never sent in this bulk save. Each one is saved on its
+  // own (saveSubjectComment) so the server checks it against the caller's subject.
   const handleSave = useCallback(async () => {
     if (!onSaveComment) return;
     setSaving(true);
     try {
-      await onSaveComment(comment);
+      const { subjectComments: _subjectComments, ...rest } = comment;
+      await onSaveComment(rest);
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } finally {
       setSaving(false);
     }
   }, [comment, onSaveComment]);
+
+  const [subjectError, setSubjectError] = useState(null);
+  const saveSubjectComment = useCallback(async (subjectId, text) => {
+    if (!onSaveSubjectComment) return;
+    setSubjectError(null);
+    try {
+      await onSaveSubjectComment(subjectId, text);
+      setComment(c => ({ ...c, subjectComments: { ...c.subjectComments, [subjectId]: text } }));
+    } catch (err) {
+      setSubjectError(err?.message ?? 'Could not save this comment');
+    }
+  }, [onSaveSubjectComment]);
 
   /* ── Print (RC3) — renders through the shared server-side IR +
      HTML adapter instead of hand-building its own document (see
@@ -367,21 +409,19 @@ export default function StudentReportCard({
       {section === 'comments' && (
         <div className="p-5 space-y-5">
 
-          {/* Subject comments (read-only — set in MarkEntryTab by subject teacher) */}
+          {/* Subject teacher comments — one per subject, written by whoever teaches it */}
           <div>
             <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2">Subject Teacher Comments</p>
+            {subjectError && <p className="text-xs text-red-600 mb-2">{subjectError}</p>}
             <div className="space-y-1.5">
-              {subjectEntries.map(({ subId, name: sName }) => {
-                const c = comment.subjectComments?.[subId];
-                return (
-                  <div key={subId} className="flex gap-3 items-start rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2">
-                    <span className="text-xs font-semibold text-slate-700 min-w-[120px] shrink-0 pt-0.5">{sName}</span>
-                    <span className={`text-xs flex-1 ${c ? 'text-slate-700' : 'text-slate-300 italic'}`}>
-                      {c || 'No comment entered'}
-                    </span>
-                  </div>
-                );
-              })}
+              {subjectEntries.map(({ subId, name: sName }) => (
+                <SubjectCommentField
+                  key={subId}
+                  label={sName}
+                  value={comment.subjectComments?.[subId] ?? ''}
+                  onSave={(text) => saveSubjectComment(subId, text)}
+                />
+              ))}
             </div>
           </div>
 

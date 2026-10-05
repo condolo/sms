@@ -880,7 +880,7 @@ export default function ConfigTab() {
   });
   const schedules = schedData?.data ?? [];
 
-  const EMPTY_SCHED = { termNumber: 1, assessmentType: activeTypes[0]?.key ?? 'CA', instance: 1, dateFrom: '', dateTo: '' };
+  const EMPTY_SCHED = { termNumber: 1, assessmentType: activeTypes[0]?.key ?? 'CA', instance: 1, dateFrom: '', dateTo: '', commentsEnabled: true };
   const [newSched,     setNewSched]     = useState(EMPTY_SCHED);
   const [unlockId,     setUnlockId]     = useState(null);
   const [unlockReason, setUnlockReason] = useState('');
@@ -1039,6 +1039,11 @@ export default function ConfigTab() {
             <input type="date" value={newSched.dateTo}
               onChange={e => setNewSched(p => ({ ...p, dateTo: e.target.value }))} className={iCls()} />
           </div>
+          <label className="flex items-center gap-2 text-xs font-medium text-slate-600 self-end pb-2">
+            <input type="checkbox" checked={newSched.commentsEnabled !== false}
+              onChange={e => setNewSched(p => ({ ...p, commentsEnabled: e.target.checked }))} />
+            Ask for comments
+          </label>
           <button onClick={() => saveSched()} disabled={savingSched || !newSched.dateFrom || !newSched.dateTo}
             className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition self-end">
             {savingSched ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
@@ -1058,6 +1063,7 @@ export default function ConfigTab() {
                   <th className="text-left text-xs font-medium text-slate-500 px-3 py-2.5">From</th>
                   <th className="text-left text-xs font-medium text-slate-500 px-3 py-2.5">To</th>
                   <th className="text-left text-xs font-medium text-slate-500 px-3 py-2.5">Status</th>
+                  <th className="text-left text-xs font-medium text-slate-500 px-3 py-2.5">Comments</th>
                   <th className="text-right text-xs font-medium text-slate-500 px-3 py-2.5"></th>
                 </tr>
               </thead>
@@ -1076,6 +1082,19 @@ export default function ConfigTab() {
                       <td className="px-3 py-2.5 text-slate-600">Term {s.termNumber}</td>
                       <td className="px-3 py-2.5 text-slate-500 text-xs font-mono">{s.dateFrom}</td>
                       <td className="px-3 py-2.5 text-slate-500 text-xs font-mono">{s.dateTo}</td>
+                      <td className="px-3 py-2.5 text-xs">
+                        <button
+                          onClick={() => api.upsertSchedule({
+                            termNumber: s.termNumber, assessmentType: s.assessmentType, instance: s.instance,
+                            dateFrom: s.dateFrom, dateTo: s.dateTo, label: s.label || undefined,
+                            academicYearId: s.academicYearId || undefined,
+                            commentsEnabled: s.commentsEnabled === false,
+                          }).then(() => refetchSched()).catch(err => setToast({ msg: err?.message ?? 'Could not change comments setting.', type: 'error' }))}
+                          className={`rounded-full border px-2 py-0.5 font-medium ${s.commentsEnabled === false ? 'text-slate-500 bg-slate-100 border-slate-200' : 'text-emerald-700 bg-emerald-50 border-emerald-200'}`}
+                        >
+                          {s.commentsEnabled === false ? 'Off' : 'On'}
+                        </button>
+                      </td>
                       <td className="px-3 py-2.5">
                         {s.isLocked ? (
                           <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-red-700 bg-red-100 border border-red-200 rounded-full px-2 py-0.5">

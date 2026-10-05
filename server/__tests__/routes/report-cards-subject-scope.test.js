@@ -28,6 +28,7 @@ jest.mock('../../utils/archival', () => ({ isYearArchived: jest.fn().mockResolve
 
 let mockAcademicConfig;
 let mockAssignmentDocs;
+let mockStudent;
 const mockDraftCommentUpsert = jest.fn(() => mockChain({ id: 'draft_1' }));
 
 jest.mock('../../utils/tenant-model', () => ({
@@ -41,8 +42,11 @@ jest.mock('../../utils/tenant-model', () => ({
         find:    jest.fn(() => mockChain(mockAssignmentDocs)),
       };
     }
+    if (col === 'students') {
+      return { findOne: jest.fn(() => mockChain(mockStudent)) };
+    }
     if (col === 'report_card_draft_comments') {
-      return { findOneAndUpdate: mockDraftCommentUpsert };
+      return { findOne: jest.fn(() => mockChain(null)), findOneAndUpdate: mockDraftCommentUpsert };
     }
     return { findOne: jest.fn(() => mockChain(null)), find: jest.fn(() => mockChain([])) };
   }),
@@ -65,6 +69,7 @@ beforeEach(() => {
   mockCurrentUser = { userId: 'usr_teacher_1', schoolId: 'school_001', role: 'teacher', roles: ['teacher'] };
   mockAcademicConfig = { subjectAssignmentEnforced: true };
   mockAssignmentDocs = [];
+  mockStudent = { id: 'stu_001', schoolId: 'school_001', classId: 'cls_001', streamId: null };
   mockDraftCommentUpsert.mockReturnValue(mockChain({ id: 'draft_1' }));
 });
 
@@ -106,31 +111,31 @@ describe('PUT /api/report-cards/draft-comments/:studentId/subject/:subjectId', (
   });
 });
 
-describe('PUT /api/report-cards/draft-comments/:studentId — subjectComments branch', () => {
-  test('enforced + a subjectComments key the caller is not assigned to → 403, no write', async () => {
-    mockAssignmentDocs = [{ classId: 'cls_001', subjectId: 'subj_math' }]; // math only
-    const res = await supertest(buildApp())
-      .put('/api/report-cards/draft-comments/stu_001')
-      .send({ classId: 'cls_001', termNumber: 1, subjectComments: { subj_math: 'Good', subj_english: 'Bad' } });
-    expect(res.status).toBe(403);
-    expect(res.body.error?.message ?? res.body.error).toMatch(/subj_english/);
-    expect(mockDraftCommentUpsert).not.toHaveBeenCalled();
-  });
-
-  test('enforced + every subjectComments key assigned → write proceeds', async () => {
+describe("PUT /api/report-cards/draft-comments/:studentId — subjectComments branch", () => {
+  test("a whole-record save carrying subjectComments is refused, whoever sends it", async () => {
     mockAssignmentDocs = [{ classId: 'cls_001', subjectId: 'subj_math' }];
     const res = await supertest(buildApp())
       .put('/api/report-cards/draft-comments/stu_001')
-      .send({ classId: 'cls_001', termNumber: 1, subjectComments: { subj_math: 'Good' } });
-    expect(res.status).toBe(200);
-    expect(mockDraftCommentUpsert).toHaveBeenCalledTimes(1);
+      .send({ classId: 'cls_001', termNumber: 1, subjectComments: { subj_math: 'Good', subj_english: 'Bad' } });
+    expect(res.status).toBe(400);
+    expect(mockDraftCommentUpsert).not.toHaveBeenCalled();
   });
 
-  test('no classId on the request skips the check (nothing to scope against) — base fields still write', async () => {
-    mockAssignmentDocs = [];
+  test("a whole-record save without subjectComments writes the base fields", async () => {
+    mockCurrentUser = { userId: 'usr_admin_1', schoolId: 'school_001', role: 'admin', roles: ['admin'] };
     const res = await supertest(buildApp())
       .put('/api/report-cards/draft-comments/stu_001')
       .send({ termNumber: 1, classTeacherRemark: 'Great term' });
     expect(res.status).toBe(200);
+    expect(mockDraftCommentUpsert).toHaveBeenCalledTimes(1);
+  });
+
+  test("a teacher with no form stream cannot set the class teacher remark (stream-scoped, not class-wide)", async () => {
+    mockAssignmentDocs = [];
+    const res = await supertest(buildApp())
+      .put('/api/report-cards/draft-comments/stu_001')
+      .send({ termNumber: 1, classTeacherRemark: 'Great term' });
+    expect(res.status).toBe(403);
+    expect(mockDraftCommentUpsert).not.toHaveBeenCalled();
   });
 });

@@ -114,6 +114,7 @@ describe('GET /api/report-cards — data scope', () => {
   });
 
   test('a teacher scoped to CLASS_A only sees CLASS_A snapshots', async () => {
+    mockAssignmentDocs = [{ schoolId: SCHOOL, classId: CLASS_A, subjectId: 'subj_math', teacherId: 'usr_teacher_1' }];
     mockScope = { level: 'assigned', classIds: [CLASS_A], subjectIds: [], streamIds: [], unrestrictedModules: [] };
     const res = await supertest(buildApp()).get('/api/report-cards');
     const ids = res.body.data.map(d => d.id);
@@ -153,6 +154,7 @@ describe('GET /api/report-cards/:id — data scope + ownership', () => {
   });
 
   test('a teacher in scope for the class → 200', async () => {
+    mockAssignmentDocs = [{ schoolId: SCHOOL, classId: CLASS_A, subjectId: 'subj_math', teacherId: 'usr_teacher_1' }];
     mockScope = { level: 'assigned', classIds: [CLASS_A], subjectIds: [], streamIds: [], unrestrictedModules: [] };
     const res = await supertest(buildApp()).get('/api/report-cards/rc_1');
     expect(res.status).toBe(200);
@@ -203,11 +205,11 @@ describe('GET /api/report-cards/bulk-pdf — scope (had no scope check at all)',
     expect(res.status).toBe(403);
   });
 
-  test('a teacher in scope for the requested classId passes the scope check (404 — no published cards — not 403)', async () => {
+  test('a teacher is refused the bulk download — it is management-only, since it prints whole classes', async () => {
     mockScope = { level: 'assigned', classIds: [CLASS_A], subjectIds: [], streamIds: [], unrestrictedModules: [] };
     mockSnapshotDocs = [];
     const res = await supertest(buildApp()).get('/api/report-cards/bulk-pdf').query({ classId: CLASS_A });
-    expect(res.status).not.toBe(403);
+    expect(res.status).toBe(403);
   });
 
   test('an unrestricted (admin) role bypasses the class-scope check entirely', async () => {

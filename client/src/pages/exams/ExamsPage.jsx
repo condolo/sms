@@ -25,6 +25,8 @@ import {
   assessment as assessmentApi,
   teachingAssignments as taApi,
   markSubmissions as markSubmissionsApi,
+  reportCards as reportCardsApi,
+  classSubjects as classSubjectsApi,
 } from '@/api/client.js';
 import RemindersTab   from '../grades/components/RemindersTab.jsx';
 import CAConfigTab    from '../grades/components/ConfigTab.jsx';
@@ -468,8 +470,10 @@ function SubmissionBadge({ submission, onRecall }) {
 }
 
 /* ─── Grid cell ─────────────────────────────────────────────── */
-function GridCell({ value, markState = 'present', rowIdx, colIdx, isLocked, hasConflict, onChange, onStateChange, onNavigate, cellRef }) {
+function GridCell({ value, markState = 'present', rowIdx, colIdx, isLocked, hasConflict, saved, onChange, onStateChange, onNavigate, cellRef }) {
   const nonPresent = markState !== 'present';
+  // Red X: a mark still to be entered. Green tick: saved and not edited since.
+  const missing = !isLocked && !nonPresent && value == null;
   return (
     <div className="flex items-center gap-1">
       <input
@@ -516,7 +520,34 @@ function GridCell({ value, markState = 'present', rowIdx, colIdx, isLocked, hasC
           <option key={o.value} value={o.value} title={o.title}>{o.label}</option>
         ))}
       </select>
+      {saved && !missing && <Check size={12} className="text-emerald-600 shrink-0" aria-label="Saved" />}
+      {missing && <XCircle size={12} className="text-red-500 shrink-0" aria-label="Missing — not yet entered" />}
     </div>
+  );
+}
+
+/* Subject comment for one student. Grows with its text; saves on blur, only when changed. */
+function GridComment({ value, disabled, onSave }) {
+  const [text, setText] = useState(value ?? '');
+  const ref = useRef(null);
+  useEffect(() => { setText(value ?? ''); }, [value]);
+  useEffect(() => {
+    if (!ref.current) return;
+    ref.current.style.height = 'auto';
+    ref.current.style.height = `${ref.current.scrollHeight}px`;
+  }, [text]);
+  return (
+    <textarea
+      ref={ref}
+      rows={1}
+      maxLength={500}
+      value={text}
+      disabled={disabled}
+      onChange={e => setText(e.target.value)}
+      onBlur={() => { if (text !== (value ?? '')) onSave(text); }}
+      placeholder={disabled ? '' : 'Comment…'}
+      className="w-full min-w-[200px] resize-none overflow-hidden rounded border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-900/10 disabled:bg-slate-100 disabled:text-slate-400"
+    />
   );
 }
 
@@ -602,8 +633,8 @@ function MarkbookTab({ years }) {
      and is a no-op for school-level roles like admin), rather than a
      second, independently-drifting reimplementation of the same logic. */
   const { data: classesData } = useQuery({
-    queryKey: ['classes', 'assignedOnly'],
-    queryFn:  () => classesApi.list({ limit: 200, status: 'active', assignedOnly: true }),
+    queryKey: ['classes', 'assessmentScope'],
+    queryFn:  () => classesApi.list({ limit: 200, status: 'active', assessmentScope: true }),
     staleTime: 5 * 60_000,
   });
   const classesList = classesData?.data ?? [];
@@ -631,28 +662,60 @@ function MarkbookTab({ years }) {
      exact same "class vs stream" distinction AttendancePage.jsx already
      draws for the daily register. Derived from `assignments` (already
      fetched, already self-scoped server-side) — no new endpoint needed. */
+  // Same stream list Attendance uses (streams.js ?assessmentScope=true): the streams this
+  // teacher is assigned to teach in the class. Homeroom-only streams are not included.
+  const { data: myStreamsData } = useQuery({
+    queryKey: ['streams', 'assessmentScope', classId],
+    queryFn:  () => streamsApi.list({ classId, status: 'active', limit: 50, assessmentScope: true }),
+    enabled:  !!classId,
+    staleTime: 5 * 60_000,
+  });
+  // Admins too: a class with streams is taken one stream at a time, as Attendance does.
+  // For a floor role the server returns every stream of the class.
   const myStreamsForClass = useMemo(() => {
-    if (!isTeacher || !classId) return [];
+    if (!classId) return [];
+    return (myStreamsData?.data ?? []).map(s => ({ id: s.id ?? s._id, name: s.name }));
+  }, [isTeacher, classId, myStreamsData]);
+
+  /* Electives: a subject not compulsory for this class. Its group is the students
+     enrolled in it, across every stream, so it needs no stream. */
+  const { data: classSubjectsData } = useQuery({
+    queryKey: ['class-subjects', classId],
+    queryFn:  () => classSubjectsApi.list({ classId }),
+    enabled:  !!classId,
+    staleTime: 5 * 60_000,
+  });
+  const isElectiveSubject = !!subjectId && (classSubjectsData?.data ?? []).some(r => r.subjectId === subjectId && r.isCompulsoryForClass === false);
+  // The stream the roster is actually for. A teacher with exactly one assigned stream
+  // in this class is not asked to pick it, but the roster is already scoped to it, so
+  // submissions must carry it too. Without this a submission had no stream and locked
+  // every stream of the class, including marks another teacher entered.
+  // Order is class, then subject, then stream. The stream is asked only for a compulsory
+  // subject the teacher teaches in 2+ streams of this class. Electives are one group: no stream.
+  const subjectStreams = useMemo(() => {
+    if (!classId || !subjectId) return [];
+    if (!isTeacher) return myStreamsForClass;
     const seen = new Set();
     return assignments
-      .filter(a => a.classId === classId && a.streamId)
+      .filter(a => a.classId === classId && a.subjectId === subjectId && a.streamId)
       .map(a => ({ id: a.streamId, name: a.streamName }))
-      .filter(s => s.id && !seen.has(s.id) && seen.add(s.id));
-  }, [isTeacher, assignments, classId]);
-  const needsStreamSelection = myStreamsForClass.length > 1;
+      .filter(x => !seen.has(x.id) && seen.add(x.id));
+  }, [isTeacher, assignments, classId, subjectId, myStreamsForClass]);
+  const needsStreamSelection = !isElectiveSubject && subjectStreams.length > 1;
+  const activeStreamId = isElectiveSubject ? '' : (streamId || (subjectStreams.length === 1 ? subjectStreams[0].id : ''));
 
   const subjectsList = useMemo(() => {
     if (isTeacher) {
       if (!classId) return [];
-      if (needsStreamSelection && !streamId) return [];
       const seen = new Set();
+      // Whole-class assignments (electives) are always offered; stream assignments only for the chosen stream.
       return assignments
-        .filter(a => a.classId === classId && (!needsStreamSelection || a.streamId === streamId))
+        .filter(a => a.classId === classId)
         .map(a => ({ id: a.subjectId, name: a.subjectName }))
         .filter(s => s.id && !seen.has(s.id) && seen.add(s.id));
     }
     return allSubjectsData?.data ?? [];
-  }, [isTeacher, assignments, classId, needsStreamSelection, streamId, allSubjectsData]);
+  }, [isTeacher, assignments, classId, allSubjectsData]);
 
   /* ── Assessment schedule ── */
   const { data: scheduleData } = useQuery({
@@ -697,22 +760,26 @@ function MarkbookTab({ years }) {
      fallback for a single (or no) stream assignment already narrows
      correctly server-side, so no stream flag is needed there. ── */
   const { data: studentsData, isLoading: studentsLoading } = useQuery({
-    queryKey: needsStreamSelection
-      ? ['streams', streamId, 'students']
-      : ['classes', classId, 'students'],
-    queryFn: () => needsStreamSelection
+    queryKey: isElectiveSubject
+      ? ['classes', classId, 'elective', subjectId, 'students']
+      : needsStreamSelection
+        ? ['streams', streamId, 'students']
+        : ['classes', classId, 'students'],
+    queryFn: () => isElectiveSubject
+      ? classesApi.students(classId, { limit: 500, status: 'active', electiveSubjectId: subjectId })
+      : needsStreamSelection
       ? streamsApi.students(streamId, { limit: 500, status: 'active' })
       // assessmentScope=true: closes the same school-level-role-with-a-
       // real-stream-assignment gap already fixed for Attendance/Lessons —
       // see classes.js's GET /:id/students and scopeEngine.js's
       // resolveAssessmentScope.
       : classesApi.students(classId, { limit: 500, status: 'active', assessmentScope: true }),
-    enabled:  needsStreamSelection ? !!streamId : !!classId,
+    enabled:  isElectiveSubject ? !!classId && !!subjectId : (needsStreamSelection ? !!streamId : !!classId),
     staleTime: 5 * 60_000,
   });
   const students = studentsData?.data ?? [];
 
-  const canQuery = !!(classId && (!needsStreamSelection || streamId) && subjectId && selectedEntry);
+  const canQuery = !!(classId && (!needsStreamSelection || streamId || isElectiveSubject) && subjectId && selectedEntry);
 
   /* ── Existing marks ──
      academicYearId included in both the fetch and the query key — Academic
@@ -766,8 +833,16 @@ function MarkbookTab({ years }) {
 
   useEffect(() => { setScores({}); setVersions({}); setMarkStates({}); setConflicts([]); setDirty(false); }, [classId, streamId, subjectId, scheduleId]);
 
+  // Cells saved in this session and not edited since. Drives the green tick.
+  const [savedKeys, setSavedKeys] = useState(() => new Set());
+  const pendingSaveRef = useRef([]);
   const setCell = useCallback((studentId, colId, value) => {
     setScores(prev => ({ ...prev, [studentId]: { ...(prev[studentId] ?? {}), [colId]: value } }));
+    setSavedKeys(prev => {
+      const key = `${studentId}|${colId}`;
+      if (!prev.has(key)) return prev;
+      const next = new Set(prev); next.delete(key); return next;
+    });
     setDirty(true);
   }, []);
 
@@ -795,8 +870,8 @@ function MarkbookTab({ years }) {
      instance at a different stage — tracked per column, not as one
      grid-wide status. */
   const { data: submissionsData, refetch: refetchSubmissions } = useQuery({
-    queryKey: ['markSubmissions', { classId, subjectId, termNumber: selectedEntry?.termNumber, assessmentType: selectedEntry?.assessmentType }],
-    queryFn:  () => markSubmissionsApi.list({ classId, subjectId, termNumber: selectedEntry.termNumber, assessmentType: selectedEntry.assessmentType }),
+    queryKey: ['markSubmissions', { classId, streamId: activeStreamId, subjectId, termNumber: selectedEntry?.termNumber, assessmentType: selectedEntry?.assessmentType }],
+    queryFn:  () => markSubmissionsApi.list({ classId, streamId: activeStreamId || undefined, subjectId, termNumber: selectedEntry.termNumber, assessmentType: selectedEntry.assessmentType }),
     enabled:  canQuery,
     staleTime: 15_000,
   });
@@ -810,12 +885,35 @@ function MarkbookTab({ years }) {
     [submissionByInstance]
   );
 
+  /* ── Subject comments, one per student for this subject ──
+     Stored per subject per term (report_card_draft_comments). The toggle on the
+     assessment decides whether the comment column is shown for it. */
+  const commentsOn = !!selectedEntry && selectedEntry.commentsEnabled !== false;
+  const { data: draftCommentsByStudent } = useQuery({
+    queryKey: ['reportCards', 'draftComments', { classId, termNum: selectedEntry?.termNumber }],
+    queryFn:  () => reportCardsApi.draftComments.list({ classId, termNumber: Number(selectedEntry.termNumber) }),
+    enabled:  canQuery && commentsOn,
+    staleTime: 15_000,
+    select: (res) => Object.fromEntries((res?.data ?? []).map(c => [c.studentId, c])),
+  });
+  const { mutate: saveGridComment } = useMutation({
+    mutationFn: ({ studentId, text }) => reportCardsApi.draftComments.saveSubject(studentId, subjectId, {
+      classId, termNumber: Number(selectedEntry.termNumber), comment: text,
+    }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['reportCards', 'draftComments'] }),
+    onError:   err => setToast({ msg: err?.message ?? 'Could not save the comment.', type: 'error' }),
+  });
+  // Comments are locked with the subject's marks: once any column is submitted or approved.
+  const commentsLocked = !!selectedEntry?.isLocked || (cols.length > 0 && cols.every(c => isInstanceReadOnly(c.instance)));
+
   const { mutate: submitForReview, isPending: submitting } = useMutation({
     mutationFn: () => Promise.all(
       cols
         .filter(c => !isInstanceReadOnly(c.instance))
         .map(c => markSubmissionsApi.submit({
           classId, subjectId, termNumber: selectedEntry.termNumber,
+          // A submission is per stream: the teacher submits the stream they have selected.
+          streamId: activeStreamId || null,
           academicYearId: selectedEntry.academicYearId || undefined,
           assessmentType: c.typeKey, instance: c.instance,
         }))
@@ -894,6 +992,7 @@ function MarkbookTab({ years }) {
           });
         }
       }
+      pendingSaveRef.current = marksToSave.map(m => ({ sid: m.studentId, typeKey: m.assessmentType, instance: m.instance }));
       return assessmentApi.bulkMarks({ marks: marksToSave });
     },
     onSuccess: (res) => {
@@ -901,6 +1000,17 @@ function MarkbookTab({ years }) {
       qc.invalidateQueries({ queryKey: ['assessment', 'marks'] });
       qc.invalidateQueries({ queryKey: ['assessment', 'report'] });
       setConflicts(newConflicts);
+      // Green tick only for cells the server accepted (conflicts stay unticked).
+      const conflictSet = new Set(newConflicts.map(c => `${c.studentId}|${c.assessmentType}${c.instance > 1 ? `_${c.instance}` : ''}`));
+      setSavedKeys(new Set(
+        pendingSaveRef.current
+          .filter(p => !conflictSet.has(`${p.sid}|${p.typeKey}${p.instance > 1 ? `_${p.instance}` : ''}`))
+          .map(p => {
+            const col = cols.find(c => c.typeKey === p.typeKey && c.instance === p.instance);
+            return col ? `${p.sid}|${col.colId}` : null;
+          })
+          .filter(Boolean)
+      ));
       if (newConflicts.length > 0) {
         setToast({
           msg: `${newConflicts.length} mark${newConflicts.length === 1 ? '' : 's'} couldn't be saved — someone else edited ${newConflicts.length === 1 ? 'it' : 'them'} first. See below.`,
@@ -1034,41 +1144,33 @@ function MarkbookTab({ years }) {
             </select>
           </div>
 
-          {/* Stream — only when this class has 2+ of the teacher's own
-             assigned streams (see myStreamsForClass's own comment above);
-             a single assigned stream, or a whole-class grant, needs no
-             picker — the roster fetch already narrows correctly either way. */}
-          {needsStreamSelection && (
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1.5">Stream</label>
-              <select
-                value={streamId}
-                onChange={e => { setStreamId(e.target.value); setSubjectId(''); }}
-                className={selCls}
-              >
-                <option value="">Select stream…</option>
-                {myStreamsForClass.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-            </div>
-          )}
         </div>
 
-        {/* Row 2: Subject · Assessment */}
-        <div className="grid sm:grid-cols-2 gap-3">
+        {/* Row 2: Subject · Stream (when needed) · Assessment */}
+        <div className={`grid gap-3 ${needsStreamSelection ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1.5">
               Subject {isTeacher && classId && subjectsList.length > 0 && <span className="text-slate-400 font-normal">(assigned to you)</span>}
             </label>
             <select
               value={subjectId}
-              onChange={e => setSubjectId(e.target.value)}
-              disabled={!classId || (needsStreamSelection && !streamId)}
+              onChange={e => { setSubjectId(e.target.value); setStreamId(''); }}
+              disabled={!classId}
               className={`${selCls} disabled:opacity-50`}
             >
               <option value="">Select subject…</option>
               {subjectsList.map(s => <option key={s.id ?? s._id} value={s.id ?? s._id}>{s.name}</option>)}
             </select>
           </div>
+          {needsStreamSelection && (
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1.5">Stream</label>
+              <select value={streamId} onChange={e => setStreamId(e.target.value)} className={selCls}>
+                <option value="">Select stream…</option>
+                {subjectStreams.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+          )}
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1.5">
               Assessment {filteredSchedule.length === 0 && yearId && <span className="text-amber-600 font-normal">(none scheduled — set up in Configuration)</span>}
@@ -1195,6 +1297,7 @@ function MarkbookTab({ years }) {
                       />
                     </th>
                   ))}
+                  {commentsOn && <th className="text-left text-xs font-medium text-slate-500 px-2 py-2.5 min-w-[220px]">Comment</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -1215,6 +1318,7 @@ function MarkbookTab({ years }) {
                             rowIdx={rowIdx} colIdx={colIdx}
                             isLocked={(selectedEntry?.isLocked ?? false) || isInstanceReadOnly(col.instance)}
                             hasConflict={conflictedCellKeys.has(`${sid}|${col.colId}`)}
+                            saved={savedKeys.has(`${sid}|${col.colId}`)}
                             onChange={v => setCell(sid, col.colId, v)}
                             onStateChange={st => setCellState(sid, col.colId, st)}
                             onNavigate={navigate}
@@ -1222,6 +1326,15 @@ function MarkbookTab({ years }) {
                           />
                         </td>
                       ))}
+                      {commentsOn && (
+                        <td className="px-2 py-1.5">
+                          <GridComment
+                            value={draftCommentsByStudent?.[sid]?.subjectComments?.[subjectId] ?? ''}
+                            disabled={commentsLocked}
+                            onSave={text => saveGridComment({ studentId: sid, text })}
+                          />
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
@@ -1244,6 +1357,7 @@ function MarkbookTab({ years }) {
                       </td>
                     );
                   })}
+                  {commentsOn && <td />}
                 </tr>
               </tfoot>
             </table>

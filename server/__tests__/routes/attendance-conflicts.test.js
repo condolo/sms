@@ -36,6 +36,8 @@ function matchesFilter(doc, filter) {
       if ('$ne' in v) return doc[k] !== v.$ne;
       return true;
     }
+    // Mongo: a null filter matches a missing field too.
+    if (v === null) return doc[k] == null;
     return doc[k] === v;
   });
 }

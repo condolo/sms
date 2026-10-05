@@ -29,6 +29,7 @@ jest.mock('../../utils/email', () => ({}));
 let mockJwtUser;
 let mockScope; // null = unrestricted; {level, classIds, subjectIds, streamIds, unrestrictedModules} = scoped
 let mockMarkDocs;
+let mockAssignments = [];
 let mockStudentDoc;
 
 function mockChainArr(arr) { return { sort: () => mockChainArr(arr), select: () => mockChainArr(arr), limit: () => mockChainArr(arr), lean: () => Promise.resolve(arr) }; }
@@ -36,6 +37,7 @@ function mockChainObj(obj) { return { select: () => mockChainObj(obj), lean: () 
 function mockMatchesFilter(doc, filter) {
   return Object.entries(filter || {}).every(([k, v]) => {
     if (k === '$or') return v.some(sub => mockMatchesFilter(doc, sub));
+    if (k === '$and') return v.every(sub => mockMatchesFilter(doc, sub));
     if (v && typeof v === 'object' && !Array.isArray(v)) {
       if ('$in' in v) return v.$in.includes(doc[k]);
       if ('$exists' in v) {
@@ -61,6 +63,7 @@ jest.mock('../../utils/tenant-model', () => ({
   tenantModel: (collection) => {
     if (collection === 'assessment_marks') return mockCollection(mockMarkDocs);
     if (collection === 'students')         return { findOne: jest.fn(() => mockChainObj(mockStudentDoc)) };
+    if (collection === 'teaching_assignments') return mockCollection(mockAssignments);
     return mockCollection([]);
   },
 }));
@@ -88,6 +91,11 @@ beforeEach(() => {
     { id: 'mark_B', schoolId: SCHOOL, classId: CLASS_B, streamId: null, studentId: 'stu_2', subjectId: 'subj_math', termNumber: 1, assessmentType: 'CA', instance: 1, rawScore: 80 },
   ];
   mockStudentDoc = null;
+  // The teacher teaches maths in both classes, whole-class. Reads are narrowed to what they teach.
+  mockAssignments = [
+    { schoolId: SCHOOL, teacherId: 'usr_teacher_1', classId: CLASS_A, subjectId: 'subj_math', streamId: null },
+    { schoolId: SCHOOL, teacherId: 'usr_teacher_1', classId: CLASS_B, subjectId: 'subj_math', streamId: null },
+  ];
 });
 
 describe('GET /api/assessment/marks — data scope', () => {
@@ -111,7 +119,18 @@ describe('GET /api/assessment/marks — data scope', () => {
     expect(res.body.data).toHaveLength(0);
   });
 
+  test('a teacher sees only the subjects they teach, even across the whole class', async () => {
+    mockMarkDocs = [
+      { id: 'mark_math', schoolId: SCHOOL, classId: CLASS_A, streamId: null, studentId: 'stu_1', subjectId: 'subj_math', termNumber: 1, assessmentType: 'CA', instance: 1, rawScore: 70 },
+      { id: 'mark_bio', schoolId: SCHOOL, classId: CLASS_A, streamId: null, studentId: 'stu_1', subjectId: 'subj_bio', termNumber: 1, assessmentType: 'CA', instance: 1, rawScore: 55 },
+    ];
+    mockScope = null;
+    const res = await supertest(buildApp()).get('/api/assessment/marks?classId=' + CLASS_A);
+    expect(res.body.data.map(m => m.id)).toEqual(['mark_math']);
+  });
+
   test('a stream-scoped-only teacher sees marks tagged with their own stream, via the streamAware branch', async () => {
+    mockAssignments = [{ schoolId: SCHOOL, teacherId: 'usr_teacher_1', classId: CLASS_A, subjectId: 'subj_math', streamId: STREAM_A1 }];
     mockMarkDocs = [
       { id: 'mark_stream_A1', schoolId: SCHOOL, classId: CLASS_A, streamId: STREAM_A1, studentId: 'stu_1', subjectId: 'subj_math', termNumber: 1, assessmentType: 'CA', instance: 1, rawScore: 70 },
       { id: 'mark_stream_other', schoolId: SCHOOL, classId: CLASS_A, streamId: 'strm_other', studentId: 'stu_3', subjectId: 'subj_math', termNumber: 1, assessmentType: 'CA', instance: 1, rawScore: 65 },

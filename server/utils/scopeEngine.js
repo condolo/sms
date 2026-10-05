@@ -549,13 +549,14 @@ async function resolveAssessmentScope(req) {
   if (ASSESSMENT_FLOOR_ROLES.has(effectiveRole)) return null;
   if (!userId || !schoolId) return { level: 'assigned', classIds: [], subjectIds: [], streamIds: [] };
 
+  // Teaching assignments only. A form tutor's homeroom stream is not marks authority
+  // (see resolveHomeroomStreamIds); their class remark is governed by comment-scope.js.
   const assigned = await _loadAssigned(userId, schoolId);
-  const homeroomStreamIds = await resolveHomeroomStreamIds(req);
   return {
     level:      'assigned',
     classIds:   assigned.classIds,
     subjectIds: assigned.subjectIds,
-    streamIds:  [...new Set([...assigned.streamIds, ...homeroomStreamIds])],
+    streamIds:  assigned.streamIds,
   };
 }
 

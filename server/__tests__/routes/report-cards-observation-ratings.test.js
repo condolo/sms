@@ -76,6 +76,7 @@ beforeEach(() => {
   mockCurrentUser = { userId: 'u_class_teacher', schoolId: SCHOOL, role: 'teacher', roles: [] };
   mockStores = {
     report_card_draft_comments: makeStore(),
+    students: makeStore([{ id: 'stu_1', schoolId: SCHOOL, classId: 'cls_001', streamId: null }]),
     academic_config: makeStore([
       { schoolId: SCHOOL, showObservationRatings: true, observationCategories: ['Engaged', 'Teamwork', 'Confidence'] },
     ]),
@@ -115,7 +116,7 @@ describe('PUT /api/report-cards/draft-comments/:studentId — observationRatings
   test('omitting observationRatings entirely is fine — unaffected, matches every other optional field here', async () => {
     const res = await supertest(buildApp())
       .put('/api/report-cards/draft-comments/stu_1')
-      .send({ termNumber: 1, classId: 'cls_1', classTeacherRemark: 'Good term.' });
+      .send({ termNumber: 1, classId: 'cls_1', sportsAndTalent: 'Choir' });
     expect(res.status).toBe(200);
     expect(res.body.data.observationRatings).toBeUndefined();
   });

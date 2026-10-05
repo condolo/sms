@@ -44,7 +44,7 @@ function mockMatchesFilter(doc, filter) {
   return Object.entries(filter || {}).every(([k, v]) => {
     if (k === '$or') return v.some(sub => mockMatchesFilter(doc, sub));
     if (v && typeof v === 'object' && !Array.isArray(v)) {
-      if ('$in' in v) return v.$in.includes(doc[k]);
+      if ('$in' in v) return v.$in.some(x => x === doc[k] || (x == null && doc[k] == null));
       return true;
     }
     return doc[k] === v;
