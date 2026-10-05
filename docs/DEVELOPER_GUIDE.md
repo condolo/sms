@@ -6208,6 +6208,17 @@ A subject's final score is the weighted average over the assessment types that h
 - Term invoices dispatch `invoice_created` through `_notifyInvoiceCreated`, so the school's notification settings decide whether guardians hear about them.
 - The overdue job (`utils/invoice-overdue-cron.js`) skips term invoices (`termBillingTermId` set) unless `invoice_reminder_config.includeTermBilling` is true. The default is false. The school enables it in Finance → Fee Settings → Overdue Invoice Reminders.
 
-**Open decision: permissions for the new finance actions.** Term billing, early-payment confirmation and activity writes are still guarded by the general finance `create` and `update` rights. Introducing sub-permissions (`finance__term_billing`, `finance__early_payment`, `finance__activities`) needs a decision first. `hasExplicitSubGrant` refuses a role that has no explicit grant, so the change would stop roles that work today. Also, `_actorEffectiveAllows` (settings.js) falls back to module rights, so the grant ceiling must treat these keys as explicit too. Otherwise a role could grant rights it doesn't explicitly hold.
+**Explicit finance sub-permissions (v5.169.2).** Three finance actions have their own grants, which a general finance right does not cover:
+- `finance__term_billing`: preview and read the run (`read`), generate (`create`). Also reads the early-payment list.
+- `finance__early_payment`: confirm (`create`), change the deadline or percentage (`update`).
+- `finance__activities`: create and update activities (`create`, `update`) and enrol or end enrolments.
+
+Enforcement: `middleware/explicit-sub.js` (`explicitSub`) uses `hasExplicitSubGrant`, which has no module-level fallback and fails closed. The grant ceiling in `settings.js` (`_actorEffectiveAllows`) treats these keys as explicit too, so a user can't hand on a right they don't hold explicitly. Read routes for activities keep the general finance read right.
+
+Existing roles keep what they had. `withFinanceSubGrants()` derives each new key from the finance actions a role already holds. It is applied by:
+- the one-time backfill at startup (`utils/finance-permission-backfill.js`, recorded in `app_migrations` as `finance_sub_permissions_v1`, never overwrites a key already set);
+- the default role seeds for new schools (`onboard.js`, and the platform seed in `platform.js`).
+
+The three keys are listed in the Roles & Permissions registry under Finance (`config/moduleRegistry.js`).
 
 **Tests:** `__tests__/utils/term-billing.test.js` (rules), `__tests__/routes/finance-term-billing.test.js` (preview, generate, idempotency, refusals, bursar early payment, invoice_created), `__tests__/routes/transport-bulk-assign.test.js` (bulk assignment), `__tests__/invoice-overdue-cron.test.js` (term reminders off by default, opt-in).

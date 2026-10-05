@@ -12,6 +12,7 @@ const { verify: verifyJwt } = require('./utils/jwt');
 const monitoring = require('./utils/monitoring');
 const { connect }             = require('./config/db');
 const { ensureIndexes }       = require('./utils/indexes');
+const { backfillFinanceSubPermissions } = require('./utils/finance-permission-backfill');
 const { repairPermissions }   = require('./utils/repairPermissions');
 const { provisionOrganizations } = require('./utils/provision-organizations');
 const { provisionMemberships } = require('./utils/provision-memberships');
@@ -728,6 +729,9 @@ async function _migrateReportIds() {
 async function start() {
   await connect();        // Connect to MongoDB (no-op if MONGODB_URI not set)
   await ensureIndexes();  // Idempotent — safe to run on every startup
+  // One-time: existing bursars keep the explicit finance sub-permissions they
+  // had through the general finance rights (see utils/finance-permission-backfill.js).
+  await backfillFinanceSubPermissions().catch(err => console.error('[startup] finance sub-permission backfill failed:', err.message));
 
   app.listen(PORT, () => {
     console.log(`\n🎓 Msingi API running on port ${PORT}`);

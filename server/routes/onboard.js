@@ -12,6 +12,7 @@ const { MODULE_KEYS } = require('../config/moduleRegistry');
 const { sign }   = require('../utils/jwt');
 const email      = require('../utils/email');
 const { tenantModel } = require('../utils/tenant-model');
+const { withFinanceSubGrants } = require('../middleware/explicit-sub');
 const { provisionOrganizationForSchool } = require('../utils/provision-organizations');
 const { provisionIdentityForUser } = require('../utils/provision-identities');
 
@@ -483,9 +484,11 @@ async function _seedBaseData(schoolId, selectedSections = ['primary','secondary'
   const permDocs = roles.map(roleKey => ({
     id: `rp_${roleKey}_${schoolId}`,
     schoolId, roleKey,
-    permissions: roleKey === 'superadmin'
+    // withFinanceSubGrants: the explicit finance sub-permissions (term billing,
+    // early payment, activities) follow the finance actions each role gets.
+    permissions: withFinanceSubGrants(roleKey === 'superadmin'
       ? Object.fromEntries(ALL_MODULES.map(m => [m, FULL_ACTIONS]))  // superadmin: full access (also bypassed in middleware)
-      : _defaultPerms(roleKey)
+      : _defaultPerms(roleKey))
   }));
 
   await Promise.all(permDocs.map(p =>

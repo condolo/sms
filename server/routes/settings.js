@@ -23,6 +23,7 @@ const emailUtil             = require('../utils/email');
 const { encrypt, smtpEncryptReady } = require('../utils/smtpEncrypt');
 const { DEFAULTS: NOTIF_DEFAULTS, EVENT_REGISTRY, GROUPS: NOTIF_GROUPS } = require('../utils/notif-settings');
 const { rbac, invalidatePermCache, hasExplicitSubGrant, _mergeUserOverrides, _loadPerms, _loadUserPerms } = require('../middleware/rbac');
+const { EXPLICIT_SUB_KEYS } = require('../middleware/explicit-sub');
 const { invalidateModuleConfigCache } = require('../middleware/module-gate');
 const { invalidateScopeCache, invalidateScopeCacheForRole } = require('../middleware/scopeMiddleware');
 const AuditService           = require('../services/audit');
@@ -91,6 +92,10 @@ async function _actorEffectivePerms(req) {
 }
 function _actorEffectiveAllows(actorPerms, key, action) {
   if (Array.isArray(actorPerms[key])) return actorPerms[key].includes(action);
+  // An explicit finance sub-permission is never inherited from the general
+  // finance grant (hasExplicitSubGrant has no fallback either), so a user
+  // can't hand on a right they don't explicitly hold.
+  if (EXPLICIT_SUB_KEYS.has(key)) return false;
   const mod = key.includes('__') ? key.split('__')[0] : key;
   return Array.isArray(actorPerms[mod]) && actorPerms[mod].includes(action);
 }

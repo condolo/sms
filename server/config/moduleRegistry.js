@@ -228,6 +228,11 @@ const MODULE_REGISTRY = [
     { key: 'fee_structure',  label: 'Manage Fee Structures' },
     { key: 'import',         label: 'Import Finance Data (CSV)' },
     { key: 'mpesa',          label: 'Configure M-Pesa Integration' },
+    // Explicit grants: a general finance right does NOT cover these (see
+    // middleware/explicit-sub.js). Existing roles were given them by the backfill.
+    { key: 'term_billing',   label: 'Run Term Billing' },
+    { key: 'early_payment',  label: 'Confirm Early Payment' },
+    { key: 'activities',     label: 'Manage Extra-Curricular Activities & Enrolments' },
   ]},
   { key: 'messages', label: 'Messages', section: 'Communication', icon: 'MessageSquare', navRoute: '/messages', navOrder: 11, subs: [
     { key: 'view',   label: 'View Messages' },

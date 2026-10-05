@@ -6,6 +6,12 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.169.2] — 2026-10-05 — feat(permissions): explicit grants for term billing, early payment and activities
+
+- **Three finance actions have their own permissions**, listed under Finance in Roles & Permissions: *Run Term Billing*, *Confirm Early Payment*, *Manage Extra-Curricular Activities & Enrolments*. A general finance right no longer covers them.
+- **Existing roles keep their access.** A one-time backfill at startup gives each role and per-user override that holds finance create or update the matching new permissions. It is recorded once and never overwrites a permission already set. New schools get the same grants in their default roles.
+- The grant ceiling treats the new permissions as explicit, so a user can only pass on what they hold explicitly.
+
 ## [v5.169.1] — 2026-10-05 — fix(finance): settings audit follow-ups for term billing
 
 Following a review of the settings, permissions and notification routes against finance:

@@ -23,6 +23,7 @@ const { authMiddleware } = require('../middleware/auth');
 const { planGate }       = require('../middleware/plan');
 const { moduleGate }     = require('../middleware/module-gate');
 const { rbac }           = require('../middleware/rbac');
+const { explicitSub }    = require('../middleware/explicit-sub');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, E } = require('../utils/response');
 const AuditService       = require('../services/audit');
@@ -68,7 +69,7 @@ router.get('/activities', rbac('finance', 'read'), async (req, res) => {
   } catch (err) { console.error('[extracurricular/activities GET]', err); return E.serverError(res); }
 });
 
-router.post('/activities', rbac('finance', 'create'), async (req, res) => {
+router.post('/activities', explicitSub('finance', 'activities', 'create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(ActivitySchema, req.body);
@@ -84,7 +85,7 @@ router.post('/activities', rbac('finance', 'create'), async (req, res) => {
   } catch (err) { console.error('[extracurricular/activities POST]', err); return E.serverError(res); }
 });
 
-router.put('/activities/:id', rbac('finance', 'update'), async (req, res) => {
+router.put('/activities/:id', explicitSub('finance', 'activities', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(ActivitySchema.partial(), req.body);
@@ -120,7 +121,7 @@ router.get('/enrolments', rbac('finance', 'read'), async (req, res) => {
   } catch (err) { console.error('[extracurricular/enrolments GET]', err); return E.serverError(res); }
 });
 
-router.post('/enrolments', rbac('finance', 'create'), async (req, res) => {
+router.post('/enrolments', explicitSub('finance', 'activities', 'create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(EnrolmentSchema, req.body);
@@ -164,7 +165,7 @@ router.post('/enrolments', rbac('finance', 'create'), async (req, res) => {
 });
 
 /* Ending an enrolment keeps the record (history for past terms). It is not deleted. */
-router.put('/enrolments/:id/end', rbac('finance', 'update'), async (req, res) => {
+router.put('/enrolments/:id/end', explicitSub('finance', 'activities', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(EnrolmentEndSchema, req.body);

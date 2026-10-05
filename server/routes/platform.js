@@ -12,6 +12,7 @@ const rateLimit  = require('express-rate-limit');
 const { platformSession, requireOwnerTier } = require('../middleware/auth');
 const { invalidatePlanCache } = require('../middleware/plan');
 const { invalidatePermCache }  = require('../middleware/rbac');
+const { withFinanceSubGrants } = require('../middleware/explicit-sub');
 const { revokeUserTokens, revokeIdentityTokens } = require('../utils/token-version');
 const AuditService      = require('../services/audit');
 const SessionService    = require('../services/sessionService');
@@ -2310,7 +2311,7 @@ async function _seedBaseData(schoolId) {
   await Promise.all(roleDefaults.map(({ roleKey, permissions }) =>
     Perm.updateOne(
       { schoolId, roleKey },
-      { $set: { schoolId, roleKey, permissions } },
+      { $set: { schoolId, roleKey, permissions: withFinanceSubGrants(permissions) } },
       { upsert: true }
     )
   ));

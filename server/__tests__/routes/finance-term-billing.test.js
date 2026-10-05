@@ -13,7 +13,14 @@ jest.mock('../../middleware/auth', () => ({
     next();
   },
 }));
-jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => next() }));
+// Explicit finance sub-permissions (term billing, early payment) are granted
+// per role; the test controls the grant through mockExplicitGrant.
+let mockExplicitGrant = true;
+jest.mock('../../middleware/rbac', () => ({
+  rbac: () => (_req, _res, next) => next(),
+  hasExplicitSubGrant: jest.fn(async () => mockExplicitGrant),
+  hasPermission: () => true,
+}));
 jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) => next() }));
 jest.mock('../../middleware/module-gate', () => ({ moduleGate: () => (_req, _res, next) => next() }));
 jest.mock('../../utils/counters', () => ({
@@ -116,7 +123,28 @@ function seed(overrides = {}) {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockExplicitGrant = true;
   seed();
+});
+
+describe('explicit grants for term billing and early payment', () => {
+  test('a role without the explicit term-billing grant cannot preview or generate', async () => {
+    mockExplicitGrant = false;
+    const preview = await supertest(buildApp()).post('/api/finance/term-billing/preview').send({ termId: 'term_1' });
+    expect(preview.status).toBe(403);
+    const gen = await supertest(buildApp()).post('/api/finance/term-billing/generate').send({ termId: 'term_1' });
+    expect(gen.status).toBe(403);
+    expect(mockStores.invoices.create).not.toHaveBeenCalled();
+  });
+
+  test('a role without the explicit early-payment grant cannot confirm an early payment', async () => {
+    mockStores.invoices = mockFakeCollection([{ id: 'inv1', schoolId: SCHOOL, earlyPaymentManual: true, earlyPaymentPct: 5, earlyPaymentDeadline: '2026-09-01' }]);
+    mockExplicitGrant = false;
+    const res = await supertest(buildApp()).post('/api/finance/invoices/inv1/early-payment/confirm');
+    expect(res.status).toBe(403);
+    const put = await supertest(buildApp()).put('/api/finance/invoices/inv1/early-payment').send({ pct: 6 });
+    expect(put.status).toBe(403);
+  });
 });
 
 describe('POST /term-billing/preview', () => {

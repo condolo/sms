@@ -23,6 +23,7 @@ const email = require('../utils/email');
 const { resolveAcademicPeriod: _resolveAcademicPeriod } = require('../utils/academic-period');
 const { isYearArchived } = require('../utils/archival');
 const { buildTermLines } = require('../utils/term-billing');
+const { explicitSub } = require('../middleware/explicit-sub');
 
 const router = express.Router();
 const PLAN   = planGate('finance');
@@ -1110,12 +1111,12 @@ async function _runTermBilling(req, res, { dryRun }) {
   return ok(res, { dryRun: false, termId: period.termId, created: createdIds.length, skipped });
 }
 
-router.post('/term-billing/preview', authMiddleware, PLAN, MODGATE, rbac('finance', 'read'), async (req, res) => {
+router.post('/term-billing/preview', authMiddleware, PLAN, MODGATE, explicitSub('finance', 'term_billing', 'read'), async (req, res) => {
   try { return await _runTermBilling(req, res, { dryRun: true }); }
   catch (err) { console.error('[finance POST /term-billing/preview]', err); return E.serverError(res); }
 });
 
-router.post('/term-billing/generate', authMiddleware, PLAN, MODGATE, rbac('finance', 'create'), async (req, res) => {
+router.post('/term-billing/generate', authMiddleware, PLAN, MODGATE, explicitSub('finance', 'term_billing', 'create'), async (req, res) => {
   try { return await _runTermBilling(req, res, { dryRun: false }); }
   catch (err) { console.error('[finance POST /term-billing/generate]', err); return E.serverError(res); }
 });
@@ -1134,7 +1135,7 @@ router.post('/term-billing/generate', authMiddleware, PLAN, MODGATE, rbac('finan
    ══════════════════════════════════════════════════════════════ */
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
-router.get('/term-billing/early-payments', authMiddleware, PLAN, MODGATE, rbac('finance', 'read'), async (req, res) => {
+router.get('/term-billing/early-payments', authMiddleware, PLAN, MODGATE, explicitSub('finance', 'term_billing', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const termId = typeof req.query.termId === 'string' ? req.query.termId : '';
@@ -1147,7 +1148,7 @@ router.get('/term-billing/early-payments', authMiddleware, PLAN, MODGATE, rbac('
   } catch (err) { console.error('[finance GET /term-billing/early-payments]', err); return E.serverError(res); }
 });
 
-router.put('/invoices/:id/early-payment', authMiddleware, PLAN, MODGATE, rbac('finance', 'update'), async (req, res) => {
+router.put('/invoices/:id/early-payment', authMiddleware, PLAN, MODGATE, explicitSub('finance', 'early_payment', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { deadline, pct } = req.body ?? {};
@@ -1183,7 +1184,7 @@ router.put('/invoices/:id/early-payment', authMiddleware, PLAN, MODGATE, rbac('f
 });
 
 // Same permission as recording a payment: confirming a discount is a money action.
-router.post('/invoices/:id/early-payment/confirm', authMiddleware, PLAN, MODGATE, rbac('finance', 'create'), async (req, res) => {
+router.post('/invoices/:id/early-payment/confirm', authMiddleware, PLAN, MODGATE, explicitSub('finance', 'early_payment', 'create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const Invoices = tenantModel('invoices', tenantContext(req));
