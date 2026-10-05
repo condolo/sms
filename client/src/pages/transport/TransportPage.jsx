@@ -171,9 +171,11 @@ function RouteModal({ route, onClose, onSave }) {
 function AssignModal({ routes, onClose, onSave }) {
   const today = new Date().toISOString().slice(0, 10);
   const [form, setForm] = useState({
-    routeId: '', studentId: '', studentName: '',
-    studentClass: '', pickupStop: '', direction: 'both', startDate: today, fareType: '',
+    routeId: '', pickupStop: '', direction: 'both', startDate: today, fareType: '',
   });
+  // Several students can be chosen, across the class search. Each is saved as
+  // its own assignment; they all share the route, fare, pickup and dates above.
+  const [picked, setPicked] = useState([]); // [{ studentId, studentName, studentClass }]
   // The fare types offered are only the ones this route actually has a fare for.
   const selectedRoute = routes.find(r => (r.id ?? r._id) === form.routeId);
   const offeredFares  = selectedRoute?.fares ?? [];
@@ -200,21 +202,27 @@ function AssignModal({ routes, onClose, onSave }) {
   });
   const studentResults = studentsResp?.data ?? [];
 
-  function pickStudent(s) {
+  const isPicked = (id) => picked.some(p => p.studentId === id);
+  function togglePick(s) {
+    const id = s.id ?? s._id;
+    if (isPicked(id)) { setPicked(p => p.filter(x => x.studentId !== id)); return; }
     const cls = classList.find(c => (c.id ?? c._id) === classId);
-    setForm(f => ({
-      ...f,
-      studentId:    s.id ?? s._id,
-      studentName:  [s.firstName, s.middleName, s.lastName].filter(Boolean).join(' '),
-      studentClass: cls?.name ?? '',
-    }));
+    setPicked(p => [...p, {
+      studentId:    id,
+      studentName:  s.studentName ?? [s.firstName, s.middleName, s.lastName].filter(Boolean).join(' '),
+      studentClass: s.studentClass ?? cls?.name ?? '',
+    }]);
   }
 
   async function handleSubmit(e) {
     e.preventDefault();
+    if (picked.length === 0) { setError('Choose at least one student'); return; }
     setSaving(true); setError('');
-    try { await onSave(form); onClose(); }
-    catch (err) { setError(err.message ?? 'Failed to assign student'); }
+    try {
+      await onSave({ ...form, startDate: form.startDate || null, students: picked });
+      onClose();
+    }
+    catch (err) { setError(err.message ?? 'Failed to assign students'); }
     finally { setSaving(false); }
   }
 
@@ -252,19 +260,23 @@ function AssignModal({ routes, onClose, onSave }) {
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-700 mb-1">Class *</label>
-            <select value={classId} onChange={e => { setClassId(e.target.value); setSearch(''); setForm(f => ({ ...f, studentId: '', studentName: '', studentClass: '' })); }}
+            <select value={classId} onChange={e => { setClassId(e.target.value); setSearch(''); }}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
               <option value="">Select class…</option>
               {classList.map(c => <option key={c.id ?? c._id} value={c.id ?? c._id}>{c.name}</option>)}
             </select>
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-700 mb-1">Student *</label>
-            {form.studentId && (
-              <div className="flex items-center justify-between gap-2 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm mb-2">
-                <span className="text-slate-800">{form.studentName} <span className="text-slate-500">· {form.studentClass}</span></span>
-                <button type="button" onClick={() => setForm(f => ({ ...f, studentId: '', studentName: '', studentClass: '' }))}
-                  className="text-xs text-blue-700 hover:underline">Change</button>
+            <label className="block text-xs font-medium text-slate-700 mb-1">Students * <span className="font-normal text-slate-400">({picked.length} selected)</span></label>
+            {picked.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {picked.map(p => (
+                  <span key={p.studentId} className="inline-flex items-center gap-1 bg-blue-50 border border-blue-200 rounded-full px-2.5 py-1 text-xs text-slate-800">
+                    {p.studentName}{p.studentClass ? <span className="text-slate-500">· {p.studentClass}</span> : null}
+                    <button type="button" onClick={() => togglePick({ id: p.studentId })} aria-label={`Remove ${p.studentName}`}
+                      className="text-blue-700 hover:text-blue-900 px-0.5">×</button>
+                  </span>
+                ))}
               </div>
             )}
             <input
@@ -279,13 +291,16 @@ function AssignModal({ routes, onClose, onSave }) {
                 {!searching && studentResults.length === 0 && (
                   <p className="px-3 py-2 text-xs text-slate-400">No active students match in this class.</p>
                 )}
-                {studentResults.map(s => (
-                  <button key={s.id ?? s._id} type="button" onClick={() => pickStudent(s)}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex justify-between gap-2">
-                    <span className="text-slate-800">{[s.firstName, s.lastName].filter(Boolean).join(' ')}</span>
-                    <span className="font-mono text-xs text-slate-500">{s.admissionNumber ?? '—'}</span>
-                  </button>
-                ))}
+                {studentResults.map(s => {
+                  const id = s.id ?? s._id;
+                  return (
+                    <label key={id} className="w-full px-3 py-2 text-sm hover:bg-slate-50 flex items-center gap-2 cursor-pointer">
+                      <input type="checkbox" checked={isPicked(id)} onChange={() => togglePick(s)} className="rounded border-slate-300" />
+                      <span className="text-slate-800 flex-1">{[s.firstName, s.lastName].filter(Boolean).join(' ')}</span>
+                      <span className="font-mono text-xs text-slate-500">{s.admissionNumber ?? '—'}</span>
+                    </label>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -312,7 +327,7 @@ function AssignModal({ routes, onClose, onSave }) {
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-slate-200 hover:bg-slate-50">Cancel</button>
-            <button type="submit" disabled={saving || !form.studentId || !form.routeId || !form.fareType}
+            <button type="submit" disabled={saving || picked.length === 0 || !form.routeId || !form.fareType}
               className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
               {saving ? 'Assigning…' : 'Assign'}
             </button>
@@ -389,13 +404,15 @@ export default function TransportPage() {
     onError: err => toast.error(err?.message ?? 'Failed to delete route.'),
   });
   const assignStudent = useMutation({
-    mutationFn: (data) => transportApi.assignments.assign(data),
-    onSuccess:  () => {
+    mutationFn: (data) => transportApi.assignments.assignBulk(data),
+    onSuccess:  (r) => {
       qc.invalidateQueries({ queryKey: ['transport-assignments'] });
       qc.invalidateQueries({ queryKey: ['transport-summary'] });
-      toast.success('Student assigned to route.');
+      const created = r?.data?.created ?? 0;
+      const skipped = r?.data?.skipped?.length ?? 0;
+      toast.success(`${created} student${created === 1 ? '' : 's'} assigned to route.${skipped ? ` ${skipped} already on this route, skipped.` : ''}`);
     },
-    onError: err => toast.error(err?.message ?? 'Failed to assign student.'),
+    onError: err => toast.error(err?.message ?? 'Failed to assign students.'),
   });
   const removeAssignment = useMutation({
     mutationFn: (id) => transportApi.assignments.remove(id),

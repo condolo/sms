@@ -22,6 +22,7 @@ const { moduleGate }     = require('../middleware/module-gate');
 const { rbac, hasPermission } = require('../middleware/rbac');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
+const AuditService = require('../services/audit');
 
 const router = express.Router();
 const PLAN   = planGate('transport');
@@ -269,6 +270,99 @@ router.post('/assignments', rbac('transport', 'create', 'assign'), async (req, r
     return created(res, doc.toObject ? doc.toObject() : doc);
   } catch (err) {
     console.error('[transport/assignments POST]', err);
+    return E.serverError(res);
+  }
+});
+
+/* POST /api/transport/assignments/bulk — one route, fare and pickup for several
+   students (usually of one class). Each student still gets their OWN assignment
+   record, so billing and changes stay per student. Everything is checked before
+   anything is written: the route and its fare, that every student is an active
+   student of this school, duplicates, and remaining seats. A student already on
+   this route is skipped and reported, never duplicated. */
+const BulkAssignmentSchema = z.object({
+  routeId:    z.string().min(1),
+  fareType:   z.enum(['one_way', 'two_way']),
+  direction:  z.enum(['to_school', 'from_school', 'both']).optional().default('both'),
+  pickupStop: z.string().max(200).trim().optional().default(''),
+  startDate:  z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  endDate:    z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  notes:      z.string().max(300).trim().optional().default(''),
+  students:   z.array(z.object({
+                studentId:    z.string().min(1),
+                studentName:  z.string().max(200).trim().optional().default(''),
+                studentClass: z.string().max(100).trim().optional().default(''),
+              })).min(1).max(200),
+});
+
+router.post('/assignments/bulk', rbac('transport', 'create', 'assign'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const { data, error } = _validate(BulkAssignmentSchema, req.body);
+    if (error) return E.validation(res, error);
+    const ctx = tenantContext(req);
+
+    const route = await tenantModel('transport_routes', ctx).findOne({ id: data.routeId, schoolId }).lean();
+    if (!route) return E.notFound(res, 'Route not found');
+    if (!(route.fares ?? []).some(f => f.fareType === data.fareType)) {
+      return E.badRequest(res, `This route has no ${data.fareType === 'one_way' ? 'one-way' : 'two-way'} fare. Set it on the route first.`);
+    }
+
+    const ids = [...new Set(data.students.map(s => s.studentId))];
+    const found = await tenantModel('students', ctx).find({ schoolId, id: { $in: ids }, status: 'active' }).select('id').lean();
+    const foundIds = new Set(found.map(s => s.id));
+    const missing = ids.filter(id => !foundIds.has(id));
+    if (missing.length) {
+      return E.validation(res, [{ field: 'students', message: `Not active students in this school: ${missing.join(', ')}` }]);
+    }
+
+    const Assignments = tenantModel('transport_assignments', ctx);
+    const active = await Assignments.find({ schoolId, routeId: data.routeId, status: 'active' }).select('studentId').lean();
+    const alreadyOn = new Set(active.map(a => a.studentId));
+
+    const seen = new Set();
+    const toCreate = [];
+    const skipped = [];
+    for (const s of data.students) {
+      if (seen.has(s.studentId)) { skipped.push({ studentId: s.studentId, reason: 'listed more than once' }); continue; }
+      seen.add(s.studentId);
+      if (alreadyOn.has(s.studentId)) { skipped.push({ studentId: s.studentId, reason: 'already on this route' }); continue; }
+      toCreate.push(s);
+    }
+
+    if (route.capacity) {
+      const seatsLeft = Math.max(route.capacity - active.length, 0);
+      if (toCreate.length > seatsLeft) {
+        return E.badRequest(res, `Only ${seatsLeft} seat${seatsLeft === 1 ? '' : 's'} left on this route (capacity ${route.capacity}), but ${toCreate.length} student${toCreate.length === 1 ? ' is' : 's are'} to be added.`);
+      }
+    }
+
+    const now = new Date().toISOString();
+    const docs = toCreate.map(s => ({
+      id:           uuidv4(),
+      schoolId,
+      routeId:      data.routeId,
+      routeName:    route.name,
+      studentId:    s.studentId,
+      studentName:  s.studentName,
+      studentClass: s.studentClass,
+      pickupStop:   data.pickupStop,
+      direction:    data.direction,
+      fareType:     data.fareType,
+      startDate:    data.startDate ?? now.slice(0, 10),
+      endDate:      data.endDate   ?? null,
+      notes:        data.notes,
+      status:       'active',
+      createdBy:    userId,
+      createdAt:    now,
+      updatedAt:    now,
+    }));
+    if (docs.length) await Assignments.insertMany(docs);
+
+    AuditService.log({ action: 'transport.assignments_bulk_created', actor: req.jwtUser, schoolId, target: { type: 'route', id: data.routeId, label: route.name }, details: { fareType: data.fareType, created: docs.length, skipped: skipped.length }, req });
+    return ok(res, { created: docs.length, skipped });
+  } catch (err) {
+    console.error('[transport/assignments/bulk POST]', err);
     return E.serverError(res);
   }
 });

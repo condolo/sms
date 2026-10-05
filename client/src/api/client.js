@@ -904,6 +904,8 @@ export const transport = {
   assignments: {
     list:       (params)     => _get('/transport/assignments', params),
     assign:     (data)       => _post('/transport/assignments', data),
+    // One route, fare and pickup for many students; each gets their own record.
+    assignBulk: (data)       => _post('/transport/assignments/bulk', data),
     update:     (id, data)   => _patch(`/transport/assignments/${id}`, data),
     remove:     (id)         => _delete(`/transport/assignments/${id}`),
   },

@@ -739,13 +739,6 @@ function _validatePolicyShape(data) {
    payment may land on to still qualify. Returns null when the fee
    structure carries no dueDate at all (nothing to count back from), in
    which case Early Payment simply never applies to that invoice. */
-/* The day before a term starts (YYYY-MM-DD): the last day for early payment,
-   which is paid before the term opens. UTC arithmetic, as _termDueDate. */
-function _dayBefore(dateStr) {
-  const d = new Date(`${dateStr}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() - 1);
-  return d.toISOString().slice(0, 10);
-}
 
 /* Term fees are due by the end of the term's first week: the seventh day
    counting the term's start date as day 1. UTC arithmetic keeps the date
@@ -1038,7 +1031,8 @@ async function _runTermBilling(req, res, { dryRun }) {
   const dueDate = _termDueDate(term.startDate);
   const earlyPaymentPolicy = await tenantModel('discount_policies', ctx)
     .findOne({ schoolId, type: 'early_payment', active: true }).lean();
-  const earlyPaymentDeadline = earlyPaymentPolicy ? _dayBefore(term.startDate) : null;
+  // The deadline is the term's first day: paid on or before the day it starts.
+  const earlyPaymentDeadline = earlyPaymentPolicy ? term.startDate : null;
 
   const rows = billable.map(b => {
     const discountPct = discounts.get(b.studentId) ?? 0;
@@ -1119,7 +1113,7 @@ router.post('/term-billing/generate', authMiddleware, PLAN, MODGATE, rbac('finan
    TERM EARLY PAYMENT — the bursar's manual step.
 
    Early payment is paid BEFORE the term starts. A term invoice carries
-   earlyPaymentManual: its deadline is the day before the term's start, and
+   earlyPaymentManual: its deadline is the term's first day, and
    a payment alone never applies the discount. Until the bursar confirms:
    • PUT   /invoices/:id/early-payment   change the deadline and/or percentage
    • POST  /invoices/:id/early-payment/confirm   apply the discount. The server

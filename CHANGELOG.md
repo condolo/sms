@@ -22,7 +22,7 @@ Transport and extra-curricular charges now reach the student's invoice. Before t
 - Generation is run by an admin for a chosen term, not on a timer. A scheduled run needs a decision on timing.
 - Auto-discounts apply as they do for fee structures.
 - Term invoices are due by the end of the term's first week: the seventh day counting the term's start date as day 1.
-- **Early payment is paid before the term starts.** Each term invoice's deadline is the day before the term's start. It is never applied automatically on payment. The bursar confirms it per invoice (Finance → Term Billing → Early payment), and the server checks that a payment was received on or before the deadline. The deadline can be changed until it is confirmed. Fee-structure invoices keep the automatic rule.
+- **Early payment is paid before the term starts.** Each term invoice's deadline is the term's first day (paid on or before the day it starts). It is never applied automatically on payment. The bursar confirms it per invoice (Finance → Term Billing → Early payment), and the server checks that a payment was received on or before the deadline. The deadline can be changed until it is confirmed. Fee-structure invoices keep the automatic rule.
 - A change after a run (a new enrolment, a changed fare) is not re-billed for the same term.
 - Enrolment and activity records are copied into the invoice's lines, so a later amount change does not alter an invoice already created.
 
