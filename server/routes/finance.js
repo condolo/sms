@@ -22,6 +22,7 @@ const { notifyGuardiansForStudents } = require('../utils/notify-students');
 const email = require('../utils/email');
 const { resolveAcademicPeriod: _resolveAcademicPeriod } = require('../utils/academic-period');
 const { isYearArchived } = require('../utils/archival');
+const { buildTermLines } = require('../utils/term-billing');
 
 const router = express.Router();
 const PLAN   = planGate('finance');
@@ -943,6 +944,137 @@ router.delete('/fee-structures/:id', authMiddleware, PLAN, MODGATE, rbac('financ
     console.error('[finance DELETE /fee-structures/:id]', err);
     return E.serverError(res);
   }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   TERM BILLING — transport and extra-curricular charges onto each
+   student's invoice for one term.
+
+   POST /term-billing/preview   what would be billed (no writes)
+   POST /term-billing/generate  one invoice per student for the term
+
+   Rules (utils/term-billing.js decides what is billed):
+   • Transport: the active assignment's fare type (one-way or two-way)
+     at the route's fare. Missing fare type or fare = warning, not billed.
+   • Extra-curricular: active enrolments in active activities.
+   • Idempotent: a student who already has a term-billing invoice for this
+     term is skipped. The unique index inv_term_billing_unique makes a
+     concurrent second run fail for the same student, which is then skipped.
+   • Auto-discounts (sibling, director, referral) apply as they do for fee
+     structures. Early-payment eligibility does not: a term has no due date
+     to measure it from, so it is not stamped.
+   • Changes after a run (a new enrolment, a changed fare) are NOT re-billed
+     by a second run for the same term. They need a manual invoice.
+   ══════════════════════════════════════════════════════════════ */
+async function _runTermBilling(req, res, { dryRun }) {
+  const { schoolId, userId } = req.jwtUser;
+  const { academicYearId, termId } = req.body ?? {};
+  if (!termId) return E.validation(res, [{ field: 'termId', message: 'Choose a term to bill' }]);
+
+  // Also refuses a locked (archived) academic year.
+  const period = await _resolveAcademicPeriod(schoolId, tenantContext(req), { academicYearId, termId });
+  if (period.error) return E.badRequest(res, period.error);
+  if (!period.termId) return E.badRequest(res, 'Choose a term to bill');
+
+  const yearDoc = await tenantModel('academic_years', tenantContext(req)).findOne({ id: period.academicYearId, schoolId }).lean();
+  const term = (yearDoc?.terms || []).find(t => t.id === period.termId);
+  if (!term?.startDate || !term?.endDate) {
+    return E.badRequest(res, 'This term has no start and end dates. Set them in Academic Configuration before billing it.');
+  }
+
+  const ctx = tenantContext(req);
+  const Invoices = tenantModel('invoices', ctx);
+  const [assignments, routes, enrolments, activities, students, alreadyBilledIds] = await Promise.all([
+    tenantModel('transport_assignments', ctx).find({ schoolId, status: 'active' }).lean(),
+    tenantModel('transport_routes', ctx).find({ schoolId }).lean(),
+    tenantModel('activity_enrolments', ctx).find({ schoolId, status: 'active' }).lean(),
+    tenantModel('activities', ctx).find({ schoolId }).lean(),
+    tenantModel('students', ctx).find({ schoolId, status: 'active' }).select('firstName middleName lastName').lean(),
+    Invoices.distinct('studentId', { schoolId, termBillingTermId: period.termId }),
+  ]);
+  const alreadyBilled = new Set(alreadyBilledIds);
+  const studentById = new Map(students.map(s => [s.id ?? s._id?.toString(), s]));
+  const nameOf = (s) => [s.firstName, s.middleName, s.lastName].filter(Boolean).join(' ');
+
+  const plan = buildTermLines({ term, assignments, routes, enrolments, activities });
+  const billable = [];
+  const skipped  = [];
+  for (const [studentId, { lines, warnings }] of plan) {
+    const s = studentById.get(studentId);
+    if (!s) { skipped.push({ studentId, studentName: studentId, reasons: ['Student is not active in this school'] }); continue; }
+    const studentName = nameOf(s);
+    if (alreadyBilled.has(studentId)) { skipped.push({ studentId, studentName, reasons: ['Already billed for this term'] }); continue; }
+    if (lines.length === 0) { skipped.push({ studentId, studentName, reasons: warnings }); continue; }
+    billable.push({ studentId, studentName, lines, warnings });
+  }
+
+  const discounts = billable.length
+    ? await _resolveAutoDiscounts(schoolId, ctx, billable.map(b => b.studentId))
+    : new Map();
+  const rows = billable.map(b => {
+    const discountPct = discounts.get(b.studentId) ?? 0;
+    const totals = _calcInvoiceTotals(b.lines, discountPct);
+    return { ...b, discountPct, totals };
+  });
+
+  if (dryRun) {
+    return ok(res, {
+      dryRun: true,
+      termId: period.termId,
+      billable: rows.map(r => ({ studentId: r.studentId, studentName: r.studentName, lines: r.lines, discountPct: r.discountPct, total: r.totals.total, warnings: r.warnings })),
+      skipped,
+    });
+  }
+
+  const schoolDoc = await _model('schools').findOne({ id: schoolId }, { currency: 1 }).lean();
+  const currency = schoolDoc?.currency || 'KES';
+  const termLabel = term.name || 'this term';
+
+  const createdIds = [];
+  for (const r of rows) {
+    try {
+      await Invoices.create({
+        id:                uuidv4(),
+        schoolId,
+        invoiceNumber:     await nextInvoiceNumber(schoolId),
+        studentId:         r.studentId,
+        studentName:       r.studentName,
+        title:             `Term billing — ${termLabel}`,
+        lineItems:         r.lines,
+        academicYearId:    period.academicYearId,
+        termId:            period.termId,
+        termBillingTermId: period.termId,
+        discountPct:       r.discountPct,
+        currency,
+        ...r.totals,
+        amountPaid:        0,
+        balance:           r.totals.total,
+        status:            'unpaid',
+        createdBy:         userId,
+        updatedBy:         userId,
+      });
+      createdIds.push(r.studentId);
+    } catch (err) {
+      if (err?.code === 11000) {
+        skipped.push({ studentId: r.studentId, studentName: r.studentName, reasons: ['Already billed for this term (a run at the same time created it first)'] });
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  AuditService.log({ action: 'finance.term_billing_generated', actor: req.jwtUser, schoolId, target: { type: 'term', id: period.termId, label: termLabel }, details: { created: createdIds.length, skipped: skipped.length }, req });
+  return ok(res, { dryRun: false, termId: period.termId, created: createdIds.length, skipped });
+}
+
+router.post('/term-billing/preview', authMiddleware, PLAN, MODGATE, rbac('finance', 'read'), async (req, res) => {
+  try { return await _runTermBilling(req, res, { dryRun: true }); }
+  catch (err) { console.error('[finance POST /term-billing/preview]', err); return E.serverError(res); }
+});
+
+router.post('/term-billing/generate', authMiddleware, PLAN, MODGATE, rbac('finance', 'create'), async (req, res) => {
+  try { return await _runTermBilling(req, res, { dryRun: false }); }
+  catch (err) { console.error('[finance POST /term-billing/generate]', err); return E.serverError(res); }
 });
 
 /* ── POST /api/finance/fee-structures/:id/generate ─ Bulk invoices */

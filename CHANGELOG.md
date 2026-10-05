@@ -6,6 +6,28 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.169.0] — 2026-10-05 — feat(finance): term billing for transport and extra-curricular
+
+Transport and extra-curricular charges now reach the student's invoice. Before this, a route's fee was stored but never billed, a route could carry only one fee, and extra-curricular activities had no catalogue, prices, or enrolments.
+
+**What changed**
+- **Routes** carry a one-way fare and a two-way fare (`transport_routes.fares`). The old single `feePerTerm` is no longer edited and is not billed.
+- **Assignments** require a fare type (`transport_assignments.fareType`: `one_way` or `two_way`). The fare choices offered are only the ones the route has.
+- **Extra-curricular** (`activities`, `activity_enrolments`): a catalogue of activities with an amount per term, and enrolments that link a student to an activity for a date range. Students are picked from the school's records. Ending an enrolment keeps the record.
+- **Term billing** (`POST /api/finance/term-billing/preview|generate`, Finance → Term Billing): creates one invoice per student for a term, with one line per transport assignment and per activity enrolment. Preview writes nothing. Generate is idempotent: a unique index (`inv_term_billing_unique`) stops two runs creating two invoices for one student.
+- A student with no fare type chosen, a route with no fare for it, or an inactive activity is never billed silently. Each appears under "Not billed" with the reason.
+- The student assign form (Transport) picks a class and then searches by name or admission number.
+
+**Decisions and limits (see DEVELOPER_GUIDE "Term billing")**
+- Generation is run by an admin for a chosen term, not on a timer. A scheduled run needs a decision on timing.
+- Auto-discounts apply as they do for fee structures. Early-payment eligibility does not, because a term has no due date to measure it from.
+- A change after a run (a new enrolment, a changed fare) is not re-billed for the same term.
+- Enrolment and activity records are copied into the invoice's lines, so a later amount change does not alter an invoice already created.
+
+**Dependencies updated**
+- New collections added to the backup, export, school-deletion and backup-cron lists. `activity_enrolments` is also in student merge, so merged students keep their enrolments.
+- New plan feature `extracurricular` (core). Activities are gated by the finance module.
+
 ## [v5.168.2] — 2026-10-04 — feat(grades): grade scales are section-scoped, like report-card templates
 
 Requested directly: the report card template and the grade scale should both be section-based, so a school with several sections (Trinitas: KG, Primary, Secondary, A-Level) can grade each section on its own scale and template. Before this, report generation used one school-wide default scale for every class, so KG and Primary could not differ.

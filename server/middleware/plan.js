@@ -61,6 +61,7 @@ const FEATURE_PLAN = {
   resources:          'core',
   library:            'core',
   transport:          'core',
+  extracurricular:    'core',
   hostel:             'core',
   medical:            'core',
   inventory:          'core',

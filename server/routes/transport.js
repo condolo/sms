@@ -42,6 +42,14 @@ const RouteSchema = z.object({
   driverPhone:   z.string().max(30).trim().optional().default(''),
   capacity:      z.coerce.number().int().min(1).optional().nullable(),
   feePerTerm:    z.coerce.number().min(0).optional().default(0),
+  // One-way and two-way fares for this route. A student is billed the fare for
+  // the fare type given on their assignment (see AssignmentSchema.fareType).
+  // A route with no fare for a type cannot bill students who chose that type.
+  fares:         z.array(z.object({
+                   fareType: z.enum(['one_way', 'two_way']),
+                   amount:   z.coerce.number().min(0),
+                 })).optional().default([])
+                 .refine(f => new Set(f.map(x => x.fareType)).size === f.length, { message: 'Each fare type can only be set once per route' }),
   notes:         z.string().max(500).trim().optional().default(''),
 });
 
@@ -52,6 +60,9 @@ const AssignmentSchema = z.object({
   studentClass: z.string().max(100).trim().optional().default(''),
   pickupStop:   z.string().max(200).trim().optional().default(''),
   direction:    z.enum(['to_school', 'from_school', 'both']).optional().default('both'),
+  // Which of the route's fares this student pays. Required for a new
+  // assignment; billing charges exactly this fare, never a guess.
+  fareType:     z.enum(['one_way', 'two_way']),
   startDate:    z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   endDate:      z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   notes:        z.string().max(300).trim().optional().default(''),
@@ -246,6 +257,7 @@ router.post('/assignments', rbac('transport', 'create', 'assign'), async (req, r
       studentClass: data.studentClass,
       pickupStop:   data.pickupStop,
       direction:    data.direction,
+      fareType:     data.fareType,
       startDate:    data.startDate ?? now.slice(0, 10),
       endDate:      data.endDate   ?? null,
       notes:        data.notes,

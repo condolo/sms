@@ -51,7 +51,7 @@ const ALLOWED = new Set([
   // Library, hostel, transport
   'library_books','library_loans',
   'hostels','hostel_rooms','hostel_assignments',
-  'transport_routes','transport_assignments',
+  'transport_routes','transport_assignments','activities','activity_enrolments',
 
   // HR
   'leave_requests','payroll',
@@ -134,6 +134,7 @@ const COLLECTION_MODULE = {
   growth_recommendations: 'growth_profile', growth_aspirations: 'growth_profile',
   library_books: 'library', library_loans: 'library', hostels: 'hostel', hostel_rooms: 'hostel',
   hostel_assignments: 'hostel', transport_routes: 'transport', transport_assignments: 'transport',
+  activities: 'finance', activity_enrolments: 'finance',
   leave_requests: 'hr', payroll: 'hr', elearning_tokens: 'elearning',
   elearning_course_links: 'elearning', elearning_coursework_links: 'elearning',
   elearning_sessions: 'elearning', billing_snapshots: 'finance', user_photos: 'students',

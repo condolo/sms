@@ -1893,7 +1893,7 @@ const TENANT_COLS = [
   // Library, hostel, transport
   'library_books','library_loans',
   'hostels','hostel_rooms','hostel_assignments',
-  'transport_routes','transport_assignments',
+  'transport_routes','transport_assignments','activities','activity_enrolments',
 
   // HR
   'leave_requests','payroll',

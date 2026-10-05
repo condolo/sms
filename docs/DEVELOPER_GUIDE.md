@@ -6175,3 +6175,30 @@ A subject's final score is the weighted average over the assessment types that h
 - **Assessment weights:** one configuration per school and academic year, not per section.
 - **Trinitas:** four sections (KG, Primary, Secondary, A-Level). Each section can have its own scale, created under Grade Scales → "Applies to". Templates are still not set up.
 - **Trinity:** one section (KG). Until a scale is created for it (or a school default), report generation refuses with the explicit message. Previously it crashed inside `computeFinalScores` on an empty schema.
+
+## Term billing: transport and extra-curricular on the invoice (v5.169.0)
+
+**Status before this change:** a route's `feePerTerm` was stored but no code read it for billing. `transport_assignments` was read by nothing in finance. Activities had no model. Invoices came only from fee structures.
+
+**Model**
+- `transport_routes.fares`: `[{ fareType: 'one_way' | 'two_way', amount }]`. Each type at most once per route. The legacy `feePerTerm` field is still stored but not edited or billed.
+- `transport_assignments.fareType`: required on create. Billing charges exactly this fare; the `direction` field is a pickup label and changes no amount.
+- `activities`: `{ name (unique per school), amount per term, status active|inactive }`.
+- `activity_enrolments`: `{ studentId, studentName, activityId, activityName, startDate, endDate|null, status active|ended }`. One open enrolment per student per activity. Ending keeps the row.
+- Invoices from term billing carry `termBillingTermId`. The unique index `inv_term_billing_unique` on `(schoolId, studentId, termBillingTermId)` (partial) stops a duplicate per student per term.
+
+**Code**
+- `server/utils/term-billing.js`: pure rules (`buildTermLines`). Decides lines and warnings. No DB.
+- `server/routes/finance.js` `_runTermBilling`: loads the records, calls the rules, applies auto-discounts (`utils/discount-resolution`), writes invoices. Refuses a locked year (via `_resolveAcademicPeriod`) and a term with no dates.
+- `server/routes/extracurricular.js`: catalogue and enrolment CRUD, mounted at `/api/extracurricular`. Students are validated against `students`.
+- Client: `Finance → Extra-Curricular` (`ActivitiesTab.jsx`) and `Finance → Term Billing` (`TermBillingTab.jsx`), both on the finance page.
+
+**Rules that are deliberate**
+- A student is never billed silently. No fare type, no fare on the route, or an inactive activity each produce a "Not billed" line with the reason.
+- Preview is read-only. Generate skips students already billed for the term.
+- A run does not re-bill a later change for the same term (new enrolment, changed fare). That needs a new invoice.
+- Lines are copied into the invoice. Later edits to a fare or activity amount do not change existing invoices.
+- Early-payment eligibility is not stamped (no due date to measure from).
+- Generation is manual, per term. Automatic (scheduled) generation needs a decision on timing.
+
+**Tests:** `__tests__/utils/term-billing.test.js` (rules), `__tests__/routes/finance-term-billing.test.js` (preview, generate, idempotency, refusals).

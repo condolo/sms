@@ -61,6 +61,7 @@ const REFERENCING_COLLECTIONS = [
   'growth_service',
   'hostel_assignments',
   'transport_assignments',
+  'activity_enrolments',
   'medical_visits',
   'report_card_snapshots',
   'weekly_snapshots',

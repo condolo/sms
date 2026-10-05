@@ -309,6 +309,7 @@ app.use('/api/sections',              require('./routes/sections'));
 /* ── v4.29.0: Library / Transport / Hostel ── */
 app.use('/api/library',   require('./routes/library'));
 app.use('/api/transport', require('./routes/transport'));
+app.use('/api/extracurricular', require('./routes/extracurricular'));
 app.use('/api/hostel',    require('./routes/hostel'));
 
 /* ── Medical Centre (Module 1, milestone 3: Clinic Visits) ── */

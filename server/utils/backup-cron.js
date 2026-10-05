@@ -80,7 +80,7 @@ const BACKUP_COLLECTIONS = [
   // Library, hostel, transport
   'library_books','library_loans',
   'hostels','hostel_rooms','hostel_assignments',
-  'transport_routes','transport_assignments',
+  'transport_routes','transport_assignments','activities','activity_enrolments',
 
   // E-learning
   'elearning_tokens','elearning_course_links',

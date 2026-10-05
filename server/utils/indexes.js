@@ -255,6 +255,10 @@ const INDEXES = [
       { key: { schoolId: 1, studentId: 1, status: 1 }, name: 'inv_student_status' },
       { key: { schoolId: 1, status: 1, dueDate: 1 },   name: 'inv_status_due' },
       { key: { id: 1 },                                 name: 'inv_id', unique: true, sparse: true },
+      // One term-billing invoice per student per term. Two runs at the same time
+      // cannot both create one: the second insert fails and is reported as skipped.
+      { key: { schoolId: 1, studentId: 1, termBillingTermId: 1 }, name: 'inv_term_billing_unique',
+        unique: true, partialFilterExpression: { termBillingTermId: { $exists: true } } },
     ],
   },
 
@@ -367,6 +371,16 @@ const INDEXES = [
       { key: { schoolId: 1, routeId: 1, status: 1 },    name: 'ta_route_status' },
       { key: { schoolId: 1, studentId: 1, status: 1 },  name: 'ta_student_status' },
       { key: { id: 1 },                                  name: 'ta_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── activity_enrolments (extra-curricular billing reads active rows per school) ── */
+  {
+    col: 'activity_enrolments',
+    indexes: [
+      { key: { schoolId: 1, status: 1 },                 name: 'ae_school_status' },
+      { key: { schoolId: 1, studentId: 1, activityId: 1 }, name: 'ae_student_activity' },
+      { key: { id: 1 },                                  name: 'ae_id', unique: true, sparse: true },
     ],
   },
 

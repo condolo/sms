@@ -280,7 +280,28 @@ export const attendance = {
   },
 };
 
+/* Extra-curricular: the activity catalogue and which students are enrolled.
+   Billing reads these through finance.termBilling below. */
+export const extracurricular = {
+  activities: {
+    list:   ()           => _get('/extracurricular/activities'),
+    create: (data)       => _post('/extracurricular/activities', data),
+    update: (id, data)   => _put(`/extracurricular/activities/${id}`, data),
+  },
+  enrolments: {
+    list:   (params)     => _get('/extracurricular/enrolments', params),
+    create: (data)       => _post('/extracurricular/enrolments', data),
+    end:    (id, endDate) => _put(`/extracurricular/enrolments/${id}/end`, { endDate }),
+  },
+};
+
 export const finance = {
+  // Term billing: transport and extra-curricular charges onto each student's
+  // invoice for one term. preview writes nothing; generate is idempotent.
+  termBilling: {
+    preview:  (data) => _post('/finance/term-billing/preview', data),
+    generate: (data) => _post('/finance/term-billing/generate', data),
+  },
   invoices: {
     ..._resource('finance/invoices'),
     // Pre-existing bug fixed in passing (2026-09): this called a PATCH

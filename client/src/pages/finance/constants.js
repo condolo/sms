@@ -2,7 +2,7 @@
    Finance — shared constants
    ============================================================ */
 import {
-  TrendingUp, FileText, AlertTriangle, CreditCard, ListChecks,
+  TrendingUp, FileText, AlertTriangle, CreditCard, ListChecks, Star, Receipt,
 } from 'lucide-react';
 
 export const LIMIT = 20;
@@ -13,6 +13,8 @@ export const TABS = [
   { id: 'overdue',  label: 'Overdue',       Icon: AlertTriangle },
   { id: 'payments', label: 'Payments',      Icon: CreditCard    },
   { id: 'feestr',   label: 'Fee Structure', Icon: ListChecks    },
+  { id: 'activities', label: 'Extra-Curricular', Icon: Star    },
+  { id: 'termbill',   label: 'Term Billing',     Icon: Receipt },
 ];
 
 export const INV_STATUS_BADGE = {

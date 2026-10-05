@@ -34,7 +34,8 @@ function RouteModal({ route, onClose, onSave }) {
     driverName:    route?.driverName    ?? '',
     driverPhone:   route?.driverPhone   ?? '',
     capacity:      route?.capacity      ?? '',
-    feePerTerm:    route?.feePerTerm    ?? 0,
+    oneWayFare:    (route?.fares ?? []).find(f => f.fareType === 'one_way')?.amount ?? '',
+    twoWayFare:    (route?.fares ?? []).find(f => f.fareType === 'two_way')?.amount ?? '',
     notes:         route?.notes         ?? '',
   });
   const [saving, setSaving] = useState(false);
@@ -45,8 +46,14 @@ function RouteModal({ route, onClose, onSave }) {
     e.preventDefault();
     setSaving(true); setError('');
     try {
+      const { oneWayFare, twoWayFare, ...rest } = form;
+      const fares = [
+        ...(oneWayFare !== '' ? [{ fareType: 'one_way', amount: Number(oneWayFare) }] : []),
+        ...(twoWayFare !== '' ? [{ fareType: 'two_way', amount: Number(twoWayFare) }] : []),
+      ];
       const payload = {
-        ...form,
+        ...rest,
+        fares,
         stops:    form.stops ? form.stops.split(',').map(s => s.trim()).filter(Boolean) : [],
         capacity: form.capacity ? Number(form.capacity) : null,
       };
@@ -134,11 +141,19 @@ function RouteModal({ route, onClose, onSave }) {
                 className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
           </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-700 mb-1">Fee Per Term (KSh)</label>
-            <input type="number" min={0} value={form.feePerTerm} onChange={e => set('feePerTerm', e.target.value)}
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1">One-way fare per term (KSh)</label>
+              <input type="number" min={0} value={form.oneWayFare} onChange={e => set('oneWayFare', e.target.value)}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1">Two-way fare per term (KSh)</label>
+              <input type="number" min={0} value={form.twoWayFare} onChange={e => set('twoWayFare', e.target.value)}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
           </div>
+          <p className="text-[11px] text-slate-400">A student is charged the fare for the type chosen when they are assigned to this route. Leave a fare blank if the route does not offer that type.</p>
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-slate-200 hover:bg-slate-50">Cancel</button>
             <button type="submit" disabled={saving}
@@ -157,8 +172,11 @@ function AssignModal({ routes, onClose, onSave }) {
   const today = new Date().toISOString().slice(0, 10);
   const [form, setForm] = useState({
     routeId: '', studentId: '', studentName: '',
-    studentClass: '', pickupStop: '', direction: 'both', startDate: today,
+    studentClass: '', pickupStop: '', direction: 'both', startDate: today, fareType: '',
   });
+  // The fare types offered are only the ones this route actually has a fare for.
+  const selectedRoute = routes.find(r => (r.id ?? r._id) === form.routeId);
+  const offeredFares  = selectedRoute?.fares ?? [];
   const [saving, setSaving] = useState(false);
   const [error,  setError]  = useState('');
   // Student is picked from the school's records, never typed: choose a class,
@@ -211,11 +229,26 @@ function AssignModal({ routes, onClose, onSave }) {
           {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>}
           <div>
             <label className="block text-xs font-medium text-slate-700 mb-1">Route *</label>
-            <select value={form.routeId} onChange={e => set('routeId', e.target.value)} required
+            <select value={form.routeId} onChange={e => setForm(f => ({ ...f, routeId: e.target.value, fareType: '' }))} required
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
               <option value="">Select route…</option>
               {routes.map(r => <option key={r.id ?? r._id} value={r.id ?? r._id}>{r.name}</option>)}
             </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-700 mb-1">Fare *</label>
+            <select value={form.fareType} onChange={e => set('fareType', e.target.value)} required disabled={!form.routeId}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400">
+              <option value="">{form.routeId ? 'Choose one-way or two-way…' : 'Choose a route first'}</option>
+              {offeredFares.map(f => (
+                <option key={f.fareType} value={f.fareType}>
+                  {f.fareType === 'one_way' ? 'One way' : 'Two way'} — KSh {Number(f.amount).toLocaleString()} per term
+                </option>
+              ))}
+            </select>
+            {form.routeId && offeredFares.length === 0 && (
+              <p className="text-[11px] text-amber-700 mt-1">This route has no fare set. Set one on the route first.</p>
+            )}
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-700 mb-1">Class *</label>
@@ -279,7 +312,7 @@ function AssignModal({ routes, onClose, onSave }) {
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-slate-200 hover:bg-slate-50">Cancel</button>
-            <button type="submit" disabled={saving || !form.studentId || !form.routeId}
+            <button type="submit" disabled={saving || !form.studentId || !form.routeId || !form.fareType}
               className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
               {saving ? 'Assigning…' : 'Assign'}
             </button>
@@ -483,7 +516,11 @@ export default function TransportPage() {
                       </td>
                       <td className="px-4 py-3 text-center text-slate-700 hidden sm:table-cell">{route.capacity ?? '—'}</td>
                       <td className="px-4 py-3 text-right text-slate-700 hidden md:table-cell">
-                        {route.feePerTerm > 0 ? `KSh ${route.feePerTerm.toLocaleString()}` : '—'}
+                        {(route.fares ?? []).length === 0 ? '—' : (route.fares ?? []).map(f => (
+                          <div key={f.fareType} className="text-xs whitespace-nowrap">
+                            {f.fareType === 'one_way' ? 'One way' : 'Two way'} KSh {Number(f.amount).toLocaleString()}
+                          </div>
+                        ))}
                       </td>
                       {canEdit && (
                         <td className="px-4 py-3">

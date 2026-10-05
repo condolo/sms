@@ -20,6 +20,8 @@ import OverdueTab              from './components/OverdueTab.jsx';
 import InvoicesTab             from './components/InvoicesTab.jsx';
 import PaymentsTab             from './components/PaymentsTab.jsx';
 import FeeStructureTab         from './components/FeeStructureTab.jsx';
+import ActivitiesTab           from './components/ActivitiesTab.jsx';
+import TermBillingTab          from './components/TermBillingTab.jsx';
 import FeeSettingsModal        from './components/FeeSettingsModal.jsx';
 import { RecordPaymentButton }      from './components/RecordPaymentSlideOver.jsx';
 import { CreateFeeStructureButton } from './components/FeeStructureSlideOver.jsx';
@@ -88,6 +90,8 @@ export default function FinancePage() {
         {tab === 'overdue'  && <OverdueTab      fmtCurrency={fmtCurrency} />}
         {tab === 'payments' && <PaymentsTab     fmtCurrency={fmtCurrency} page={page} onPage={setPage} school={school} />}
         {tab === 'feestr'   && <FeeStructureTab fmtCurrency={fmtCurrency} canCreate={canCreate} />}
+        {tab === 'activities' && <ActivitiesTab fmtCurrency={fmtCurrency} canCreate={canCreate} />}
+        {tab === 'termbill'   && <TermBillingTab fmtCurrency={fmtCurrency} canCreate={canCreate} />}
       </div>
 
       {showFeeSettings && <FeeSettingsModal onClose={() => setShowFeeSettings(false)} />}
