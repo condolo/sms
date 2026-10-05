@@ -8,7 +8,7 @@ Some students owe money from before the current term, and invoices for the curre
 
 - No student record stores a balance. A balance is invoices minus payments (**Verified**: `routes/finance.js`, `_calcBalance`).
 - The only way to bring a balance in is the student CSV import's `openingFee*` columns. They create an invoice only when the student is new. An existing admission number is skipped (**Verified**: `routes/import-export.js`, "already exists" branch).
-- So an existing student's balance can't be imported at all, and the only manual route is one invoice per student by hand.
+- So an existing student's balance can't be imported at all. No screen adds a single invoice to an existing student either (the single-invoice create endpoint exists, but the interface does not use it), so there is no manual route today.
 
 ## 2. Goal
 

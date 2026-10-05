@@ -155,7 +155,7 @@ Balances are worked out from the payment records. A payment you record is what c
 **Not yet available as an import.** The system does not keep an opening balance for each student. What exists today:
 
 - **New students** imported with the student CSV can have an opening-fee amount, which creates one invoice for them. This does not work for students who are already in the system: their rows are skipped.
-- **Students already in the system** who owe from before the current term can only be given a balance by creating an invoice for them by hand, one at a time, in **Finance → Invoices**. That invoice notifies the guardian.
+- **Students already in the system** who owe from before the current term cannot be given a balance in Msingi yet. No screen adds a single invoice to an existing student (the only single-invoice route is the API, which the interface does not use), so the balance has to be recorded outside the system until the balance-only import is built.
 
 A balance-only import for existing students is designed and waiting for decisions. See `docs/design/opening-balance-import.md`.
 

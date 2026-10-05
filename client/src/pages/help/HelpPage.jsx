@@ -141,7 +141,7 @@ const SECTIONS = [
       },
       {
         q: 'How do I import students in bulk?',
-        a: 'Go to Students → Import → download the CSV template → fill in your student data → upload the file. The system validates each row and reports errors. You can include opening fee balances in the same import.',
+        a: 'Go to Students → Import → download the CSV template → fill in your student data → upload the file. The import checks each row and reports errors. A class or stream named in the file must already exist, and a house must already exist in Settings. Admission numbers already in Msingi are skipped, not updated, so the import cannot change an existing student\'s class. Opening fee columns create an invoice only for new students. The import writes rows as soon as it runs, so check the file before you upload it.',
       },
       {
         q: 'How do I filter and search students?',
@@ -240,6 +240,10 @@ const SECTIONS = [
         a: 'Yes. Each application has a stage history log showing every status change with the staff member who made it and a timestamp. You can add notes when changing stages.',
       },
       {
+        q: 'Are admission fees billed when a student is enrolled?',
+        a: 'Only if the school has set a fee structure to generate automatically on enrolment. That structure must apply to all students. Each new student then gets a draft invoice. Finance reviews the draft and issues it, so nothing reaches the parent until it is issued. The admission fee is not marked as non-refundable, there is no refund process for the caution fee, and admission charges cannot be limited to one class. Term fees are billed separately, through Finance → Term Billing or Fee Structures.',
+      },
+      {
         q: 'Where do I see the admissions funnel overview?',
         a: 'The Dashboard → Admissions Pipeline bar chart shows counts by stage. For full detail, go to Admissions — the board view shows all active applications grouped by stage.',
       },
@@ -259,7 +263,7 @@ const SECTIONS = [
     articles: [
       {
         q: 'How do I mark attendance for my class?',
-        a: 'Go to Attendance → select the date and class (and stream, if the class has more than one — see below) → mark each student as Present, Absent, Late, or Excused → click Save. You can only save attendance once per class/stream per day.',
+        a: 'Go to Attendance → select the date and class (and stream, if the class has more than one — see below) → mark each student as Present, Absent, Late, or Excused → click Save. Each class or stream has one register per date. Saving again for the same date updates that register; it never creates a second one.',
       },
       {
         q: 'My class has multiple streams (e.g. Year 3A and 3B) — why do I have to pick one before I can mark attendance?',
@@ -267,7 +271,7 @@ const SECTIONS = [
       },
       {
         q: 'Can I mark the whole class present at once?',
-        a: 'Yes. Click "Mark All Present" to set all students to Present in one action, then adjust any exceptions individually before saving.',
+        a: 'Yes. Above the register is a "Quick mark" row with All Present, All Absent, All Late and All Excused. Each sets every student in the register to that status in one click. Then change any exceptions individually before saving.',
       },
       {
         q: "Where can I see a student's full attendance history?",
@@ -329,7 +333,7 @@ const SECTIONS = [
       },
       {
         q: 'What is Emergency Online Learning Mode?',
-        a: "When enabled in Settings → School Profile, every timetable slot shows a 'Join Zoom / Meet' button using each teacher's saved meeting link. Students see the same Join buttons in their portal.",
+        a: "When enabled in Settings → School (Emergency Online Learning), every timetable slot shows a Join button using each teacher's saved meeting link. Students see the same Join buttons in their portal.",
       },
       {
         q: 'How do teachers save their meeting links?',
@@ -393,7 +397,7 @@ const SECTIONS = [
       },
       {
         q: 'How do I create a fee invoice for a student?',
-        a: 'Go to Finance → Invoices → "New Invoice". Select the student, choose a fee structure or enter a custom amount, set the due date, and click Create.',
+        a: 'Invoices are not typed in one at a time. They come from four places: a fee structure (Finance → Fee Structure → Generate Invoices, one invoice per matching student); Term Billing (transport and extra-curricular for a term); automatic draft invoices for new admissions, if the school has set this up; and the student import, for opening fees on new students. There is no "New Invoice" button, so a single student\'s extra charge needs a fee structure that targets that student.',
       },
       {
         q: 'How do I record a payment?',
@@ -401,23 +405,39 @@ const SECTIONS = [
       },
       {
         q: 'What do the invoice statuses mean?',
-        a: 'Draft = not yet issued. Pending = issued, awaiting payment. Partial = some amount paid, balance remains. Paid = fully settled. Overdue = past due date with outstanding balance. Void = cancelled.',
+        a: 'Draft = created but not yet issued (admission invoices start as drafts, so you can review them first). Unpaid = issued, nothing paid yet. Partial = some amount paid, balance remains. Paid = fully settled. Void = cancelled. "Overdue" is not a status: it is shown on the Overdue tab for any unpaid or partial invoice past its due date.',
+      },
+      {
+        q: 'How do I bill transport and extra-curricular activities for a term?',
+        a: 'Go to Finance → Term Billing. Choose the academic year and term, then click Preview. Nothing is created yet. The preview lists who will be billed, with their charges and the due date (the end of the term\'s first week), and who will not be billed, with the reason. Fix the reasons, preview again, then click Create term invoices. Running it again is safe: students already billed for that term are skipped. Changes made after a run (a new enrolment, a changed fare) need a new invoice.',
+      },
+      {
+        q: 'How does early payment work?',
+        a: 'Early payment means paying by the first day of the term. Term invoices carry the discount from the school\'s early-payment policy. A payment does not apply the discount on its own: the bursar confirms it in Finance → Term Billing → Early payment, after checking that the payment was received on or before the deadline. The deadline can be changed until the discount is confirmed. For fee-structure invoices, early payment still applies automatically when a payment lands before the deadline.',
+      },
+      {
+        q: 'Can I enrol several students in an activity at once?',
+        a: 'Yes. Go to Finance → Extra-Curricular. Pick a class, search, and tick the students. Choose the activity and the dates, then click Enrol. Each student gets their own enrolment. Students already in that activity are skipped and the message says why. To stop billing for a student in an activity, click End and give the date.',
+      },
+      {
+        q: 'How do transport fares work?',
+        a: 'Each route has a one-way fare and a two-way fare per term. When you assign a student to a route, you choose which fare they pay. The Direction (to school, from school, both) only sets the pickup label and does not change the amount. A student with no fare type, or a route with no fare for that type, is not billed and appears under "Not billed" in Term Billing.',
       },
       {
         q: 'How do I accept M-Pesa payments?',
-        a: 'Go to Settings → M-Pesa. Enter your Daraja API credentials (Consumer Key, Secret, Shortcode, Passkey). Once configured, the system can validate M-Pesa STK push payments and auto-reconcile them to invoices.',
+        a: 'A School Admin sets this up in Settings → School, in the M-Pesa section. Enter your Daraja API credentials (Consumer Key, Consumer Secret, Paybill or Till number, STK Push Passkey, Environment, and the public callback base URL). Finance staff then see STK Push and automatic reconciliation work with no extra steps.',
       },
       {
         q: 'How do I generate a fee statement for a parent?',
-        a: "Open the student's Finance tab in their profile. Print or download a PDF fee statement showing all invoices and payment history.",
+        a: "There is no separate fee-statement PDF yet. The Finance tab on the student's profile lists every invoice and payment for that student, with the balance. Use that to answer a parent's question about fees.",
       },
       {
         q: 'Can I import opening balances for students?',
-        a: 'Yes. The student CSV import supports opening fee columns: openingFeeTitle, openingFeeAmount, openingFeePaid, and openingFeeDueDate. The system creates an invoice and payment record per student automatically.',
+        a: 'Only for new students. The student CSV import can create an opening-fee invoice (openingFeeTitle, openingFeeAmount, openingFeePaid, openingFeeDueDate) when it creates a student. A student who is already in Msingi is skipped by the import, so their balance cannot be imported this way. There is no screen for adding one invoice to an existing student, so a balance brought forward for an existing student cannot be recorded in Msingi yet. A balance-only import for existing students is planned but not yet available.',
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Invoices — see issued invoices\n• Create Invoice — issue a new invoice\n• Void Invoice — cancel an issued invoice\n• View Payments — see recorded payments\n• Record Payment — log a payment against an invoice\n• Print Receipts / Invoices — generate printable documents\n• Manage Fee Structures — create/edit fee structure templates\n• Import Finance Data (CSV) — bulk-load invoices/opening balances\n• Configure M-Pesa Integration — set up Daraja API credentials\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Invoices — see issued invoices\n• Create Invoice — issue a new invoice\n• Void Invoice — cancel an issued invoice\n• View Payments — see recorded payments\n• Record Payment — log a payment against an invoice\n• Print Receipts / Invoices — generate printable documents\n• Manage Fee Structures — create/edit fee structure templates\n• Import Finance Data (CSV) — bulk-load invoices/opening balances\n• Run Term Billing — preview and create term invoices (its own permission, not covered by the general finance rights)\n• Confirm Early Payment — confirm an early payment, or change its deadline or percentage before confirming (its own permission)\n• Manage Extra-Curricular Activities & Enrolments — create or change activities, and enrol or end students (its own permission)\n• Configure M-Pesa Integration — set up Daraja API credentials\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -435,23 +455,23 @@ const SECTIONS = [
       },
       {
         q: 'What is the Behaviour Point System (BPS)?',
-        a: 'The BPS tracks cumulative merit and demerit points per student. Demerits trigger escalating stages (Verbal Warning → Written Warning → Suspension). Merits award milestone badges at set thresholds.',
+        a: 'The BPS tracks each student\'s merit and demerit points. Demerit points move a student through five intervention stages, counted over a rolling 90-day window: Stage 1 Verbal Check-in (5 points, class teacher), Stage 2 Formal Review (10 points, head of year or coordinator), Stage 3 Behaviour Support Plan (20 points, senior staff), Stage 4 Leadership Referral (35 points, deputy or principal), Stage 5 Disciplinary Panel (50 points, principal or committee).',
       },
       {
         q: 'How do students earn milestone badges?',
-        a: 'When a student accumulates enough merit points they earn a milestone badge (Bronze, Silver, Gold). Milestones are visible on the student profile and the Behaviour dashboard.',
+        a: 'Merit points earn milestone badges: Bronze at 25 points, Silver at 50 points, and Gold at 100 points. The current badge shows on the student profile and the Behaviour dashboard.',
       },
       {
         q: 'How do students or parents appeal a demerit?',
-        a: 'A teacher or admin submits an appeal from the incident detail page. Parents can add a note from their portal. An admin or discipline committee member resolves it — the outcome is permanently logged.',
+        a: 'A staff member with the right permission submits an appeal against an incident, and the appeal is recorded against that incident. Appeals are resolved by staff who hold the update permission. Parents cannot submit an appeal through the parent portal; they raise it with the school.',
       },
       {
-        q: 'What is a Rolling Half-Term window?',
-        a: 'Demerit stages are calculated over a rolling half-term window, not the full year. A student can reset after sufficient time without new demerits — preventing unfair carry-over from old incidents.',
+        q: 'Can points be reset?',
+        a: 'Yes. A points reset moves the starting point for the running total. It does not delete any incident. The reset date is kept, and the incident history stays complete. Only a user with the Delete Records permission, or a behaviour officer, can reset points.',
       },
       {
         q: 'Can all teachers record behaviour for any student?',
-        a: 'Yes. Behaviour is school-wide — teachers can record merits and demerits for any student, not just those in their assigned classes. This is by design to support pastoral care across the school.',
+        a: 'Behaviour is school-wide. A staff member who holds the Record Incident permission can record for any student in the school, not only students in their own classes. Behaviour officers, set in the behaviour settings, also get access.',
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
@@ -469,31 +489,23 @@ const SECTIONS = [
     articles: [
       {
         q: 'How do I create an exam?',
-        a: 'Go to Exams → "New Exam". Enter the exam name, subject, class, date, total marks, and term. The exam appears in the markbook once created.',
+        a: 'Go to Exams → "New Exam". The Exams module is for scheduling: enter the exam title, subject, class, term, type, date, start time, duration, room and the maximum score. Marks are not entered here. They are entered in the Markbook (Grades). An exam has a status of Scheduled, In progress, Completed or Cancelled.',
+      },
+      {
+        q: 'Where do exam marks get entered now?',
+        a: 'In the Markbook, under Grades. Exam results are no longer entered or stored on the Exams page. The Exams page only schedules the sitting. If you have older results on the Exams page, they were moved to the Markbook.',
       },
       {
         q: 'What is an Exam Series?',
-        a: 'An Exam Series groups multiple exams together (e.g. End-of-Term 1 Series). Results across all exams in a series feed into the report card for that term. Series can span multiple subjects.',
+        a: 'An Exam Series groups related exams together, for example an End-of-Term 1 series. The series is for scheduling and organising. Marks for a report card come from the Markbook, not from the series.',
       },
       {
-        q: 'How do I enter exam results?',
-        a: "Go to Exams → open the exam → 'Enter Results'. Enter each student's raw score. The system calculates percentages and letter grades automatically based on your grading scale.",
-      },
-      {
-        q: 'What is the exam approval workflow?',
-        a: 'Exams follow a status flow: Draft → Submitted → Approved → Published. Teachers submit completed mark entries. An exam officer or admin approves, then publishes. Each stage change is logged.',
-      },
-      {
-        q: 'Can I lock exam results after entry?',
-        a: 'Yes. Once results are reviewed and correct, click "Lock Exam". Locked exams cannot be edited until someone with the separate Unlock Exam permission reopens them. Unlocking is logged in the audit trail with who did it and when.',
-      },
-      {
-        q: 'How are grades calculated from multiple assessments?',
-        a: 'The final grade is a weighted average of all assessment components (CA, Homework, Mid-Term, End-Term). Weights are configured per subject in Academic Config → Assessment Settings.',
+        q: 'How are exam marks locked or approved now?',
+        a: 'Through the Markbook. A teacher submits marks for a class and subject, a reviewer approves or rejects them, and approved marks are locked. Locked marks cannot be changed until an unlock is approved. Publishing a report card is blocked while any mark for that class and term is not yet approved, unless an administrator records a documented bypass. See the Grades help for the steps.',
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Exams & Results — see exams and their results\n• Create / Edit Exam — set up a new exam or change its details\n• Lock Exam — freeze results against further edits\n• Unlock Exam — reopen a locked exam, a separate, independently grantable permission from Lock (e.g. an exams officer may lock but only a Principal can unlock)\n• Enter Exam Results — record student scores\n• Delete Exam — permanently remove an exam\nThis is the "Exams" module specifically — a separate permission from "Grades & Marks" below, though both live under the Exams area in the sidebar. Your role\'s exact access is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Exams — see scheduled exams\n• Create / Edit Exam — set up or change an exam\n• Delete Exam — remove an exam\nMarks are a separate permission, under Grades & Marks below. Your role\'s exact access is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -530,6 +542,14 @@ const SECTIONS = [
         a: 'Assessment Scheduling is its own small module, separate from Grades & Marks, covering only one action: locking or unlocking the assessment schedule (which CA/HW/MT/ET components exist and their weights) for a term. Entering marks against an already-scheduled assessment is a Grades & Marks action; changing the schedule itself needs this separate permission.',
       },
       {
+        q: 'How are a final grade and its weights calculated?',
+        a: 'A subject\'s final score is a weighted average of the assessments that have marks so far, scaled to those weights. One 20% assessment with marks therefore reads as a full mark, not as 20%. This is the intended behaviour. Weights are set per subject in Academic Config → Assessment Settings.',
+      },
+      {
+        q: 'Which grade scale is used for a class?',
+        a: 'Each section (for example KG, Primary, Secondary) can have its own grade scale, set in the Grades configuration under "Applies to". A class uses the scale for its section, then the school default. If neither exists, report cards for that class cannot be generated, and the message says which scale to add.',
+      },
+      {
         q: 'Who can do what here? (Roles & Permissions)',
         a: '• View Grades & Marks — see marks and grade summaries\n• Enter / Edit Marks — record scores in the markbook\n• Review / Approve Mark Submissions — sign off a teacher\'s submitted marks before they count\n• Manage Comment Banks — maintain the reusable teacher-comment library\n• Generate / Publish Report Cards — compile and release report cards to students/parents\n• Export Grades (CSV) — download markbook data\n• Lock / Unlock Assessment Schedule — a separate "Assessment Scheduling" permission (see above)\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
       },
@@ -561,7 +581,7 @@ const SECTIONS = [
       },
       {
         q: 'What is moderation and when does it apply?',
-        a: 'Moderation checks that all exams in the series have been approved before publishing. If any exam is still in Draft or Submitted status, the system blocks publishing to prevent incomplete report cards.',
+        a: 'Moderation checks that every mark for the class and term has been approved before publishing. If a subject has marks but no approved submission (still draft, submitted, rejected, or never submitted), publishing is blocked and the message lists the subjects. An administrator can record a documented bypass. The bypass is logged.',
       },
       {
         q: 'Can parents download report cards as a PDF?',
@@ -598,6 +618,10 @@ const SECTIONS = [
         a: "Students see a per-subject coverage bar on their Student Dashboard showing the percentage of topics covered so far in the term — scoped to their own stream when the subject is taught separately per stream, so a student never sees a sibling stream's progress credited to them.",
       },
       {
+        q: 'Can leaders see the syllabus topics and lesson plans teachers have added?',
+        a: 'Yes. Admins, deputies and heads of department open Lessons → Overview. Each row is one teacher, class, stream and subject. Click a row to see the topics for it, with coverage. Click "View plans" to see its lesson plans. Both views are read-only for leaders. Topics belong to a class and are shared by the class\'s streams.',
+      },
+      {
         q: 'Do teachers only see their assigned classes in Lessons?',
         a: 'Yes. Teachers can only view and update coverage for classes (and streams, where relevant) they are actually assigned to teach. Admins and section heads have broader access.',
       },
@@ -617,7 +641,7 @@ const SECTIONS = [
     articles: [
       {
         q: 'How do I add a school event?',
-        a: 'Go to Events → "New Event". Set the title, date, time, category (term date, exam, sports, cultural, meeting, etc.), and audience (school-wide, specific class, or staff only). Click Save.',
+        a: 'Go to Events and add a new event. Set the title, dates, whether it is all day, location and description, and choose a category: Term, Exam, Meeting, Sports, Cultural, Training, Academic, Break, General or Birthday. New events are shown to the whole school. Click Save.',
       },
       {
         q: 'What is an Online Class event?',
@@ -859,27 +883,23 @@ const SECTIONS = [
     articles: [
       {
         q: 'How do I add a transport route?',
-        a: "Go to Transport → Routes → 'Add Route'. Enter the route name, stops (in order), and assign a vehicle and driver. Students are then assigned to routes from their profile.",
+        a: "On the Transport page, open the Routes tab and click to add a route. Enter the route name, origin and destination, stops, times, vehicle type and registration, driver name and phone, and capacity. Then set the one-way and two-way fares per term. A route with no fare for a type cannot bill students who choose that type.",
       },
       {
         q: 'How do I assign a student to a route?',
-        a: "Open the student's profile → Transport tab → select their route and boarding stop. The student appears on the route manifest for that stop.",
+        a: "On the Transport page, open the Assignments tab and click Assign Student to Route. Choose the route, then the fare (one-way or two-way). Choose a class and search for the student by name or admission number, then tick one or more students. Students already on the route are skipped. The number of students you save must fit the route's capacity.",
       },
       {
-        q: 'How do I manage vehicles and drivers?',
-        a: "Go to Transport → Vehicles to add and manage school vehicles (number plate, capacity, type). Go to Transport → Drivers to record driver details and assign them to vehicles.",
+        q: 'Does an assignment charge the student automatically?',
+        a: 'Yes, through Term Billing. Each active assignment is billed for the term at the fare the student chose. Assignments with no fare type, or a route with no fare for it, are not billed and appear under "Not billed" with the reason. See the Finance help for how to run Term Billing.',
       },
       {
-        q: 'Can I see a route manifest?',
-        a: 'Yes. Open a route to see a full passenger list grouped by stop, with student names and class. This is useful for drivers and transport coordinators.',
-      },
-      {
-        q: 'How does transport link to fees?',
-        a: 'Transport fees can be set up in Finance → Fee Structures as a "Transport" fee type and invoiced to students assigned to a route, just like any other fee.',
+        q: 'What does Direction mean on an assignment?',
+        a: 'Direction (to school, from school, both) is a pickup label only. It does not change the fare. The amount depends only on the fare type chosen.',
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Routes & Vehicles — see routes, vehicles, and manifests\n• Add / Edit Routes & Stops — manage routes and stops\n• Assign Students to Routes — allocate a student to a route/stop\n• Delete Routes / Vehicles — remove a route or vehicle\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Routes — see routes and their fares\n• Add / Edit Routes & Stops — manage routes, stops and fares\n• Assign Students to Routes — allocate students to a route, with a fare\n• Delete Routes — remove a route\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -1063,23 +1083,23 @@ const SECTIONS = [
     articles: [
       {
         q: 'How do I set up the academic year and terms?',
-        a: 'Go to Settings → Academic Year. Create the year (e.g. 2025/2026), add terms with start and end dates, then click "Set as Active". All modules use this active year as the default context.',
+        a: 'Go to Settings → School, then the Academic Years section. Create the year (for example 2025-2026), add its terms with start and end dates, and click "Activate year". Activating a new year locks the current one. All modules use the active year as their default.',
       },
       {
         q: 'How do I customise the school logo and colours?',
-        a: 'Go to Settings → Branding. Upload your school logo (PNG or JPG), set a Primary Colour and Accent Colour using the colour pickers, and save. These colours apply across all dashboards.',
+        a: 'Go to Settings → School → Branding. Upload your logo, favicon or login background, and choose a colour theme from the list (for example Violet, Ocean, Forest or Midnight). Save to apply it.',
       },
       {
         q: 'How do I configure custom SMTP email sending?',
-        a: "By default, system emails come from Msingi's platform address. To send from your own domain (e.g. noreply@yourschool.ke), go to Settings → Email / SMTP and enter your SMTP credentials.",
+        a: "By default, system emails come from Msingi's platform address. To send from your own domain (for example noreply@yourschool.ke), go to Settings → School, then the SMTP section. Enter your SMTP details and save. Use the test action to check them. Removing the custom SMTP sends emails from the platform address again.",
       },
       {
         q: 'What is Emergency Online Learning Mode?',
-        a: "Found in Settings → School Profile. When toggled ON, all timetable slots show Join buttons using each teacher's saved meeting link. Useful for unexpected school closures.",
+        a: "Found in Settings → School, in the Emergency Online Learning section. When switched on, timetable slots show Join buttons using each teacher's saved meeting link, and students see the same buttons in their portal. Useful for unexpected school closures.",
       },
       {
-        q: 'How do I back up my school data?',
-        a: 'Go to Settings → System → "Download Backup". This exports all your school data as a JSON archive. Store the file securely.',
+        q: 'Can I download a backup of my school data?',
+        a: 'Not from Settings. Msingi takes automatic backups of school data on the server. There is no backup download button for schools at present. If you need a copy of your records, export the list you need from its module (for example Students or Invoices) as CSV.',
       },
       {
         q: 'Where can I see the Audit Log?',
@@ -1101,19 +1121,19 @@ const SECTIONS = [
     articles: [
       {
         q: 'What roles are available in Msingi?',
-        a: 'Superadmin, Admin, Deputy Principal, Section Head, Teacher, Finance Officer, HR, Admissions Officer, Discipline Committee, Exams Officer, Timetabler, Parent, and Student. Custom roles can be created in Settings → Role Permissions.',
+        a: 'Superadmin, Admin, Principal, Deputy Principal, Section Head, Teacher, Finance, HR, Admissions Officer, Exams Officer, Timetabler, Discipline Committee, Parent and Student. Custom roles can be created in Settings → Roles & Permissions.',
       },
       {
         q: 'What is the difference between Superadmin and Admin?',
-        a: 'Superadmin is the school owner account with full access including billing and branding. Admin has full operational access but cannot change billing or delete the school.',
+        a: 'A Superadmin bypasses the permission checks in Msingi. An Admin works within the Roles & Permissions grid for their school, like every other role.',
       },
       {
         q: 'Can I create custom permission sets?',
-        a: 'Yes. Go to Settings → Role Permissions. Adjust which modules each role can Read, Create, Update, or Delete. Changes apply immediately for all users with that role.',
+        a: 'Yes. Go to Settings → Roles & Permissions. Choose which modules each role can read, create, update or delete, and set the finer sub-permissions where the grid shows them. Changes apply to everyone with that role.',
       },
       {
         q: 'Why can I only see certain modules in the sidebar?',
-        a: "The sidebar shows only modules your role has permission to access. If a module you expect to see is missing, ask your administrator to check your role's permissions in Settings → Role Permissions.",
+        a: "The sidebar shows only modules your role has permission to access. If a module you expect to see is missing, ask your administrator to check your role's permissions in Settings → Roles & Permissions.",
       },
       {
         q: 'What can a parent account see?',
@@ -1151,7 +1171,7 @@ const SECTIONS = [
       },
       {
         q: 'Can I import opening fee balances for students?',
-        a: 'Yes. The student CSV template includes columns for opening fee title, amount, amount paid, and due date. This creates invoice and payment records for each student in the same import operation.',
+        a: 'Only for students who are new to Msingi. The student CSV template has columns for opening fee title, amount, amount paid and due date. For each new student with an amount, the import creates an invoice, and a payment record if part was paid. Students already in Msingi are skipped, so their balances are not imported this way. A balance-only import for existing students is planned.',
       },
     ],
   },
