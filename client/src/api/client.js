@@ -105,8 +105,13 @@ async function _req(method, path, body = null, params = null, opts = {}) {
     // Handle both { error: 'string' } and { error: { code, message } } shapes
     const errBody = json?.error;
     const code    = typeof errBody === 'object' ? (errBody?.code ?? 'SERVER_ERROR') : 'SERVER_ERROR';
-    const message = typeof errBody === 'string'  ? errBody
-                  : errBody?.message ?? json?.message ?? 'An error occurred';
+    let message = typeof errBody === 'string'  ? errBody
+                : errBody?.message ?? json?.message ?? 'An error occurred';
+    // Validation failures carry the offending fields; name them so the user
+    // can see what to fix instead of only "Validation failed".
+    if (Array.isArray(errBody?.issues) && errBody.issues.length) {
+      message = `${message}: ${errBody.issues.map(i => `${i.field || 'field'} — ${i.message}`).join('; ')}`;
+    }
     throw new APIError(code, message, res.status, json ?? {});
   }
 
@@ -912,6 +917,7 @@ export const lessons = {
     reorder: (data)       => _post('/lessons/topics/reorder', data),
     copyFrom: (data)      => _post('/lessons/topics/copy-from', data),
     diagnostic: (params)  => _get('/lessons/topics/diagnostic', params),
+    assignClass: (data)   => _post('/lessons/topics/assign-class', data),
     // Same filters as the panel; the server returns the CSV attachment.
     diagnosticCsv: (params) => _downloadPdf('/lessons/topics/diagnostic', 'topic-diagnostic.csv', { ...params, format: 'csv' }),
   },

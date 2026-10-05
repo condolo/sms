@@ -113,7 +113,9 @@ const TopicSchema = z.object({
   // teacher (no whole-class grant) is correctly recognized as in-scope
   // for their own stream, the same streamAware check GET /coverage and
   // POST /coverage already rely on.
-  streamId:     z.string().optional(),
+  // null is what a whole-class assignment (no stream) sends back from
+  // GET /my-classes; it means "no stream", the same as omitting it.
+  streamId:     z.string().nullish().transform(v => v || undefined),
   subjectId:    z.string().min(1),
   subjectName:  z.string().max(200).trim().optional(),
   academicYear: z.string().max(20).trim().optional(),
@@ -580,7 +582,7 @@ router.get('/topics/diagnostic', authMiddleware, PLAN, MODGATE, async (req, res)
         subjectNameSaved:  t.subjectName ?? null,
         subjectRecordName: subjectById[t.subjectId]?.name ?? '(no subject record with this subjectId)',
         classId:           t.classId ?? null,
-        className:         t.classId ? (classById[t.classId]?.name ?? '(no class record with this classId)') : '(legacy: no class)',
+        className:         t.classId ? (classById[t.classId]?.name ?? '(no class record with this classId)') : '(no class recorded: saved before class scoping)',
         academicYear:      t.academicYear ?? null,
       }));
 
@@ -603,6 +605,61 @@ router.get('/topics/diagnostic', authMiddleware, PLAN, MODGATE, async (req, res)
       classes:  classes.map(c => ({ id: c.id, name: c.name, status: c.status ?? null })),
     });
   } catch (err) { console.error('[lessons/topics/diagnostic GET]', err); return E.serverError(res); }
+});
+
+/* ── POST /api/lessons/topics/assign-class ─ admin: give class-less topics a class ──
+   Topics saved before class scoping (2026-09-28) have no classId, so every
+   class sees them. This lets school leadership assign the class each one
+   belongs to. Only topics that currently have no class are changed, so an
+   existing assignment can never be overwritten here. Each change is audited.
+   Body: { assignments: [{ topicId, classId }] } */
+router.post('/topics/assign-class', authMiddleware, PLAN, MODGATE, async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    if (!isAdmin(req)) return E.forbidden(res, 'Assigning topics to classes is for school leadership only.');
+
+    const assignments = Array.isArray(req.body?.assignments) ? req.body.assignments : [];
+    if (!assignments.length) return E.validation(res, [{ field: 'assignments', message: 'At least one assignment is required' }]);
+    if (assignments.length > 500) return E.validation(res, [{ field: 'assignments', message: 'At most 500 assignments per request' }]);
+    const badRow = assignments.find(a => !a?.topicId || !a?.classId);
+    if (badRow) return E.validation(res, [{ field: 'assignments', message: 'Every assignment needs a topicId and a classId' }]);
+
+    // The class must exist in this school.
+    const classIds = [...new Set(assignments.map(a => a.classId))];
+    const classes = await tenantModel('classes', tenantContext(req)).find({ schoolId, id: { $in: classIds } }).select('id name').lean();
+    const classById = Object.fromEntries(classes.map(c => [c.id, c]));
+    const unknown = classIds.filter(id => !classById[id]);
+    if (unknown.length) return E.validation(res, [{ field: 'classId', message: `No class with id ${unknown.join(', ')} in this school` }]);
+
+    const Topics = tenantModel('syllabus_topics', tenantContext(req));
+    const noClass = { $or: [{ classId: { $exists: false } }, { classId: null }] };
+    const assigned = [];
+    const skipped  = [];
+
+    for (const a of assignments) {
+      const topic = await Topics.findOne({ id: a.topicId, schoolId }).select('id title classId subjectId').lean();
+      if (!topic) { skipped.push({ topicId: a.topicId, reason: 'not found in this school' }); continue; }
+      if (topic.classId) { skipped.push({ topicId: a.topicId, reason: 'already has a class' }); continue; }
+
+      const result = await Topics.updateOne(
+        { id: a.topicId, schoolId, ...noClass },
+        { $set: { classId: a.classId, updatedBy: userId } },
+      );
+      if (!result?.modifiedCount) { skipped.push({ topicId: a.topicId, reason: 'changed by someone else, not assigned' }); continue; }
+
+      assigned.push({ topicId: a.topicId, classId: a.classId });
+      AuditService.log({
+        action: 'lessons.topic.assign_class',
+        actor: req.jwtUser,
+        schoolId,
+        target: { type: 'topic', id: a.topicId, label: topic.title },
+        details: { classId: a.classId, className: classById[a.classId].name, subjectId: topic.subjectId },
+        req,
+      });
+    }
+
+    return ok(res, { assigned: assigned.length, skipped });
+  } catch (err) { console.error('[lessons/topics/assign-class POST]', err); return E.serverError(res); }
 });
 
 /* ── POST /api/lessons/topics ─ create topic ────────────────── */

@@ -74,7 +74,7 @@ describe('GET /api/lessons/topics/diagnostic', () => {
     const plants = res.body.data.topics.find(t => t.id === 't1');
     expect(plants).toMatchObject({ subjectId: 'sub_sci_a', subjectRecordName: 'Science', className: 'Year 6', academicYear: '2026-2027' });
     const legacy = res.body.data.topics.find(t => t.id === 't2');
-    expect(legacy.className).toBe('(legacy: no class)');
+    expect(legacy.className).toBe('(no class recorded: saved before class scoping)');
   });
 
   test('the subject filter lists every matching subject record, so duplicates are visible', async () => {

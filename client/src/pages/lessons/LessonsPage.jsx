@@ -1833,6 +1833,21 @@ function TopicDiagnostic() {
   });
   const d = resp?.data;
 
+  // Class choices for topics saved before class scoping. Nothing is saved
+  // until the admin presses Save; the server only fills topics that have no class.
+  const [pending, setPending] = useState({});
+  const [assignResult, setAssignResult] = useState(null);
+  const qc = useQueryClient();
+  const assignMutation = useMutation({
+    mutationFn: (assignments) => lessonsApi.topics.assignClass({ assignments }),
+    onSuccess: (r) => {
+      setPending({});
+      setAssignResult(r?.data ?? null);
+      qc.invalidateQueries({ queryKey: ['lessons', 'topic-diagnostic'] });
+    },
+    onError: (err) => setAssignResult({ error: err?.message ?? 'Could not assign classes' }),
+  });
+
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
       <div className="flex items-center justify-between gap-3">
@@ -1900,7 +1915,25 @@ function TopicDiagnostic() {
               </div>
 
               <div>
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Topics in this school ({d.topics.length}, newest first)</p>
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Topics in this school ({d.topics.length}, newest first)</p>
+                  <button
+                    type="button"
+                    disabled={Object.keys(pending).length === 0 || assignMutation.isPending}
+                    onClick={() => assignMutation.mutate(Object.entries(pending).filter(([, c]) => c).map(([topicId, classId]) => ({ topicId, classId })))}
+                    className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-medium px-3 py-1.5 rounded-lg"
+                  >
+                    {assignMutation.isPending && <Loader2 size={12} className="animate-spin" />}
+                    Save class assignments ({Object.values(pending).filter(Boolean).length})
+                  </button>
+                </div>
+                {assignResult?.error && <p className="text-xs text-red-600 mb-1">{assignResult.error}</p>}
+                {assignResult && !assignResult.error && (
+                  <p className="text-xs text-emerald-700 mb-1">
+                    Assigned {assignResult.assigned} topic{assignResult.assigned === 1 ? '' : 's'}.
+                    {assignResult.skipped?.length > 0 && ` Skipped ${assignResult.skipped.length}: ${assignResult.skipped.map(s => s.reason).filter((v, i, a) => a.indexOf(v) === i).join('; ')}.`}
+                  </p>
+                )}
                 {d.topics.length === 0 ? (
                   <p className="text-xs text-slate-400">No topics saved in this school.</p>
                 ) : (
@@ -1924,7 +1957,18 @@ function TopicDiagnostic() {
                               <td className="px-3 py-2 whitespace-nowrap text-slate-600">{t.createdAt ? new Date(t.createdAt).toLocaleString('en-GB', { timeZone: 'Africa/Nairobi' }) : '—'}</td>
                               <td className="px-3 py-2 text-slate-800">{t.title}</td>
                               <td className="px-3 py-2 text-slate-700">{t.subjectRecordName}</td>
-                              <td className="px-3 py-2 text-slate-700">{t.className}</td>
+                              <td className="px-3 py-2 text-slate-700">
+                                {t.classId ? t.className : (
+                                  <select
+                                    value={pending[t.id] ?? ''}
+                                    onChange={e => setPending(p => ({ ...p, [t.id]: e.target.value }))}
+                                    className="text-xs px-2 py-1 border border-amber-300 rounded bg-white max-w-[12rem]"
+                                  >
+                                    <option value="">Choose class…</option>
+                                    {(d.classes ?? []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                  </select>
+                                )}
+                              </td>
                               <td className="px-3 py-2 text-slate-700">{t.academicYear ?? '—'}</td>
                               <td className="px-3 py-2 font-mono text-[10px] text-slate-500 break-all">{t.subjectId ?? '—'} · {t.classId ?? '—'}</td>
                             </tr>
