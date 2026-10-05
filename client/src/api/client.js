@@ -291,6 +291,8 @@ export const extracurricular = {
   enrolments: {
     list:   (params)     => _get('/extracurricular/enrolments', params),
     create: (data)       => _post('/extracurricular/enrolments', data),
+    // One activity, the same dates, several students; each gets their own record.
+    createBulk: (data)   => _post('/extracurricular/enrolments/bulk', data),
     end:    (id, endDate) => _put(`/extracurricular/enrolments/${id}/end`, { endDate }),
   },
 };

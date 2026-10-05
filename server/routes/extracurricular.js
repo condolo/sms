@@ -164,6 +164,74 @@ router.post('/enrolments', explicitSub('finance', 'activities', 'create'), async
   } catch (err) { console.error('[extracurricular/enrolments POST]', err); return E.serverError(res); }
 });
 
+/* POST /enrolments/bulk — one activity, the same dates, several students (usually
+   one class). Each student gets their own enrolment record. Everything is checked
+   before anything is written: the activity is active, every student is an active
+   student of this school, and anyone already enrolled in this activity is skipped
+   and reported, never duplicated. */
+const BulkEnrolmentSchema = z.object({
+  activityId: z.string().min(1),
+  startDate:  z.string().regex(ISO_DATE),
+  endDate:    z.string().regex(ISO_DATE).optional().nullable(),
+  students:   z.array(z.object({ studentId: z.string().min(1) })).min(1).max(300),
+});
+
+router.post('/enrolments/bulk', explicitSub('finance', 'activities', 'create'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const { data, error } = _validate(BulkEnrolmentSchema, req.body);
+    if (error) return E.validation(res, error);
+    if (data.endDate && data.endDate < data.startDate) {
+      return E.validation(res, [{ field: 'endDate', message: 'End date cannot be before the start date' }]);
+    }
+    const ctx = tenantContext(req);
+
+    const activity = await tenantModel('activities', ctx).findOne({ id: data.activityId, schoolId }).lean();
+    if (!activity) return E.notFound(res, 'Activity not found');
+    if (activity.status !== 'active') return E.badRequest(res, `"${activity.name}" is not active`);
+
+    const ids = [...new Set(data.students.map(s => s.studentId))];
+    const found = await tenantModel('students', ctx)
+      .find({ schoolId, id: { $in: ids }, status: 'active' })
+      .select('id firstName middleName lastName admissionNumber').lean();
+    const studentById = new Map(found.map(s => [s.id, s]));
+    const missing = ids.filter(id => !studentById.has(id));
+    if (missing.length) {
+      return E.validation(res, [{ field: 'students', message: `Not active students in this school: ${missing.join(', ')}` }]);
+    }
+
+    const open = await tenantModel('activity_enrolments', ctx)
+      .find({ schoolId, activityId: data.activityId, status: 'active', studentId: { $in: ids } })
+      .select('studentId').lean();
+    const alreadyIn = new Set(open.map(e => e.studentId));
+
+    const skipped = [];
+    const docs = [];
+    for (const id of ids) {
+      if (alreadyIn.has(id)) { skipped.push({ studentId: id, reason: `already enrolled in "${activity.name}"` }); continue; }
+      const s = studentById.get(id);
+      docs.push({
+        id:              uuidv4(),
+        schoolId,
+        studentId:       id,
+        studentName:     [s.firstName, s.middleName, s.lastName].filter(Boolean).join(' '),
+        admissionNumber: s.admissionNumber ?? null,
+        activityId:      data.activityId,
+        activityName:    activity.name,
+        startDate:       data.startDate,
+        endDate:         data.endDate ?? null,
+        status:          'active',
+        createdBy:       userId,
+        updatedBy:       userId,
+      });
+    }
+    if (docs.length) await tenantModel('activity_enrolments', ctx).insertMany(docs);
+
+    AuditService.log({ action: 'extracurricular.enrolled_bulk', actor: req.jwtUser, schoolId, target: { type: 'activity', id: data.activityId, label: activity.name }, details: { created: docs.length, skipped: skipped.length, startDate: data.startDate }, req });
+    return ok(res, { created: docs.length, skipped });
+  } catch (err) { console.error('[extracurricular/enrolments/bulk POST]', err); return E.serverError(res); }
+});
+
 /* Ending an enrolment keeps the record (history for past terms). It is not deleted. */
 router.put('/enrolments/:id/end', explicitSub('finance', 'activities', 'update'), async (req, res) => {
   try {

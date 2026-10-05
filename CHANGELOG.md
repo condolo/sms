@@ -6,6 +6,11 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.169.3] — 2026-10-05 — feat(finance): bulk enrolment in extra-curricular activities
+
+- **Enrol several students at once** (Finance → Extra-Curricular): pick a class, tick students across the search, choose one activity and the dates, and save. Each student gets their own enrolment. Students already enrolled in that activity are skipped and reported.
+- `POST /api/extracurricular/enrolments/bulk` checks everything before writing: the activity is active, every student is an active student of this school, and the end date is not before the start date. It needs the explicit *Manage Extra-Curricular Activities & Enrolments* permission.
+
 ## [v5.169.2] — 2026-10-05 — feat(permissions): explicit grants for term billing, early payment and activities
 
 - **Three finance actions have their own permissions**, listed under Finance in Roles & Permissions: *Run Term Billing*, *Confirm Early Payment*, *Manage Extra-Curricular Activities & Enrolments*. A general finance right no longer covers them.
