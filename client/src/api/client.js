@@ -911,6 +911,7 @@ export const lessons = {
     remove:  (id)         => _delete(`/lessons/topics/${id}`),
     reorder: (data)       => _post('/lessons/topics/reorder', data),
     copyFrom: (data)      => _post('/lessons/topics/copy-from', data),
+    diagnostic: (params)  => _get('/lessons/topics/diagnostic', params),
   },
   /* Coverage (per teacher per class) */
   coverage: {

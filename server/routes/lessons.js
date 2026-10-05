@@ -532,6 +532,47 @@ router.get('/topics', authMiddleware, PLAN, MODGATE, async (req, res) => { // rb
   } catch (err) { console.error('[lessons/topics GET]', err); return E.serverError(res); }
 });
 
+/* ── GET /api/lessons/topics/diagnostic ─ admin: where every topic was saved (read-only) ──
+   A class view shows a topic only when its subjectId, classId and academicYear
+   all match that view. This lists every topic in the school with those keys,
+   newest first, plus every subject record and class record, so a topic that
+   "disappeared" can be traced to the record it was saved under. Nothing is
+   changed. Optional ?subject= filters subject records by name. */
+router.get('/topics/diagnostic', authMiddleware, PLAN, MODGATE, async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    if (!isAdmin(req)) return E.forbidden(res, 'Topic diagnostics are for school leadership only.');
+
+    const subjectFilter = (req.query.subject || '').trim();
+    const [topics, subjects, classes] = await Promise.all([
+      tenantModel('syllabus_topics', tenantContext(req)).find({ schoolId }).sort({ createdAt: -1 }).limit(2000).lean(),
+      tenantModel('subjects', tenantContext(req)).find({ schoolId }).select('id name code departmentId').lean(),
+      tenantModel('classes', tenantContext(req)).find({ schoolId }).select('id name status').lean(),
+    ]);
+
+    const subjectById = Object.fromEntries(subjects.map(s => [s.id, s]));
+    const classById   = Object.fromEntries(classes.map(c => [c.id, c]));
+    const matchSubject = (s) => !subjectFilter || (s.name || '').toLowerCase().includes(subjectFilter.toLowerCase());
+
+    return ok(res, {
+      topics: topics.map(t => ({
+        id:               t.id,
+        title:            t.title,
+        createdAt:        t.createdAt ?? null,
+        createdBy:        t.createdBy ?? null,
+        subjectId:        t.subjectId ?? null,
+        subjectNameSaved: t.subjectName ?? null,
+        subjectRecordName: subjectById[t.subjectId]?.name ?? '(no subject record with this subjectId)',
+        classId:          t.classId ?? null,
+        className:        t.classId ? (classById[t.classId]?.name ?? '(no class record with this classId)') : '(legacy: no class)',
+        academicYear:     t.academicYear ?? null,
+      })),
+      subjects: subjects.filter(matchSubject).map(s => ({ id: s.id, name: s.name, code: s.code ?? null, departmentId: s.departmentId ?? null })),
+      classes:  classes.map(c => ({ id: c.id, name: c.name, status: c.status ?? null })),
+    });
+  } catch (err) { console.error('[lessons/topics/diagnostic GET]', err); return E.serverError(res); }
+});
+
 /* ── POST /api/lessons/topics ─ create topic ────────────────── */
 router.post('/topics', authMiddleware, PLAN, MODGATE, rbac('lessons', 'create'), async (req, res) => {
   try {

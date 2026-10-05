@@ -1703,6 +1703,7 @@ function OverviewTab() {
   // Opening a row shows the same topic list a teacher sees, read-only, so an
   // admin can check what teachers actually added (not only the progress %).
   const [drill, setDrill] = useState(null);
+  const { isAdmin } = useRole();
   const school  = useAuthStore(s => s.session?.school);
 
   const { data: resp, isLoading } = useQuery({
@@ -1803,6 +1804,109 @@ function OverviewTab() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {isAdmin && <TopicDiagnostic />}
+    </div>
+  );
+}
+
+/* ── Topic diagnostic (admin, read-only) ─────────────────────────
+   Shows where each syllabus topic was saved: its subject record, class and
+   academic year. A class view shows a topic only when all three match, so
+   this is how a topic that "disappeared" is traced. Changes nothing. */
+function TopicDiagnostic() {
+  const [open, setOpen]       = useState(false);
+  const [subject, setSubject] = useState('science');
+  // Topics added on or after Saturday 3 Oct 2026 (Africa/Nairobi) are highlighted.
+  const SINCE = new Date('2026-10-03T00:00:00+03:00');
+
+  const { data: resp, isLoading, error } = useQuery({
+    queryKey: ['lessons', 'topic-diagnostic', subject],
+    queryFn:  () => lessonsApi.topics.diagnostic({ subject }),
+    enabled:  open,
+    staleTime: 0,
+  });
+  const d = resp?.data;
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-slate-800">Topic diagnostic (read-only)</p>
+          <p className="text-xs text-slate-500">Where each topic was saved: subject record, class and academic year.</p>
+        </div>
+        <button onClick={() => setOpen(o => !o)} className="text-xs font-medium text-indigo-600 hover:text-indigo-800">
+          {open ? 'Hide' : 'Show'}
+        </button>
+      </div>
+
+      {open && (
+        <>
+          <input
+            value={subject} onChange={e => setSubject(e.target.value)}
+            placeholder="Subject name filter (e.g. science)"
+            className="w-full max-w-xs text-sm px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+          />
+
+          {isLoading && <div className="flex justify-center py-6"><Loader2 className="animate-spin text-indigo-400" size={20} /></div>}
+          {error && <p className="text-xs text-red-600">{error.message ?? 'Could not load diagnostic'}</p>}
+
+          {d && (
+            <>
+              <div>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Subject records matching "{subject}"</p>
+                {d.subjects.length === 0 ? (
+                  <p className="text-xs text-slate-400">None</p>
+                ) : (
+                  <ul className="text-xs text-slate-700 space-y-0.5">
+                    {d.subjects.map(s => (
+                      <li key={s.id}>{s.name} · code {s.code ?? '—'} · <span className="font-mono text-[11px] text-slate-500 break-all">{s.id}</span></li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <div>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Topics in this school ({d.topics.length}, newest first)</p>
+                {d.topics.length === 0 ? (
+                  <p className="text-xs text-slate-400">No topics saved in this school.</p>
+                ) : (
+                  <div className="overflow-x-auto border border-slate-200 rounded-lg">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="bg-slate-50 text-left text-slate-500">
+                          <th className="px-3 py-2 font-semibold">Added</th>
+                          <th className="px-3 py-2 font-semibold">Topic</th>
+                          <th className="px-3 py-2 font-semibold">Subject record</th>
+                          <th className="px-3 py-2 font-semibold">Class</th>
+                          <th className="px-3 py-2 font-semibold">Academic year</th>
+                          <th className="px-3 py-2 font-semibold">IDs (subject · class)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {d.topics.map(t => {
+                          const recent = t.createdAt && new Date(t.createdAt) >= SINCE;
+                          return (
+                            <tr key={t.id} className={recent ? 'bg-amber-50' : ''}>
+                              <td className="px-3 py-2 whitespace-nowrap text-slate-600">{t.createdAt ? new Date(t.createdAt).toLocaleString('en-GB', { timeZone: 'Africa/Nairobi' }) : '—'}</td>
+                              <td className="px-3 py-2 text-slate-800">{t.title}</td>
+                              <td className="px-3 py-2 text-slate-700">{t.subjectRecordName}</td>
+                              <td className="px-3 py-2 text-slate-700">{t.className}</td>
+                              <td className="px-3 py-2 text-slate-700">{t.academicYear ?? '—'}</td>
+                              <td className="px-3 py-2 font-mono text-[10px] text-slate-500 break-all">{t.subjectId ?? '—'} · {t.classId ?? '—'}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                <p className="text-[11px] text-slate-400 mt-1">Highlighted rows were added on or after 3 Oct 2026.</p>
+              </div>
+            </>
+          )}
+        </>
       )}
     </div>
   );
