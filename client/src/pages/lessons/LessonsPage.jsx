@@ -19,7 +19,7 @@ import {
   Loader2, AlertTriangle, Pencil, Trash2, Search, GraduationCap,
   Users, Copy, BarChart3, ArrowLeft, BookOpen, Circle,
   CheckCircle2, MinusCircle, NotebookPen, Printer, Calendar, Settings,
-  Upload, FileText,
+  Upload, FileText, Eye,
 } from 'lucide-react';
 import { lessons as lessonsApi, academicConfig as academicConfigApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
@@ -762,7 +762,7 @@ function TemplateFieldsCard({ fields, setFields, toast, setToast, mutation }) {
    whole mechanism behind "teachers must update topics before planning a
    lesson" (the server enforces the same thing independently — this is
    just the friendlier, earlier version of that same rule). */
-function LessonPlanSlideOver({ classId, className, subjectId, subjectName, streamId, streamName, existing, initialDate, onClose, onSaved }) {
+function LessonPlanSlideOver({ classId, className, subjectId, subjectName, streamId, streamName, existing, initialDate, readOnly = false, onClose, onSaved }) {
   const qc = useQueryClient();
   const isEdit = !!existing;
   const [date,        setDate]        = useState(existing?.date ?? initialDate ?? new Date().toISOString().slice(0, 10));
@@ -883,13 +883,15 @@ function LessonPlanSlideOver({ classId, className, subjectId, subjectName, strea
       <div className="fixed right-0 top-0 h-full w-full max-w-xl bg-white shadow-2xl z-50 flex flex-col">
         <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100 shrink-0">
           <div>
-            <h2 className="text-sm font-semibold text-slate-900">{isEdit ? 'Edit Lesson Plan' : 'New Lesson Plan'}</h2>
+            <h2 className="text-sm font-semibold text-slate-900">{readOnly ? 'Lesson Plan' : isEdit ? 'Edit Lesson Plan' : 'New Lesson Plan'}</h2>
             <p className="text-xs text-slate-400 mt-0.5">{subjectName} · {className}{streamName ? ` · ${streamName}` : ''}</p>
           </div>
           <button onClick={onClose} className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"><X size={18} /></button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+        {/* readOnly: the whole form is one disabled fieldset, so every input,
+            select and button inside it is inert without touching each field. */}
+        <fieldset disabled={readOnly} className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-5">
           {error && (
             <div className="flex items-center gap-2 bg-red-50 text-red-700 text-sm px-3 py-2 rounded-lg border border-red-200">
               <AlertTriangle size={14} className="shrink-0" />{error}
@@ -972,17 +974,19 @@ function LessonPlanSlideOver({ classId, className, subjectId, subjectName, strea
               </div>
             </div>
           )}
-        </div>
+        </fieldset>
 
         <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-slate-100 shrink-0">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 rounded-lg">Cancel</button>
-          <button
-            onClick={submit} disabled={mutation.isPending || topics.length === 0}
-            className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg"
-          >
-            {mutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
-            {isEdit ? 'Save Changes' : 'Save Lesson Plan'}
-          </button>
+          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 rounded-lg">{readOnly ? 'Close' : 'Cancel'}</button>
+          {!readOnly && (
+            <button
+              onClick={submit} disabled={mutation.isPending || topics.length === 0}
+              className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg"
+            >
+              {mutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+              {isEdit ? 'Save Changes' : 'Save Lesson Plan'}
+            </button>
+          )}
         </div>
       </div>
     </>
@@ -990,7 +994,7 @@ function LessonPlanSlideOver({ classId, className, subjectId, subjectName, strea
 }
 
 /* ── Lesson plan row (list item) ──────────────────────────────── */
-function LessonPlanRow({ plan, onEdit, onDelete }) {
+function LessonPlanRow({ plan, onEdit, onDelete, readOnly = false }) {
   const hasReflection = plan.reflection && (plan.reflection.wentWell || plan.reflection.betterIf || plan.reflection.improvement);
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-4 flex items-start justify-between gap-3">
@@ -1015,8 +1019,14 @@ function LessonPlanRow({ plan, onEdit, onDelete }) {
           href={undefined} onClick={(e) => { e.preventDefault(); lessonsApi.plans.pdf(plan.id); }}
           title="Print / export" className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
         ><Printer size={14} /></a>
-        <button onClick={() => onEdit(plan)} title="Edit" className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50"><Pencil size={14} /></button>
-        <button onClick={() => onDelete(plan)} title="Delete" className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50"><Trash2 size={14} /></button>
+        {readOnly ? (
+          <button onClick={() => onEdit(plan)} title="View" className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50"><Eye size={14} /></button>
+        ) : (
+          <>
+            <button onClick={() => onEdit(plan)} title="Edit" className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50"><Pencil size={14} /></button>
+            <button onClick={() => onDelete(plan)} title="Delete" className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50"><Trash2 size={14} /></button>
+          </>
+        )}
       </div>
     </div>
   );
@@ -1315,7 +1325,7 @@ function ImportSlideOver({ classId, className, subjectId, subjectName, streamId,
 }
 
 /* ── Lesson Plans: drill-down for one class-subject[-stream] ──── */
-function PlansDrillDown({ item, onBack }) {
+function PlansDrillDown({ item, onBack, readOnly = false }) {
   const { classId, streamId, streamName, subjectId, subjectName, className } = item;
   const qc = useQueryClient();
   const [showSlider, setShowSlider] = useState(false);
@@ -1381,7 +1391,7 @@ function PlansDrillDown({ item, onBack }) {
           </div>
           <p className="text-xs text-slate-400 mt-0.5">{plans.length} lesson plan{plans.length !== 1 ? 's' : ''}</p>
         </div>
-        {canImport && (
+        {canImport && !readOnly && (
           <button
             onClick={() => setShowImport(true)}
             className="flex items-center gap-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-medium px-3 py-2 rounded-lg"
@@ -1389,17 +1399,19 @@ function PlansDrillDown({ item, onBack }) {
             <Upload size={13} /> Import
           </button>
         )}
-        <button
-          onClick={() => { setEditing(null); setPrefillDate(null); setShowSlider(true); }}
-          className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium px-3 py-2 rounded-lg"
-        >
-          <Plus size={13} /> New Lesson Plan
-        </button>
+        {!readOnly && (
+          <button
+            onClick={() => { setEditing(null); setPrefillDate(null); setShowSlider(true); }}
+            className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium px-3 py-2 rounded-lg"
+          >
+            <Plus size={13} /> New Lesson Plan
+          </button>
+        )}
       </div>
 
-      <ShareablePlansBanner classId={classId} subjectId={subjectId} streamId={streamId} />
+      {!readOnly && <ShareablePlansBanner classId={classId} subjectId={subjectId} streamId={streamId} />}
 
-      {weekUnplanned.length > 0 && (
+      {!readOnly && weekUnplanned.length > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
           <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-800">
             <AlertTriangle size={13} />
@@ -1441,6 +1453,7 @@ function PlansDrillDown({ item, onBack }) {
                   <LessonPlanRow
                     key={p.id}
                     plan={p}
+                    readOnly={readOnly}
                     onEdit={(plan) => { setEditing(plan); setShowSlider(true); }}
                     onDelete={(plan) => { if (window.confirm('Delete this lesson plan?')) deleteMutation.mutate(plan); }}
                   />
@@ -1455,7 +1468,7 @@ function PlansDrillDown({ item, onBack }) {
         <LessonPlanSlideOver
           classId={classId} className={className} subjectId={subjectId} subjectName={subjectName}
           streamId={streamId} streamName={streamName}
-          existing={editing} initialDate={prefillDate}
+          existing={editing} initialDate={prefillDate} readOnly={readOnly}
           onClose={() => { setShowSlider(false); setEditing(null); setPrefillDate(null); }}
           onSaved={() => { setShowSlider(false); setEditing(null); setPrefillDate(null); }}
         />
@@ -1718,7 +1731,9 @@ function OverviewTab() {
   }
 
   if (drill) {
-    return <DrillDown item={drill} onBack={() => setDrill(null)} canManage={false} />;
+    return drill.view === 'plans'
+      ? <PlansDrillDown item={drill.item} onBack={() => setDrill(null)} readOnly />
+      : <DrillDown item={drill.item} onBack={() => setDrill(null)} canManage={false} />;
   }
 
   return (
@@ -1749,11 +1764,12 @@ function OverviewTab() {
                 <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Subject</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Coverage</th>
                 <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Progress</th>
+                <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Lesson plans</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
               {filtered.map((r, i) => (
-                <tr key={i} onClick={() => setDrill(r)} className="hover:bg-slate-50/50 transition-colors cursor-pointer">
+                <tr key={i} onClick={() => setDrill({ item: r, view: 'topics' })} className="hover:bg-slate-50/50 transition-colors cursor-pointer">
                   <td className="px-4 py-3 font-medium text-slate-800">{r.teacherName}</td>
                   <td className="px-4 py-3 text-slate-600">{r.className}{r.streamName ? ` · ${r.streamName}` : ''}</td>
                   <td className="px-4 py-3 text-slate-600">{r.subjectName}</td>
@@ -1772,6 +1788,15 @@ function OverviewTab() {
                         {r.pct}%
                       </span>
                     </div>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    {/* stopPropagation: this button opens the plans, not the row's topics. */}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setDrill({ item: r, view: 'plans' }); }}
+                      className="text-xs font-medium text-indigo-600 hover:text-indigo-800"
+                    >
+                      View plans
+                    </button>
                   </td>
                 </tr>
               ))}
