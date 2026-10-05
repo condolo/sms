@@ -31,15 +31,15 @@ const SECTIONS = [
     articles: [
       {
         q: 'How do I sign in?',
-        a: 'Open your school portal, enter your email (or admission number for students) and password, then click Sign In. First-time users are prompted to set a new password immediately.',
+        a: 'Open your school portal. Staff sign in with their email address, and students with their admission number. Enter your password and click Sign In. Google or Microsoft sign-in buttons appear on the login page where your school has enabled them. If your account requires a one-time code, you will be asked for it after your password.',
       },
       {
         q: 'I forgot my password. What do I do?',
-        a: 'Click "Forgot password?" on the login page and enter your email. A reset link will be sent. Alternatively, ask your school administrator to reset it from Settings → Users.',
+        a: 'There is no self-service password reset yet. Ask your school administrator to reset it from Settings → Users. They can enter a new password or let Msingi generate one, and then share it with you securely.',
       },
       {
         q: 'Why am I being asked to change my password?',
-        a: 'Msingi enforces a 90-day password rotation policy for security. You will be prompted to choose a new password after 90 days. The new password must be at least 8 characters and include letters and numbers.',
+        a: 'Msingi requires a password change every 90 days. You will be asked to choose a new one at sign-in. A new password must be at least 8 characters. You must also change the password when an administrator has set a temporary one.',
       },
       {
         q: 'I have multiple roles. What do I see?',
@@ -47,7 +47,7 @@ const SECTIONS = [
       },
       {
         q: 'What browsers does Msingi support?',
-        a: 'Msingi works on Chrome, Firefox, Edge, and Safari (all current versions). Internet Explorer is not supported. For the best experience keep your browser up to date.',
+        a: 'Use a current version of Chrome, Firefox, Edge or Safari. Keep the browser updated for the best experience.',
       },
       {
         q: 'Can I use Msingi on my phone?',
@@ -55,7 +55,7 @@ const SECTIONS = [
       },
       {
         q: 'How is my data stored and who can see it?',
-        a: "All data is stored in a secure cloud database. Each school's data is completely isolated — other schools cannot access your records. Data is encrypted in transit and at rest.",
+        a: "Each school's records are kept separate from other schools' records, and each user sees only what their school and role allow. Who can see which records is set by the Roles & Permissions for your school.",
       },
       {
         q: 'What is the academic year context?',
@@ -73,11 +73,11 @@ const SECTIONS = [
     articles: [
       {
         q: 'How does the Classes → Streams architecture work?',
-        a: 'Classes represent year groups (e.g. Form 3, Year 8). Streams are teaching groups within a class (e.g. Form 3A, Form 3B, Form 3 East). Students, timetable slots, and marks are tracked at the stream level.',
+        a: 'Classes represent year groups (e.g. Form 3, Year 8). Streams are teaching groups within a class (e.g. Form 3A, Form 3B, Form 3 East). Each student belongs to a stream, and each stream has its own timetable. The curriculum and marks are kept per class and subject.',
       },
       {
         q: 'How do I create a class?',
-        a: 'Go to Classes → "Add Class". Enter the class name, select a section (e.g. Primary, Secondary), set the year, and save. Then open the class card to add streams inside it.',
+        a: 'Go to Classes → "Add Class". Enter the class name and, optionally, choose its section (e.g. Primary, Secondary), then save. Open the class to add its streams.',
       },
       {
         q: 'How do I add streams to a class?',
@@ -227,7 +227,7 @@ const SECTIONS = [
       },
       {
         q: 'How do I filter and search teachers?',
-        a: 'Use the filter bar to narrow by Department, Subject, or Status. The Export button respects active filters, matching what is on screen.',
+        a: 'Use the filters to narrow the list by Department or Status. Export downloads the teacher list as CSV.',
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
@@ -881,7 +881,7 @@ const SECTIONS = [
       },
       {
         q: 'Can I search the catalogue?',
-        a: 'Yes. Use the search bar in Library to find books by title, author, ISBN, or category. The result shows total copies and how many are currently available.',
+        a: 'Yes. Use the search bar in Library to find books by title, author or ISBN. The result shows total copies and how many are currently available.',
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
@@ -1073,11 +1073,11 @@ const SECTIONS = [
       },
       {
         q: 'What does Fee Exposure show?',
-        a: 'Outstanding balances grouped by class, scoped to the same date range as the rest of the Dashboard, so it reflects the exact period you\'re looking at rather than an all-time total.',
+        a: 'The outstanding fee balances shown on the Dashboard. Fee Exposure is one of the four Leadership Analytics panels.',
       },
       {
-        q: 'Who typically sees this panel?',
-        a: 'Leadership roles — admin, superadmin, deputy principal, section head. A plain teacher does not see the Leadership Analytics panel by default.',
+        q: 'Who can see the Leadership Analytics panels?',
+        a: 'Access is set by the View Leadership Analytics permission in Settings → Roles & Permissions. A role that does not hold it does not see these panels.',
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
