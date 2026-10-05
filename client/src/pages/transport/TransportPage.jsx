@@ -4,7 +4,7 @@ import {
   Bus, Plus, Search, MapPin, Users, Trash2, Edit2,
   X, RefreshCw, UserPlus, ChevronDown,
 } from 'lucide-react';
-import { transport as transportApi } from '@/api/client.js';
+import { transport as transportApi, students as studentsApi, classes as classesApi } from '@/api/client.js';
 import { KpiCard } from '@/components/ui/KpiCard.jsx';
 import useAuthStore from '@/store/auth.js';
 import { useToast } from '@/hooks/useToast.jsx';
@@ -161,7 +161,36 @@ function AssignModal({ routes, onClose, onSave }) {
   });
   const [saving, setSaving] = useState(false);
   const [error,  setError]  = useState('');
+  // Student is picked from the school's records, never typed: choose a class,
+  // then search that class by name or admission number.
+  const [classId, setClassId] = useState('');
+  const [search,  setSearch]  = useState('');
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const { data: classesResp } = useQuery({
+    queryKey: ['transport', 'assign-classes'],
+    queryFn:  () => classesApi.list(),
+    staleTime: 5 * 60_000,
+  });
+  const classList = classesResp?.data ?? [];
+
+  const { data: studentsResp, isFetching: searching } = useQuery({
+    queryKey: ['transport', 'assign-students', classId, search.trim()],
+    queryFn:  () => studentsApi.list({ classId, search: search.trim() || undefined, status: 'active', limit: 20 }),
+    enabled:  !!classId,
+    staleTime: 30_000,
+  });
+  const studentResults = studentsResp?.data ?? [];
+
+  function pickStudent(s) {
+    const cls = classList.find(c => (c.id ?? c._id) === classId);
+    setForm(f => ({
+      ...f,
+      studentId:    s.id ?? s._id,
+      studentName:  [s.firstName, s.middleName, s.lastName].filter(Boolean).join(' '),
+      studentClass: cls?.name ?? '',
+    }));
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -189,21 +218,43 @@ function AssignModal({ routes, onClose, onSave }) {
             </select>
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-700 mb-1">Student ID *</label>
-            <input value={form.studentId} onChange={e => set('studentId', e.target.value)} required
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono" />
+            <label className="block text-xs font-medium text-slate-700 mb-1">Class *</label>
+            <select value={classId} onChange={e => { setClassId(e.target.value); setSearch(''); setForm(f => ({ ...f, studentId: '', studentName: '', studentClass: '' })); }}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="">Select class…</option>
+              {classList.map(c => <option key={c.id ?? c._id} value={c.id ?? c._id}>{c.name}</option>)}
+            </select>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">Student Name</label>
-              <input value={form.studentName} onChange={e => set('studentName', e.target.value)}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">Class</label>
-              <input value={form.studentClass} onChange={e => set('studentClass', e.target.value)}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-700 mb-1">Student *</label>
+            {form.studentId && (
+              <div className="flex items-center justify-between gap-2 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm mb-2">
+                <span className="text-slate-800">{form.studentName} <span className="text-slate-500">· {form.studentClass}</span></span>
+                <button type="button" onClick={() => setForm(f => ({ ...f, studentId: '', studentName: '', studentClass: '' }))}
+                  className="text-xs text-blue-700 hover:underline">Change</button>
+              </div>
+            )}
+            <input
+              value={search} onChange={e => setSearch(e.target.value)}
+              disabled={!classId}
+              placeholder={classId ? 'Search by name or admission number' : 'Choose a class first'}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400"
+            />
+            {classId && (
+              <div className="mt-1 max-h-48 overflow-y-auto border border-slate-200 rounded-lg divide-y divide-slate-100">
+                {searching && <p className="px-3 py-2 text-xs text-slate-400">Searching…</p>}
+                {!searching && studentResults.length === 0 && (
+                  <p className="px-3 py-2 text-xs text-slate-400">No active students match in this class.</p>
+                )}
+                {studentResults.map(s => (
+                  <button key={s.id ?? s._id} type="button" onClick={() => pickStudent(s)}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex justify-between gap-2">
+                    <span className="text-slate-800">{[s.firstName, s.lastName].filter(Boolean).join(' ')}</span>
+                    <span className="font-mono text-xs text-slate-500">{s.admissionNumber ?? '—'}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -228,7 +279,7 @@ function AssignModal({ routes, onClose, onSave }) {
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-slate-200 hover:bg-slate-50">Cancel</button>
-            <button type="submit" disabled={saving}
+            <button type="submit" disabled={saving || !form.studentId || !form.routeId}
               className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
               {saving ? 'Assigning…' : 'Assign'}
             </button>
