@@ -165,7 +165,7 @@ const SECTIONS = [
       },
       {
         q: 'How do I bulk-select and act on multiple students?',
-        a: 'Click the checkbox on any row to select it (or the header checkbox to select the whole page). A bulk action bar appears with options to Deactivate or Permanently Delete selected students. Permanent delete requires admin role and an explicit confirmation.',
+        a: 'Click the checkbox on any row to select it (or the header checkbox to select the whole page). A bulk action bar appears with options to Deactivate or Permanently Delete selected students. Permanent delete needs an admin-level role or the Permanently Delete Students permission, and an explicit confirmation.',
       },
       {
         q: 'How do I mark a student as transferred or graduated?',
@@ -177,7 +177,7 @@ const SECTIONS = [
       },
       {
         q: 'How do I set up a parent portal account?',
-        a: "From the student's profile → Portal tab. If the student has separate Mother and Father details on file, you'll see two independent cards — 'Mother's Portal Account' and 'Father's Portal Account' — each created and reset on its own, so no one has to share a password to see their child's information. A student with only the older, single combined parent contact shows one 'Create Parent Account' button instead. Either way, parents see their child's attendance, grades, fees, report cards, and can message teachers.",
+        a: "From the student's profile → Portal tab. If the student has separate Mother and Father details on file, you'll see two independent cards — 'Mother's Portal Account' and 'Father's Portal Account' — each created and reset on its own, so no one has to share a password to see their child's information. A student with only a single, combined parent contact on file has no separate Mother or Father cards. Either way, parents see their child's attendance, grades, fees, report cards, and can message teachers.",
       },
       {
         q: 'Can I grant portal access to many students at once?',
@@ -287,7 +287,7 @@ const SECTIONS = [
       },
       {
         q: 'My class has multiple streams (e.g. Year 3A and 3B) — why do I have to pick one before I can mark attendance?',
-        a: 'Each stream runs its own timetable — often a different time and sometimes a different room — so it needs its own register, not one list merging every stream together. The stream picker only appears when a class genuinely has more than one stream; a class with just one (or none) works exactly as before, no extra step. If you teach today\'s scheduled period for that class/stream, a small chip near the top of the page shows the matching subject, period, and time from your timetable — purely a confirmation that you\'re marking the right register, it never blocks you from taking attendance outside that exact period.',
+        a: 'Each stream runs its own timetable — often a different time and sometimes a different room — so it needs its own register, not one list merging every stream together. The stream picker only appears when a class genuinely has more than one stream; a class with just one (or none) works exactly as before, no extra step. If you teach today\'s scheduled period for that class/stream, a small chip near the top of the page shows the matching subject and period from your timetable — purely a confirmation that you\'re marking the right register, it never blocks you from taking attendance outside that exact period.',
       },
       {
         q: 'Can I mark the whole class present at once?',
@@ -337,7 +337,7 @@ const SECTIONS = [
       },
       {
         q: 'Does picking a subject fill in the teacher automatically?',
-        a: "Yes, if that subject already has a teaching assignment for the class (and stream, if it has one) — the teacher and their preferred room are filled in automatically, with a note confirming the auto-fill. You can still change either manually. If no assignment is found, you'll be prompted to fill it in yourself.",
+        a: "Yes, if that subject already has a teaching assignment for the class (and stream, if it has one) — the teacher and their preferred room are filled in automatically, with a note confirming the auto-fill. You can still change either manually. If no assignment is found, the form says so and you fill in the teacher and room yourself.",
       },
       {
         q: 'Can I record an assistant or co-teacher on a lesson?',
@@ -719,7 +719,7 @@ const SECTIONS = [
       },
       {
         q: 'Can a staff member have multiple roles?',
-        a: 'Yes. In Settings → Users → open the user → assign multiple roles (e.g. Teacher + Finance Officer). The user sees all modules accessible to any of their combined roles.',
+        a: 'Yes. A user has one main role and can also hold additional roles. The sidebar combines the modules that all of their roles allow. Check a user's roles in Settings → Users.',
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
