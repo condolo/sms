@@ -736,6 +736,15 @@ function _validatePolicyShape(data) {
    payment may land on to still qualify. Returns null when the fee
    structure carries no dueDate at all (nothing to count back from), in
    which case Early Payment simply never applies to that invoice. */
+/* Term fees are due by the end of the term's first week: the seventh day
+   counting the term's start date as day 1. UTC arithmetic keeps the date
+   exact regardless of the server's timezone. */
+function _termDueDate(termStartDate) {
+  const d = new Date(`${termStartDate}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 6);
+  return d.toISOString().slice(0, 10);
+}
+
 function _computeEarlyPaymentDeadline(dueDate, daysBeforeDue) {
   if (!dueDate) return null;
   const d = new Date(dueDate);
@@ -1011,17 +1020,29 @@ async function _runTermBilling(req, res, { dryRun }) {
   const discounts = billable.length
     ? await _resolveAutoDiscounts(schoolId, ctx, billable.map(b => b.studentId))
     : new Map();
+  // Fees for a term are due by the end of its first week (see _termDueDate).
+  // Early-payment eligibility is stamped against that date, exactly as the
+  // fee-structure path does; POST /payments applies it later if paid in time.
+  const dueDate = _termDueDate(term.startDate);
+  const earlyPaymentPolicy = await tenantModel('discount_policies', ctx)
+    .findOne({ schoolId, type: 'early_payment', active: true }).lean();
+  const earlyPaymentDeadline = earlyPaymentPolicy
+    ? _computeEarlyPaymentDeadline(dueDate, earlyPaymentPolicy.daysBeforeDue)
+    : null;
+
   const rows = billable.map(b => {
     const discountPct = discounts.get(b.studentId) ?? 0;
     const totals = _calcInvoiceTotals(b.lines, discountPct);
-    return { ...b, discountPct, totals };
+    const earlyPaymentEligible = !!earlyPaymentDeadline && earlyPaymentPolicy.flatPct > discountPct;
+    return { ...b, discountPct, totals, earlyPaymentEligible };
   });
 
   if (dryRun) {
     return ok(res, {
       dryRun: true,
       termId: period.termId,
-      billable: rows.map(r => ({ studentId: r.studentId, studentName: r.studentName, lines: r.lines, discountPct: r.discountPct, total: r.totals.total, warnings: r.warnings })),
+      dueDate,
+      billable: rows.map(r => ({ studentId: r.studentId, studentName: r.studentName, lines: r.lines, discountPct: r.discountPct, total: r.totals.total, warnings: r.warnings, earlyPaymentDeadline: r.earlyPaymentEligible ? earlyPaymentDeadline : null })),
       skipped,
     });
   }
@@ -1044,12 +1065,18 @@ async function _runTermBilling(req, res, { dryRun }) {
         academicYearId:    period.academicYearId,
         termId:            period.termId,
         termBillingTermId: period.termId,
+        dueDate,
         discountPct:       r.discountPct,
         currency,
         ...r.totals,
         amountPaid:        0,
         balance:           r.totals.total,
         status:            'unpaid',
+        ...(r.earlyPaymentEligible ? {
+          earlyPaymentPct:      earlyPaymentPolicy.flatPct,
+          earlyPaymentDeadline,
+          earlyPaymentApplied:  false,
+        } : {}),
         createdBy:         userId,
         updatedBy:         userId,
       });

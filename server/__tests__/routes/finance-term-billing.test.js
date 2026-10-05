@@ -118,6 +118,8 @@ describe('POST /term-billing/preview', () => {
     const res = await supertest(buildApp()).post('/api/finance/term-billing/preview').send({ termId: 'term_1' });
     expect(res.status).toBe(200);
     expect(res.body.data.dryRun).toBe(true);
+    // The term starts 1 Sep 2026: fees are due by the end of its first week (7th day).
+    expect(res.body.data.dueDate).toBe('2026-09-07');
     const stu1 = res.body.data.billable.find(b => b.studentId === 'stu1');
     expect(stu1.lines).toEqual([
       { description: 'Transport — Zone A (one-way)', quantity: 1, unitPrice: 29000, feeType: 'transport' },
@@ -132,6 +134,25 @@ describe('POST /term-billing/preview', () => {
     expect(res.body.data.billable.find(b => b.studentId === 'stu3')).toBeUndefined();
     const skip = res.body.data.skipped.find(s => s.studentId === 'stu3');
     expect(skip.reasons[0]).toMatch(/no one-way or two-way fare/);
+  });
+});
+
+describe('POST /term-billing/generate — due date and early payment', () => {
+  test('each term invoice is due by the end of the term\'s first week', async () => {
+    await supertest(buildApp()).post('/api/finance/term-billing/generate').send({ termId: 'term_1' });
+    const inv = mockStores.invoices._docs().find(d => d.studentId === 'stu1');
+    expect(inv.dueDate).toBe('2026-09-07');
+    expect(inv.earlyPaymentApplied).toBeUndefined();
+  });
+
+  test('an active early-payment policy stamps the deadline against the term due date', async () => {
+    mockStores.discount_policies = mockFakeCollection([
+      { id: 'dp1', schoolId: SCHOOL, type: 'early_payment', active: true, flatPct: 5, daysBeforeDue: 3 },
+    ]);
+    const res = await supertest(buildApp()).post('/api/finance/term-billing/generate').send({ termId: 'term_1' });
+    expect(res.status).toBe(200);
+    const inv = mockStores.invoices._docs().find(d => d.studentId === 'stu1');
+    expect(inv).toMatchObject({ earlyPaymentPct: 5, earlyPaymentDeadline: '2026-09-04', earlyPaymentApplied: false });
   });
 });
 

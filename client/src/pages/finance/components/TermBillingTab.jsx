@@ -81,6 +81,12 @@ export default function TermBillingTab({ fmtCurrency, canCreate }) {
       {preview && (
         <section className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
           <h3 className="text-sm font-semibold text-slate-800">Will be billed ({preview.billable.length})</h3>
+          {preview.dueDate && (
+            <p className="text-xs text-slate-600">
+              Due by <span className="font-medium">{preview.dueDate}</span> (end of the term's first week).
+              Early-payment deadlines are shown per student where a policy applies.
+            </p>
+          )}
           {preview.billable.length === 0 ? (
             <p className="text-xs text-slate-400">No student would be billed for this term.</p>
           ) : (

@@ -20,7 +20,8 @@ Transport and extra-curricular charges now reach the student's invoice. Before t
 
 **Decisions and limits (see DEVELOPER_GUIDE "Term billing")**
 - Generation is run by an admin for a chosen term, not on a timer. A scheduled run needs a decision on timing.
-- Auto-discounts apply as they do for fee structures. Early-payment eligibility does not, because a term has no due date to measure it from.
+- Auto-discounts and early-payment eligibility apply as they do for fee structures.
+- Term invoices are due by the end of the term's first week: the seventh day counting the term's start date as day 1. Early-payment deadlines are measured from that date.
 - A change after a run (a new enrolment, a changed fare) is not re-billed for the same term.
 - Enrolment and activity records are copied into the invoice's lines, so a later amount change does not alter an invoice already created.
 
