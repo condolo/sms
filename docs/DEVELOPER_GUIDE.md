@@ -6204,4 +6204,10 @@ A subject's final score is the weighted average over the assessment types that h
 
 **Bulk route assignment:** `POST /api/transport/assignments/bulk` puts several students of one class on one route with one fare type, pickup and dates. Each student still gets their own `transport_assignments` record. Checks run before any write: the route and fare exist, every student is an active student of this school, duplicates are skipped and reported, and the remaining seats cover the batch. The Assign form in Transport uses it.
 
-**Tests:** `__tests__/utils/term-billing.test.js` (rules), `__tests__/routes/finance-term-billing.test.js` (preview, generate, idempotency, refusals, bursar early payment), `__tests__/routes/transport-bulk-assign.test.js` (bulk assignment).
+**Notifications and reminders (v5.169.1):**
+- Term invoices dispatch `invoice_created` through `_notifyInvoiceCreated`, so the school's notification settings decide whether guardians hear about them.
+- The overdue job (`utils/invoice-overdue-cron.js`) skips term invoices (`termBillingTermId` set) unless `invoice_reminder_config.includeTermBilling` is true. The default is false. The school enables it in Finance → Fee Settings → Overdue Invoice Reminders.
+
+**Open decision: permissions for the new finance actions.** Term billing, early-payment confirmation and activity writes are still guarded by the general finance `create` and `update` rights. Introducing sub-permissions (`finance__term_billing`, `finance__early_payment`, `finance__activities`) needs a decision first. `hasExplicitSubGrant` refuses a role that has no explicit grant, so the change would stop roles that work today. Also, `_actorEffectiveAllows` (settings.js) falls back to module rights, so the grant ceiling must treat these keys as explicit too. Otherwise a role could grant rights it doesn't explicitly hold.
+
+**Tests:** `__tests__/utils/term-billing.test.js` (rules), `__tests__/routes/finance-term-billing.test.js` (preview, generate, idempotency, refusals, bursar early payment, invoice_created), `__tests__/routes/transport-bulk-assign.test.js` (bulk assignment), `__tests__/invoice-overdue-cron.test.js` (term reminders off by default, opt-in).

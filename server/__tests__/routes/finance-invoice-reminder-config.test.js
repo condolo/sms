@@ -74,7 +74,7 @@ test('GET with no saved config returns the documented defaults', async () => {
   const res = await supertest(buildApp()).get('/api/finance/invoice-reminder-config');
   expect(res.status).toBe(200);
   expect(res.body.data).toEqual({
-    enabled: true, beforeDueDays: 3, onDueDate: true, afterDueIntervalDays: 4,
+    enabled: true, beforeDueDays: 3, onDueDate: true, afterDueIntervalDays: 4, includeTermBilling: false,
   });
 });
 
@@ -84,7 +84,7 @@ test('PUT persists a partial update and merges it over the defaults on the next 
   });
   expect(putRes.status).toBe(200);
   expect(putRes.body.data).toEqual({
-    enabled: true, beforeDueDays: 7, onDueDate: true, afterDueIntervalDays: 10,
+    enabled: true, beforeDueDays: 7, onDueDate: true, afterDueIntervalDays: 10, includeTermBilling: false,
   });
 
   const getRes = await supertest(buildApp()).get('/api/finance/invoice-reminder-config');

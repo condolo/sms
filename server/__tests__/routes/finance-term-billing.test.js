@@ -163,6 +163,18 @@ describe('POST /term-billing/generate — due date and early payment', () => {
   });
 });
 
+describe('invoice_created notice for term invoices', () => {
+  test('each term invoice dispatches invoice_created through the school\'s notification settings', async () => {
+    const { notifyGuardiansForStudents } = require('../../utils/notify-students');
+    notifyGuardiansForStudents.mockClear();
+    await supertest(buildApp()).post('/api/finance/term-billing/generate').send({ termId: 'term_1' });
+    await new Promise(r => setImmediate(r)); // the notice is sent without being awaited
+    const keys = notifyGuardiansForStudents.mock.calls.map(c => c[0].eventKey);
+    expect(keys).toEqual(['invoice_created']);
+    expect(notifyGuardiansForStudents.mock.calls[0][0].items[0].studentId).toBe('stu1');
+  });
+});
+
 describe('bursar early payment (term invoices)', () => {
   let invoiceId;
   beforeEach(async () => {

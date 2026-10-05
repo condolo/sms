@@ -6,6 +6,15 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.169.1] — 2026-10-05 — fix(finance): settings audit follow-ups for term billing
+
+Following a review of the settings, permissions and notification routes against finance:
+
+- **Term invoices are excluded from guardian reminders by default.** The overdue job reminds on any unpaid invoice with a due date, and term invoices now have one, so they would have been emailed without the school choosing it. A new setting, "Also remind guardians about term invoices", in Finance → Fee Settings → Overdue Invoice Reminders turns it on (`includeTermBilling`, default false).
+- **Term invoices send the `invoice_created` notice** through the school's notification settings, as a manually created invoice does.
+- **The early-payment policy form says which invoices it governs:** fee-structure invoices are paid automatically; term invoices are confirmed by the bursar, with the deadline on the term's first day.
+- Permissions for term billing, early-payment confirmation and activities are **not** changed in this release. They need a decision on who holds them after deployment; see the developer guide.
+
 ## [v5.169.0] — 2026-10-05 — feat(finance): term billing for transport and extra-curricular
 
 Transport and extra-curricular charges now reach the student's invoice. Before this, a route's fee was stored but never billed, a route could carry only one fee, and extra-curricular activities had no catalogue, prices, or enrolments.

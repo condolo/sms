@@ -30,6 +30,9 @@ const DEFAULT_REMINDER_CONFIG = {
   beforeDueDays:        3,
   onDueDate:            true,
   afterDueIntervalDays: 4,
+  // Term invoices (Term Billing) are excluded unless the school opts in, so
+  // guardians are never emailed about them without the school choosing to.
+  includeTermBilling:   false,
 };
 
 function _todayKenyaDate() {
@@ -85,6 +88,9 @@ async function runInvoiceOverdueCheck() {
         schoolId: school.id,
         status:   { $in: ['unpaid', 'partial'] },
         dueDate:  { $ne: null },
+        // null matches a missing field too, so this keeps term invoices out
+        // unless the school has opted in (includeTermBilling).
+        ...(cfg.includeTermBilling ? {} : { termBillingTermId: null }),
       }).select('id studentId invoiceNumber total currency balance dueDate').lean();
       if (!candidates.length) continue;
 

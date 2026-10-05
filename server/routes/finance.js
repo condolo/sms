@@ -567,12 +567,14 @@ const DEFAULT_INVOICE_REMINDER_CONFIG = {
   beforeDueDays:        3,     // 0 disables the pre-due reminder
   onDueDate:            true,
   afterDueIntervalDays: 4,     // 0 disables recurring post-due reminders
+  includeTermBilling:   false, // term invoices get reminders only if the school opts in
 };
 const InvoiceReminderConfigSchema = z.object({
   enabled:              z.boolean().optional(),
   beforeDueDays:        z.number().int().min(0).max(30).optional(),
   onDueDate:            z.boolean().optional(),
   afterDueIntervalDays: z.number().int().min(0).max(30).optional(),
+  includeTermBilling:   z.boolean().optional(),
 });
 function _mergeInvoiceReminderConfig(saved) {
   return {
@@ -580,6 +582,7 @@ function _mergeInvoiceReminderConfig(saved) {
     beforeDueDays:        saved?.beforeDueDays         ?? DEFAULT_INVOICE_REMINDER_CONFIG.beforeDueDays,
     onDueDate:            saved?.onDueDate             ?? DEFAULT_INVOICE_REMINDER_CONFIG.onDueDate,
     afterDueIntervalDays: saved?.afterDueIntervalDays  ?? DEFAULT_INVOICE_REMINDER_CONFIG.afterDueIntervalDays,
+    includeTermBilling:   saved?.includeTermBilling    ?? DEFAULT_INVOICE_REMINDER_CONFIG.includeTermBilling,
   };
 }
 
@@ -1056,9 +1059,10 @@ async function _runTermBilling(req, res, { dryRun }) {
   const termLabel = term.name || 'this term';
 
   const createdIds = [];
+  const createdInvoices = [];
   for (const r of rows) {
     try {
-      await Invoices.create({
+      const inv = await Invoices.create({
         id:                uuidv4(),
         schoolId,
         invoiceNumber:     await nextInvoiceNumber(schoolId),
@@ -1086,6 +1090,7 @@ async function _runTermBilling(req, res, { dryRun }) {
         updatedBy:         userId,
       });
       createdIds.push(r.studentId);
+      createdInvoices.push(inv.toObject ? inv.toObject() : inv);
     } catch (err) {
       if (err?.code === 11000) {
         skipped.push({ studentId: r.studentId, studentName: r.studentName, reasons: ['Already billed for this term (a run at the same time created it first)'] });
@@ -1093,6 +1098,12 @@ async function _runTermBilling(req, res, { dryRun }) {
         throw err;
       }
     }
+  }
+
+  // invoice_created: the same notice a manually created invoice sends. It
+  // follows the school's notification settings (off means nothing is sent).
+  for (const inv of createdInvoices) {
+    _notifyInvoiceCreated(req, inv).catch(err => console.error('[finance/term-billing notify]', err));
   }
 
   AuditService.log({ action: 'finance.term_billing_generated', actor: req.jwtUser, schoolId, target: { type: 'term', id: period.termId, label: termLabel }, details: { created: createdIds.length, skipped: skipped.length }, req });

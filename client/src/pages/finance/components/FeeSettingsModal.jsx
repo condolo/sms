@@ -167,6 +167,12 @@ function PolicyForm({ initial, onCancel, onSave, saving }) {
               <span>day{form.daysBeforeDue === 1 ? '' : 's'} or more before the due date</span>
             </div>
           )}
+          {isEarlyPayment && (
+            <p className="text-[11px] text-slate-500">
+              This applies to fee-structure invoices, paid automatically when the payment lands before the deadline.
+              Term invoices (Term Billing) use a different rule: the bursar confirms early payment, and the deadline is the term's first day.
+            </p>
+          )}
         </div>
       )}
 
@@ -367,6 +373,15 @@ function ReminderScheduleSection() {
               onChange={e => set('afterDueIntervalDays', Number(e.target.value))} className={fCls} />
             <span>day{form.afterDueIntervalDays === 1 ? '' : 's'} while still unpaid (0 to disable)</span>
           </div>
+
+          <label className="flex items-start gap-2 text-sm text-slate-700 cursor-pointer">
+            <input type="checkbox" checked={!!form.includeTermBilling} onChange={e => set('includeTermBilling', e.target.checked)}
+              className="h-3.5 w-3.5 mt-0.5 rounded border-slate-300 text-violet-600 focus:ring-violet-400" />
+            <span>
+              Also remind guardians about term invoices (Term Billing)
+              <span className="block text-[11px] text-slate-500">Off by default: term invoices are not emailed to guardians until you turn this on.</span>
+            </span>
+          </label>
         </div>
       )}
 

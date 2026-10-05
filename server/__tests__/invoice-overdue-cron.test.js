@@ -13,6 +13,8 @@ function makeStore(seed = []) {
   return {
     find: (filter) => chain(seed.filter(d => {
       return Object.entries(filter).every(([k, v]) => {
+        // Mongo: { field: null } matches a missing field as well as an explicit null.
+        if (v === null) return d[k] === null || d[k] === undefined;
         if (v && typeof v === 'object' && '$in' in v) return v.$in.includes(d[k]);
         if (v && typeof v === 'object' && ('$lt' in v || '$ne' in v)) {
           if ('$ne' in v && d[k] === v.$ne) return false;
@@ -76,6 +78,24 @@ test('3 days before due (default schedule) fires invoice_due_soon, not invoice_o
   const call = mockNotify.mock.calls[0][0];
   expect(call.eventKey).toBe('invoice_due_soon');
   expect(call.items[0].studentId).toBe('stu_1');
+});
+
+test('term invoices get no guardian reminder by default (the school has not opted in)', async () => {
+  mockStores.invoices = makeStore([
+    { id: 'term1', schoolId: SCHOOL_A, studentId: 'stu_1', status: 'unpaid', invoiceNumber: 'INV-T', total: 35000, balance: 35000, currency: 'KES', dueDate: dateOffset(0), termBillingTermId: 'term_1' },
+  ]);
+  await runInvoiceOverdueCheck();
+  expect(mockNotify).not.toHaveBeenCalled();
+});
+
+test('term invoices are reminded once the school opts in (includeTermBilling)', async () => {
+  mockStores.invoices = makeStore([
+    { id: 'term1', schoolId: SCHOOL_A, studentId: 'stu_1', status: 'unpaid', invoiceNumber: 'INV-T', total: 35000, balance: 35000, currency: 'KES', dueDate: dateOffset(0), termBillingTermId: 'term_1' },
+  ]);
+  mockStores.invoice_reminder_config = makeStore([{ schoolId: SCHOOL_A, includeTermBilling: true }]);
+  await runInvoiceOverdueCheck();
+  expect(mockNotify).toHaveBeenCalledTimes(1);
+  expect(mockNotify.mock.calls[0][0].items[0].inAppBody).toContain('INV-T');
 });
 
 test('on the due date fires invoice_overdue with "due today" wording', async () => {
