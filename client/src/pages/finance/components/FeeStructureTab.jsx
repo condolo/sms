@@ -81,6 +81,7 @@ export default function FeeStructureTab({ fmtCurrency, canCreate }) {
             const isExpanded = expanded === fs.id;
             const result     = genResult?.id === fs.id ? genResult : null;
             const period     = periodLabel(fs);
+            const generated  = (fs.generation?.students ?? 0) > 0;
             return (
               <div key={fs.id ?? fs._id} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
                 {/* Header row */}
@@ -96,7 +97,7 @@ export default function FeeStructureTab({ fmtCurrency, canCreate }) {
                     </p>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    {canCreate && (
+                    {canCreate && !generated && (
                       <button
                         onClick={() => generate(fs)}
                         disabled={!!generating}
@@ -109,6 +110,23 @@ export default function FeeStructureTab({ fmtCurrency, canCreate }) {
                         }
                         Generate Invoices
                       </button>
+                    )}
+                    {canCreate && generated && (
+                      <>
+                        <span className="flex items-center gap-1.5 bg-slate-100 text-slate-500 text-xs font-medium px-3 py-1.5 rounded-lg">
+                          <Zap size={12} />
+                          Invoices generated ({fs.generation.students})
+                        </span>
+                        <button
+                          onClick={() => generate(fs)}
+                          disabled={!!generating}
+                          className="flex items-center gap-1.5 border border-emerald-600 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 text-xs font-medium px-3 py-1.5 rounded-lg transition"
+                          title="Invoice active students who do not yet have one from this structure"
+                        >
+                          {generating === fs.id && <Loader2 size={12} className="animate-spin" />}
+                          Generate for new students
+                        </button>
+                      </>
                     )}
                     <button
                       onClick={() => setExpanded(isExpanded ? null : fs.id)}
@@ -128,6 +146,11 @@ export default function FeeStructureTab({ fmtCurrency, canCreate }) {
                 </div>
 
                 {/* Generation result */}
+                {!result && generated && fs.generation.lastGeneratedAt && (
+                  <p className="mx-5 mb-3 text-xs text-slate-500">
+                    {fs.generation.students} invoice{fs.generation.students !== 1 ? 's' : ''} created on {new Date(fs.generation.lastGeneratedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })} for this fee structure.
+                  </p>
+                )}
                 {result && (
                   <div className={`mx-5 mb-3 px-3 py-2 rounded-lg text-xs font-medium ${result.error ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}>
                     {result.error

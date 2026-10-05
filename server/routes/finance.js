@@ -870,7 +870,19 @@ router.get('/fee-structures', authMiddleware, PLAN, MODGATE, rbac('finance', 're
     const { schoolId } = req.jwtUser;
     const FeeStructures = tenantModel('fee_structures', tenantContext(req));
     const docs = await FeeStructures.find({ schoolId }).sort({ createdAt: -1 }).lean();
-    return ok(res, docs);
+
+    // Generation summary per structure: how many students have an invoice from
+    // it, and when it was last run. The tab uses this to show "Invoices generated"
+    // after a reload, and to offer "Generate for new students".
+    const ids = docs.map(d => d.id).filter(Boolean);
+    const summaries = ids.length
+      ? await tenantModel('invoices', tenantContext(req)).aggregate([
+          { $match: { schoolId, feeStructureId: { $in: ids } } },
+          { $group: { _id: '$feeStructureId', students: { $addToSet: '$studentId' }, lastAt: { $max: '$createdAt' } } },
+        ])
+      : [];
+    const byId = Object.fromEntries(summaries.map(s => [s._id, { students: s.students.length, lastGeneratedAt: s.lastAt ?? null }]));
+    return ok(res, docs.map(d => ({ ...d, generation: byId[d.id] ?? { students: 0, lastGeneratedAt: null } })));
   } catch (err) {
     console.error('[finance GET /fee-structures]', err);
     return E.serverError(res);
