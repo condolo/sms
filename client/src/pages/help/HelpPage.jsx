@@ -107,23 +107,39 @@ const SECTIONS = [
     articles: [
       {
         q: 'How do I add a subject?',
-        a: 'Go to Subjects → "Add Subject". Enter the subject name, code, and assign the teacher responsible. Subjects must be linked to classes before they appear in the timetable and markbook.',
+        a: 'Go to Subjects → Catalog. Add the subject under its department, with a name and a code. The code must be unique in your school. The subject then appears in the catalogue, and you add it to each class in the Curriculum tab.',
       },
       {
-        q: 'How do subjects link to the timetable and grades?',
-        a: 'A subject assigned to a class drives both the timetable (which periods it occupies) and the markbook (which assessment components exist for it). Deleting a subject will affect both.',
+        q: 'How do I add a subject to a class?',
+        a: 'Go to Subjects → Curriculum. Pick the class. The left panel lists the subjects available for that class\'s section. Click a subject to add it to the class\'s curriculum. Use the compulsory switch on a subject to mark it compulsory for that class. You can also bulk-assign subjects.',
+      },
+      {
+        q: 'What is a compulsory subject?',
+        a: 'A subject marked compulsory for a class. In a class that has streams, a compulsory subject must be assigned to each stream separately, so each stream has its own teacher for it. Electives can be assigned at class level.',
+      },
+      {
+        q: 'How do students take a subject?',
+        a: 'Go to Subjects → Enrollment. Pick a class, then a subject from its curriculum. Add individual students by search, or enrol the whole class at once. Remove a student from a subject from the same screen.',
+      },
+      {
+        q: 'What do the Subjects Warnings mean?',
+        a: 'Subjects → Warnings compares how many subjects each student is enrolled in against the minimum and maximum set for their class or section. The Timetabler sets these rules. A class with no rule shows "No rule configured", so no warning is given for it. Correct the enrolment, or ask the Timetabler to review the rule.',
+      },
+      {
+        q: 'What happens when I delete a subject?',
+        a: 'The subject is deactivated, not erased. It stops appearing in the catalogue for new use, and its existing records are kept, so past marks and history are not lost.',
       },
       {
         q: 'Can the same subject be taught by different teachers in different classes?',
-        a: 'Yes. Create the subject once, then assign it to each class with the appropriate teacher. Each class-subject link is independent.',
+        a: 'Yes. The subject is one catalogue entry. Each class curriculum links it separately, and the teaching assignment for each class (and stream) names its teacher. Each class-subject link is independent.',
       },
       {
         q: 'What is a class-subject?',
-        a: 'A class-subject is the combination of a subject and a class — e.g. Mathematics in Form 3A. This is the unit that holds the syllabus, timetable slots, and the gradebook for that group.',
+        a: 'A class-subject is one subject in one class, for example Mathematics in Form 3A. It is the unit that enrolments and teaching assignments attach to.',
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Subjects & Departments — see the subject list\n• Create Subject / Department — add a new subject\n• Edit Subject — change name, code, or teacher assignment\n• Delete Subject — permanently remove a subject\nA role with none of these shows a plain "no access" message instead of the Subjects page. Your role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Subjects & Departments — see the catalogue\n• Create Subject / Department — add a subject or department\n• Edit Subject — change name, code, department or teacher\n• Delete Subject — deactivate a subject (its records are kept)\nA role with none of these shows a plain "no access" message instead of the Subjects page. Your role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -187,15 +203,19 @@ const SECTIONS = [
     articles: [
       {
         q: 'How do I add a teacher?',
-        a: 'Go to Teachers → "Add Teacher". Enter their name, email, subject specialisation, and qualifications. A user account and welcome email with login instructions are created automatically.',
+        a: 'Go to HR and click "Add Staff", then fill in the staff member\'s details. This creates the staff record only. It does not create a login. To give them a login, open their record in HR and choose Create Login Account. Msingi creates the account with a temporary password and emails them a welcome message. They must set a new password at first sign-in. You can also invite a user from Settings → Users and assign their role there.',
       },
       {
         q: 'How do I import teachers in bulk?',
-        a: 'Go to Teachers → Import → download the CSV template → fill in your staff data → upload. Each imported teacher who does not already have a login gets one created automatically, with a welcome email.',
+        a: 'Use the teacher import (download the CSV template, fill in the staff data, then upload). Each imported teacher who does not already have a login gets one created automatically. Check the import result for any rows that were skipped or had errors.',
       },
       {
         q: 'How do I assign a teacher to a class or subject?',
-        a: 'Teaching assignments (which teacher delivers which subject to which class) are managed from Subjects → the class-subject link, or from Timetable when building the schedule. A teacher\'s profile shows all their current assignments.',
+        a: 'Open the teacher\'s profile and go to the Assignments tab. Add the class, subject and, where the class has streams, the stream they teach. The tab lists all their current assignments, and each one can be removed there. The subject must already be in that class\'s curriculum (Subjects → Curriculum).',
+      },
+      {
+        q: 'Can a teacher be assigned to several classes and streams?',
+        a: 'Yes. Each assignment is one class, subject and stream. A teacher can have as many as needed. A compulsory subject in a class with streams needs an assignment for each stream.',
       },
       {
         q: 'What can a teacher edit on their own profile?',
@@ -203,7 +223,7 @@ const SECTIONS = [
       },
       {
         q: 'How do I deactivate a teacher who has left the school?',
-        a: "Open the teacher's profile → Edit → set Status to \"Inactive\" → Save. Their login is disabled and they drop off active class/subject assignment pickers, but their historical records (marks entered, attendance taken, lesson coverage) are preserved.",
+        a: "Open the teacher's profile and set their status to Inactive (or On leave, or Terminated, where the school uses those). Their record is kept, and so are the marks, attendance and lesson coverage they recorded. Deleting a teacher from the list does the same: it marks the record inactive and keeps its history. Their login is not changed by this, so disable the login separately in Settings → Users if they should no longer sign in.",
       },
       {
         q: 'How do I filter and search teachers?',
@@ -211,7 +231,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Teacher List — see the staff roster\n• View Teacher Profile — open a teacher\'s full record\n• Add Teacher — create a new staff account\n• Edit Teacher — update an existing record\n• Delete Teacher — permanently remove a record\n• Export Teachers (CSV) — download the staff list\n• Import Teachers (CSV) — bulk-create staff accounts from a spreadsheet\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Teacher List — see the staff roster\n• View Teacher Profile — open a teacher\'s full record\n• Add Teacher — create a new staff account\n• Edit Teacher — update an existing record\n• Delete Teacher — mark a record inactive (its history is kept)\n• Export Teachers (CSV) — download the staff list\n• Import Teachers (CSV) — bulk-create staff accounts from a spreadsheet\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -359,23 +379,27 @@ const SECTIONS = [
     articles: [
       {
         q: 'How do I schedule an online class?',
-        a: "Go to eLearning → Online Sessions → 'Schedule Session'. Choose the audience (class, student, or parent), platform (Zoom or Google Meet), date, time, and duration, then click Schedule. A calendar event is created automatically.",
+        a: "Go to eLearning → Online Sessions → Schedule Session. Step 1 chooses the audience. Step 2 gives the details: the platform, date, time and duration. Platforms are Google Meet and Zoom. Zoom can be chosen only when the school's Zoom account is configured; otherwise it is greyed out.",
       },
       {
-        q: 'Do I need to connect Zoom or Google to Msingi?',
-        a: 'No. Save your personal meeting room link once in Profile → Online Meeting Links. That link is used every time — no API connection, tokens, or sign-in required.',
+        q: 'Do I need to connect Google or Zoom to Msingi?',
+        a: 'It depends on what you use. Online Sessions does not need a sign-in: it uses the meeting link you saved in Profile → Online Meeting Links. Google Classroom courses and scheduling Google Meet through Google Calendar need a Google Workspace connection, using "Connect Google Classroom" or "Connect Google Meet". Zoom sessions use the school\'s Zoom account, which must be configured first.',
       },
       {
         q: 'Where do students see scheduled sessions?',
-        a: 'In the school calendar as "Online Class" events with a Join button. Students also see Join buttons in their Student Portal dashboard when Emergency Online Learning Mode is active.',
+        a: 'Session lists are shown to staff who hold the eLearning read permission. Students see Join buttons on their Student Portal dashboard when Emergency Online Learning Mode is switched on.',
       },
       {
         q: 'Can I cancel a session?',
-        a: "Yes. Go to eLearning → Online Sessions → find the upcoming session → click × (cancel). This removes the session and its calendar event.",
+        a: 'Yes. A cancelled session no longer appears in the list of upcoming sessions.',
       },
       {
         q: "What if I haven't saved my meeting link yet?",
-        a: "The scheduling modal shows a yellow warning. Click 'Add it in Profile →' to save your link first. You must have a meeting link saved before scheduling sessions.",
+        a: "Sessions that use your own link need that link saved in Profile → Online Meeting Links first. The scheduling form warns you if it is missing, and links to your profile to add it.",
+      },
+      {
+        q: 'What does the Google Classroom part of eLearning do?',
+        a: 'For a connected Google Classroom course, the eLearning page shows Classwork (assignments, questions and material), People (the enrolled students) and Grades. Students must be enrolled in the Google Classroom course for them to appear there.',
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
@@ -671,7 +695,7 @@ const SECTIONS = [
     articles: [
       {
         q: 'How do I add a staff member?',
-        a: 'Go to HR → "Add Staff". Enter their name, email, role, and department. A welcome email with login instructions is sent automatically. You can also bulk-import staff from a CSV.',
+        a: 'Go to HR → "Add Staff". Enter their name, email, role and department. This creates the staff record only. To give them a login, open the record and choose Create Login Account. Msingi then creates the account with a temporary password and emails them a welcome message with their credentials. They must set a new password at first sign-in. You can also bulk-import staff from a CSV.',
       },
       {
         q: 'Does teacher import create login accounts automatically?',
@@ -691,7 +715,7 @@ const SECTIONS = [
       },
       {
         q: 'How do I reset a staff password?',
-        a: 'Go to Settings → Users → find the staff member → "Reset Password". The staff member will be prompted to change it on their next login.',
+        a: 'Go to Settings → Users, open the user, and use the reset password action. You can enter a new password yourself or let Msingi generate one, then give it to the staff member securely.',
       },
       {
         q: 'Can a staff member have multiple roles?',
@@ -713,19 +737,15 @@ const SECTIONS = [
     articles: [
       {
         q: 'Who can I send messages to?',
-        a: 'Admins and teachers can message any role. Teachers can message students and parents in their classes. Parents can reply to staff messages. Students can message their teachers.',
+        a: 'When composing a message, choose a recipient group: Everyone, All Teachers, All Parents, All Students, or All Staff (all non-admin staff roles). You can also choose an individual person. Which people each sender can reach follows the Messages permissions your school has set.',
       },
       {
         q: 'Are messages private?',
-        a: 'Yes. Messages are only visible to the sender and recipient(s), except for staff holding the separate Delete Any Message (Moderation) permission, who can act on any conversation for safeguarding and compliance purposes.',
+        a: 'Messages are sent to the recipients you chose. Staff with the Delete Any Message (Moderation) permission can remove someone else\'s message, for safeguarding or compliance. Ask your school admin if you need that permission.',
       },
       {
-        q: 'Can I message an entire class at once?',
-        a: 'Yes. When composing a message, select "Class" as the recipient type and choose the class. All students or parents in that class receive the message.',
-      },
-      {
-        q: 'Will I be notified of new messages?',
-        a: 'An unread badge appears on the Messages icon in the sidebar. Email notifications depend on whether your school has configured SMTP in Settings.',
+        q: 'Can I message a whole group at once?',
+        a: 'Yes. Choose one of the group recipients (All Teachers, All Parents, All Students, All Staff or Everyone). The message is sent to every account in that group. To reach one class, choose the people in it individually.',
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
@@ -811,11 +831,11 @@ const SECTIONS = [
       },
       {
         q: 'When is it generated? Do I need to do anything?',
-        a: "No action needed from any staff member. It generates automatically every Saturday, in your school's own local time — there is no approval step, so it never adds work to a class teacher's week regardless of how many classes or students they have.",
+        a: 'No action is needed from staff. It is generated automatically from 1 pm on Saturday, Africa/Nairobi time. There is no approval step, so it adds no work to a class teacher.',
       },
       {
         q: 'How do parents and students see it?',
-        a: 'They are notified automatically by email and in-app the moment it\'s ready, with a "This Week\'s Snapshot" card on their dashboard. Every past week stays available — nothing is ever deleted.',
+        a: 'Parents and guardians are notified by email and in the app once a snapshot is ready, through the school\'s notification settings. Past weeks stay available.',
       },
       {
         q: 'How do staff view a class\'s snapshots?',
