@@ -224,6 +224,14 @@ const INDEXES = [
      Primary: class timetable view + conflict detection
      Note: field is 'day' (lowercase string), NOT 'dayOfWeek' */
   {
+    col: 'bell_schedules',
+    indexes: [
+      // Many schedules may share a section. Only a section's default (no classes) is unique.
+      { key: { schoolId: 1, section: 1 }, name: 'bell_school_section' },
+      { key: { schoolId: 1, section: 1 }, name: 'bell_section_default', unique: true, partialFilterExpression: { isDefault: true } },
+    ],
+  },
+  {
     col: 'timetable_published',
     indexes: [
       { key: { schoolId: 1, versionId: 1, classId: 1, day: 1 },   name: 'ttp_class_day' },
@@ -899,6 +907,8 @@ const DROP_INDEXES = [
   { col: 'users',    name: 'users_school_email' },
   { col: 'users',    name: 'users_school_username' },
   { col: 'teachers', name: 'teachers_school_email' },
+  // Earlier bell schedule design: one schedule per (school, section). Replaced by the indexes below.
+  { col: 'bell_schedules', name: 'bs_school_section' },
 ];
 
 /**

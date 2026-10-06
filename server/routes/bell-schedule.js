@@ -331,11 +331,11 @@ router.put('/', authMiddleware, planGate('bell_schedule'), rbac('timetable', 'up
 
     const label = name ?? (classIds.length === 0 ? 'Section default' : 'Custom schedule');
     if (existing) {
-      await Bs.updateOne({ id: existing.id }, { $set: { section: storedSection, name: label, classIds, periods, updatedAt: now } });
+      await Bs.updateOne({ id: existing.id }, { $set: { section: storedSection, name: label, classIds, periods, isDefault: classIds.length === 0, updatedAt: now } });
       await _resyncSafely(schoolId, ctx);
       return res.json({ success: true, data: { id: existing.id, section: storedSection, name: label, classIds, periods } });
     }
-    const doc = await Bs.create({ id: _uid(), schoolId, section: storedSection, name: label, classIds, periods, createdAt: now, updatedAt: now });
+    const doc = await Bs.create({ id: _uid(), schoolId, section: storedSection, name: label, classIds, periods, isDefault: classIds.length === 0, createdAt: now, updatedAt: now });
     await _resyncSafely(schoolId, ctx);
     res.json({ success: true, data: { id: doc.id, section: storedSection, name: label, classIds, periods } });
   } catch (err) {
