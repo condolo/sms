@@ -57,6 +57,20 @@ function mockBellStore() {
     deleteOne: async (f) => { const i = mockBells.findIndex(x => matches(x, f)); if (i >= 0) mockBells.splice(i, 1); return { deletedCount: i >= 0 ? 1 : 0 }; },
   };
 }
+function mockClassStore() {
+  const chain = (r) => ({ select: () => chain(r), sort: () => chain(r), lean: () => Promise.resolve(r) });
+  return {
+    find: (f) => {
+      for (const c of (f && f.$or) || []) {
+        if (c._id && c._id.$in && c._id.$in.some(v => !/^[a-f\d]{24}$/i.test(String(v)))) {
+          throw new Error('Cast to ObjectId failed for an _id search');
+        }
+      }
+      return chain(mockClasses.filter(d => matches(d, f)));
+    },
+  };
+}
+
 function mockListStore(rows) {
   const chain = (r) => ({ select: () => chain(r), sort: () => chain(r), lean: () => Promise.resolve(r) });
   return { find: (f) => chain(rows.filter(d => matches(d, f))) };
@@ -71,7 +85,7 @@ jest.mock('../../utils/tenant-model', () => ({
   tenantContext: (req) => ({ schoolId: req.jwtUser.schoolId }),
   tenantModel: jest.fn((col) => {
     if (col === 'bell_schedules') return mockBellStore();
-    if (col === 'classes') return mockListStore(mockClasses);
+    if (col === 'classes') return mockClassStore();
     if (col === 'sections') return mockListStore(mockSections);
     if (col === 'timetable') return mockTimetableStore();
     return mockListStore([]);

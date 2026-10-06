@@ -33,7 +33,7 @@ router.get('/counts', authMiddleware, async (req, res) => { // rbac: intentional
 /* GET /api/student-subjects
    ?subjectId=X  — list enrollments for a subject (includes student + class name)
    ?studentId=X  — list subjects a student is enrolled in */
-router.get('/', authMiddleware, async (req, res) => { // rbac: intentionally open to every authenticated user — reference data
+router.get('/', authMiddleware, rbac('subjects', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { subjectId, studentId } = req.query;

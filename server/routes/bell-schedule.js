@@ -238,7 +238,7 @@ router.get('/', authMiddleware, planGate('bell_schedule'), async (req, res) => {
 // rooms.js's already-correct subKey usage for the same "Configure Rooms"
 // sub-permission pattern.
 /* GET /api/bell-schedule/schedules — every named schedule, with the classes it covers */
-router.get('/schedules', authMiddleware, planGate('bell_schedule'), async (req, res) => {
+router.get('/schedules', authMiddleware, planGate('bell_schedule'), rbac('timetable', 'read'), async (req, res) => {
   try {
     const schoolId = req.jwtUser.schoolId;
     const docs = await tenantModel('bell_schedules', tenantContext(req))
@@ -284,8 +284,12 @@ router.put('/', authMiddleware, planGate('bell_schedule'), rbac('timetable', 'up
     // Every class must exist here.
     const classNames = {};
     if (classIds.length) {
+      // A class is referenced by its own id, or by its database _id. Only real object ids may be searched
+      // in _id: mongoose rejects any other value, which failed every save that included classes.
+      const oidRefs = classIds.filter(ref => /^[a-f\d]{24}$/i.test(ref));
+      const or = [{ id: { $in: classIds } }, ...(oidRefs.length ? [{ _id: { $in: oidRefs } }] : [])];
       const classes = await tenantModel('classes', ctx)
-        .find({ schoolId, $or: [{ id: { $in: classIds } }, { _id: { $in: classIds } }] })
+        .find({ schoolId, $or: or })
         .select('id name sectionKey').lean();
       const byRef = new Map();
       for (const c of classes) {

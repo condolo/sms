@@ -224,6 +224,13 @@ const INDEXES = [
      Primary: class timetable view + conflict detection
      Note: field is 'day' (lowercase string), NOT 'dayOfWeek' */
   {
+    col: 'timetable_published',
+    indexes: [
+      { key: { schoolId: 1, versionId: 1, classId: 1, day: 1 },   name: 'ttp_class_day' },
+      { key: { schoolId: 1, versionId: 1, teacherId: 1, day: 1 }, name: 'ttp_teacher_day' },
+    ],
+  },
+  {
     col: 'timetable',
     indexes: [
       { key: { schoolId: 1, classId: 1, day: 1, period: 1 },        name: 'tt_class_day_period' },

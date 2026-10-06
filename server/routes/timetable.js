@@ -748,7 +748,7 @@ router.get('/status', authMiddleware, PLAN, MODGATE, timetableManageAccess('read
 router.post('/publish', authMiddleware, PLAN, MODGATE, timetableManageAccess('update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
-    const termLabel = String(req.body?.termLabel ?? '').trim();
+    const termLabel = String(req.body?.termLabel ?? '').trim().slice(0, 60);
     const before = await getPublishState(schoolId);
     if (before.published && !before.hasChanges) {
       return E.badRequest(res, 'Nothing has changed since the last publish.');
