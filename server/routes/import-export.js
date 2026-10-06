@@ -26,6 +26,7 @@ const { rbac }                = require('../middleware/rbac');
 const { planGate }            = require('../middleware/plan');
 const { _model }              = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
+const { markTimetableChanged } = require('../utils/timetable-publish');
 const { resolvePrimaryContact, validateGuardianRequirement } = require('../utils/guardian-contact');
 const { BUILTIN_EXTRA_ROLE_VALUES } = require('../config/staffResponsibilities');
 const { parseCSV } = require('../utils/csv');
@@ -1691,6 +1692,8 @@ async function _importTimetable(rows, schoolId, userId) {
   }
 
   results.created = inserted + upserted; // total written (both new and updated)
+  // Imported lessons are draft changes: the timetabler must publish them before anyone sees them.
+  if (inserted + upserted > 0) await markTimetableChanged(schoolId);
   return { ...results, inserted, updated: upserted };
 }
 

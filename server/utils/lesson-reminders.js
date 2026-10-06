@@ -21,6 +21,7 @@
    Override via LESSON_REMINDER_TZ env var (node-cron schedule).
    ============================================================ */
 'use strict';
+const { publishedReader } = require('./timetable-publish');
 
 const cron         = require('node-cron');
 const { _model }   = require('./model');
@@ -69,7 +70,7 @@ async function _getPendingTeachers(schoolId, academicYear, dayOfWeek) {
 
   // 2. Get teachers who had a timetable slot on the given day
   const teacherIds = [...new Set(assignments.map(a => a.teacherId))];
-  const slots      = await _model('timetable').find({
+  const slots      = await (await publishedReader(schoolId, { schoolId })).find({
     schoolId,
     teacherId: { $in: teacherIds },
     day: dayOfWeek,

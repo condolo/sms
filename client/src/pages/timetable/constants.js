@@ -75,3 +75,43 @@ export function buildSlotMap(slots = []) {
   });
   return m;
 }
+
+/* ── Time bands ──────────────────────────────────────────────────
+   A teacher's or a room's grid is drawn from the clock times its own
+   lessons run at, not from one bell schedule. Each lesson already
+   carries its startTime/endTime (copied from its class's schedule when
+   it was created, and re-synced when a schedule changes). Two lessons
+   in the same band start and end together. Overlapping lessons fall in
+   different bands, so the overlap is visible. */
+export const UNTIMED_BAND = '__untimed';
+
+export function bandKeyOf(slot) {
+  return slot.startTime && slot.endTime ? `${slot.startTime}-${slot.endTime}` : UNTIMED_BAND;
+}
+
+/** The distinct time bands these slots use, in clock order. Untimed slots go last. */
+export function timeBandsFromSlots(slots = []) {
+  const seen = new Map();
+  let untimed = false;
+  for (const s of slots) {
+    if (!s.startTime || !s.endTime) { untimed = true; continue; }
+    const key = bandKeyOf(s);
+    if (!seen.has(key)) seen.set(key, { key, start: s.startTime, end: s.endTime });
+  }
+  const bands = [...seen.values()].sort((a, b) => a.start.localeCompare(b.start) || a.end.localeCompare(b.end));
+  if (untimed) bands.push({ key: UNTIMED_BAND, start: null, end: null });
+  return bands;
+}
+
+/** { [day]: { [bandKey]: slot[] } } */
+export function buildBandMap(slots = []) {
+  const m = {};
+  for (const s of slots) {
+    const day = (s.day || '').toLowerCase();
+    const key = bandKeyOf(s);
+    if (!m[day]) m[day] = {};
+    if (!m[day][key]) m[day][key] = [];
+    m[day][key].push(s);
+  }
+  return m;
+}

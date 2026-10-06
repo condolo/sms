@@ -26,6 +26,7 @@ import TimetablePortal       from './TimetablePortal.jsx';
 import { DAYS, DAY_SHORT, DEFAULT_BELL, inferSection } from './constants.js';
 import { useSections } from '@/hooks/useSections.js';
 import TimetableGrid          from './components/TimetableGrid.jsx';
+import TimeBandGrid           from './components/TimeBandGrid.jsx';
 import WorkloadPanel          from './components/WorkloadPanel.jsx';
 import ConflictsPanel         from './components/ConflictsPanel.jsx';
 import AddSlotSlideOver       from './components/AddSlotSlideOver.jsx';
@@ -105,6 +106,7 @@ export default function TimetablePage() {
     staleTime: 5 * 60_000,
   });
   const classList = classesData?.data ?? [];
+  const classNameById = Object.fromEntries(classList.map(c => [c.id ?? c._id, c.name]));
 
   // Prefer stored sectionKey over name inference for accurate filtering
   const filteredClasses = section === 'all'
@@ -131,8 +133,8 @@ export default function TimetablePage() {
   /* Bell schedule — resolved for the selected class's section (prefer stored sectionKey) */
   const classSection = selectedClass ? (selectedClass.sectionKey || inferSection(selectedClass.name)) : 'all';
   const { data: bellData } = useQuery({
-    queryKey: ['bell-schedule', classSection],
-    queryFn:  () => bellApi.get(classSection),
+    queryKey: ['bell-schedule', classSection, classId || null],
+    queryFn:  () => bellApi.get(classSection, classId || undefined),
     staleTime: 10 * 60_000,
   });
   const bell          = bellData?.data?.periods ?? DEFAULT_BELL;
@@ -255,13 +257,18 @@ export default function TimetablePage() {
 
   const { mutate: doPublish, isPending: publishing } = useMutation({
     mutationFn: (termLabel) => ttApi.publish({ termLabel }),
-    onSuccess:  () => { refetchStatus(); setShowPublishModal(false); showToast('Timetable published — now visible to staff and parents.'); },
+    onSuccess:  () => {
+      refetchStatus();
+      qc.invalidateQueries({ queryKey: ['timetable'] });
+      setShowPublishModal(false);
+      showToast('Published. Staff, students and parents now see this version.');
+    },
     onError:    err => showToast(err?.message ?? 'Failed to publish.', 'error'),
   });
 
   const { mutate: doUnpublish, isPending: unpublishing } = useMutation({
     mutationFn: () => ttApi.unpublish(),
-    onSuccess:  () => { refetchStatus(); showToast('Timetable unpublished — hidden from portal users.'); },
+    onSuccess:  () => { refetchStatus(); qc.invalidateQueries({ queryKey: ['timetable'] }); showToast('Unpublished. Staff, students and parents no longer see the timetable.'); },
     onError:    err => showToast(err?.message ?? 'Failed to unpublish.', 'error'),
   });
 
@@ -495,47 +502,60 @@ export default function TimetablePage() {
         </div>
       </div>
 
-      {/* ── Publish banner ── */}
+      {/* ── Publish banner ──
+          Editors see the draft. Teachers, students and parents see only the published version.
+          Publish is offered when nothing is live yet, or when the draft has changed since the last publish. ── */}
       {canEdit && (
         <div className={`px-6 py-2.5 border-b flex items-center justify-between gap-4 text-xs ${
-          publishStatus.published ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'
+          !publishStatus.published ? 'bg-amber-50 border-amber-200'
+            : publishStatus.hasChanges ? 'bg-sky-50 border-sky-200'
+            : 'bg-emerald-50 border-emerald-200'
         }`}>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 min-w-0">
             {publishStatus.published ? (
               <>
                 <CheckCircle2 size={13} className="text-emerald-600 shrink-0" />
-                <span className="font-medium text-emerald-700">
+                <span className="font-medium text-emerald-700 truncate">
                   Published
                   {publishStatus.termLabel  ? ` · ${publishStatus.termLabel}`  : ''}
                   {publishStatus.publishedAt
                     ? ` · ${new Date(publishStatus.publishedAt).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' })}`
                     : ''}
                 </span>
-                <span className="text-emerald-600 hidden sm:inline">— visible to teachers, parents, and section heads</span>
+                {publishStatus.doubleBookings > 0 && (
+                  <span className="text-amber-700 font-medium shrink-0">· {publishStatus.doubleBookings} double booking{publishStatus.doubleBookings === 1 ? '' : 's'} to check</span>
+                )}
+                {publishStatus.staleLessons > 0 && (
+                  <span className="text-amber-700 font-medium shrink-0">· {publishStatus.staleLessons} lesson{publishStatus.staleLessons === 1 ? '' : 's'} need review (period left its schedule)</span>
+                )}
+                {publishStatus.hasChanges
+                  ? <span className="text-sky-700 font-medium shrink-0">· Draft has changes not yet published</span>
+                  : <span className="text-emerald-600 hidden sm:inline">— live for staff, students and parents</span>}
               </>
             ) : (
               <>
                 <AlertCircle size={13} className="text-amber-600 shrink-0" />
-                <span className="font-medium text-amber-700">Draft — not visible to portal users</span>
+                <span className="font-medium text-amber-700">Draft — not visible to staff, students or parents</span>
                 <span className="text-amber-600 hidden sm:inline">Publish when the timetable is ready</span>
               </>
             )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            {publishStatus.published ? (
+            {publishStatus.published && (
               <button
-                onClick={() => { if (window.confirm('Unpublish the timetable? Portal users will no longer see it.')) doUnpublish(); }}
+                onClick={() => { if (window.confirm('Unpublish the timetable? Staff, students and parents will no longer see it.')) doUnpublish(); }}
                 disabled={unpublishing}
-                className="flex items-center gap-1 px-3 py-1 rounded-md border border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-100 transition font-medium"
+                className="flex items-center gap-1 px-3 py-1 rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 transition font-medium"
               >
                 {unpublishing ? 'Unpublishing…' : 'Unpublish'}
               </button>
-            ) : (
+            )}
+            {publishStatus.canPublish && (
               <button
                 onClick={() => setShowPublishModal(true)}
                 className="flex items-center gap-1 px-3 py-1 rounded-md bg-slate-900 text-white hover:bg-slate-800 transition font-medium"
               >
-                <Zap size={11} /> Publish Timetable
+                <Zap size={11} /> {publishStatus.published ? 'Publish changes' : 'Publish Timetable'}
               </button>
             )}
           </div>
@@ -746,8 +766,31 @@ export default function TimetablePage() {
               ))}
             </div>
           ) : (
-            <TimetableGrid slots={teacherSlots} onDelete={removeSlot} onAdd={() => {}} canEdit={false} bell={bell}
-              emergencyMode={emergencyMode} teacherMap={teacherMap} />
+            <TimeBandGrid
+              slots={teacherSlots}
+              renderEntry={s => {
+                const t = emergencyMode && s.teacherId ? teacherMap?.[s.teacherId] : null;
+                const link = t ? (t.zoomPMILink || t.meetLink || null) : null;
+                const platform = t?.zoomPMILink ? 'Zoom' : t?.meetLink ? 'Meet' : null;
+                return (
+                  <div className="rounded-md bg-slate-50 border border-slate-200 px-2 py-1">
+                    <p className="text-[11px] font-semibold text-slate-800 truncate">{s.subject || '—'}</p>
+                    <p className="text-[10px] text-slate-500 truncate">
+                      {classNameById[s.classId] ?? s.classId ?? ''}{s.room ? ` · ${s.room}` : ''}
+                    </p>
+                    {s.scheduleStale && (
+                      <p className="text-[9px] font-semibold text-amber-700">⚠ Period not in schedule — review</p>
+                    )}
+                    {link && (
+                      <a href={link} target="_blank" rel="noopener noreferrer"
+                        className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-sky-600 hover:bg-sky-700 text-white text-[9px] font-semibold">
+                        Join {platform}
+                      </a>
+                    )}
+                  </div>
+                );
+              }}
+            />
           )
         )}
 
@@ -762,7 +805,7 @@ export default function TimetablePage() {
             </div>
             {/* Right: room occupancy view */}
             <div className="xl:col-span-2">
-              <RoomView slots={allSlots} rooms={roomList} bell={bell} conflicts={conflicts} />
+              <RoomView slots={allSlots} rooms={roomList} conflicts={conflicts} />
             </div>
           </div>
         )}
@@ -800,6 +843,8 @@ export default function TimetablePage() {
         {showPublishModal && (
           <PublishModal
             publishing={publishing}
+            alreadyPublished={publishStatus.published}
+            warnings={publishStatus.warnings ?? []}
             onPublish={(termLabel) => doPublish(termLabel)}
             onClose={() => setShowPublishModal(false)}
           />

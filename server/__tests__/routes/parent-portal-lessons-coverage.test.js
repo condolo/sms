@@ -16,6 +16,16 @@ const SCHOOL_A = 'school_A';
 const CHILD_1  = 'stu_1';
 const PARENT_USER = 'usr_parent';
 
+// The published copy is read through the same reader; in these tests it is the same fixture store.
+jest.mock('../../utils/timetable-publish', () => {
+  const actual = jest.requireActual('../../utils/timetable-publish');
+  const { tenantModel } = require('../../utils/tenant-model');
+  return {
+    ...actual,
+    publishedReader: async (schoolId, ctx) => tenantModel('timetable', ctx),
+    timetableReaderFor: async (req) => tenantModel('timetable', { schoolId: req.jwtUser.schoolId }),
+  };
+});
 jest.mock('../../middleware/auth', () => ({
   authMiddleware: (req, _res, next) => {
     req.jwtUser = { userId: PARENT_USER, schoolId: SCHOOL_A, role: 'parent', studentIds: [CHILD_1], guardianOf: [] };
@@ -98,7 +108,7 @@ beforeEach(() => {
     id: CHILD_1, schoolId: SCHOOL_A, firstName: 'Amara', lastName: 'Osei',
     admissionNumber: 'ADM001', classId: CLASS_ID, className: 'Year 2', streamId: DIAMOND, status: 'active',
   };
-  mockSchoolDoc = { name: 'Test School', academicYear: '2026', portalConfig: {} };
+  mockSchoolDoc = { name: 'Test School', academicYear: '2026', portalConfig: {}, timetableStatus: { published: true } };
   mockSubjectDocs = [{ id: 'subj_eng', name: 'English', code: 'ENG' }];
   mockTopicDocs = [
     { id: 'topic_1', schoolId: SCHOOL_A, subjectId: 'subj_eng', academicYear: '2026', subtopics: [] },

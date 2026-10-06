@@ -19,6 +19,16 @@
 const SCHOOL_A = 'school_A';
 const STUDENT_1 = 'stu_1';
 
+// The published copy is read through the same reader; in these tests it is the same fixture store.
+jest.mock('../../utils/timetable-publish', () => {
+  const actual = jest.requireActual('../../utils/timetable-publish');
+  const { tenantModel } = require('../../utils/tenant-model');
+  return {
+    ...actual,
+    publishedReader: async (schoolId, ctx) => tenantModel('timetable', ctx),
+    timetableReaderFor: async (req) => tenantModel('timetable', { schoolId: req.jwtUser.schoolId }),
+  };
+});
 jest.mock('../../middleware/auth', () => ({
   authMiddleware: (req, _res, next) => {
     req.jwtUser = { userId: 'usr_stu', schoolId: SCHOOL_A, role: 'student', studentId: STUDENT_1 };
@@ -101,7 +111,7 @@ beforeEach(() => {
     id: STUDENT_1, schoolId: SCHOOL_A, firstName: 'Amara', lastName: 'Osei',
     admissionNumber: 'ADM001', classId: CLASS_ID, className: 'Year 2', streamId: DIAMOND, status: 'active',
   };
-  mockSchoolDoc = { name: 'Test School', academicYear: '2026', portalConfig: {} };
+  mockSchoolDoc = { name: 'Test School', academicYear: '2026', portalConfig: {}, timetableStatus: { published: true } };
   mockSubjectDocs = [{ id: 'subj_eng', name: 'English', code: 'ENG' }];
   mockTopicDocs = [
     { id: 'topic_1', schoolId: SCHOOL_A, subjectId: 'subj_eng', academicYear: '2026', subtopics: [] },
@@ -150,6 +160,16 @@ describe("GET /api/student-portal/dashboard — Today's Timetable day-name casin
   // query for the capitalized form ('Monday') matched zero documents,
   // ever. "Today's Timetable" showed nothing for every student, every
   // day, since this route shipped.
+  test('an UNPUBLISHED timetable shows no lessons to the student', async () => {
+    const today = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'][new Date().getDay()];
+    mockSchoolDoc = { ...mockSchoolDoc, timetableStatus: { published: false } };
+    mockTimetableDocs = [
+      { schoolId: SCHOOL_A, classId: CLASS_ID, day: today, subject: 'English', isActive: true, startTime: '08:00', endTime: '08:40' },
+    ];
+    const res = await supertest(buildApp()).get('/api/student-portal/dashboard');
+    expect(res.body.data.timetableToday).toHaveLength(0);
+  });
+
   test('a real-shaped lowercase day value is matched', async () => {
     const today = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'][new Date().getDay()];
     mockTimetableDocs = [

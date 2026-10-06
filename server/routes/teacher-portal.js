@@ -10,6 +10,7 @@ const express            = require('express');
 const { authMiddleware } = require('../middleware/auth');
 const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
+const { isTimetablePublished, publishedReader } = require('../utils/timetable-publish');
 const { ok, E }          = require('../utils/response');
 const { resolveTeacher } = require('../utils/resolveTeacher');
 
@@ -54,7 +55,7 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     // 'timetable_slots' is an orphaned legacy collection nothing writes
     // to anymore. Reading the wrong one meant an admin's timetable edits
     // never reached this dashboard widget.
-    const Timetable          = tenantModel('timetable', tenantContext(req));
+    const Timetable          = await publishedReader(schoolId, tenantContext(req));
     const Streams            = tenantModel('streams', tenantContext(req));
     const Subjects           = tenantModel('subjects', tenantContext(req));
     const Schools            = _model('schools');
@@ -130,7 +131,8 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     // without it, the "Take Att." deep-link below can't pre-select the
     // right stream, and the submitted-check further down would wrongly
     // conflate the two.
-    const rawTimetableToday = await Timetable.find({
+    // Unpublished timetables are not shown to teachers either (see utils/timetable-publish.js).
+    const rawTimetableToday = !(await isTimetablePublished(schoolId)) ? [] : await Timetable.find({
       schoolId,
       day: todayDay,
       isActive: true,

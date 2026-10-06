@@ -29,8 +29,23 @@ function mockChainArr(arr) {
 function mockChainObj(obj) {
   return { lean: () => Promise.resolve(obj) };
 }
+// A matcher with the MongoDB semantics the bell-schedule routes rely on:
+// $or, $exists, $size, $in, $ne, array membership, and null matching a missing field.
 function mockMatchesFilter(doc, filter) {
-  return Object.entries(filter || {}).every(([k, v]) => doc[k] === v);
+  return Object.entries(filter || {}).every(([k, v]) => {
+    if (k === '$or') return v.some(sub => mockMatchesFilter(doc, sub));
+    if (k === '$and') return v.every(sub => mockMatchesFilter(doc, sub));
+    const val = doc[k];
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      if ('$exists' in v) return (val !== undefined) === v.$exists;
+      if ('$size' in v) return Array.isArray(val) && val.length === v.$size;
+      if ('$in' in v) return Array.isArray(val) ? val.some(x => v.$in.includes(x)) : v.$in.includes(val);
+      if ('$ne' in v) return val !== v.$ne;
+    }
+    if (Array.isArray(val)) return val.includes(v);
+    if (v === null) return val == null;
+    return val === v;
+  });
 }
 function mockMakeFakeCollection(seed = []) {
   const docs = seed.map(d => ({ ...d }));

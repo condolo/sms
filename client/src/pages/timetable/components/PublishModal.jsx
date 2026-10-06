@@ -9,7 +9,7 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Loader2, Zap } from 'lucide-react';
 
-export default function PublishModal({ publishing, onPublish, onClose }) {
+export default function PublishModal({ publishing, alreadyPublished = false, warnings = [], onPublish, onClose }) {
   const [termLabel, setTermLabel] = useState('');
 
   return (
@@ -26,12 +26,23 @@ export default function PublishModal({ publishing, onPublish, onClose }) {
         className="relative bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-sm z-50 p-6 space-y-4"
       >
         <div>
-          <h2 className="text-sm font-semibold text-slate-900">Publish Timetable</h2>
+          <h2 className="text-sm font-semibold text-slate-900">{alreadyPublished ? 'Publish changes' : 'Publish Timetable'}</h2>
           <p className="text-xs text-slate-400 mt-0.5">
-            Once published, teachers, parents, and section heads can view their timetable in the portal.
+            Staff, students and parents see the version you publish, and nothing else. Edits you make after this stay in the draft until you publish again.
           </p>
         </div>
 
+        {warnings.length > 0 && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 space-y-1">
+            <p className="text-[11px] font-semibold text-amber-800">
+              {warnings.length} double booking{warnings.length === 1 ? '' : 's'} to check — publishing still goes ahead
+            </p>
+            <ul className="text-[11px] text-amber-700 list-disc pl-4 space-y-0.5">
+              {warnings.slice(0, 5).map((w, i) => <li key={i}>{w}</li>)}
+            </ul>
+            {warnings.length > 5 && <p className="text-[11px] text-amber-700">and {warnings.length - 5} more</p>}
+          </div>
+        )}
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-slate-600">
             Term label <span className="text-slate-400">(optional)</span>

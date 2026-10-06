@@ -34,6 +34,7 @@ const { rbac, hasExplicitSubGrant } = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
+const { timetableReaderFor } = require('../utils/timetable-publish');
 const { ok, created, paginate, parsePagination, E, fail } = require('../utils/response');
 const { resolveAcademicPeriod } = require('../utils/academic-period');
 const { resolveTeacher } = require('../utils/resolveTeacher');
@@ -1356,7 +1357,8 @@ router.get('/plans/week-status', authMiddleware, PLAN, MODGATE, rbac('lessons', 
     const teacher = await resolveTeacher(userId, email, schoolId).catch(() => null);
     const teacherIdOr = [{ teacherId: userId }, ...(teacher?.id && teacher.id !== userId ? [{ teacherId: teacher.id }] : [])];
 
-    const Timetable = tenantModel('timetable', tenantContext(req));
+    // Teachers plan from the published timetable; editors from the draft (utils/timetable-publish.js).
+    const Timetable = await timetableReaderFor(req);
     const slots = await Timetable.find({ schoolId, isActive: true, type: 'lesson', $or: teacherIdOr })
       .select('classId streamId subjectId day').lean();
 

@@ -6,8 +6,7 @@
    Props:
      slots     []        — ALL active timetable slots (school-wide)
      rooms     []        — room registry from /api/rooms
-     bell      []        — bell schedule periods (for THIS view's grid
-                            layout only — see conflicts note below)
+     (no bell prop: rows are the clock times the slots themselves use)
      conflicts []        — GET /timetable/conflicts' own room_double_booked
                             entries. This grid used to decide "conflict"
                             purely by two slots sharing the same period
@@ -28,7 +27,7 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { DoorOpen, AlertTriangle } from 'lucide-react';
-import { DAYS, DAY_FULL, DAY_SHORT, DEFAULT_BELL, slotColor } from '../constants.js';
+import { DAYS, DAY_FULL, DAY_SHORT, UNTIMED_BAND, slotColor, bandKeyOf, timeBandsFromSlots } from '../constants.js';
 
 /* ── Build room-slot map: { [room]: { [day]: { [period]: slot[] } } } ── */
 function buildRoomMap(slots) {
@@ -37,11 +36,11 @@ function buildRoomMap(slots) {
     const room = (s.room || '').trim();
     if (!room) return;
     const day    = (s.day || '').toLowerCase();
-    const period = String(s.period);
+    const band   = bandKeyOf(s);
     if (!m[room])         m[room]         = {};
     if (!m[room][day])    m[room][day]    = {};
-    if (!m[room][day][period]) m[room][day][period] = [];
-    m[room][day][period].push(s);
+    if (!m[room][day][band]) m[room][day][band] = [];
+    m[room][day][band].push(s);
   });
   return m;
 }
@@ -82,6 +81,9 @@ function RoomCell({ entries, conflictSlotIds }) {
             <p className={`text-[11px] font-semibold leading-tight truncate ${thisEntryConflicts ? 'text-red-800' : col.text}`}>
               {s.subject || '—'}
             </p>
+            {s.scheduleStale && (
+              <p className="text-[9px] font-semibold text-amber-700">⚠ Period not in schedule — review</p>
+            )}
             {s.teacherName && (
               <p className={`text-[10px] truncate ${thisEntryConflicts ? 'text-red-600' : col.sub} opacity-80`}>
                 {s.teacherName}
@@ -100,7 +102,7 @@ function RoomCell({ entries, conflictSlotIds }) {
 }
 
 /* ── Room grid for one room ──────────────────────────────────── */
-function RoomGrid({ roomName, slotMap, bell, conflictSlotIds }) {
+function RoomGrid({ roomName, slotMap, bands, conflictSlotIds }) {
   // Count grid cells that actually contain a server-confirmed conflict —
   // matches exactly what the grid below highlights in red, so the badge
   // and the grid can never tell a different story from each other.
@@ -144,46 +146,30 @@ function RoomGrid({ roomName, slotMap, bell, conflictSlotIds }) {
       {/* Period rows */}
       <div className="overflow-x-auto">
         <div style={{ minWidth: '540px' }}>
-          {bell.map(b => {
-            if (b.isBreak) {
-              return (
-                <div key={b.p} className="flex border-b border-slate-100 bg-slate-50/40" style={{ minHeight: '26px' }}>
-                  <div className="flex items-center px-2 border-r border-slate-100" style={{ width: '80px', minWidth: '80px' }}>
-                    <span className="text-[9px] text-slate-400">{b.start}</span>
-                  </div>
-                  <div className="flex-1 flex items-center px-3 gap-2">
-                    <div className="h-px flex-1 bg-slate-200" />
-                    <span className="text-[10px] text-slate-400 font-medium whitespace-nowrap">{b.label}</span>
-                    <div className="h-px flex-1 bg-slate-200" />
-                  </div>
-                </div>
-              );
-            }
-            return (
-              <div key={b.p} className="flex border-b border-slate-100" style={{ minHeight: '72px' }}>
-                <div
-                  className="flex flex-col justify-center px-2 border-r border-slate-100 shrink-0"
-                  style={{ width: '80px', minWidth: '80px' }}
-                >
-                  <span className="text-[10px] font-bold text-slate-500">P{b.p}</span>
-                  <span className="text-[9px] text-slate-400">{b.start}</span>
-                  <span className="text-[9px] text-slate-400">–{b.end}</span>
-                </div>
-                {DAYS.map((day, i) => {
-                  const entries = slotMap[roomName]?.[day]?.[String(b.p)];
-                  return (
-                    <div
-                      key={day}
-                      className={`flex-1 p-1.5 ${i < DAYS.length - 1 ? 'border-r border-slate-100' : ''}`}
-                      style={{ minWidth: 0 }}
-                    >
-                      <RoomCell entries={entries} conflictSlotIds={conflictSlotIds} />
-                    </div>
-                  );
-                })}
+          {bands.map(b => (
+            <div key={b.key} className="flex border-b border-slate-100" style={{ minHeight: '72px' }}>
+              <div className="flex flex-col justify-center px-2 border-r border-slate-100 shrink-0" style={{ width: '80px', minWidth: '80px' }}>
+                {b.key === UNTIMED_BAND
+                  ? <span className="text-[10px] font-semibold text-amber-700">No time set</span>
+                  : <>
+                      <span className="text-[10px] font-bold text-slate-500">{b.start}</span>
+                      <span className="text-[9px] text-slate-400">–{b.end}</span>
+                    </>}
               </div>
-            );
-          })}
+              {DAYS.map((day, i) => {
+                const entries = slotMap[roomName]?.[day]?.[b.key];
+                return (
+                  <div
+                    key={day}
+                    className={`flex-1 p-1.5 ${i < DAYS.length - 1 ? 'border-r border-slate-100' : ''}`}
+                    style={{ minWidth: 0 }}
+                  >
+                    <RoomCell entries={entries} conflictSlotIds={conflictSlotIds} />
+                  </div>
+                );
+              })}
+            </div>
+          ))}
         </div>
       </div>
     </div>
@@ -191,7 +177,7 @@ function RoomGrid({ roomName, slotMap, bell, conflictSlotIds }) {
 }
 
 /* ── Main export ─────────────────────────────────────────────── */
-export default function RoomView({ slots = [], rooms = [], bell = DEFAULT_BELL, conflicts = [] }) {
+export default function RoomView({ slots = [], rooms = [], conflicts = [] }) {
   const [selectedRoom, setSelectedRoom] = useState('');
 
   // Slot ids GET /timetable/conflicts already confirmed are a genuine
@@ -217,6 +203,8 @@ export default function RoomView({ slots = [], rooms = [], bell = DEFAULT_BELL, 
   ];
 
   const slotMap = buildRoomMap(slots);
+  // Rows are the clock times the school's lessons use, so every room lines up on the same bands.
+  const bands   = timeBandsFromSlots(slots);
 
   return (
     <div className="space-y-4">
@@ -264,7 +252,7 @@ export default function RoomView({ slots = [], rooms = [], bell = DEFAULT_BELL, 
           <RoomGrid
             roomName={selectedRoom}
             slotMap={slotMap}
-            bell={bell}
+            bands={bands}
             conflictSlotIds={conflictSlotIds}
           />
         </motion.div>

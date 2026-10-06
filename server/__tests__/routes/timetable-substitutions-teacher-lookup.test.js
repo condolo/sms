@@ -16,6 +16,16 @@
    All DB calls are mocked — no MongoDB required.
    ============================================================ */
 'use strict';
+// The published copy is read through the same reader; in these tests it is the same fixture store.
+jest.mock('../../utils/timetable-publish', () => {
+  const actual = jest.requireActual('../../utils/timetable-publish');
+  const { tenantModel } = require('../../utils/tenant-model');
+  return {
+    ...actual,
+    publishedReader: async (schoolId, ctx) => tenantModel('timetable', ctx),
+    timetableReaderFor: async (req) => tenantModel('timetable', { schoolId: req.jwtUser.schoolId }),
+  };
+});
 
 const SCHOOL_A = 'school_A';
 

@@ -35,6 +35,16 @@ const SCHOOL_A = 'school_A';
 const TEACHER_USER = 'usr_teacher';
 const TEACHER_ID = 'tch_1';
 
+// The published copy is read through the same reader; in these tests it is the same fixture store.
+jest.mock('../../utils/timetable-publish', () => {
+  const actual = jest.requireActual('../../utils/timetable-publish');
+  const { tenantModel } = require('../../utils/tenant-model');
+  return {
+    ...actual,
+    publishedReader: async (schoolId, ctx) => tenantModel('timetable', ctx),
+    timetableReaderFor: async (req) => tenantModel('timetable', { schoolId: req.jwtUser.schoolId }),
+  };
+});
 jest.mock('../../middleware/auth', () => ({
   authMiddleware: (req, _res, next) => {
     req.jwtUser = { userId: TEACHER_USER, schoolId: SCHOOL_A, role: 'teacher', email: 't@x.com' };
@@ -124,7 +134,7 @@ const TODAY_ISO = new Date().toISOString().slice(0, 10);
 
 beforeEach(() => {
   jest.clearAllMocks();
-  mockSchoolDoc = { name: 'Test School', academicYear: '2026' };
+  mockSchoolDoc = { name: 'Test School', academicYear: '2026', timetableStatus: { published: true } };
   mockClassDocs = [{ id: CLASS_ID, schoolId: SCHOOL_A, name: 'Standard 4A', formTeacherId: null, studentCount: 0 }];
   mockStreamDocs = [
     { id: STREAM_A, schoolId: SCHOOL_A, name: 'A' },

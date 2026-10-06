@@ -12,6 +12,7 @@
 import { motion } from 'framer-motion';
 import { Plus, Trash2, Play } from 'lucide-react';
 import { DAYS, DAY_FULL, DAY_SHORT, DEFAULT_BELL, buildSlotMap, slotColor } from '../constants.js';
+import TimeBandGrid from './TimeBandGrid.jsx';
 
 /* ── Slot card ───────────────────────────────────────────────── */
 function SlotCard({ slot, onDelete, onEdit, canEdit, emergencyMode, teacherMap }) {
@@ -46,6 +47,9 @@ function SlotCard({ slot, onDelete, onEdit, canEdit, emergencyMode, teacherMap }
       </p>
       {slot.teacherName && (
         <p className={`text-[10px] mt-0.5 truncate ${col.sub} opacity-80`}>{slot.teacherName}</p>
+      )}
+      {slot.scheduleStale && (
+        <p className="text-[9px] font-semibold text-amber-700 mt-0.5">⚠ Period not in schedule — review</p>
       )}
       {slot.assistantTeacherName && (
         <p className={`text-[10px] truncate ${col.sub} opacity-60`}>+ {slot.assistantTeacherName}</p>
@@ -135,6 +139,10 @@ function PeriodRow({ bell, slotMap, onDelete, onEdit, onAdd, canEdit, emergencyM
 /* ── Timetable grid (public export) ─────────────────────────── */
 export default function TimetableGrid({ slots, onDelete, onEdit, onAdd, canEdit, bell = DEFAULT_BELL, emergencyMode = false, teacherMap = {} }) {
   const slotMap = buildSlotMap(slots);
+  // Lessons whose period is not a row of this class's schedule (its period was removed, or it
+  // was moved to another schedule). They are shown for review, not dropped.
+  const lessonKeys = new Set(bell.filter(b => !b.isBreak).map(b => String(b.p)));
+  const outside    = slots.filter(s => !lessonKeys.has(String(s.period)));
 
   return (
     <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
@@ -176,6 +184,20 @@ export default function TimetableGrid({ slots, onDelete, onEdit, onAdd, canEdit,
           )}
         </div>
       </div>
+      {outside.length > 0 && (
+        <div className="border-t border-amber-200">
+          <p className="px-4 py-2 text-[11px] font-semibold text-amber-700 bg-amber-50">
+            Lessons outside this class's bell schedule — review them
+          </p>
+          <TimeBandGrid
+            slots={outside}
+            renderEntry={slot => (
+              <SlotCard slot={slot} onDelete={onDelete} onEdit={onEdit} canEdit={canEdit}
+                emergencyMode={emergencyMode} teacherMap={teacherMap} />
+            )}
+          />
+        </div>
+      )}
     </div>
   );
 }

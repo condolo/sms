@@ -34,6 +34,7 @@ const { moduleGate }     = require('../middleware/module-gate');
 const { rbac, hasExplicitSubGrant } = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { _model }         = require('../utils/model');
+const { getPublishState, markTimetableChanged, publishedReader, timetableReaderFor } = require('../utils/timetable-publish');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 const { resolveBellSchedule } = require('./bell-schedule');
@@ -43,6 +44,19 @@ const { isYearArchived } = require('../utils/archival');
 const ScopeEngine = require('../utils/scopeEngine');
 
 const router = express.Router();
+
+// Every successful change to the draft marks it as changed, so Publish becomes available.
+// Publishing and substitution cover are not timetable changes.
+router.use((req, res, next) => {
+  if (['POST', 'PUT', 'DELETE'].includes(req.method) && !/^\/(publish|unpublish|substitutions)/.test(req.path)) {
+    res.on('finish', () => {
+      if (res.statusCode < 300 && req.jwtUser?.schoolId) {
+        markTimetableChanged(req.jwtUser.schoolId).catch(err => console.error('[timetable] change mark failed:', err.message));
+      }
+    });
+  }
+  next();
+});
 const PLAN   = planGate('timetable');
 
 /* ── Teacher identifier-form resolver ──────────────────────────
@@ -214,12 +228,17 @@ function _timesOverlap(start1, end1, start2, end2) {
  * Resolve the actual start/end times for a period key in a given section.
  * Returns { startTime, endTime } or null if the period key isn't in the schedule.
  */
-async function _resolveSlotTimes(schoolId, section, periodKey) {
+// A lesson needs its times: the overlap check, the teacher and room views and attendance all read them.
+function _periodNotInScheduleMsg(period) {
+  return `Period ${period} is not in this class's bell schedule. Add it to the schedule, or choose another period.`;
+}
+
+async function _resolveSlotTimes(schoolId, section, periodKey, classId) {
   try {
-    const { periods } = await resolveBellSchedule(schoolId, section);
+    const { periods, id } = await resolveBellSchedule(schoolId, section, classId);
     const entry = periods.find(p => String(p.p) === String(periodKey));
     if (!entry || entry.isBreak) return null;
-    return { startTime: entry.start, endTime: entry.end };
+    return { startTime: entry.start, endTime: entry.end, bellScheduleId: id ?? null };
   } catch {
     return null;
   }
@@ -235,7 +254,8 @@ async function _sectionForClass(schoolId, classId) {
       schoolId,
       $or: [{ id: classId }, { _id: classId }],
     }).lean();
-    return cls ? _inferSection(cls.name) : 'all';
+    // The stored sectionKey is authoritative. The name is a guess, used only for classes saved before sectionKey existed.
+    return cls ? (cls.sectionKey || _inferSection(cls.name)) : 'all';
   } catch {
     return 'all';
   }
@@ -673,53 +693,108 @@ function _canEdit(req) {
   return ed.has(role) || roles.some(r => ed.has(r));
 }
 
-/* ── GET /api/timetable/status ─ Publish state ──────────────── */
+// Two lessons that overlap in time and share a teacher, a room, or a class and stream.
+// Each pair is one warning. Publishing still goes ahead; the timetabler is told what to check.
+function _overlapWarnings(slots) {
+  const byDay = {};
+  for (const sl of slots) (byDay[(sl.day || '').toLowerCase()] = byDay[(sl.day || '').toLowerCase()] || []).push(sl);
+  const room = sl => (sl.room || '').trim().toLowerCase();
+  const sameStream = (a, b) => !a.streamId || !b.streamId || a.streamId === b.streamId;
+  const out = [];
+  for (const day of Object.keys(byDay)) {
+    const list = byDay[day];
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const a = list[i], b = list[j];
+        if (!(a.startTime < b.endTime && b.startTime < a.endTime)) continue;
+        let why = null;
+        if (a.teacherId && a.teacherId === b.teacherId) why = 'the same teacher';
+        else if (room(a) && room(a) === room(b)) why = 'the same room';
+        else if (a.classId === b.classId && sameStream(a, b)) why = 'the same class';
+        if (why) out.push(`${day} ${a.startTime}–${a.endTime}: ${why} is in two lessons (${a.subject || 'lesson'} and ${b.subject || 'lesson'})`);
+      }
+    }
+  }
+  return out;
+}
+
+// What is wrong with the draft. Untimed lessons block publish. Double bookings and stale lessons are reported.
+async function _draftProblems(req) {
+  const { schoolId } = req.jwtUser;
+  const all = await tenantModel('timetable', tenantContext(req))
+    .find({ schoolId, isActive: true })
+    .select('day startTime endTime teacherId classId streamId room subject scheduleStale')
+    .lean();
+  const untimed = all.filter(sl => !sl.startTime || !sl.endTime);
+  const warnings = _overlapWarnings(all.filter(sl => sl.startTime && sl.endTime));
+  return {
+    untimedLessons: untimed.length,
+    staleLessons: all.filter(sl => sl.scheduleStale).length,
+    doubleBookings: warnings.length,
+    warnings: warnings.slice(0, 20),
+  };
+}
+
+/* ── GET /api/timetable/status ─ Publish state (utils/timetable-publish.js) ── */
 router.get('/status', authMiddleware, PLAN, MODGATE, timetableManageAccess('read'), async (req, res) => {
   try {
-    const school = await _model('schools').findOne({ id: req.jwtUser.schoolId }).lean();
-    const s = school?.timetableStatus ?? { published: false, publishedAt: null, termLabel: '' };
-    return ok(res, s);
+    return ok(res, { ...(await getPublishState(req.jwtUser.schoolId)), ...(await _draftProblems(req)) });
   } catch (err) { console.error('[timetable GET /status]', err); return E.serverError(res); }
 });
 
-/* ── POST /api/timetable/publish ────────────────────────────── */
+/* ── POST /api/timetable/publish ─ publish the draft as a new version ── */
+// The draft is copied in full to timetable_published under a new versionId. Everyone reads that
+// version from then on. Only after the copy is complete does the school point at it.
 router.post('/publish', authMiddleware, PLAN, MODGATE, timetableManageAccess('update'), async (req, res) => {
   try {
-    const { termLabel = '' } = req.body;
-    const now = new Date().toISOString();
     const { schoolId, userId } = req.jwtUser;
+    const termLabel = String(req.body?.termLabel ?? '').trim();
+    const before = await getPublishState(schoolId);
+    if (before.published && !before.hasChanges) {
+      return E.badRequest(res, 'Nothing has changed since the last publish.');
+    }
+    const problems = await _draftProblems(req);
+    if (problems.untimedLessons > 0) {
+      return E.badRequest(res, `${problems.untimedLessons} lesson${problems.untimedLessons === 1 ? ' has' : 's have'} no time. Fix ${problems.untimedLessons === 1 ? 'it' : 'them'} before publishing.`);
+    }
+    // The revision is read before the draft, so an edit made during publishing still shows as unpublished.
+    const draftRevision = before.draftRevision;
+    const drafts = await tenantModel('timetable', tenantContext(req)).find({ schoolId, isActive: true }).lean();
+    const versionId = uuidv4();
+    const now = new Date().toISOString();
+    const copies = drafts.map(({ _id, __v, ...slot }) => ({ ...slot, versionId, schoolId }));
+    const Published = tenantModel('timetable_published', tenantContext(req));
+    if (copies.length) await Published.insertMany(copies, { ordered: false });
 
     await _model('schools').updateOne({ id: schoolId }, {
       $set: {
-        'timetableStatus.published':   true,
-        'timetableStatus.publishedAt': now,
-        'timetableStatus.publishedBy': userId,
-        'timetableStatus.termLabel':   termLabel.trim(),
+        'timetableStatus.published':          true,
+        'timetableStatus.publishedAt':        now,
+        'timetableStatus.publishedBy':        userId,
+        'timetableStatus.termLabel':          termLabel,
+        'timetableStatus.publishedVersionId': versionId,
+        'timetableStatus.publishedRevision':  draftRevision,
       },
     });
-
-    // Snapshot version metadata on every publish
-    const slotCount = await tenantModel('timetable', tenantContext(req)).countDocuments({ schoolId, isActive: true });
     await tenantModel('timetable_versions', tenantContext(req)).create({
-      id:          uuidv4(),
-      schoolId,
-      termLabel:   termLabel.trim(),
-      publishedAt: now,
-      publishedBy: userId,
-      slotCount,
+      id: versionId, schoolId, termLabel, publishedAt: now, publishedBy: userId,
+      slotCount: copies.length, draftRevision,
     });
+    // Only the live version's copy is kept. The version record above stays as history.
+    await Published.deleteMany({ schoolId, versionId: { $ne: versionId } });
 
-    return ok(res, { published: true, publishedAt: now, termLabel: termLabel.trim() });
+    return ok(res, { published: true, publishedAt: now, termLabel, versionId, slotCount: copies.length, warnings: problems.warnings });
   } catch (err) { console.error('[timetable POST /publish]', err); return E.serverError(res); }
 });
 
-/* ── POST /api/timetable/unpublish ─────────────────────────── */
+/* ── POST /api/timetable/unpublish ─ take the live version down for everyone ── */
+// The copy is kept, so publishing again is quick. Editors still see the draft.
 router.post('/unpublish', authMiddleware, PLAN, MODGATE, timetableManageAccess('update'), async (req, res) => {
   try {
     await _model('schools').updateOne({ id: req.jwtUser.schoolId }, {
       $set: { 'timetableStatus.published': false },
     });
-    return ok(res, { published: false });
+    return ok(res, await getPublishState(req.jwtUser.schoolId));
   } catch (err) { console.error('[timetable POST /unpublish]', err); return E.serverError(res); }
 });
 
@@ -789,7 +864,7 @@ router.get('/my', authMiddleware, async (req, res) => {
       const section = user?.sectionAssigned ?? null;
       const filter  = { schoolId, isActive: true };
       if (section) filter.section = section;
-      const slots = await tenantModel('timetable', tenantContext(req)).find(filter)
+      const slots = await (await timetableReaderFor(req)).find(filter)
         .sort({ day: 1, startTime: 1, period: 1 }).limit(5000).lean();
       return ok(res, { slots, section: section ?? 'all', role: 'section_head' });
     }
@@ -798,7 +873,7 @@ router.get('/my', authMiddleware, async (req, res) => {
       return ok(res, { slots: [], teacher: null, message: 'No teacher record is linked to this account.' });
     }
 
-    const slots = await tenantModel('timetable', tenantContext(req))
+    const slots = await (await timetableReaderFor(req))
       .find({ schoolId, teacherId: { $in: _teacherSlotForms(teacher) }, isActive: true })
       .sort({ day: 1, startTime: 1, periodNumber: 1, period: 1 })
       .limit(500).lean();
@@ -837,7 +912,7 @@ router.get('/my-children', authMiddleware, async (req, res) => {
         ? [{ streamId: student.streamId }, { streamId: { $exists: false } }]
         : [{ streamId: { $exists: false } }];
       const slots = student.classId
-        ? await tenantModel('timetable', tenantContext(req))
+        ? await (await timetableReaderFor(req))
           .find({ schoolId, classId: student.classId, isActive: true, $or: streamOr })
           .sort({ day: 1, startTime: 1, period: 1 }).limit(300).lean()
         : [];
@@ -1122,7 +1197,7 @@ router.post('/substitutions/absent', authMiddleware, PLAN, MODGATE, timetableMan
     const slotIds = [...new Set([teacherId, teacher?.userId, teacher?.id].filter(Boolean))];
 
     // All slots for this teacher on that weekday
-    const slots = await tenantModel('timetable', tenantContext(req)).find({
+    const slots = await (await publishedReader(schoolId, tenantContext(req))).find({
       schoolId, teacherId: { $in: slotIds }, day: dayOfWeek, isActive: true,
       type: { $in: ['lesson', 'assembly', 'registration'] },
     }).lean();
@@ -1198,7 +1273,7 @@ router.post('/substitutions/auto-assign', authMiddleware, PLAN, MODGATE, timetab
     const [uncovered, allTeachers, weeklySlots] = await Promise.all([
       Sub.find({ schoolId, date, status: 'uncovered' }).lean(),
       tenantModel('teachers', tenantContext(req)).find({ schoolId, status: 'active' }).lean(),
-      tenantModel('timetable', tenantContext(req)).find({ schoolId, isActive: true }).select('teacherId').lean(),
+      (await publishedReader(schoolId, tenantContext(req))).find({ schoolId, isActive: true }).select('teacherId').lean(),
     ]);
 
     if (!uncovered.length) return ok(res, { assigned: 0, message: 'No uncovered lessons to assign.' });
@@ -1226,7 +1301,7 @@ router.post('/substitutions/auto-assign', authMiddleware, PLAN, MODGATE, timetab
       if (!thisRunByPeriod[p]) thisRunByPeriod[p] = new Set();
 
       // Teachers already teaching at this period on this weekday
-      const busySlots = await tenantModel('timetable', tenantContext(req))
+      const busySlots = await (await publishedReader(schoolId, tenantContext(req)))
         .find({ schoolId, day, period: p, isActive: true })
         .select('teacherId').lean();
       const busyIds = new Set(busySlots.map(s => String(s.teacherId)).filter(Boolean));
@@ -1380,7 +1455,7 @@ router.get('/available-teachers', authMiddleware, PLAN, MODGATE, timetableManage
     // Run all lookups in parallel
     const [busySlots, absentSubs, coveredSubs, allTeachers, weeklySlots] = await Promise.all([
       // Teachers scheduled at this period on this weekday (master timetable)
-      tenantModel('timetable', tenantContext(req)).find({ schoolId, day, period: String(period), isActive: true })
+      (await publishedReader(schoolId, tenantContext(req))).find({ schoolId, day, period: String(period), isActive: true })
         .select('teacherId').lean(),
       // Teachers already marked absent today
       tenantModel('substitutions', tenantContext(req)).find({ schoolId, date })
@@ -1393,7 +1468,7 @@ router.get('/available-teachers', authMiddleware, PLAN, MODGATE, timetableManage
       // All active teachers for this school
       tenantModel('teachers', tenantContext(req)).find({ schoolId, status: 'active' }).lean(),
       // All slots (for weekly load count)
-      tenantModel('timetable', tenantContext(req)).find({ schoolId, isActive: true }).select('teacherId').lean(),
+      (await publishedReader(schoolId, tenantContext(req))).find({ schoolId, isActive: true }).select('teacherId').lean(),
     ]);
 
     const busyIds    = new Set(busySlots.map(s => String(s.teacherId)).filter(Boolean));
@@ -1500,8 +1575,9 @@ router.post('/', authMiddleware, PLAN, MODGATE, timetableManageAccess('create'),
     const section = await _sectionForClass(schoolId, data.classId);
     data.section  = section;
     if (!data.startTime) {
-      const times = await _resolveSlotTimes(schoolId, section, data.period);
-      if (times) { data.startTime = times.startTime; data.endTime = times.endTime; }
+      const times = await _resolveSlotTimes(schoolId, section, data.period, data.classId);
+      if (!times) return E.badRequest(res, _periodNotInScheduleMsg(data.period));
+      data.startTime = times.startTime; data.endTime = times.endTime; data.bellScheduleId = times.bellScheduleId;
     }
 
     const conflictMsg = await _checkConflicts(schoolId, data);
@@ -1554,19 +1630,22 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, timetableManageAccess('creat
 
     // Resolve section + times for each slot; cache by classId to avoid N+1
     const sectionCache = {};
+    const missingPeriods = [];
     const toInsert = await Promise.all(data.slots.map(async s => {
       if (!sectionCache[s.classId]) {
         sectionCache[s.classId] = await _sectionForClass(schoolId, s.classId);
       }
       const section = sectionCache[s.classId];
       let { startTime, endTime } = s;
+      let bellScheduleId = null;
       if (!startTime) {
-        const times = await _resolveSlotTimes(schoolId, section, s.period);
-        if (times) { startTime = times.startTime; endTime = times.endTime; }
+        const times = await _resolveSlotTimes(schoolId, section, s.period, s.classId);
+        if (times) { startTime = times.startTime; endTime = times.endTime; bellScheduleId = times.bellScheduleId; }
+        else missingPeriods.push(`Period ${s.period}`);
       }
       const period = await _resolvedPeriod(s.academicYearId, s.termId);
       return {
-        ...s, startTime, endTime,
+        ...s, startTime, endTime, bellScheduleId,
         academicYearId: period.academicYearId,
         termId:         period.termId,
         section,
@@ -1577,6 +1656,9 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, timetableManageAccess('creat
       };
     }));
 
+    if (missingPeriods.length) {
+      return E.badRequest(res, `${[...new Set(missingPeriods)].join(', ')} ${missingPeriods.length > 1 ? 'are' : 'is'} not in the bell schedule of the class being timetabled. Add ${missingPeriods.length > 1 ? 'them' : 'it'} to the schedule, or choose other periods.`);
+    }
     await Timetable.insertMany(toInsert, { ordered: false });
     return ok(res, { created: toInsert.length, replaced: !!data.replaceClass }, null, 201);
   } catch (err) { console.error('[timetable POST /bulk]', err); return E.serverError(res); }
@@ -1622,12 +1704,14 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, timetableManageAccess('update'
       const section = await _sectionForClass(schoolId, merged.classId);
       merged.section = section;
       if (!data.startTime) {
-        const times = await _resolveSlotTimes(schoolId, section, merged.period);
-        if (times) { merged.startTime = times.startTime; merged.endTime = times.endTime; }
+        const times = await _resolveSlotTimes(schoolId, section, merged.period, merged.classId);
+        if (times) { merged.startTime = times.startTime; merged.endTime = times.endTime; merged.bellScheduleId = times.bellScheduleId; }
+        else if (!merged.startTime) return E.badRequest(res, _periodNotInScheduleMsg(merged.period));
       }
       data.section   = merged.section;
       data.startTime = merged.startTime;
       data.endTime   = merged.endTime;
+      if (merged.bellScheduleId !== undefined) data.bellScheduleId = merged.bellScheduleId;
     }
 
     const schedulingChanged = ['classId', 'streamId', 'day', 'period', 'teacherId', 'room', 'roomId'].some(f => data[f] !== undefined);

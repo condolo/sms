@@ -452,6 +452,11 @@ router.delete('/:id', authMiddleware, PLAN, MODGATE, rbac('classes', 'delete'), 
       { new: true }
     ).lean();
     if (!doc) return E.notFound(res, 'Class not found');
+    // The class is no longer in any bell schedule, so its schedule's class count and the one-schedule rule stay true.
+    const refs = [...new Set([doc.id, String(doc._id)].filter(Boolean))];
+    await tenantModel('bell_schedules', tenantContext(req))
+      .updateMany({ schoolId, classIds: { $in: refs } }, { $pull: { classIds: { $in: refs } } })
+      .catch(err => console.error('[classes DELETE] bell schedule cleanup failed:', err.message));
     return ok(res, { id: paramId, deleted: true });
   } catch (err) {
     console.error('[classes DELETE/:id]', err);

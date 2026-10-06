@@ -14,6 +14,7 @@ const { authMiddleware }   = require('../middleware/auth');
 const { rbac }             = require('../middleware/rbac');
 const { _model }           = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
+const { markTimetableChanged } = require('../utils/timetable-publish');
 const { revokeUserTokens } = require('../utils/token-version');
 const email                = require('../utils/email');
 const AuditService         = require('../services/audit');
@@ -366,7 +367,8 @@ router.put('/me', authMiddleware, async (req, res) => {
         await Teachers.updateOne({ schoolId, userId }, { $set: { firstName: newFirst, lastName: newLast, updatedAt: now } });
       }
 
-      // Cascade to every collection that denormalises teacherName
+      // Cascade to every collection that denormalises teacherName. A renamed teacher on the draft timetable is a change to publish.
+      await markTimetableChanged(schoolId);
       await Promise.all([
         tenantModel('timetable', tenantContext(req)).updateMany(
           { schoolId, teacherId: userId },

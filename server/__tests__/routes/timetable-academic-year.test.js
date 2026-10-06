@@ -31,7 +31,8 @@ jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => ne
 jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) => next() }));
 jest.mock('../../middleware/module-gate', () => ({ moduleGate: () => (_req, _res, next) => next() }));
 jest.mock('../../routes/bell-schedule', () => ({
-  resolveBellSchedule: jest.fn().mockResolvedValue({ periods: [] }),
+  // A real schedule with the periods these fixtures use, so a lesson gets its times.
+  resolveBellSchedule: jest.fn().mockResolvedValue({ id: 'bs_test', periods: [1,2,3,4,5,6,7,8].map(n => ({ p: String(n), start: `0${6 + n}:30`.slice(-5), end: `0${7 + n}:30`.slice(-5), label: `Period ${n}`, isBreak: false })) }),
 }));
 
 function mockChainArr(arr) {

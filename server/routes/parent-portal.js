@@ -12,6 +12,7 @@ const express            = require('express');
 const { authMiddleware } = require('../middleware/auth');
 const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
+const { isTimetablePublished, publishedReader } = require('../utils/timetable-publish');
 const { ok, E }          = require('../utils/response');
 // Weekly Snapshot's read logic is shared with weekly-snapshots.js's own
 // staff-facing routes — see that file's _findAuthorizedStudent header
@@ -142,7 +143,7 @@ router.get('/dashboard/:childId', authMiddleware, async (req, res) => {
     // identical fix for the full reasoning: these are genuinely different,
     // both-populated collections, and 'timetable_slots' is an orphaned
     // legacy one nothing writes to anymore.
-    const Timetable     = tenantModel('timetable', tenantContext(req));
+    const Timetable     = await publishedReader(schoolId, tenantContext(req));
     const LibraryLoans  = tenantModel('library_loans', tenantContext(req));
 
     const todayISO = new Date().toISOString().slice(0, 10);
@@ -294,7 +295,8 @@ router.get('/dashboard/:childId', authMiddleware, async (req, res) => {
         ? Classes.findOne({ id: student.classId, schoolId })
             .select('formTeacherId name').lean().catch(() => null)
         : null,
-      student.classId
+      // Unpublished timetables are not shown to parents (see utils/timetable-publish.js).
+      student.classId && (await isTimetablePublished(schoolId))
         ? Timetable.find({ schoolId, classId: student.classId, day: todayDay, isActive: true, $or: timetableStreamOr })
             .sort({ startTime: 1 })
             .select('subject teacherName startTime endTime room').lean()

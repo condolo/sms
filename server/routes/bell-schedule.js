@@ -29,6 +29,7 @@ const { authMiddleware } = require('../middleware/auth');
 const { planGate }       = require('../middleware/plan');
 const { rbac }           = require('../middleware/rbac');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
+const { markTimetableChanged } = require('../utils/timetable-publish');
 
 const router = express.Router();
 
@@ -66,7 +67,8 @@ const DEFAULT_BELL = [
 ];
 
 /* ── Validation ───────────────────────────────────────────────── */
-const TimeRe = /^\d{2}:\d{2}$/;
+// A real clock time: 00:00–23:59. Times are compared as text everywhere, so the format must be exact.
+const TimeRe = /^([01]\d|2[0-3]):[0-5]\d$/;
 const PeriodSchema = z.object({
   p:       z.string().min(1).max(10),
   start:   z.string().regex(TimeRe, 'start must be HH:MM'),
@@ -75,6 +77,11 @@ const PeriodSchema = z.object({
   isBreak: z.boolean(),
 });
 const BellBodySchema = z.object({
+  // Set to update one named schedule. Omitted = the section default, or a new schedule when classIds are given.
+  id:       z.string().min(1).max(80).optional(),
+  name:     z.string().trim().min(1).max(60).optional(),
+  // The classes this schedule applies to. Empty = the section default. A class is in at most one schedule.
+  classIds: z.array(z.string().min(1).max(80)).max(500).optional(),
   // Shape-only here — membership against this school's real section
   // keys (plus 'all') is checked in the route handler, since that set
   // is per-school and can't be known at schema-definition time.
@@ -87,29 +94,87 @@ function _uid() {
   return 'bs_' + Date.now().toString(36) + crypto.randomBytes(4).toString('hex');
 }
 
+/* A period must end after it starts, and each key may appear once: lessons are placed by key. */
+function _periodProblem(periods) {
+  const keys = new Set();
+  for (const p of periods) {
+    if (p.start >= p.end) return `Period ${p.p}: it must end after it starts (${p.start}–${p.end}).`;
+    if (keys.has(String(p.p))) return `Period key "${p.p}" appears more than once. Each key needs its own row.`;
+    keys.add(String(p.p));
+  }
+  return null;
+}
+
 /* ── Shared lookup used by timetable route too ───────────────── */
+/* A schedule with no classIds is a section default. Documents saved before classIds existed have none, so both count. */
+const SECTION_DEFAULT = { $or: [{ classIds: { $exists: false } }, { classIds: { $size: 0 } }] };
+
 /**
- * Fetch the effective bell schedule for a given section.
- * Falls back: section-specific → school 'all' → hardcoded DEFAULT_BELL.
- * Returns { periods, section } — the section that was actually used.
+ * Fetch the effective bell schedule for a class.
+ * Falls back: the schedule that lists this class -> the section default
+ * (no classIds) -> the school-wide "all" -> the built-in DEFAULT_BELL.
+ * Returns { periods, section, id, name } for the schedule actually used.
  */
-async function resolveBellSchedule(schoolId, section = 'all') {
+async function resolveBellSchedule(schoolId, section = 'all', classId = null) {
   const Bs = tenantModel('bell_schedules', { schoolId });
   let doc = null;
 
-  // 1. Try requested section (if not already 'all')
-  if (section !== 'all') {
-    doc = await Bs.findOne({ schoolId, section }).lean();
+  // 1. The schedule this class has been assigned to
+  if (classId) {
+    doc = await Bs.findOne({ schoolId, classIds: classId }).lean();
   }
-  // 2. Fall back to school-wide default
+  // 2. The section's default
+  if (!doc && section !== 'all') {
+    doc = await Bs.findOne({ schoolId, section, ...SECTION_DEFAULT }).lean();
+  }
+  // 3. The school-wide default
   if (!doc) {
-    doc = await Bs.findOne({ schoolId, section: 'all' }).lean();
+    doc = await Bs.findOne({ schoolId, section: 'all', ...SECTION_DEFAULT }).lean();
   }
-  // 3. Final fallback: hardcoded constant
+  // 4. Built-in
   if (!doc) {
-    return { periods: DEFAULT_BELL, section: 'default', id: null };
+    // Built-in: used only while a school has saved no schedule at all. Reported as its own source.
+    return { periods: DEFAULT_BELL, section: 'default', id: null, name: null, source: 'built-in' };
   }
-  return { periods: doc.periods, section: doc.section, id: doc.id };
+  // Where the times came from: the class's own schedule, a section default, or the school default.
+  const source = (classId && (doc.classIds ?? []).includes(classId)) ? 'class'
+    : doc.section === 'all' ? 'school' : 'section';
+  return { periods: doc.periods, section: doc.section, id: doc.id, name: doc.name ?? null, source };
+}
+
+/* Each slot copies its start and end times when it is created. When a schedule changes, bring every
+   active slot back in line with the schedule its class now uses. Breaks have no slot. A period that
+   a schedule no longer has keeps its last times, and is left for the timetable owner to review. */
+async function resyncSlotTimes(schoolId, ctx) {
+  const classes = await tenantModel('classes', ctx).find({ schoolId }).select('id _id sectionKey').lean();
+  const Timetable = tenantModel('timetable', ctx);
+  for (const c of classes) {
+    const refs = [...new Set([c.id, c._id && String(c._id)].filter(Boolean).map(String))];
+    const { periods, id } = await resolveBellSchedule(schoolId, c.sectionKey || 'all', refs[0]);
+    const lessons = periods.filter(x => !x.isBreak);
+    for (const p of lessons) {
+      await Timetable.updateMany(
+        { schoolId, classId: { $in: refs }, period: String(p.p), isActive: true },
+        { $set: { startTime: p.start, endTime: p.end, bellScheduleId: id ?? null, scheduleStale: false } },
+      );
+    }
+    // A lesson whose period is no longer in the schedule keeps its times, but is flagged so the
+    // timetable shows it for review instead of silently dropping it.
+    await Timetable.updateMany(
+      { schoolId, classId: { $in: refs }, isActive: true, period: { $nin: lessons.map(p => String(p.p)) } },
+      { $set: { scheduleStale: true } },
+    );
+  }
+}
+
+// A schedule change must still save if the re-sync fails. The error is logged, and the slots keep their times.
+async function _resyncSafely(schoolId, ctx) {
+  try {
+    await resyncSlotTimes(schoolId, ctx);
+    await markTimetableChanged(schoolId);
+  } catch (err) {
+    console.error('[bell-schedule] slot time re-sync failed:', err.message);
+  }
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -152,7 +217,9 @@ router.get('/', authMiddleware, planGate('bell_schedule'), async (req, res) => {
     const schoolId    = req.jwtUser.schoolId;
     const sectionKeys = await _schoolSectionKeys(schoolId, tenantContext(req));
     const section = sectionKeys.has(req.query.section) ? req.query.section : 'all';
-    const result  = await resolveBellSchedule(schoolId, section);
+    // ?classId= returns the schedule that class actually runs, not just its section's.
+    const classId = req.query.classId ? String(req.query.classId) : null;
+    const result  = await resolveBellSchedule(schoolId, section, classId);
     res.json({ success: true, data: result });
   } catch (err) {
     console.error('[bell-schedule] GET error:', err);
@@ -170,65 +237,135 @@ router.get('/', authMiddleware, planGate('bell_schedule'), async (req, res) => {
 // permanently inaccessible to every role except superadmin. Matches
 // rooms.js's already-correct subKey usage for the same "Configure Rooms"
 // sub-permission pattern.
+/* GET /api/bell-schedule/schedules — every named schedule, with the classes it covers */
+router.get('/schedules', authMiddleware, planGate('bell_schedule'), async (req, res) => {
+  try {
+    const schoolId = req.jwtUser.schoolId;
+    const docs = await tenantModel('bell_schedules', tenantContext(req))
+      .find({ schoolId }).sort({ section: 1, name: 1 }).lean();
+    res.json({
+      success: true,
+      data: docs.map(d => ({
+        id: d.id, section: d.section, name: d.name ?? null,
+        classIds: d.classIds ?? [], periods: d.periods,
+      })),
+    });
+  } catch (err) {
+    console.error('[bell-schedule] GET schedules error:', err);
+    res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Failed to fetch bell schedules' } });
+  }
+});
+
+/* PUT /api/bell-schedule ─ save a schedule: a section default, or one for specific classes */
+// RBAC: {resource: 'timetable', action: 'update', subKey: 'bell_schedule'} (see the 2026-09 fix in git history).
 router.put('/', authMiddleware, planGate('bell_schedule'), rbac('timetable', 'update', 'bell_schedule'), async (req, res) => {
+  const fail = (msg, status = 400) => res.status(status).json({
+    success: false,
+    error: { code: status === 404 ? 'NOT_FOUND' : 'VALIDATION_ERROR', message: msg },
+  });
   try {
     const parsed = BellBodySchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'VALIDATION_ERROR', message: parsed.error.errors[0]?.message ?? 'Invalid bell schedule data' },
-      });
-    }
+    if (!parsed.success) return fail(parsed.error.errors[0]?.message ?? 'Invalid bell schedule data');
+    const periodProblem = _periodProblem(parsed.data.periods);
+    if (periodProblem) return fail(periodProblem);
 
-    const { section, periods } = parsed.data;
+    const { id, name, section, periods } = parsed.data;
+    const classIds = [...new Set(parsed.data.classIds ?? [])];
     const schoolId = req.jwtUser.schoolId;
     const ctx      = tenantContext(req);
+    const Bs       = tenantModel('bell_schedules', ctx);
 
+    // A schedule for classes is school-wide: its classes may come from any section, so it is
+    // stored under 'all'. A section default (no classes) is still stored under its own section.
     const sectionKeys = await _schoolSectionKeys(schoolId, ctx);
-    if (!sectionKeys.has(section)) {
-      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: `Unknown section '${section}'.` } });
+    if (!sectionKeys.has(section)) return fail(`Unknown section '${section}'.`);
+    const storedSection = classIds.length ? 'all' : section;
+
+    // Every class must exist here.
+    const classNames = {};
+    if (classIds.length) {
+      const classes = await tenantModel('classes', ctx)
+        .find({ schoolId, $or: [{ id: { $in: classIds } }, { _id: { $in: classIds } }] })
+        .select('id name sectionKey').lean();
+      const byRef = new Map();
+      for (const c of classes) {
+        byRef.set(String(c.id), c);
+        byRef.set(String(c._id), c);
+      }
+      for (const ref of classIds) {
+        const c = byRef.get(ref);
+        if (!c) return fail('A class in this schedule was not found.');
+        classNames[ref] = c.name;
+      }
+      // One schedule per class: a class already in another schedule is refused, never moved silently.
+      const others = await Bs.find({ schoolId, classIds: { $in: classIds }, ...(id ? { id: { $ne: id } } : {}) })
+        .select('id name classIds').lean();
+      if (others.length) {
+        const taken  = classIds.find(ref => others.some(o => (o.classIds ?? []).includes(ref)));
+        const holder = others.find(o => (o.classIds ?? []).includes(taken));
+        return fail(`${classNames[taken] ?? 'A class'} is already in the "${holder.name ?? 'other'}" schedule. Remove it there first.`);
+      }
     }
 
     const now = new Date().toISOString();
-    const Bs  = tenantModel('bell_schedules', ctx);
-
-    const existing = await Bs.findOne({ schoolId, section }).lean();
-    if (existing) {
-      await Bs.updateOne({ id: existing.id }, { $set: { periods, updatedAt: now } });
-    } else {
-      await Bs.create({
-        id:        _uid(),
-        schoolId,
-        section,
-        periods,
-        createdAt: now,
-        updatedAt: now,
-      });
+    let existing = null;
+    if (id) {
+      existing = await Bs.findOne({ schoolId, id }).lean();
+      if (!existing) return fail('Bell schedule not found.', 404);
+      // A default (no classes) and a class schedule are different things. Converting one into the
+      // other would leave the school without its default, or silently create a second one.
+      if (!(existing.classIds ?? []).length && classIds.length) {
+        return fail('A default cannot take classes. Create a new schedule for them.');
+      }
+      if ((existing.classIds ?? []).length && !classIds.length) {
+        return fail('A class schedule needs at least one class. Remove the schedule instead.');
+      }
+    } else if (classIds.length === 0) {
+      // A section default: one per section, updated in place.
+      existing = await Bs.findOne({ schoolId, section, ...SECTION_DEFAULT }).lean();
     }
 
-    res.json({ success: true, data: { section, periods } });
+    const label = name ?? (classIds.length === 0 ? 'Section default' : 'Custom schedule');
+    if (existing) {
+      await Bs.updateOne({ id: existing.id }, { $set: { section: storedSection, name: label, classIds, periods, updatedAt: now } });
+      await _resyncSafely(schoolId, ctx);
+      return res.json({ success: true, data: { id: existing.id, section: storedSection, name: label, classIds, periods } });
+    }
+    const doc = await Bs.create({ id: _uid(), schoolId, section: storedSection, name: label, classIds, periods, createdAt: now, updatedAt: now });
+    await _resyncSafely(schoolId, ctx);
+    res.json({ success: true, data: { id: doc.id, section: storedSection, name: label, classIds, periods } });
   } catch (err) {
     console.error('[bell-schedule] PUT error:', err);
     res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Failed to save bell schedule' } });
   }
 });
 
-/* DELETE /api/bell-schedule?section=primary — revert to default ─ */
-// RBAC fix: same as PUT above — now checks action 'delete' with the same subKey.
+/* DELETE /api/bell-schedule?id=… — remove a named schedule; its classes fall back to the section default.
+   DELETE /api/bell-schedule?section=… — remove the section default (never the school-wide 'all'). */
 router.delete('/', authMiddleware, planGate('bell_schedule'), rbac('timetable', 'delete', 'bell_schedule'), async (req, res) => {
   try {
-    const section  = req.query.section;
     const schoolId = req.jwtUser.schoolId;
     const ctx      = tenantContext(req);
+    const Bs       = tenantModel('bell_schedules', ctx);
+
+    if (req.query.id) {
+      const r = await Bs.deleteOne({ schoolId, id: String(req.query.id) });
+      if (!r.deletedCount) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Bell schedule not found.' } });
+      await _resyncSafely(schoolId, ctx);
+      return res.json({ success: true, message: 'Bell schedule removed. Its classes now use the section default.' });
+    }
+
+    const section = req.query.section;
     if (!section || section === 'all') {
-      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: "Cannot delete the 'all' schedule. Use PUT to update it." } });
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: "Cannot delete the school-wide 'all' schedule. Use PUT to update it." } });
     }
     const sectionKeys = await _schoolSectionKeys(schoolId, ctx);
     if (!sectionKeys.has(section)) {
       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: `Unknown section '${section}'.` } });
     }
-    await tenantModel('bell_schedules', ctx).deleteOne({ schoolId, section });
-    res.json({ success: true, message: `Bell schedule for '${section}' removed. Will now use school default.` });
+    await Bs.deleteOne({ schoolId, section, ...SECTION_DEFAULT });
+    await _resyncSafely(schoolId, ctx);
+    res.json({ success: true, message: `Section default for '${section}' removed. Will now use the school default.` });
   } catch (err) {
     console.error('[bell-schedule] DELETE error:', err);
     res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Failed to delete bell schedule' } });

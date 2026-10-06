@@ -21,6 +21,16 @@ const DIAMOND   = 'strm_diamond';
 const SAPPHIRE  = 'strm_sapphire';
 
 let mockJwtUser;
+// The published copy is read through the same reader; in these tests it is the same fixture store.
+jest.mock('../../utils/timetable-publish', () => {
+  const actual = jest.requireActual('../../utils/timetable-publish');
+  const { tenantModel } = require('../../utils/tenant-model');
+  return {
+    ...actual,
+    publishedReader: async (schoolId, ctx) => tenantModel('timetable', ctx),
+    timetableReaderFor: async (req) => tenantModel('timetable', { schoolId: req.jwtUser.schoolId }),
+  };
+});
 jest.mock('../../middleware/auth', () => ({
   authMiddleware: (req, _res, next) => { req.jwtUser = mockJwtUser; next(); },
 }));

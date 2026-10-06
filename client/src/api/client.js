@@ -847,13 +847,17 @@ export const mpesa = {
 
 export const bellSchedule = {
   /** Fetch a section's schedule. Falls back: section → 'all' → hardcoded default. */
-  get:      (section = 'all') => _get('/bell-schedule', { section }),
+  get:      (section = 'all', classId) => _get('/bell-schedule', { section, ...(classId ? { classId } : {}) }),
   /** Fetch overview of all configured sections */
   sections: ()                => _get('/bell-schedule/sections'),
   /** Save a section's schedule. body: { section, periods } */
   update:   (data)            => _put('/bell-schedule', data),
   /** Revert a section to the school-wide default */
   remove:   (section)         => _delete(`/bell-schedule?section=${section}`),
+  /** Every named schedule, with the classes each one covers */
+  list:     ()                => _get('/bell-schedule/schedules'),
+  /** Remove one named schedule by id; its classes fall back to the section default */
+  removeById: (id)            => _delete(`/bell-schedule?id=${encodeURIComponent(id)}`),
 };
 
 export const library = {

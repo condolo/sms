@@ -12,6 +12,7 @@ const express            = require('express');
 const { authMiddleware } = require('../middleware/auth');
 const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
+const { isTimetablePublished, publishedReader } = require('../utils/timetable-publish');
 const { ok, E }          = require('../utils/response');
 // Weekly Snapshot's read logic is shared with weekly-snapshots.js's own
 // staff-facing routes — see that file's _findAuthorizedStudent header
@@ -56,7 +57,7 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     // edits never reached this dashboard widget. Confirmed live against
     // the real database: 202 real documents in 'timetable' vs 55 stale
     // ones in 'timetable_slots'.
-    const Timetable     = tenantModel('timetable', tenantContext(req));
+    const Timetable     = await publishedReader(schoolId, tenantContext(req));
     const Subjects      = tenantModel('subjects', tenantContext(req));
     const Schools       = _model('schools');
     const Behaviour     = tenantModel('behaviour', tenantContext(req));
@@ -165,7 +166,8 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
       ? [{ streamId: student.streamId }, { streamId: { $exists: false } }]
       : [{ streamId: { $exists: false } }];
 
-    let rawSlots = student.classId
+    // Unpublished timetables are not shown to students (see utils/timetable-publish.js).
+    let rawSlots = student.classId && (await isTimetablePublished(schoolId))
       ? (await Timetable.find({ schoolId, classId: student.classId, day: today, isActive: true, $or: timetableStreamOr })
           .sort({ startTime: 1 })
           .select('subjectId subject teacherName teacherId startTime endTime room day')

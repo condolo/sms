@@ -98,6 +98,8 @@ beforeEach(() => {
   mockCurrentUser  = { userId: 'usr_admin', schoolId: SCHOOL, role: 'admin', roles: ['admin'] };
   mockCurrentPeriod = { academicYearId: 'ay_2026', termId: 'term_1' };
   mockStores = {
+    // The change mark that makes Publish available (utils/timetable-publish.js).
+    schools: { updateOne: jest.fn(() => Promise.resolve({ matchedCount: 1 })) },
     timetable: makeStore([]),
     classes:   makeStore([{ id: 'cls_yr7', schoolId: SCHOOL, name: 'Year 7' }]),
     streams:   makeStore([
