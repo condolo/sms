@@ -13,6 +13,7 @@ function makeStore(seed = []) {
   const docs = seed.map(d => ({ ...d }));
   return {
     find:   () => chain(docs),
+    findOne: (f) => chain(docs.find(d => Object.entries(f || {}).every(([k, v]) => d[k] === v)) ?? null),
     create: async (doc) => { const d = { ...doc, toObject: () => d }; docs.push(d); return d; },
   };
 }
@@ -48,7 +49,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockIsEnabled.mockResolvedValue(true);
   mockCurrentUser = { userId: 'u_admin', schoolId: SCHOOL, role: 'admin', roles: [], name: 'Admin' };
-  mockStores = { messages: makeStore([]), users: makeStore([]) };
+  mockStores = { messages: makeStore([]), users: makeStore([]), schools: makeStore([{ id: 'school_test_001', slug: 'trinitas', organizationId: null }]) };
 });
 
 test('a direct message checks the new_message event', async () => {

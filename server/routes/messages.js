@@ -14,11 +14,11 @@ const email = require('../utils/email');
 const notif = require('../utils/notif-settings');
 const { enqueueBatch } = require('../utils/email-queue');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
+const { schoolLoginUrl } = require('../utils/school-url');
 
 const router = express.Router();
 router.use(authMiddleware, tenantMiddleware, moduleGate('messages'));
 
-const APP_URL = process.env.APP_URL || 'https://msingi.io';
 
 /* ── Role → recipient group mapping ─────────────────────── */
 const ROLE_GROUPS = {
@@ -83,7 +83,9 @@ router.get('/', rbac('messages', 'read'), async (req, res) => {
 /* ── POST /api/messages — create message + send email notifications ─ */
 router.post('/', rbac('messages', 'create'), async (req, res) => {
   try {
-    const { schoolId, userId, name: senderName, role: senderRole } = req.jwtUser;
+    const { schoolId, userId, role: senderRole } = req.jwtUser;
+    const senderUser = await tenantModel('users', tenantContext(req)).findOne({ id: userId, schoolId }).select('name email').lean();
+    const senderName = req.jwtUser.name || senderUser?.name || senderUser?.email || 'School staff';
     const { subject, body, recipients, type = 'direct' } = req.body;
 
     if (!subject || !body || !recipients) {
@@ -124,6 +126,8 @@ router.post('/', rbac('messages', 'create'), async (req, res) => {
     const preview     = body.length > 160 ? body.substring(0, 157) + '…' : body;
     const isDirect    = type === 'direct';
     const notifyJobs  = [];
+    // Links go to this school's own sign-in (or its organisation's), not the marketing site.
+    const loginUrl    = await schoolLoginUrl(schoolId);
 
     // Check once whether email notifications are enabled for this school —
     // announcements and direct messages are separately configurable events
@@ -152,7 +156,7 @@ router.post('/', rbac('messages', 'create'), async (req, res) => {
               schoolEmail,
               schoolId,
               isDirect:    false,
-              appUrl:      APP_URL,
+              appUrl:      loginUrl,
             }));
           }
         }
@@ -176,7 +180,7 @@ router.post('/', rbac('messages', 'create'), async (req, res) => {
               schoolEmail,
               schoolId,
               isDirect:    false,
-              appUrl:      APP_URL,
+              appUrl:      loginUrl,
             }));
           }
         }
@@ -194,7 +198,7 @@ router.post('/', rbac('messages', 'create'), async (req, res) => {
             schoolEmail,
             schoolId,
             isDirect:    true,
-            appUrl:      APP_URL,
+            appUrl:      loginUrl,
           }));
         }
       }
