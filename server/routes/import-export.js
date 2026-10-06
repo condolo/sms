@@ -27,6 +27,7 @@ const { planGate }            = require('../middleware/plan');
 const { _model }              = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { markTimetableChanged } = require('../utils/timetable-publish');
+const { resolveBellSchedule } = require('./bell-schedule');
 const { resolvePrimaryContact, validateGuardianRequirement } = require('../utils/guardian-contact');
 const { BUILTIN_EXTRA_ROLE_VALUES } = require('../config/staffResponsibilities');
 const { parseCSV } = require('../utils/csv');
@@ -353,6 +354,8 @@ const TEMPLATES = {
       '#   room        — room name, e.g. Lab 1 or Room 202 (optional)',
       '#   type        — lesson | assembly | registration | free  (default: lesson)',
       '#',
+      '#   period must be a lesson period in that class\'s bell schedule. Start and end times',
+      '#   come from that schedule, not from this file. Breaks cannot be used.',
       '#   Existing slots for the same class/stream/day/period are UPDATED (upsert',
       '#   behaviour). Imported into the school\'s current academic year/term.',
       '#   To start fresh: clear your timetable in the Timetable module first, then import.',
@@ -461,10 +464,10 @@ const rawText = express.text({ type: 'text/csv', limit: '5mb' });
 /* ── Helper: resolve class name → classId ────────────────────── */
 async function _buildClassMap(schoolId) {
   const Classes = tenantModel('classes', { schoolId });
-  const docs    = await Classes.find({ schoolId }).select('id _id name').lean();
+  const docs    = await Classes.find({ schoolId }).select('id _id name sectionKey').lean();
   const map     = {};
   for (const c of docs) {
-    map[c.name.toLowerCase().trim()] = { id: c.id || c._id?.toString(), name: c.name };
+    map[c.name.toLowerCase().trim()] = { id: c.id || c._id?.toString(), name: c.name, sectionKey: c.sectionKey || null };
   }
   return map;
 }
@@ -1568,6 +1571,16 @@ async function _importTimetable(rows, schoolId, userId) {
   // than blocking the whole import.
   const currentPeriod = await resolveAcademicPeriod(schoolId, { schoolId }, {});
 
+  // Each class runs its own bell schedule. A lesson's start and end come from the schedule of its class,
+  // so the imported times are the times the class actually runs at. Resolved once per class.
+  const scheduleByClass = new Map();
+  async function scheduleFor(classEntry) {
+    if (!scheduleByClass.has(classEntry.id)) {
+      scheduleByClass.set(classEntry.id, await resolveBellSchedule(schoolId, classEntry.sectionKey || 'all', classEntry.id));
+    }
+    return scheduleByClass.get(classEntry.id);
+  }
+
   const Timetable  = tenantModel('timetable', { schoolId });
   const VALID_DAYS = new Set(['monday', 'tuesday', 'wednesday', 'thursday', 'friday']);
   const VALID_TYPE = new Set(['lesson', 'assembly', 'registration', 'free']);
@@ -1603,6 +1616,14 @@ async function _importTimetable(rows, schoolId, userId) {
     const classId    = classEntry?.id;
     if (!classId) {
       results.errors.push({ row, field: 'className', message: `Class '${r.className}' not found. Create it first in Classes, then re-import.` });
+      results.skipped++; continue;
+    }
+
+    // The period must be a lesson period in this class's bell schedule. Without one, the lesson would have no time.
+    const schedule = await scheduleFor(classEntry);
+    const slotTime = schedule.periods.find(pp => String(pp.p) === period && !pp.isBreak);
+    if (!slotTime) {
+      results.errors.push({ row, field: 'period', message: `Period ${period} is not a lesson period in ${classEntry.name}'s bell schedule ("${schedule.name ?? schedule.section}"). Use one of its periods, or add this period to the schedule first.` });
       results.skipped++; continue;
     }
 
@@ -1669,6 +1690,10 @@ async function _importTimetable(rows, schoolId, userId) {
           termId:         currentPeriod.termId         || undefined,
           isActive:       true,
           updatedBy:      userId,
+          startTime:      slotTime.start,
+          endTime:        slotTime.end,
+          bellScheduleId: schedule.id ?? null,
+          scheduleStale:  false,
         },
         $setOnInsert: {
           id:        uuidv4(),

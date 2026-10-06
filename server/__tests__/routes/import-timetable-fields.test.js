@@ -100,6 +100,8 @@ beforeEach(() => {
   mockStores = {
     // The change mark that makes Publish available (utils/timetable-publish.js).
     schools: { updateOne: jest.fn(() => Promise.resolve({ matchedCount: 1 })) },
+    // No saved schedules: the resolver falls back to the built-in periods, which the fixtures use.
+    bell_schedules: { find: jest.fn(() => ({ select: () => ({ lean: () => Promise.resolve([]) }), lean: () => Promise.resolve([]) })), findOne: jest.fn(() => ({ select: () => ({ lean: () => Promise.resolve(null) }), lean: () => Promise.resolve(null) })) },
     timetable: makeStore([]),
     classes:   makeStore([{ id: 'cls_yr7', schoolId: SCHOOL, name: 'Year 7' }]),
     streams:   makeStore([
@@ -113,6 +115,59 @@ beforeEach(() => {
 function row(overrides = {}) {
   return { className: 'Year 7', day: 'monday', period: '1', subject: 'Mathematics', ...overrides };
 }
+
+// Year 7 runs its own bell schedule, with lessons at 08:15 and 09:20. Period 1 is in it; period 9 is not.
+const YEAR7_SCHEDULE = {
+  id: 'bs_year7', section: 'all', name: 'Year 7', classIds: ['cls_yr7'],
+  periods: [
+    { p: '1', start: '08:15', end: '09:10', label: 'Period 1', isBreak: false },
+    { p: 'B', start: '09:10', end: '09:20', label: 'Break', isBreak: true },
+    { p: '2', start: '09:20', end: '10:15', label: 'Period 2', isBreak: false },
+  ],
+};
+function useSavedSchedule() {
+  mockStores.bell_schedules = {
+    findOne: jest.fn((f) => ({ lean: () => Promise.resolve(f.classIds === 'cls_yr7' ? YEAR7_SCHEDULE : null) })),
+  };
+}
+
+describe('POST /api/import-export/timetable — lesson times come from the class\'s own bell schedule', () => {
+  test('an imported lesson takes the start and end of its period in the class schedule, and records the schedule', async () => {
+    useSavedSchedule();
+    const res = await supertest(buildApp())
+      .post('/api/import-export/timetable')
+      .set('Content-Type', 'application/json')
+      .send({ rows: [row({ period: '1' })] });
+    expect(res.status).toBe(201);
+    const slot = mockStores.timetable._docs()[0];
+    expect(slot.startTime).toBe('08:15');
+    expect(slot.endTime).toBe('09:10');
+    expect(slot.bellScheduleId).toBe('bs_year7');
+    expect(slot.scheduleStale).toBe(false);
+  });
+
+  test('a period the class schedule does not have is refused, and no lesson is written for it', async () => {
+    useSavedSchedule();
+    const res = await supertest(buildApp())
+      .post('/api/import-export/timetable')
+      .set('Content-Type', 'application/json')
+      .send({ rows: [row({ period: '9' })] });
+    expect(res.status).toBe(422);
+    expect(mockStores.timetable._docs()).toHaveLength(0);
+    expect(res.body.data.errors[0].message).toMatch(/not a lesson period in Year 7's bell schedule/);
+  });
+
+  test('a break cannot be used as a lesson period', async () => {
+    useSavedSchedule();
+    const res = await supertest(buildApp())
+      .post('/api/import-export/timetable')
+      .set('Content-Type', 'application/json')
+      .send({ rows: [row({ period: 'B' })] });
+    expect(res.status).toBe(422);
+    expect(mockStores.timetable._docs()).toHaveLength(0);
+    expect(res.body.data.errors[0].message).toMatch(/period/);
+  });
+});
 
 describe('POST /api/import-export/timetable — academic year/term stamping', () => {
   test('an imported slot is stamped with the school\'s live-resolved current year/term', async () => {
