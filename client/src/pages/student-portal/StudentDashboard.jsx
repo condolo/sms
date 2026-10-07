@@ -204,7 +204,7 @@ export default function StudentDashboard() {
   /* ── Destructure API response ── */
   const {
     student, school, attendance, feeBalance, feeClearancePct, nextFeeDueDate,
-    lessonsCoverage, timetableToday, reportCards,
+    lessonsCoverage, subjectMarks, timetableToday, reportCards,
     classTeacher, behaviourSummary, upcomingExams, announcements, upcomingEvents,
     borrowedBooks,
   } = data;
@@ -220,10 +220,14 @@ export default function StudentDashboard() {
   const activeSlot = timetableToday.find(s => _timeToMins(s.startTime) <= nowMins && nowMins < _timeToMins(s.endTime)) ?? null;
   const nextSlot   = timetableToday.find(s => _timeToMins(s.startTime) > nowMins) ?? null;
 
-  /* My Average — from lessonsCoverage or latest report card */
-  const myAvg = lessonsCoverage.length > 0
-    ? Math.round(lessonsCoverage.reduce((sum, s) => sum + s.percentage, 0) / lessonsCoverage.length)
-    : (reportCards[0]?.averageScore ?? null);
+  /* My Average — the latest published report card's real average. Used
+     to be computed from lessonsCoverage (curriculum coverage % — how much
+     of the syllabus has been taught, not how the student actually did),
+     which showed on this exact stat card as if it were an academic
+     average. A student/parent has no permission to read live Markbook
+     marks at all (see server/utils/repairPermissions.js), so this is the
+     one real number available to them — never anything provisional. */
+  const myAvg = reportCards[0]?.averageScore ?? null;
 
   /* Fee display — feeBalance is null when portalConfig.studentCanSeeFees
      is off (Security Baseline Register, CFG-09); null <= 0 is true in JS,
@@ -577,17 +581,21 @@ export default function StudentDashboard() {
                 </div>
 
                 <div id="grades-list" className="px-[18px] py-3.5 space-y-3.5">
-                  {lessonsCoverage.length === 0 ? (
+                  {/* subjectMarks — the student's real per-subject scores from their
+                     most recently PUBLISHED report card. Used to show curriculum
+                     coverage % here instead (mislabeled as grades) — that data is
+                     still shown, correctly labelled, in Curriculum Coverage below. */}
+                  {subjectMarks.length === 0 ? (
                     <p id="grades-empty" className="text-[12px] text-slate-400 text-center py-4">
-                      No grade data available yet
+                      No published report card yet
                     </p>
                   ) : (
-                    lessonsCoverage.map((sub, i) => (
+                    subjectMarks.map((sub, i) => (
                       <GradeBar
                         key={`grade-${sub.subjectId ?? i}`}
                         id={`grade-bar-${sub.subjectId ?? i}`}
-                        label={sub.subjectName}
-                        pct={sub.percentage ?? 0}
+                        label={sub.grade ? `${sub.subjectName} · ${sub.grade}` : sub.subjectName}
+                        pct={sub.finalScore ?? 0}
                         delay={i * 0.07}
                       />
                     ))

@@ -217,8 +217,35 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     const reportCards = await Reports.find({
       schoolId, studentId, status: 'published', superseded: { $ne: true },
     }).sort({ publishedAt: -1 }).limit(6)
-      .select('academicYear termName termNumber totalScore averageScore gpa rankings status publishedAt version termId academicYearId')
+      .select('id academicYear termName termNumber totalScore averageScore gpa rankings status publishedAt version termId academicYearId subjects')
       .lean();
+
+    // ── Real per-subject marks — the one place this dashboard can show an
+    // actual mark, since family roles have no access to the live Markbook
+    // at all (see server/utils/repairPermissions.js — student/parent carry
+    // no grades/assessment grant). Sourced only from the most recently
+    // published report card's own subjects snapshot, never provisional
+    // assessment_marks data — a mark a teacher hasn't finished entering, or
+    // one still awaiting moderation, is never shown here. Was previously
+    // conflated with lessonsCoverage below (curriculum coverage percentage
+    // mislabeled as "My Grades"/"My Average") — this is the real thing.
+    const latestSubjects  = reportCards[0]?.subjects || {};
+    const markSubjectIds  = Object.keys(latestSubjects);
+    const markSubjectDocs = markSubjectIds.length
+      ? await Subjects.find({ id: { $in: markSubjectIds }, schoolId }).select('id name').lean()
+      : [];
+    const markSubjectNameMap = Object.fromEntries(markSubjectDocs.map(s => [s.id, s.name]));
+    const subjectMarks = markSubjectIds
+      .map(subjectId => ({
+        subjectId,
+        subjectName: markSubjectNameMap[subjectId] || subjectId,
+        finalScore:  latestSubjects[subjectId]?.finalScore ?? null,
+        grade:       latestSubjects[subjectId]?.grade ?? null,
+      }))
+      .sort((a, b) => a.subjectName.localeCompare(b.subjectName));
+    // The per-type breakdown stays internal to this computation — the
+    // report-card list itself only ever needed the summary fields.
+    const reportCardsOut = reportCards.map(({ subjects, ...rc }) => rc);
 
     // ── Extended data (parallel) ─────────────────────────────
     const [
@@ -315,8 +342,9 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
         nextFeeDueDate: null,
       }),
       lessonsCoverage,
+      subjectMarks,
       timetableToday,
-      reportCards,
+      reportCards: reportCardsOut,
       classTeacher,
       behaviourSummary: { totalPoints, badgeLevel, latestReward, latestComment },
       upcomingExams:    upcomingExamsDocs,

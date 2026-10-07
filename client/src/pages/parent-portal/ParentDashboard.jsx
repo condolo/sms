@@ -249,10 +249,14 @@ export default function ParentDashboard() {
   /* Behaviour */
   const { totalPoints = 0, badgeLevel, latestReward, latestComment } = d?.behaviourSummary ?? {};
 
-  /* My Average from lessonsCoverage */
-  const myAvg = d?.lessonsCoverage?.length > 0
-    ? Math.round(d.lessonsCoverage.reduce((sum, s) => sum + s.percentage, 0) / d.lessonsCoverage.length)
-    : null;
+  /* My Average — the latest published report card's real average. Used to
+     be computed from lessonsCoverage (curriculum coverage % — how much of
+     the syllabus has been taught, not how the child actually did), shown
+     on this exact stat card as if it were an academic average. A parent
+     has no permission to read live Markbook marks at all (see server/
+     utils/repairPermissions.js), so this is the one real number available
+     — never anything provisional. */
+  const myAvg = d?.reportCards?.[0]?.averageScore ?? null;
 
   /* Fee balance display */
   const feePaid    = (d?.feeBalance ?? 0) <= 0;
@@ -711,22 +715,27 @@ export default function ParentDashboard() {
                         )}
                       </div>
                       <div id="grades-list" className="px-[18px] py-3.5 space-y-3.5">
-                        {!d.lessonsCoverage?.length ? (
+                        {/* d.subjectMarks — the child's real per-subject scores from
+                           their most recently PUBLISHED report card. Used to show
+                           curriculum coverage % here instead (mislabeled as grades)
+                           — that data is still shown, correctly labelled, in
+                           Curriculum Coverage below. */}
+                        {!d.subjectMarks?.length ? (
                           <p id="grades-empty" className="text-[12px] text-slate-400 text-center py-4">
-                            No grade data available yet
+                            No published report card yet
                           </p>
                         ) : (
-                          d.lessonsCoverage.map((sub, i) => (
+                          d.subjectMarks.map((sub, i) => (
                             <GradeBar
                               key={`grade-${sub.subjectId ?? i}`}
                               id={`grade-bar-${sub.subjectId ?? i}`}
-                              label={sub.subjectName}
-                              pct={sub.percentage ?? 0}
+                              label={sub.grade ? `${sub.subjectName} · ${sub.grade}` : sub.subjectName}
+                              pct={sub.finalScore ?? 0}
                               delay={i * 0.07}
                             />
                           ))
                         )}
-                        {myAvg != null && d.lessonsCoverage?.length > 0 && (
+                        {myAvg != null && d.subjectMarks?.length > 0 && (
                           <div
                             id="grades-class-avg-note"
                             className="mt-2 text-[11px] text-slate-500 px-3 py-2 bg-slate-50 rounded-[7px]"
