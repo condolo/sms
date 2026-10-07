@@ -24,6 +24,7 @@ const BREADCRUMB_MAP = {
   '/messages':      'Messages',
   '/events':        'Events',
   '/reports':       'Reports',
+  '/reports/academic': 'Assessment Analytics',
   '/hr':            'HR',
   '/profile':       'My Profile',
 };
@@ -32,6 +33,8 @@ function useBreadcrumb() {
   const { pathname } = useLocation();
   const segments = pathname.split('/').filter(Boolean);
   if (!segments.length) return 'Dashboard';
+  const full = '/' + segments.join('/');
+  if (BREADCRUMB_MAP[full]) return BREADCRUMB_MAP[full];
   const root = '/' + segments[0];
   return BREADCRUMB_MAP[root] ?? segments[0].charAt(0).toUpperCase() + segments[0].slice(1);
 }

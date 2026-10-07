@@ -3,6 +3,7 @@
    Uses existing attendance, finance, behaviour, grades APIs.
    ============================================================ */
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -17,66 +18,12 @@ import {
   attendance as attendanceApi,
   finance    as financeApi,
   behaviour  as behaviourApi,
-  assessment as assessmentApi,
 } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
-import { useSchoolTheme } from '@/hooks/useSchoolTheme.js';
+import { Stat, Card, ChartTip, COLORS } from './ReportsPrimitives.jsx';
 
 /* ── Helpers ──────────────────────────────────────────────── */
-const COLORS = ['#8b5cf6','#3b82f6','#10b981','#f59e0b','#ef4444','#ec4899'];
 const MONTHS  = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-
-/**
- * Stat — Reports page KPI card.
- * colorIndex selects the school's palette tint slot.
- * trend is kept as semantic green/red (has UX meaning).
- */
-function Stat({ label, value, sub, trend, Icon, colorIndex = 0 }) {
-  const { tint } = useSchoolTheme();
-  const t = tint(colorIndex);
-  return (
-    <div className="bg-white rounded-xl border border-slate-200 p-5 hover:shadow-md hover:border-slate-300 transition-all">
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{label}</span>
-        <div className="rounded-lg p-2" style={{ background: t.iconBg, color: t.iconColor }}>
-          <Icon size={16} />
-        </div>
-      </div>
-      <p className="text-2xl font-bold text-slate-900">{value}</p>
-      {sub && <p className="text-xs text-slate-500 mt-1">{sub}</p>}
-      {trend != null && (
-        <div className={`flex items-center gap-1 mt-2 text-xs font-medium ${trend >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
-          {trend >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-          {Math.abs(trend)}% vs last term
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Card({ title, children, action }) {
-  return (
-    <div className="bg-white rounded-xl border border-slate-200 p-5">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="font-semibold text-slate-900 text-sm">{title}</h3>
-        {action}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function ChartTip({ active, payload, label }) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div className="bg-slate-900 text-white text-xs rounded-lg px-3 py-2 shadow-xl">
-      {label && <p className="font-medium mb-1">{label}</p>}
-      {payload.map((p, i) => (
-        <p key={i} className="text-slate-300">{p.name}: <span className="text-white font-semibold">{p.value?.toLocaleString()}</span></p>
-      ))}
-    </div>
-  );
-}
 
 /* ── Tabs ─────────────────────────────────────────────────── */
 const TABS = [
@@ -92,14 +39,8 @@ const TABS = [
    MAIN COMPONENT
    ══════════════════════════════════════════════════════════ */
 export default function ReportsPage() {
+  const navigate = useNavigate();
   const [tab, setTab]       = useState('overview');
-  const [acSort, setAcSort] = useState({ col: 'subject', dir: 'asc' });
-  // Academic tab filters (2026-09) — classId/subjectId are further
-  // restricted server-side by role (ScopeEngine): a teacher only ever
-  // gets back their own assigned classes here, whatever they pick.
-  const [acClassId,   setAcClassId]   = useState('');
-  const [acSubjectId, setAcSubjectId] = useState('');
-  const [acCompareTo, setAcCompareTo] = useState('previousTerm'); // 'previousTerm' | 'previousYear' | 'none'
   const school         = useAuthStore(s => s.session?.school);
   const sym            = school?.currencySymbol ?? 'KSh';
 
@@ -108,20 +49,6 @@ export default function ReportsPage() {
   const { data: finSummary } = useQuery({ queryKey: ['finance','summary'],   queryFn: () => financeApi.summary({}),             select: r => r?.data ?? r });
   const { data: attSummary } = useQuery({ queryKey: ['attendance','summary'],queryFn: () => attendanceApi.summary({}),          select: r => r?.data ?? r });
   const { data: behSummary } = useQuery({ queryKey: ['behaviour','summary'], queryFn: () => behaviourApi.incidents.summary({}), select: r => r?.data ?? r });
-  // subjectId is deliberately NOT sent to the server — it doesn't affect
-  // scope/RBAC (unlike classId), so narrowing to one subject is done
-  // client-side below. That also keeps the subject dropdown's own option
-  // list from collapsing to whichever one subject is currently selected.
-  const { data: academicData, isLoading: marksLoading } = useQuery({
-    queryKey: ['assessment', 'analytics', { classId: acClassId, compareTo: acCompareTo }],
-    queryFn:  () => assessmentApi.analytics({
-      classId:    acClassId || undefined,
-      compareTo:  acCompareTo,
-    }),
-    select:   r => r?.data ?? r,
-    enabled:  tab === 'academic',
-    staleTime: 5 * 60_000,
-  });
 
   const { data: recentStudents, isLoading: recentLoading } = useQuery({
     queryKey: ['students', 'recent-enrollments'],
@@ -163,50 +90,6 @@ export default function ReportsPage() {
     { name: 'Partial', value: _fin.countPartial ?? 0 },
     { name: 'Unpaid',  value: _fin.countUnpaid  ?? 0 },
   ];
-
-  /* ── Academic: subject rows come pre-aggregated from the server
-     (GET /assessment/analytics — school-wide or role-scoped, with the
-     previous-period comparison already computed). This just flattens
-     for the sortable table and derives the chart/KPI views. ── */
-  const ac              = academicData ?? {};
-  const acSubjectsRaw    = ac.subjects ?? [];
-  const acAvailableClasses = ac.availableClasses ?? [];
-  const acIsWholeSchool  = ac.scope === 'whole_school';
-  // Subject filter options come from the unfiltered response itself —
-  // every subject with marks in the current scope/period.
-  const acSubjectOptions = acSubjectsRaw.map(s => ({ id: s.subjectId, name: s.subject }));
-  const acSubjectsFiltered = acSubjectId ? acSubjectsRaw.filter(s => s.subjectId === acSubjectId) : acSubjectsRaw;
-
-  const rawSubjectRows = acSubjectsFiltered.map(s => ({
-    subjectId: s.subjectId,
-    subject:   s.subject,
-    count:     s.current.count,
-    avgPct:    s.current.avgPct,
-    passRate:  s.current.passRate,
-    prevAvgPct: s.previous?.avgPct ?? null,
-    delta:     s.delta,
-  }));
-
-  const subjectRows = [...rawSubjectRows].sort((a, b) => {
-    const { col, dir } = acSort;
-    const av = a[col], bv = b[col];
-    if (av == null && bv == null) return 0;
-    if (av == null) return 1;  // nulls (no prior-period data) sort last regardless of direction
-    if (bv == null) return -1;
-    const cmp = typeof av === 'string' ? av.localeCompare(bv) : av - bv;
-    return dir === 'asc' ? cmp : -cmp;
-  });
-
-  const acOverallAvg  = ac.overall?.avgPct  ?? 0;
-  const acOverallPass = ac.overall?.passRate ?? 0;
-
-  const chartSubjectData = subjectRows.slice(0, 10).map(r => ({
-    name: r.subject, avg: r.avgPct, prevAvg: r.prevAvgPct ?? undefined,
-  }));
-
-  function sortAc(col) {
-    setAcSort(prev => prev.col === col ? { col, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'desc' });
-  }
 
   /* ── Card-level quick export ── */
   function exportCSV(type) {
@@ -259,12 +142,6 @@ export default function ReportsPage() {
         ['Total Merits',   totalMerits],
         ['Total Demerits', totalDemerits],
       ];
-    } else if (tab === 'academic' && subjectRows.length > 0) {
-      rows = [
-        ['Subject','Entries','Average %','Previous Period Average %','Change','Pass Rate %'],
-        ...subjectRows.map(r => [r.subject, r.count, r.avgPct, r.prevAvgPct ?? '—', r.delta ?? '—', r.passRate]),
-      ];
-      filename = `report_academic_${date}.csv`;
     } else if (tab === 'attendance' && attSummary) {
       const s = attSummary;
       rows = [
@@ -307,7 +184,12 @@ export default function ReportsPage() {
         {TABS.map(t => (
           <button
             key={t.id}
-            onClick={() => setTab(t.id)}
+            // Academic was promoted to its own page (AssessmentAnalyticsPage) —
+            // it needs real screen space for class/subject breakdowns, a
+            // distribution chart, and spread stats that never fit well as one
+            // tab among six. This button now just navigates there instead of
+            // switching local tab state.
+            onClick={() => (t.id === 'academic' ? navigate('/reports/academic') : setTab(t.id))}
             className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition ${
               tab === t.id ? 'bg-white text-violet-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
             }`}
@@ -573,186 +455,6 @@ export default function ReportsPage() {
         </div>
       )}
 
-      {/* ── ACADEMIC TAB ── */}
-      {tab === 'academic' && (
-        <div className="space-y-6">
-          {/* Scope badge + filters — visible to everyone so a teacher
-              never mistakes "your classes" for "whole school". */}
-          <div className="flex flex-wrap items-center gap-3">
-            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${
-              acIsWholeSchool ? 'bg-violet-100 text-violet-700' : 'bg-sky-100 text-sky-700'
-            }`}>
-              {acIsWholeSchool ? 'Whole school' : 'Your classes only'}
-            </span>
-
-            <select
-              value={acClassId}
-              onChange={e => setAcClassId(e.target.value)}
-              className="text-sm px-3 py-2 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-900/10 text-slate-700"
-            >
-              <option value="">{acIsWholeSchool ? 'All classes' : 'All my classes'}</option>
-              {acAvailableClasses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-
-            <select
-              value={acSubjectId}
-              onChange={e => setAcSubjectId(e.target.value)}
-              className="text-sm px-3 py-2 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-900/10 text-slate-700"
-            >
-              <option value="">All subjects</option>
-              {acSubjectOptions.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-
-            <div className="flex items-center rounded-xl border border-slate-200 bg-white p-0.5 text-xs font-semibold">
-              {[
-                { id: 'previousTerm', label: 'vs Last Term' },
-                { id: 'previousYear', label: 'vs Last Year' },
-                { id: 'none',         label: 'This period only' },
-              ].map(opt => (
-                <button
-                  key={opt.id}
-                  onClick={() => setAcCompareTo(opt.id)}
-                  className={`px-3 py-1.5 rounded-lg transition-colors ${
-                    acCompareTo === opt.id ? 'bg-violet-600 text-white' : 'text-slate-500 hover:text-slate-800'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-
-            {ac.currentPeriod && (
-              <span className="text-xs text-slate-400 ml-auto">
-                {ac.currentPeriod.academicYearName} · Term {ac.currentPeriod.termNumber}
-                {ac.previousPeriod && ` — vs ${ac.previousPeriod.academicYearName} · Term ${ac.previousPeriod.termNumber}`}
-              </span>
-            )}
-          </div>
-
-          {marksLoading ? (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              {[...Array(4)].map((_, i) => (
-                <div key={i} className="bg-white rounded-xl border border-slate-200 p-5 animate-pulse">
-                  <div className="h-3 bg-slate-200 rounded w-24 mb-3" />
-                  <div className="h-7 bg-slate-200 rounded w-16" />
-                </div>
-              ))}
-            </div>
-          ) : !ac.currentPeriod ? (
-            <p className="text-center text-slate-400 text-sm py-12">
-              No academic year is configured yet for this school. Set one up in Settings → Academic Years.
-            </p>
-          ) : (
-            <>
-              {/* KPI row — these reflect the class/school scope above,
-                  not the subject filter (which only narrows the table
-                  and chart below). */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                <Stat label="Subjects Tracked"  value={acSubjectsRaw.length}                Icon={BookOpen}  colorIndex={0} />
-                <Stat label="Marks Entered"      value={(ac.overall?.count ?? 0).toLocaleString()} Icon={BarChart3} colorIndex={2}   />
-                <Stat label="Overall Avg Score"  value={acOverallAvg > 0 ? `${acOverallAvg}%` : '—'} Icon={TrendingUp}  colorIndex={1}  />
-                <Stat label="Avg Pass Rate"      value={acOverallPass > 0 ? `${acOverallPass}%` : '—'} Icon={Scale} colorIndex={3}  />
-              </div>
-
-              {/* Bar chart */}
-              {chartSubjectData.length > 0 && (
-                <Card title={acCompareTo === 'none' ? 'Average Score % by Subject' : 'Average Score % by Subject — current vs previous period'}>
-                  <ResponsiveContainer width="100%" height={240}>
-                    <BarChart data={chartSubjectData} margin={{ left: -10 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                      <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-                      <YAxis tick={{ fontSize: 10 }} domain={[0, 100]} unit="%" />
-                      <Tooltip content={<ChartTip />} />
-                      <Bar dataKey="avg" name="Current %" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
-                      {acCompareTo !== 'none' && (
-                        <Bar dataKey="prevAvg" name="Previous %" fill="#c4b5fd" radius={[4, 4, 0, 0]} />
-                      )}
-                    </BarChart>
-                  </ResponsiveContainer>
-                </Card>
-              )}
-
-              {/* Table */}
-              <Card title="Subject Performance Breakdown">
-                {subjectRows.length === 0 ? (
-                  <p className="text-center text-slate-400 text-sm py-12">
-                    No assessment marks recorded yet for this period. Enter marks via the Assessment module.
-                  </p>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-slate-100">
-                          {[
-                            { col: 'subject',    label: 'Subject'    },
-                            { col: 'count',      label: 'Entries'    },
-                            { col: 'avgPct',     label: 'Avg %'      },
-                            ...(acCompareTo !== 'none' ? [{ col: 'delta', label: 'Change' }] : []),
-                            { col: 'passRate',   label: 'Pass Rate'  },
-                          ].map(({ col, label }) => (
-                            <th
-                              key={col}
-                              onClick={() => sortAc(col)}
-                              className="text-left py-2 px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider cursor-pointer select-none hover:text-slate-900"
-                            >
-                              {label}
-                              {acSort.col === col && (
-                                <span className="ml-1 text-violet-600">{acSort.dir === 'asc' ? '↑' : '↓'}</span>
-                              )}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {subjectRows.map((row, i) => (
-                          <tr key={row.subjectId} className={`border-b border-slate-50 ${i % 2 === 0 ? '' : 'bg-slate-50/40'}`}>
-                            <td className="py-2.5 px-3 font-medium text-slate-800">{row.subject}</td>
-                            <td className="py-2.5 px-3 text-slate-600">{row.count}</td>
-                            <td className="py-2.5 px-3">
-                              <div className="flex items-center gap-2">
-                                <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden max-w-[60px]">
-                                  <div
-                                    className="h-full rounded-full bg-violet-500"
-                                    style={{ width: `${row.avgPct}%` }}
-                                  />
-                                </div>
-                                <span className="text-slate-700 font-medium">{row.avgPct}%</span>
-                              </div>
-                            </td>
-                            {acCompareTo !== 'none' && (
-                              <td className="py-2.5 px-3">
-                                {row.delta == null ? (
-                                  <span className="text-slate-300">No prior data</span>
-                                ) : (
-                                  <span className={`inline-flex items-center gap-1 font-medium ${
-                                    row.delta > 0 ? 'text-emerald-600' : row.delta < 0 ? 'text-red-500' : 'text-slate-400'
-                                  }`}>
-                                    {row.delta > 0 ? <TrendingUp size={13} /> : row.delta < 0 ? <TrendingDown size={13} /> : null}
-                                    {row.delta > 0 ? '+' : ''}{row.delta}%
-                                  </span>
-                                )}
-                              </td>
-                            )}
-                            <td className="py-2.5 px-3">
-                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${
-                                row.passRate >= 80 ? 'bg-emerald-100 text-emerald-700'
-                                : row.passRate >= 50 ? 'bg-amber-100 text-amber-700'
-                                : 'bg-red-100 text-red-700'
-                              }`}>
-                                {row.passRate}%
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </Card>
-            </>
-          )}
-        </div>
-      )}
     </div>
   );
 }

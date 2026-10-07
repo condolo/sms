@@ -50,6 +50,7 @@ const MessagesPage      = lazy(() => import('@/pages/messages/MessagesPage.jsx')
 const NotFound          = lazy(() => import('@/pages/NotFound.jsx'));
 const EventsPage        = lazy(() => import('@/pages/events/EventsPage.jsx'));
 const ReportsPage       = lazy(() => import('@/pages/reports/ReportsPage.jsx'));
+const AssessmentAnalyticsPage = lazy(() => import('@/pages/reports/AssessmentAnalyticsPage.jsx'));
 const HRPage            = lazy(() => import('@/pages/hr/HRPage.jsx'));
 const ChangelogPage     = lazy(() => import('@/pages/changelog/ChangelogPage.jsx'));
 const HelpPage          = lazy(() => import('@/pages/help/HelpPage.jsx'));
@@ -251,6 +252,7 @@ export const router = createBrowserRouter([
 
       // Reports & Analytics
       { path: 'reports',               element: <SuspenseWrapper><ReportsPage /></SuspenseWrapper> },
+      { path: 'reports/academic',      element: <SuspenseWrapper><AssessmentAnalyticsPage /></SuspenseWrapper> },
 
       // HR & Staff
       { path: 'hr',                    element: <SuspenseWrapper><HRPage /></SuspenseWrapper> },

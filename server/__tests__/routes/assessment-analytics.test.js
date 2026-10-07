@@ -73,6 +73,9 @@ function mockMatchesFilter(doc, filter) {
    real $facet pipeline does — a pragmatic stand-in for a real Mongo
    $facet run, same approach this test suite already uses elsewhere for
    aggregation-heavy routes (see finance-draft-invoices.test.js). */
+const _DIST_BOUNDARIES = [0, 40, 50, 60, 70, 80, 90, 101];
+const _DIST_LABELS     = ['0–39', '40–49', '50–59', '60–69', '70–79', '80–89', '90–100'];
+
 function mockFakeMarksAggregate(pipeline) {
   const matchStage = pipeline.find(s => s.$match)?.$match ?? {};
   const matched = mockMarkDocs.filter(d => mockMatchesFilter(d, matchStage));
@@ -87,9 +90,27 @@ function mockFakeMarksAggregate(pipeline) {
 
   const bySubjectIds = [...new Set(matched.map(d => d.subjectId))];
   const bySubject = bySubjectIds.map(subjectId => ({ subjectId, ...summarize(matched.filter(d => d.subjectId === subjectId)) }));
+  const byClassIds = [...new Set(matched.map(d => d.classId))];
+  const byClass = byClassIds.map(classId => ({ classId, ...summarize(matched.filter(d => d.classId === classId)) }));
   const overall = summarize(matched);
 
-  return Promise.resolve([{ bySubject, overall: overall ? [overall] : [] }]);
+  const scores = matched.map(d => d.rawScore);
+  const overallFull = overall ? {
+    ...overall,
+    minScore: scores.length ? Math.min(...scores) : null,
+    maxScore: scores.length ? Math.max(...scores) : null,
+    stdDev:   scores.length ? Math.round(Math.sqrt(scores.reduce((s, v) => s + (v - overall.avgPct) ** 2, 0) / scores.length) * 10) / 10 : null,
+    scores,
+  } : null;
+
+  const distribution = _DIST_LABELS
+    .map((band, i) => ({
+      _id: _DIST_BOUNDARIES[i],
+      count: matched.filter(d => d.rawScore >= _DIST_BOUNDARIES[i] && d.rawScore < _DIST_BOUNDARIES[i + 1]).length,
+    }))
+    .filter(b => b.count > 0);
+
+  return Promise.resolve([{ bySubject, byClass, distribution, overall: overallFull ? [overallFull] : [] }]);
 }
 
 let mockAssignmentRows = [];
@@ -156,6 +177,32 @@ describe('GET /api/assessment/analytics — whole-school view', () => {
     expect(math.subject).toBe('Mathematics');
     expect(math.current.avgPct).toBe(70); // (80+60)/2
     expect(res.body.data.availableClasses).toHaveLength(2); // both classes visible
+  });
+
+  test('performance-by-class, score distribution, and spread stats are all present', async () => {
+    const res = await supertest(buildApp()).get('/api/assessment/analytics').query({ academicYearId: 'ay_2026', termNumber: 2, compareTo: 'none' });
+    expect(res.status).toBe(200);
+
+    // classes — same current/previous/delta shape as subjects, weakest first
+    const classA = res.body.data.classes.find(c => c.classId === 'cls_a');
+    const classB = res.body.data.classes.find(c => c.classId === 'cls_b');
+    expect(classA.className).toBe('Form 1A');
+    expect(classA.current.avgPct).toBe(70); // (80+60)/2
+    expect(classB.className).toBe('Form 2B');
+    expect(classB.current.avgPct).toBe(30);
+    expect(res.body.data.classes[0].classId).toBe('cls_b'); // weakest class first
+
+    // distribution — one mark in 80–89, one in 60–69, one in 0–39 (score 30)
+    const bandCounts = Object.fromEntries(res.body.data.distribution.map(b => [b.band, b.count]));
+    expect(bandCounts['80–89']).toBe(1);
+    expect(bandCounts['60–69']).toBe(1);
+    expect(bandCounts['0–39']).toBe(1);
+    expect(bandCounts['90–100']).toBeUndefined(); // no mark in that band — not a zero-count row
+
+    // overall spread stats, computed from the real score set [80, 60, 30]
+    expect(res.body.data.overall.minScore).toBe(30);
+    expect(res.body.data.overall.maxScore).toBe(80);
+    expect(res.body.data.overall.median).toBe(60); // sorted [30,60,80] — middle value
   });
 });
 

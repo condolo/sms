@@ -1593,25 +1593,37 @@ function _periodLabel(p) {
 
 /* One aggregation, faceted into per-subject rows and a school/class-wide
    overall — avoids a second round trip for the "overall" KPI row. */
+// Score bands for the distribution histogram — a $bucket boundary is the
+// band's lower bound, inclusive; 101 as the final boundary is what makes a
+// perfect 100 fall into the 90–100 band rather than being dropped by
+// $bucket's exclusive-upper-bound-of-last-explicit-boundary behavior.
+const _DISTRIBUTION_BOUNDARIES = [0, 40, 50, 60, 70, 80, 90, 101];
+const _DISTRIBUTION_LABELS     = ['0–39', '40–49', '50–59', '60–69', '70–79', '80–89', '90–100'];
+
 async function _aggregateAnalyticsPeriod(Marks, baseFilter, academicYearId, termNumber, passMark) {
-  if (!academicYearId || !termNumber) return { bySubject: [], overall: null };
+  if (!academicYearId || !termNumber) return { bySubject: [], byClass: [], distribution: [], overall: null };
   const filter = { ...baseFilter, ..._yearFilterPart(academicYearId), termNumber };
+  const _byDimension = (field) => ([
+    { $group: {
+        _id: `$${field}`,
+        avgPct:    { $avg: '$rawScore' },
+        count:     { $sum: 1 },
+        passCount: { $sum: { $cond: [{ $gte: ['$rawScore', passMark] }, 1, 0] } },
+    }},
+    { $project: {
+        [field]:   '$_id', _id: 0,
+        avgPct:    { $round: ['$avgPct', 1] },
+        count:     1,
+        passRate:  { $round: [{ $multiply: [{ $divide: ['$passCount', '$count'] }, 100] }, 1] },
+    }},
+  ]);
   const [result] = await Marks.aggregate([
     { $match: filter },
     { $facet: {
-        bySubject: [
-          { $group: {
-              _id: '$subjectId',
-              avgPct:    { $avg: '$rawScore' },
-              count:     { $sum: 1 },
-              passCount: { $sum: { $cond: [{ $gte: ['$rawScore', passMark] }, 1, 0] } },
-          }},
-          { $project: {
-              subjectId: '$_id', _id: 0,
-              avgPct:    { $round: ['$avgPct', 1] },
-              count:     1,
-              passRate:  { $round: [{ $multiply: [{ $divide: ['$passCount', '$count'] }, 100] }, 1] },
-          }},
+        bySubject: _byDimension('subjectId'),
+        byClass:   _byDimension('classId'),
+        distribution: [
+          { $bucket: { groupBy: '$rawScore', boundaries: _DISTRIBUTION_BOUNDARIES, output: { count: { $sum: 1 } } } },
         ],
         overall: [
           { $group: {
@@ -1619,17 +1631,42 @@ async function _aggregateAnalyticsPeriod(Marks, baseFilter, academicYearId, term
               avgPct:    { $avg: '$rawScore' },
               count:     { $sum: 1 },
               passCount: { $sum: { $cond: [{ $gte: ['$rawScore', passMark] }, 1, 0] } },
+              minScore:  { $min: '$rawScore' },
+              maxScore:  { $max: '$rawScore' },
+              // $stdDevPop (not $percentile — version-dependent, MongoDB 7.0+,
+              // unconfirmed here) — long-standard since MongoDB 3.2. Median
+              // needs the raw scores regardless, so it's computed in JS below
+              // from this same push rather than a second query.
+              stdDev:    { $stdDevPop: '$rawScore' },
+              scores:    { $push: '$rawScore' },
           }},
           { $project: {
-              _id: 0,
+              _id: 0, count: 1, minScore: 1, maxScore: 1, scores: 1,
               avgPct:    { $round: ['$avgPct', 1] },
-              count:     1,
               passRate:  { $round: [{ $multiply: [{ $divide: ['$passCount', '$count'] }, 100] }, 1] },
+              stdDev:    { $round: ['$stdDev', 1] },
           }},
         ],
     }},
   ]);
-  return { bySubject: result?.bySubject ?? [], overall: result?.overall?.[0] ?? null };
+
+  const overallRaw = result?.overall?.[0] ?? null;
+  let overall = null;
+  if (overallRaw) {
+    const { scores = [], ...rest } = overallRaw;
+    const sorted = [...scores].sort((a, b) => a - b);
+    const mid    = sorted.length ? Math.floor((sorted.length - 1) / 2) : null;
+    const median = sorted.length === 0 ? null
+      : sorted.length % 2 === 1 ? sorted[mid]
+      : Math.round(((sorted[mid] + sorted[mid + 1]) / 2) * 10) / 10;
+    overall = { ...rest, median };
+  }
+
+  const distribution = (result?.distribution ?? [])
+    .map(b => ({ band: _DISTRIBUTION_LABELS[_DISTRIBUTION_BOUNDARIES.indexOf(b._id)] ?? String(b._id), count: b.count }))
+    .sort((a, b) => _DISTRIBUTION_LABELS.indexOf(a.band) - _DISTRIBUTION_LABELS.indexOf(b.band));
+
+  return { bySubject: result?.bySubject ?? [], byClass: result?.byClass ?? [], distribution, overall };
 }
 
 router.get('/analytics', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), scopeMiddleware, async (req, res) => {
@@ -1664,7 +1701,7 @@ router.get('/analytics', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
       return _ok(res, {
         scope: ScopeEngine.isUnrestricted(req, 'assessment') ? 'whole_school' : 'assigned',
         currentPeriod: null, previousPeriod: null, passMark,
-        overall: null, subjects: [], availableClasses: [],
+        overall: null, distribution: [], subjects: [], classes: [], availableClasses: [],
       });
     }
 
@@ -1684,7 +1721,7 @@ router.get('/analytics', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
     const Marks = tenantModel('assessment_marks', ctx);
     const [currentAgg, previousAgg] = await Promise.all([
       _aggregateAnalyticsPeriod(Marks, baseFilter, currentYearId, currentTermNumber, passMark),
-      previous ? _aggregateAnalyticsPeriod(Marks, baseFilter, previous.year.id ?? String(previous.year._id), previous.termNumber, passMark) : Promise.resolve({ bySubject: [], overall: null }),
+      previous ? _aggregateAnalyticsPeriod(Marks, baseFilter, previous.year.id ?? String(previous.year._id), previous.termNumber, passMark) : Promise.resolve({ bySubject: [], byClass: [], distribution: [], overall: null }),
     ]);
 
     // Resolve subject display names for everything either period touched
@@ -1707,6 +1744,30 @@ router.get('/analytics', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
         };
       })
       .sort((a, b) => a.current.avgPct - b.current.avgPct); // weakest subject first
+
+    // Performance by class — same current-vs-previous shape as subjects.
+    // Resolved independently of the filter-dropdown's classDocs below
+    // (a different, picker-specific scope) so a class can never go
+    // unnamed just because it fell outside that scope's own resolution.
+    const allClassIds  = new Set([...currentAgg.byClass.map(r => r.classId), ...previousAgg.byClass.map(r => r.classId)]);
+    const classNameDocs = allClassIds.size
+      ? await tenantModel('classes', ctx).find({ schoolId, id: { $in: [...allClassIds] } }).select('id name').lean()
+      : [];
+    const classNameMap = Object.fromEntries(classNameDocs.map(c => [c.id, c.name]));
+    const prevByClass  = Object.fromEntries(previousAgg.byClass.map(r => [r.classId, r]));
+
+    const classes = currentAgg.byClass
+      .map(cur => {
+        const prev = prevByClass[cur.classId] ?? null;
+        return {
+          classId:   cur.classId,
+          className: classNameMap[cur.classId] ?? cur.classId,
+          current:   { avgPct: cur.avgPct, count: cur.count, passRate: cur.passRate },
+          previous:  prev ? { avgPct: prev.avgPct, count: prev.count, passRate: prev.passRate } : null,
+          delta:     prev ? Math.round((cur.avgPct - prev.avgPct) * 10) / 10 : null,
+        };
+      })
+      .sort((a, b) => a.current.avgPct - b.current.avgPct); // weakest class first
 
     // Classes available to filter by — every class in the school for an
     // unrestricted (leadership) caller, or only the caller's assigned
@@ -1734,7 +1795,9 @@ router.get('/analytics', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
       previousPeriod:   _periodLabel(previous),
       passMark,
       overall:          currentAgg.overall,
+      distribution:     currentAgg.distribution,
       subjects,
+      classes,
       availableClasses: classDocs.map(c => ({ id: c.id ?? String(c._id), name: c.name })),
     });
   } catch (err) {
