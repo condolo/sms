@@ -19,7 +19,7 @@ import {
 import {
   ArrowLeft, Download, BarChart3, TrendingUp, TrendingDown, Scale, BookOpen,
 } from 'lucide-react';
-import { assessment as assessmentApi } from '@/api/client.js';
+import { assessment as assessmentApi, academicConfig as academicConfigApi } from '@/api/client.js';
 import { Stat, Card, ChartTip } from './ReportsPrimitives.jsx';
 
 function _downloadCSV(rows, filename) {
@@ -127,14 +127,37 @@ export default function AssessmentAnalyticsPage() {
   const [compareTo,  setCompareTo]  = useState('previousTerm'); // 'previousTerm' | 'previousYear' | 'none'
   const [subjectSort, setSubjectSort] = useState({ col: 'subject', dir: 'asc' });
   const [classSort,   setClassSort]   = useState({ col: 'className', dir: 'asc' });
+  // Year/term — left blank by default so the server picks "now" the same
+  // way every other page does (resolveCurrentPeriod), but explicitly
+  // reachable here: marks for a different term than whatever the school's
+  // calendar currently resolves to "current" are real, already-entered
+  // Markbook data too, and there was previously no way to reach them
+  // (reported directly: term 3 resolved as current and showed nothing,
+  // with no control to check term 1/2 where the marks actually were).
+  const [yearId,     setYearId]     = useState('');
+  const [termNumber, setTermNumber] = useState('');
+
+  const { data: yearsRaw } = useQuery({
+    queryKey: ['academic-config', 'years'],
+    queryFn:  academicConfigApi.years.list,
+    staleTime: 10 * 60_000,
+  });
+  const years = yearsRaw?.data ?? yearsRaw ?? [];
+  const selectedYear = years.find(y => (y.id ?? y._id) === yearId);
+  const yearTerms = selectedYear?.terms ?? [];
 
   // subjectId is deliberately NOT sent to the server — it doesn't affect
   // scope/RBAC (unlike classId), so narrowing to one subject is done
   // client-side below. That also keeps the subject dropdown's own option
   // list from collapsing to whichever one subject is currently selected.
   const { data: raw, isLoading } = useQuery({
-    queryKey: ['assessment', 'analytics', { classId, compareTo }],
-    queryFn:  () => assessmentApi.analytics({ classId: classId || undefined, compareTo }),
+    queryKey: ['assessment', 'analytics', { classId, compareTo, yearId, termNumber }],
+    queryFn:  () => assessmentApi.analytics({
+      classId:        classId || undefined,
+      compareTo,
+      academicYearId: yearId     || undefined,
+      termNumber:     termNumber || undefined,
+    }),
     select:   r => r?.data ?? r,
     staleTime: 5 * 60_000,
   });
@@ -214,6 +237,29 @@ export default function AssessmentAnalyticsPage() {
         }`}>
           {isWholeSchool ? 'Whole school' : 'Your classes only'}
         </span>
+
+        <select
+          value={yearId}
+          onChange={e => { setYearId(e.target.value); setTermNumber(''); }}
+          className="text-sm px-3 py-2 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-900/10 text-slate-700"
+        >
+          <option value="">Current year</option>
+          {years.map(y => (
+            <option key={y.id ?? y._id} value={y.id ?? y._id}>{y.name}{y.isCurrent ? ' ★' : ''}</option>
+          ))}
+        </select>
+
+        <select
+          value={termNumber}
+          onChange={e => setTermNumber(e.target.value)}
+          className="text-sm px-3 py-2 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-900/10 text-slate-700"
+        >
+          <option value="">Current term</option>
+          {yearTerms.length > 0
+            ? yearTerms.map((t, i) => <option key={t.id ?? i} value={String(i + 1)}>{t.name}</option>)
+            : [1, 2, 3].map(n => <option key={n} value={String(n)}>Term {n}</option>)
+          }
+        </select>
 
         <select
           value={classId}
