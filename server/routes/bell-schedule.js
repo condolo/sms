@@ -109,6 +109,31 @@ function _periodProblem(periods) {
 /* A schedule with no classIds is a section default. Documents saved before classIds existed have none, so both count. */
 const SECTION_DEFAULT = { $or: [{ classIds: { $exists: false } }, { classIds: { $size: 0 } }] };
 
+/* Both forms of a class reference — its UUID `id` and its Mongo `_id` —
+   the same duality the PUT route above already accepts when SAVING
+   classIds (see its own oidRefs comment). A class can be referenced
+   either way at the call site (resyncSlotTimes passes `id`, a lesson's
+   own stored classId might be `_id`, an import row might be either),
+   so a lookup against a single form here silently missed a schedule
+   whose classIds array holds the OTHER form of the very class being
+   resolved — confirmed live: a school's customised schedule was being
+   ignored by its own assigned classes, falling all the way through to
+   the built-in default, for exactly this reason. */
+async function _classIdForms(schoolId, classId) {
+  const forms = new Set([String(classId)]);
+  try {
+    const mongoose = require('mongoose');
+    const or = [{ id: classId }];
+    if (mongoose.Types.ObjectId.isValid(classId) && String(classId).length === 24) or.push({ _id: classId });
+    const cls = await tenantModel('classes', { schoolId }).findOne({ schoolId, $or: or }).select('id _id').lean();
+    if (cls) {
+      if (cls.id)  forms.add(String(cls.id));
+      if (cls._id) forms.add(String(cls._id));
+    }
+  } catch (_) { /* fall back to just the one form already in `forms` */ }
+  return [...forms];
+}
+
 /**
  * Fetch the effective bell schedule for a class.
  * Falls back: the schedule that lists this class -> the section default
@@ -118,10 +143,13 @@ const SECTION_DEFAULT = { $or: [{ classIds: { $exists: false } }, { classIds: { 
 async function resolveBellSchedule(schoolId, section = 'all', classId = null) {
   const Bs = tenantModel('bell_schedules', { schoolId });
   let doc = null;
+  let idForms = null;
 
-  // 1. The schedule this class has been assigned to
+  // 1. The schedule this class has been assigned to — tried under BOTH
+  // id forms (see _classIdForms above).
   if (classId) {
-    doc = await Bs.findOne({ schoolId, classIds: classId }).lean();
+    idForms = await _classIdForms(schoolId, classId);
+    doc = await Bs.findOne({ schoolId, classIds: { $in: idForms } }).lean();
   }
   // 2. The section's default
   if (!doc && section !== 'all') {
@@ -137,7 +165,7 @@ async function resolveBellSchedule(schoolId, section = 'all', classId = null) {
     return { periods: DEFAULT_BELL, section: 'default', id: null, name: null, source: 'built-in' };
   }
   // Where the times came from: the class's own schedule, a section default, or the school default.
-  const source = (classId && (doc.classIds ?? []).includes(classId)) ? 'class'
+  const source = (idForms && (doc.classIds ?? []).some(c => idForms.includes(String(c)))) ? 'class'
     : doc.section === 'all' ? 'school' : 'section';
   return { periods: doc.periods, section: doc.section, id: doc.id, name: doc.name ?? null, source };
 }

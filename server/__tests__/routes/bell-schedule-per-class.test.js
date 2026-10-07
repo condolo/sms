@@ -59,15 +59,23 @@ function mockBellStore() {
 }
 function mockClassStore() {
   const chain = (r) => ({ select: () => chain(r), sort: () => chain(r), lean: () => Promise.resolve(r) });
-  return {
-    find: (f) => {
-      for (const c of (f && f.$or) || []) {
-        if (c._id && c._id.$in && c._id.$in.some(v => !/^[a-f\d]{24}$/i.test(String(v)))) {
-          throw new Error('Cast to ObjectId failed for an _id search');
-        }
+  function _guardObjectIdCasts(f) {
+    for (const c of (f && f.$or) || []) {
+      if (c._id && c._id.$in && c._id.$in.some(v => !/^[a-f\d]{24}$/i.test(String(v)))) {
+        throw new Error('Cast to ObjectId failed for an _id search');
       }
-      return chain(mockClasses.filter(d => matches(d, f)));
-    },
+      // A plain `{ _id: value }` branch (resolveBellSchedule's _classIdForms)
+      // casts the same way a real mongoose query would — only ever reached
+      // when the caller already checked the value looks like an ObjectId,
+      // same guard as the $in form above.
+      if (c._id && typeof c._id !== 'object' && !/^[a-f\d]{24}$/i.test(String(c._id))) {
+        throw new Error('Cast to ObjectId failed for an _id search');
+      }
+    }
+  }
+  return {
+    find: (f) => { _guardObjectIdCasts(f); return chain(mockClasses.filter(d => matches(d, f))); },
+    findOne: (f) => { _guardObjectIdCasts(f); return chain(mockClasses.find(d => matches(d, f)) ?? null); },
   };
 }
 
@@ -143,6 +151,35 @@ describe('resolveBellSchedule — which schedule a class gets', () => {
     const r = await resolveBellSchedule(SCHOOL, 'primary', 'c_y1');
     expect(r.id).toBeNull();
     expect(r.periods.length).toBeGreaterThan(0);
+  });
+
+  // Reported live: a school's customised schedule was being ignored by its
+  // own assigned classes, with the timetable silently falling back to the
+  // built-in default instead. Root cause — a class can be referenced
+  // either by its UUID `id` or its Mongo `_id` (the PUT route above
+  // already accepts both when SAVING classIds), but the lookup here used
+  // to match only ONE literal form, so a class saved into a schedule under
+  // one form was invisible to a resolve call made under the other.
+  describe('a class referenced by a different id form than the schedule stored', () => {
+    beforeEach(() => {
+      // c_y4's two id forms genuinely differ — unlike every other fixture
+      // class above, where id === _id and this bug could never surface.
+      mockClasses.push({ id: 'c_y4', _id: '507f1f77bcf86cd799439099', schoolId: SCHOOL, name: 'Year 4', sectionKey: 'primary' });
+    });
+
+    test('schedule saved with the class\'s _id is still found when resolving by its id', async () => {
+      mockBells.push({ id: 'bs_y4', schoolId: SCHOOL, section: 'primary', name: 'Year 4', classIds: ['507f1f77bcf86cd799439099'], periods: [{ ...PERIODS[0], start: '09:00' }] });
+      const r = await resolveBellSchedule(SCHOOL, 'primary', 'c_y4'); // resolving by `id`
+      expect(r.id).toBe('bs_y4');
+      expect(r.source).toBe('class');
+    });
+
+    test('schedule saved with the class\'s id is still found when resolving by its _id', async () => {
+      mockBells.push({ id: 'bs_y4', schoolId: SCHOOL, section: 'primary', name: 'Year 4', classIds: ['c_y4'], periods: [{ ...PERIODS[0], start: '09:00' }] });
+      const r = await resolveBellSchedule(SCHOOL, 'primary', '507f1f77bcf86cd799439099'); // resolving by `_id`
+      expect(r.id).toBe('bs_y4');
+      expect(r.source).toBe('class');
+    });
   });
 });
 

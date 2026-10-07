@@ -127,7 +127,12 @@ const YEAR7_SCHEDULE = {
 };
 function useSavedSchedule() {
   mockStores.bell_schedules = {
-    findOne: jest.fn((f) => ({ lean: () => Promise.resolve(f.classIds === 'cls_yr7' ? YEAR7_SCHEDULE : null) })),
+    // resolveBellSchedule's class lookup now matches against BOTH id forms
+    // of the class at once ({ classIds: { $in: [...] } }) rather than a
+    // single literal value — this mock checks membership the same way.
+    findOne: jest.fn((f) => ({
+      lean: () => Promise.resolve(f.classIds?.$in?.includes('cls_yr7') ? YEAR7_SCHEDULE : null),
+    })),
   };
 }
 
