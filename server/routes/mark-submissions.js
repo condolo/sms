@@ -36,6 +36,7 @@ const MODGATE = moduleGate('grades');
 
 const STATUSES = ['draft', 'submitted', 'approved', 'rejected', 'locked'];
 const MARKS_UNLOCK_WORKFLOW_KEY = 'marks_unlock';
+const MARKS_REVIEW_WORKFLOW_KEY = 'marks_review';
 const RELOCK_DELAY_MS = 24 * 60 * 60 * 1000; // 24h — Governance Spec §3
 
 const SubmitSchema = z.object({
@@ -151,6 +152,14 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), async 
     const now = new Date().toISOString();
     const existing = await tenantModel('mark_submissions', tenantContext(req)).findOne({ schoolId, ...markFilter }).lean();
 
+    // For the reviewer notification only — best-effort, never blocks the submit itself.
+    const [classDoc, subjectDoc] = await Promise.all([
+      tenantModel('classes',  tenantContext(req)).findOne({ id: data.classId,   schoolId }).select('name').lean(),
+      tenantModel('subjects', tenantContext(req)).findOne({ id: data.subjectId, schoolId }).select('name').lean(),
+    ]);
+    const notifyLabel = `${subjectDoc?.name ?? data.subjectId} — ${classDoc?.name ?? data.classId}`;
+    const notifyBody  = `${data.assessmentType} marks for Term ${data.termNumber} have been submitted for review.`;
+
     if (existing) {
       if (existing.status === 'locked') {
         return res.status(400).json({ error: 'These marks are locked. Submit an unlock request instead.' });
@@ -177,6 +186,7 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), async 
         },
         { new: true }
       ).lean();
+      await _notifyReviewers(req, notifyLabel, notifyBody);
       return ok(res, doc);
     }
 
@@ -196,6 +206,7 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), async 
       createdAt:       now,
       updatedAt:       now,
     });
+    await _notifyReviewers(req, notifyLabel, notifyBody);
     return created(res, doc.toObject ? doc.toObject() : doc);
   } catch (err) {
     console.error('[mark-submissions POST /]', err);
@@ -277,6 +288,31 @@ router.post('/:id/review', authMiddleware, PLAN, MODGATE, rbac('grades', 'update
 });
 
 /* ── Unlock-workflow helpers (Governance Spec §3) ──────────── */
+
+/* Submitted-for-review notification — nothing told a reviewer a submission
+   was waiting before this; the only existing notify path (_notifyUnlockParties
+   below) fires on the unlock-request step, well past where a reviewer first
+   needs to know. Same shape/fallback as that one: a configured marks_review
+   workflow step if the school has set one (none do yet — no Settings UI
+   exposes this key — so this always falls through to the actual floor roles
+   the /review route itself enforces, admin/principal/section_head, today). */
+async function _notifyReviewers(req, label, body) {
+  try {
+    const { schoolId } = req.jwtUser;
+    const ctx = tenantContext(req);
+    const config = await getWorkflowConfig(ctx, schoolId, MARKS_REVIEW_WORKFLOW_KEY);
+    const Users = tenantModel('users', ctx);
+    const targets = config
+      ? await resolveStep(ctx, schoolId, config.steps[0])
+      : await Users.find({ schoolId, role: { $in: ['admin', 'principal', 'section_head'] }, isActive: { $ne: false } }).select('id').lean();
+    for (const u of targets) {
+      await tenantModel('messages', ctx).create({
+        id: uuidv4(), schoolId, senderId: req.jwtUser.userId, senderName: 'System', senderRole: 'system',
+        recipients: [u.id], subject: 'Marks submitted for review', body: `${label}: ${body}`, type: 'direct', isRead: {}, createdAt: new Date().toISOString(),
+      });
+    }
+  } catch (err) { console.error('[mark-submissions notify reviewers]', err); }
+}
 
 async function _notifyUnlockParties(req, sub, subject, body) {
   try {
