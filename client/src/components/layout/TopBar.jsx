@@ -5,6 +5,7 @@ import clsx from 'clsx';
 import useAuthStore from '@/store/auth.js';
 import { auth as authApi, APIError } from '@/api/client.js';
 import { useToast } from '@/hooks/useToast.jsx';
+import NotificationBell from './NotificationBell.jsx';
 
 const BREADCRUMB_MAP = {
   '/dashboard':     'Dashboard',
@@ -148,6 +149,8 @@ export default function TopBar({ onMenuClick, collapsed = false, onExpand }) {
         <span className={clsx('hidden sm:inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium capitalize', PLAN_COLORS[plan] ?? PLAN_COLORS.core)}>
           {plan}
         </span>
+
+        <NotificationBell myUserId={user?.id} onSelect={() => navigate('/messages')} />
 
         {/* User avatar + dropdown */}
         <div className="relative" ref={dropRef}>

@@ -699,10 +699,11 @@ export const hr = {
 };
 
 export const messages = {
-  list:     (params) => _get('/messages', params),
-  send:     (data)   => _post('/messages', data),
-  markRead: (id)     => _patch(`/messages/${id}/read`, {}),
-  remove:   (id)     => _delete(`/messages/${id}`),
+  list:        (params) => _get('/messages', params),
+  send:        (data)   => _post('/messages', data),
+  markRead:    (id)     => _patch(`/messages/${id}/read`, {}),
+  remove:      (id)     => _delete(`/messages/${id}`),
+  unreadCount: ()       => _get('/messages/unread-count'),
 };
 
 export const studentSubjects = {

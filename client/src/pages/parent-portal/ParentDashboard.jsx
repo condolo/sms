@@ -14,6 +14,7 @@ import {
   Lock, LogOut, MessageSquare, Receipt, Star, Wallet,
   ChevronDown, MonitorPlay, MapPin, BookOpen, CalendarCheck,
 } from 'lucide-react';
+import NotificationBell from '@/components/layout/NotificationBell.jsx';
 
 /* ── API helpers ────────────────────────────────────────────────── */
 const API_BASE = import.meta.env.VITE_API_BASE || '';
@@ -444,6 +445,7 @@ export default function ParentDashboard() {
           <span id="topbar-term-badge" className="text-[12px] font-medium text-slate-500 bg-slate-100 px-3 py-1 rounded-full whitespace-nowrap">
             {termLabel}
           </span>
+          <NotificationBell myUserId={session?.user?.id} onSelect={() => scrollToSection('section-messages')} />
           <div className="flex items-center gap-2">
             <button
               id="btn-pay-fees"

@@ -30,6 +30,40 @@ const ROLE_GROUPS = {
              'discipline_committee'],
 };
 
+/* Inbox membership — a message addressed to 'all', this user's role
+   group, or directly to them. Shared by GET / and GET /unread-count so
+   the two can never drift on what "in my inbox" means. */
+function _inboxQuery({ schoolId, userId, role }) {
+  const groups = Object.entries(ROLE_GROUPS)
+    .filter(([, roles]) => roles.includes(role))
+    .map(([group]) => group);
+  return {
+    schoolId,
+    $or: [
+      { recipients: 'all' },
+      { recipients: { $in: groups } },
+      { recipients: userId },
+    ],
+  };
+}
+
+/* ── GET /api/messages/unread-count — bell badge count ───────
+   Registered before GET /:id-shaped routes would matter — there are
+   none in this file today (only PATCH /:id/read and DELETE /:id), so
+   no path-shadowing risk, but kept right next to GET / since both
+   share _inboxQuery(). */
+router.get('/unread-count', rbac('messages', 'read'), async (req, res) => {
+  try {
+    const { schoolId, userId, role } = req.jwtUser;
+    const Msg = tenantModel('messages', tenantContext(req));
+    const count = await Msg.countDocuments({
+      ..._inboxQuery({ schoolId, userId, role }),
+      [`isRead.${userId}`]: { $ne: true },
+    });
+    res.json({ data: { count } });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 /* ── GET /api/messages — list messages visible to this user ─ */
 router.get('/', rbac('messages', 'read'), async (req, res) => {
   try {
@@ -37,24 +71,9 @@ router.get('/', rbac('messages', 'read'), async (req, res) => {
     const { tab = 'inbox', page = 1, limit = 50 } = req.query;
     const Msg = tenantModel('messages', tenantContext(req));
 
-    let query;
-    if (tab === 'sent') {
-      query = { schoolId, senderId: userId };
-    } else {
-      // Inbox: messages addressed to 'all', user's role group, or directly to this user
-      const groups = Object.entries(ROLE_GROUPS)
-        .filter(([, roles]) => roles.includes(role))
-        .map(([group]) => group);
-
-      query = {
-        schoolId,
-        $or: [
-          { recipients: 'all' },
-          { recipients: { $in: groups } },
-          { recipients: userId },
-        ]
-      };
-    }
+    const query = tab === 'sent'
+      ? { schoolId, senderId: userId }
+      : _inboxQuery({ schoolId, userId, role });
 
     const skip  = (Math.max(1, parseInt(page)) - 1) * parseInt(limit);
     const total = await Msg.countDocuments(query);
