@@ -526,8 +526,13 @@ function GridCell({ value, markState = 'present', rowIdx, colIdx, isLocked, hasC
   );
 }
 
-/* Subject comment for one student. Grows with its text; saves on blur, only when changed. */
-function GridComment({ value, disabled, onSave }) {
+/* Subject comment for one student. Grows with its text; saves on blur, only when
+   changed — independently of the marks grid's own "Save marks" button, so a
+   teacher can update a comment and leave without touching any mark, or vice
+   versa. `saved` drives a brief green tick (mirrors GridCell's own), since a
+   silent background save otherwise looks indistinguishable from nothing
+   having happened at all. */
+function GridComment({ value, disabled, saved, onSave, onEdit }) {
   const [text, setText] = useState(value ?? '');
   const ref = useRef(null);
   useEffect(() => { setText(value ?? ''); }, [value]);
@@ -537,17 +542,20 @@ function GridComment({ value, disabled, onSave }) {
     ref.current.style.height = `${ref.current.scrollHeight}px`;
   }, [text]);
   return (
-    <textarea
-      ref={ref}
-      rows={1}
-      maxLength={500}
-      value={text}
-      disabled={disabled}
-      onChange={e => setText(e.target.value)}
-      onBlur={() => { if (text !== (value ?? '')) onSave(text); }}
-      placeholder={disabled ? '' : 'Comment…'}
-      className="w-full min-w-[200px] resize-none overflow-hidden rounded border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-900/10 disabled:bg-slate-100 disabled:text-slate-400"
-    />
+    <div className="flex items-start gap-1">
+      <textarea
+        ref={ref}
+        rows={1}
+        maxLength={500}
+        value={text}
+        disabled={disabled}
+        onChange={e => { setText(e.target.value); onEdit?.(); }}
+        onBlur={() => { if (text !== (value ?? '')) onSave(text); }}
+        placeholder={disabled ? '' : 'Comment…'}
+        className="w-full min-w-[200px] resize-none overflow-hidden rounded border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-900/10 disabled:bg-slate-100 disabled:text-slate-400"
+      />
+      {saved && <Check size={12} className="text-emerald-600 shrink-0 mt-1.5" aria-label="Comment saved" />}
+    </div>
   );
 }
 
@@ -907,11 +915,18 @@ function MarkbookTab({ years }) {
     staleTime: 15_000,
     select: (res) => Object.fromEntries((res?.data ?? []).map(c => [c.studentId, c])),
   });
+  // Comments saved this session and not edited since, keyed `${studentId}|${subjectId}`
+  // (mirrors `savedKeys` for marks) so switching subject never shows a stale tick for
+  // a comment that hasn't actually been saved under the newly-selected subject.
+  const [commentSavedKeys, setCommentSavedKeys] = useState(() => new Set());
   const { mutate: saveGridComment } = useMutation({
     mutationFn: ({ studentId, text }) => reportCardsApi.draftComments.saveSubject(studentId, subjectId, {
       classId, termNumber: Number(selectedEntry.termNumber), comment: text,
     }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['reportCards', 'draftComments'] }),
+    onSuccess: (_data, { studentId }) => {
+      qc.invalidateQueries({ queryKey: ['reportCards', 'draftComments'] });
+      setCommentSavedKeys(prev => new Set(prev).add(`${studentId}|${subjectId}`));
+    },
     onError:   err => setToast({ msg: err?.message ?? 'Could not save the comment.', type: 'error' }),
   });
   // Comments are locked with the subject's marks: once any column is submitted or approved.
@@ -1359,7 +1374,13 @@ function MarkbookTab({ years }) {
                           <GridComment
                             value={draftCommentsByStudent?.[sid]?.subjectComments?.[subjectId] ?? ''}
                             disabled={commentsLocked}
+                            saved={commentSavedKeys.has(`${sid}|${subjectId}`)}
                             onSave={text => saveGridComment({ studentId: sid, text })}
+                            onEdit={() => setCommentSavedKeys(prev => {
+                              const key = `${sid}|${subjectId}`;
+                              if (!prev.has(key)) return prev;
+                              const next = new Set(prev); next.delete(key); return next;
+                            })}
                           />
                         </td>
                       )}
