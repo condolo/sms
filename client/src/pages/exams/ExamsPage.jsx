@@ -754,7 +754,12 @@ function MarkbookTab({ years }) {
     return Array.from({ length: instances }, (_, i) => ({
       typeKey:  selectedEntry.assessmentType,
       instance: i + 1,
-      colId:    instances > 1 ? `${selectedEntry.assessmentType}_${i + 1}` : selectedEntry.assessmentType,
+      // Keyed by this column's OWN instance number, not whether the type has 2+ instances overall —
+      // the same rule the reload-from-server effect, the conflict keys and the saved-tick keys all
+      // use. Keying this by the aggregate `instances` count instead made the first instance column's
+      // colId ("TYPE_1") disagree with what a reload writes for instance 1 (bare "TYPE"), so a mark
+      // saved correctly in the database rendered as empty the moment the grid reloaded it.
+      colId:    (i + 1) > 1 ? `${selectedEntry.assessmentType}_${i + 1}` : selectedEntry.assessmentType,
       colLabel: instances > 1 ? `${selectedEntry.assessmentType} ${i + 1}` : selectedEntry.assessmentType,
       color:    type?.color ?? 'sky',
       weight:   type?.weight,
