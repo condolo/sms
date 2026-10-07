@@ -930,6 +930,12 @@ function MarkbookTab({ years }) {
 
   /* ── Clipboard paste (TSV from Excel/Sheets) ── */
   const handlePaste = useCallback((e) => {
+    // This grid-wide listener exists for Excel paste into mark cells. The comment column lives in
+    // the same scrollable area, and an unconditional preventDefault() here was swallowing every
+    // paste into its textarea — nothing inserted, no error. Only a mark cell (one of cellRefs) is
+    // ours to intercept; anything else gets the browser's normal paste.
+    const isMarkCell = Object.values(cellRefs.current).includes(e.target);
+    if (!isMarkCell) return;
     e.preventDefault();
     const text = e.clipboardData.getData('text/plain');
     if (!text.trim()) return;
