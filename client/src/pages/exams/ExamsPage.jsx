@@ -445,7 +445,9 @@ const SUBMISSION_BADGE = {
   rejected:  { label: 'Rejected',  cls: 'text-red-700 bg-red-50 border-red-200' },
   locked:    { label: 'Locked',    cls: 'text-slate-600 bg-slate-100 border-slate-200' },
 };
-function SubmissionBadge({ submission, onRecall }) {
+function SubmissionBadge({ submission, onRecall, canReview, reviewing, onReview }) {
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState('');
   if (!submission || submission.status === 'draft') return null;
   const meta = SUBMISSION_BADGE[submission.status];
   if (!meta) return null;
@@ -462,6 +464,43 @@ function SubmissionBadge({ submission, onRecall }) {
           <RotateCcw size={9} /> Recall
         </button>
       )}
+      {/* Reviewing right here, not only from Configuration → Moderation — same
+          markSubmissionsApi.review() call either queue uses, just a second place
+          to reach it, for whoever is already looking at this exact subject. */}
+      {submission.status === 'submitted' && canReview && !rejecting && (
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => onReview('approve')} disabled={reviewing} title="Approve this submission"
+            className="text-emerald-600 hover:text-emerald-700 disabled:opacity-40"
+          >
+            <CheckCircle2 size={12} />
+          </button>
+          <button
+            onClick={() => setRejecting(true)} disabled={reviewing} title="Reject this submission"
+            className="text-red-500 hover:text-red-700 disabled:opacity-40"
+          >
+            <XCircle size={12} />
+          </button>
+        </div>
+      )}
+      {submission.status === 'submitted' && canReview && rejecting && (
+        <div className="flex flex-col items-center gap-1 w-full">
+          <input
+            type="text" value={reason} onChange={e => setReason(e.target.value)} autoFocus
+            placeholder="Reason" className="w-full text-[10px] px-1 py-0.5 rounded border border-red-300 focus:outline-none focus:ring-1 focus:ring-red-400/30"
+          />
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => { onReview('reject', reason); setRejecting(false); setReason(''); }}
+              disabled={!reason.trim() || reviewing}
+              className="text-[10px] font-medium text-white bg-red-600 hover:bg-red-700 disabled:opacity-40 px-1.5 py-0.5 rounded"
+            >
+              Confirm
+            </button>
+            <button onClick={() => setRejecting(false)} className="text-[10px] text-slate-400 hover:text-slate-600">Cancel</button>
+          </div>
+        </div>
+      )}
       {submission.status === 'rejected' && submission.rejectionReason && (
         <span className="text-[10px] text-red-500 max-w-[100px] truncate" title={submission.rejectionReason}>{submission.rejectionReason}</span>
       )}
@@ -473,7 +512,12 @@ function SubmissionBadge({ submission, onRecall }) {
 function GridCell({ value, markState = 'present', rowIdx, colIdx, isLocked, hasConflict, saved, onChange, onStateChange, onNavigate, cellRef }) {
   const nonPresent = markState !== 'present';
   // Red X: a mark still to be entered. Green tick: saved and not edited since.
-  const missing = !isLocked && !nonPresent && value == null;
+  // Deliberately NOT gated on `!isLocked` — a locked cell with no value is still
+  // missing, and a reviewer checking a submitted/approved subject needs to see
+  // that just as much as the entering teacher does. Gating this on lock state
+  // used to hide a genuinely-empty cell behind a stale green tick the moment it
+  // was submitted, instead of showing the gap.
+  const missing = !nonPresent && value == null;
   return (
     <div className="flex items-center gap-1">
       <input
@@ -954,6 +998,22 @@ function MarkbookTab({ years }) {
     onError:   () => setToast({ msg: 'Could not recall — it may already be approved or locked.', type: 'error' }),
   });
 
+  // Approve/reject right from the Markbook itself — the exact same mark-submissions
+  // review endpoint the Configuration → Moderation queue already uses, just reachable
+  // without leaving the subject you're already looking at. The server's own floor-role/
+  // explicit-grant check (admin/principal/section_head, or an explicit grant) is the
+  // real gate; offering the control to anyone who isn't the submitting teacher just
+  // means someone without that right sees the same 403 toast they'd get from the queue.
+  const canReviewHere = !isTeacher;
+  const { mutate: reviewSubmission, isPending: reviewingSubmission } = useMutation({
+    mutationFn: ({ id, action, rejectionReason }) => markSubmissionsApi.review(id, { action, rejectionReason }),
+    onSuccess: (_res, vars) => {
+      refetchSubmissions();
+      setToast({ msg: vars.action === 'approve' ? 'Submission approved.' : 'Submission rejected.', type: 'success' });
+    },
+    onError: err => setToast({ msg: err?.message ?? 'Could not review this submission.', type: 'error' }),
+  });
+
   /* ── Clipboard paste (TSV from Excel/Sheets) ── */
   const handlePaste = useCallback((e) => {
     // This grid-wide listener exists for Excel paste into mark cells. The comment column lives in
@@ -1337,6 +1397,9 @@ function MarkbookTab({ years }) {
                       <SubmissionBadge
                         submission={submissionByInstance[col.instance]}
                         onRecall={() => recallSubmission(submissionByInstance[col.instance].id)}
+                        canReview={canReviewHere}
+                        reviewing={reviewingSubmission}
+                        onReview={(action, rejectionReason) => reviewSubmission({ id: submissionByInstance[col.instance].id, action, rejectionReason })}
                       />
                     </th>
                   ))}
