@@ -606,11 +606,17 @@ function MarkbookTab({ years }) {
     if (!yearId && currentYear) setYearId(currentYear.id ?? currentYear._id?.toString() ?? '');
   }, [currentYear, yearId]);
 
-  /* ── Teaching assignments (server auto-scopes to teacher's own) ── */
+  /* ── Teaching assignments for the selected class — fetched fresh per class, the same way
+     Attendance re-asks the server "which streams am I assigned in THIS class" instead of
+     filtering one broad, cached list. A single global fetch (no classId) let a subject sit
+     in the picker as "assigned" long after the server's own save-time check (canWriteSubject /
+     unassignedPairs) had already proven otherwise — the cached list simply never re-asked.
+     Server auto-scopes to the caller's own assignments; classId narrows it further. */
   const { data: assignmentsData } = useQuery({
-    queryKey: ['teaching-assignments', 'mine'],
-    queryFn:  () => taApi.list(),
-    staleTime: 10 * 60_000,
+    queryKey: ['teaching-assignments', 'mine', classId],
+    queryFn:  () => taApi.list({ classId }),
+    enabled:  !!classId,
+    staleTime: 5 * 60_000,
   });
   const assignments = assignmentsData?.data ?? [];
 
