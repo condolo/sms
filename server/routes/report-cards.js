@@ -1452,7 +1452,7 @@ async function _fetchSignatureImages(snap) {
    comments disabled would still see them in a downloaded PDF. One
    helper now, used by both, so they can never drift apart again. */
 async function _loadRenderExtras(req, schoolId, snap) {
-  const [school, behaviour, prevSnap, caConfig, assignments] = await Promise.all([
+  const [school, behaviour, prevSnap, caConfig, assignments, subjectDocs] = await Promise.all([
     _model('schools').findOne({ id: schoolId }, { logoUrl: 1, tagline: 1, address: 1, phone: 1, email: 1, website: 1 }).lean().catch(() => null),
     behaviourSummary(schoolId, snap.studentId).catch(() => null),
     snap.termNumber > 1
@@ -1465,6 +1465,15 @@ async function _loadRenderExtras(req, schoolId, snap) {
     tenantModel('teaching_assignments', tenantContext(req))
       .find({ schoolId, classId: snap.classId, subjectId: { $in: Object.keys(snap.subjects || {}) } })
       .select('subjectId teacherName').lean().catch(() => []),
+    // Real subject names — report cards were printing the raw subjectId
+    // (e.g. "subj_demo_bio") on every subject row and in every subject
+    // comment, since nothing ever resolved it to the subjects collection's
+    // own `name`. Queried directly (not read off teaching_assignments'
+    // own denormalized subjectName) so an UNASSIGNED subject still gets a
+    // real name instead of silently falling back to its id.
+    tenantModel('subjects', tenantContext(req))
+      .find({ schoolId, id: { $in: Object.keys(snap.subjects || {}) } })
+      .select('id name').lean().catch(() => []),
   ]);
   const deviations = computeTermDeviation(snap.subjects, prevSnap?.subjects);
   // First assignment found per subject wins — a subject could in theory
@@ -1474,8 +1483,9 @@ async function _loadRenderExtras(req, schoolId, snap) {
   for (const a of assignments) {
     if (!subjectTeacherNames[a.subjectId]) subjectTeacherNames[a.subjectId] = a.teacherName || '';
   }
+  const subjectNames = Object.fromEntries(subjectDocs.map(s => [s.id, s.name]));
   return {
-    school, behaviour, deviations, subjectTeacherNames,
+    school, behaviour, deviations, subjectTeacherNames, subjectNames,
     subjectTeacherCommentsEnabled: caConfig.subjectTeacherCommentsEnabled !== false,
   };
 }
@@ -1511,6 +1521,12 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
     // as deviations/behaviour/school above). Presentation-only — who
     // currently teaches a subject is never frozen at publish time.
     subjectTeacherNames = {},
+    // {subjectId: name}, resolved by the caller from the subjects
+    // collection — see _loadRenderExtras. Falls back to the raw id
+    // below only if a subject was deleted after this snapshot's marks
+    // were recorded (the id itself is always frozen; the name is a
+    // live lookup, same posture as subjectTeacherNames above).
+    subjectNames = {},
   } = extra;
   const isDraft = snap.status !== 'published' || snap.superseded;
 
@@ -1529,7 +1545,7 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
     const dev = deviations?.subjects ? (deviations.subjects[subjectId] ?? null) : null;
     return {
       subjectId,
-      nameLine:    (isBest ? '★ ' : '') + subjectId + (isUsed && snap.rankingSubjectStrategy !== 'all' ? ' ●' : ''),
+      nameLine:    (isBest ? '★ ' : '') + (subjectNames[subjectId] || subjectId) + (isUsed && snap.rankingSubjectStrategy !== 'all' ? ' ●' : ''),
       failed,
       typeValues:  typeEntries.map(te => {
         const val = sub.breakdown?.[te.key];
@@ -1623,7 +1639,9 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
       subjectTeacherCommentsEnabled,
       subjectComments: subjectTeacherCommentsEnabled
         ? Object.keys(snap.subjects || {}).map(subjectId => ({
-            subjectId, text: sanitisePdfStr(snap.comments?.subjectComments?.[subjectId]) || '',
+            subjectId,
+            subjectName: subjectNames[subjectId] || subjectId,
+            text: sanitisePdfStr(snap.comments?.subjectComments?.[subjectId]) || '',
             // RCE3c — the actual subject teacher's name, when known, so
             // a layout can label the comment with who wrote it instead
             // of a generic "Teacher Comment" heading.
@@ -2028,14 +2046,23 @@ router.post('/preview-html', authMiddleware, PLAN, MODGATE, rbac('grades', 'read
     };
     const config = { rankingEnabled: !!clientConfig?.rankingEnabled, showGPA: !!clientConfig?.showGPA, showAttendanceSummary: false };
 
+    // Same subject-name resolution _loadRenderExtras does for a published
+    // snapshot — this preview path never had it, so the on-screen "print
+    // preview" showed raw subjectIds too.
+    const { schoolId } = req.jwtUser;
+    const subjectDocs = await tenantModel('subjects', tenantContext(req))
+      .find({ schoolId, id: { $in: Object.keys(student.subjects || {}) } })
+      .select('id name').lean().catch(() => []);
+    const subjectNames = Object.fromEntries(subjectDocs.map(s => [s.id, s.name]));
+
     const sections = _computeReportSections(snap, config, null, {
       school, behaviour: beh ?? null, deviations: studentDeviations ?? null,
       subjectTeacherCommentsEnabled: clientConfig?.subjectTeacherCommentsEnabled !== false,
+      subjectNames,
     });
     // RCE2 — an unpublished draft has no frozen layoutKey of its own, so
     // preview uses the school's LIVE current default (school-wide, no
     // section context available here) rather than a snapshotted one.
-    const { schoolId } = req.jwtUser;
     const { layoutKey } = await resolveTemplate(tenantContext(req), schoolId, null);
     const html = getLayout(layoutKey).renderHtml(sections);
     return ok(res, { html });

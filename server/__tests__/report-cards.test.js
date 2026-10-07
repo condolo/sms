@@ -734,13 +734,13 @@ describe('_computeReportSections — RC7 subject-teacher-comments capability tog
   test('defaults to enabled when the extra param omits it (existing PDF call-site shape)', () => {
     const s = compute(baseSnap(), config, null);
     expect(s.comments.subjectTeacherCommentsEnabled).toBe(true);
-    expect(s.comments.subjectComments).toEqual([{ subjectId: 'math', text: 'Excellent effort this term', teacherName: '' }]);
+    expect(s.comments.subjectComments).toEqual([{ subjectId: 'math', subjectName: 'math', text: 'Excellent effort this term', teacherName: '' }]);
   });
 
   test('enabled explicitly: builds one row per subject, using real comment text', () => {
     const s = compute(baseSnap(), config, null, { subjectTeacherCommentsEnabled: true });
     expect(s.comments.subjectTeacherCommentsEnabled).toBe(true);
-    expect(s.comments.subjectComments).toEqual([{ subjectId: 'math', text: 'Excellent effort this term', teacherName: '' }]);
+    expect(s.comments.subjectComments).toEqual([{ subjectId: 'math', subjectName: 'math', text: 'Excellent effort this term', teacherName: '' }]);
   });
 
   test('disabled: zero trace — subjectComments is empty even though real comment data exists on the snapshot', () => {

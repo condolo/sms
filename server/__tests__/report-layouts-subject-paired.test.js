@@ -6,8 +6,10 @@
    LAYOUTS.subject_paired, rather than hand-building a sections object
    that could drift from the real shape. Covers: the two-page structure
    (cover then academic content), the per-subject comment-row pairing,
-   and every RCE1 toggle actually changing this renderer's output
-   (unlike legacy_tabular, which ignores them by design).
+   and every RCE1 toggle actually changing this renderer's output —
+   legacy_tabular now honours the same remark/observation toggles too
+   (see report-layouts-legacy-tabular.test.js), closing a real gap
+   where it used to ignore them entirely.
    ============================================================ */
 'use strict';
 

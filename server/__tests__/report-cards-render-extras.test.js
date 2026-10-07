@@ -19,6 +19,7 @@ jest.mock('../utils/archival', () => ({ isYearArchived: jest.fn().mockResolvedVa
 let mockSchoolDoc = null;
 let mockAssignments = [];
 let mockCaConfig = { subjectTeacherCommentsEnabled: true };
+let mockSubjectDocs = [];
 
 jest.mock('../utils/model', () => ({
   _model: jest.fn((col) => {
@@ -37,6 +38,11 @@ jest.mock('../utils/tenant-model', () => ({
     if (col === 'teaching_assignments') {
       return {
         find: () => ({ select: () => ({ lean: () => Promise.resolve(mockAssignments) }) }),
+      };
+    }
+    if (col === 'subjects') {
+      return {
+        find: () => ({ select: () => ({ lean: () => Promise.resolve(mockSubjectDocs) }) }),
       };
     }
     throw new Error(`unexpected tenantModel('${col}') call in this test`);
@@ -72,6 +78,10 @@ beforeEach(() => {
     { subjectId: 'english', teacherName: 'Jane Wambui' },
   ];
   mockCaConfig = { subjectTeacherCommentsEnabled: true };
+  mockSubjectDocs = [
+    { id: 'math', name: 'Mathematics' },
+    { id: 'english', name: 'English Language' },
+  ];
 });
 
 describe('_loadRenderExtras', () => {
@@ -108,5 +118,17 @@ describe('_loadRenderExtras', () => {
     mockCaConfig = { subjectTeacherCommentsEnabled: false };
     const extra = await reportCardsRouter._loadRenderExtras({}, 'sch_1', baseSnap());
     expect(extra.subjectTeacherCommentsEnabled).toBe(false);
+  });
+
+  test('builds subjectNames keyed by subjectId from subjects (reported: "just seeing their ids")', async () => {
+    const extra = await reportCardsRouter._loadRenderExtras({}, 'sch_1', baseSnap());
+    expect(extra.subjectNames).toEqual({ math: 'Mathematics', english: 'English Language' });
+  });
+
+  test('a subject with no matching subjects doc is simply absent from the map, not an error', async () => {
+    mockSubjectDocs = [{ id: 'math', name: 'Mathematics' }]; // english has no doc
+    const extra = await reportCardsRouter._loadRenderExtras({}, 'sch_1', baseSnap());
+    expect(extra.subjectNames).toEqual({ math: 'Mathematics' });
+    expect(extra.subjectNames.english).toBeUndefined();
   });
 });
