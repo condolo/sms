@@ -3561,6 +3561,12 @@ const PERM_MODULES = [
   { key: 'reports',    label: 'Reports & Analytics', subs: [
     { key: 'view',   label: 'View Reports' },
     { key: 'export', label: 'Export Reports (CSV)' },
+    // hasExplicitSubGrant-gated (no coarse-grant fallback) — mirrors
+    // moduleRegistry.js's own comment. A role/person already scoped to
+    // their own section/classes for Assessment Analytics (e.g. a section
+    // head) can be granted the whole-school view here specifically,
+    // without changing their base grades access anywhere else.
+    { key: 'academic_analytics_school_wide', label: 'View Whole-School Assessment Analytics' },
   ]},
   { key: 'timetable',  label: 'Timetable', subs: [
     { key: 'view',          label: 'View Timetable' },

@@ -338,6 +338,15 @@ const MODULE_REGISTRY = [
   { key: 'reports', label: 'Reports & Analytics', section: 'Analytics', icon: 'TrendingUp', navRoute: '/reports', navOrder: 22, subs: [
     { key: 'view',   label: 'View Reports' },
     { key: 'export', label: 'Export Reports (CSV)' },
+    // hasExplicitSubGrant-gated (no coarse-grant fallback) — a role or
+    // person who already sees Assessment Analytics scoped to their own
+    // section/assigned classes (via grades:read + their normal scope
+    // level, e.g. section_head's 'section' level) can be additionally
+    // granted the WHOLE SCHOOL view here, without touching their base
+    // grades access at all. Ticking this ONE row is the only thing that
+    // widens it — same posture as timetable__manage's admin console sub.
+    // See GET /api/assessment/analytics.
+    { key: 'academic_analytics_school_wide', label: 'View Whole-School Assessment Analytics' },
   ]},
   { key: 'analytics', label: 'Analytics Dashboard', section: 'Analytics', subs: [
     { key: 'view', label: 'View Leadership Analytics' },

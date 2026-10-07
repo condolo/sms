@@ -20,7 +20,7 @@ const { z }    = require('zod');
 
 const { authMiddleware } = require('../middleware/auth');
 const { moduleGate }     = require('../middleware/module-gate');
-const { rbac }           = require('../middleware/rbac');
+const { rbac, hasExplicitSubGrant } = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
@@ -1677,6 +1677,21 @@ router.get('/analytics', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
     const compareTo = ['previousTerm', 'previousYear', 'none'].includes(req.query.compareTo)
       ? req.query.compareTo : 'previousTerm';
 
+    // Explicit, Settings-configurable override — a role/person who is
+    // otherwise scoped to their own section/assigned classes (section_head,
+    // a teacher, etc.) can be granted whole-school Assessment Analytics
+    // without changing their base grades access anywhere else at all.
+    // hasExplicitSubGrant (no coarse-grant fallback), same posture as
+    // mark-submissions.js's review gate and timetable.js's Scheduling
+    // Engine sub — ticking this ONE row in Settings is the only thing
+    // that grants it. Already-unrestricted callers (admin/principal/etc,
+    // per ScopeEngine's own assessment floor) get nothing new from this —
+    // it only ever widens, never narrows.
+    const naturallyUnrestricted = ScopeEngine.isUnrestricted(req, 'assessment');
+    const grantedWholeSchool = !naturallyUnrestricted
+      && await hasExplicitSubGrant(req, 'reports', 'academic_analytics_school_wide', 'read');
+    const isWholeSchoolView = naturallyUnrestricted || grantedWholeSchool;
+
     const [years, academicCfg] = await Promise.all([
       tenantModel('academic_years', ctx).find({ schoolId }).sort({ startDate: 1 }).lean(),
       tenantModel('academic_config', ctx).findOne({ schoolId }).select('passMark').lean(),
@@ -1699,7 +1714,7 @@ router.get('/analytics', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
     // resolveAcademicPeriod() gives every other caller of this pattern.
     if (!currentYear || !currentTermNumber) {
       return _ok(res, {
-        scope: ScopeEngine.isUnrestricted(req, 'assessment') ? 'whole_school' : 'assigned',
+        scope: isWholeSchoolView ? 'whole_school' : 'assigned',
         currentPeriod: null, previousPeriod: null, passMark,
         overall: null, distribution: [], subjects: [], classes: [], availableClasses: [],
       });
@@ -1713,10 +1728,18 @@ router.get('/analytics', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
        rejected (replaced with an impossible match), not silently widened. */
     const baseFilter = { schoolId, isPublished: true };
     if (qClassId) baseFilter.classId = qClassId;
-    ScopeEngine.applyToFilter(req, 'assessment', baseFilter);
+    if (grantedWholeSchool) {
+      // Explicit override — the class/section scope ScopeEngine would
+      // otherwise apply (and restrictToTaught's further narrowing to only
+      // subjects THIS caller personally teaches) are both skipped: that's
+      // the entire point of this grant.
+    } else {
+      ScopeEngine.applyToFilter(req, 'assessment', baseFilter);
+    }
     if (subjectId) baseFilter.subjectId = subjectId;
-    // Analytics totals are built only from the subjects this caller teaches.
-    await restrictToTaught(req, baseFilter);
+    // Analytics totals are built only from the subjects this caller teaches
+    // — unless explicitly granted the whole-school view above.
+    if (!grantedWholeSchool) await restrictToTaught(req, baseFilter);
 
     const Marks = tenantModel('assessment_marks', ctx);
     const [currentAgg, previousAgg] = await Promise.all([
@@ -1783,14 +1806,21 @@ router.get('/analytics', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
     // real, valid assignments — the same bug classes.js's own GET / had.
     // Uses a request-local scope, restored right after, since scopeMiddleware
     // caches req.scope per userId::schoolId for other routes to read as-is.
-    const originalScope = req.scope;
-    req.scope = await ScopeEngine.resolveClassPickerScope(req);
-    const classesFilter = ScopeEngine.applyToFilter(req, 'classes', { schoolId });
-    req.scope = originalScope;
-    const classDocs = await tenantModel('classes', ctx).find(classesFilter).select('id name').lean();
+    // grantedWholeSchool skips the picker-scope resolution entirely and
+    // just lists every class — same reasoning as the baseFilter above.
+    let classDocs;
+    if (grantedWholeSchool) {
+      classDocs = await tenantModel('classes', ctx).find({ schoolId }).select('id name').lean();
+    } else {
+      const originalScope = req.scope;
+      req.scope = await ScopeEngine.resolveClassPickerScope(req);
+      const classesFilter = ScopeEngine.applyToFilter(req, 'classes', { schoolId });
+      req.scope = originalScope;
+      classDocs = await tenantModel('classes', ctx).find(classesFilter).select('id name').lean();
+    }
 
     return _ok(res, {
-      scope:            ScopeEngine.isUnrestricted(req, 'assessment') ? 'whole_school' : 'assigned',
+      scope:            isWholeSchoolView ? 'whole_school' : 'assigned',
       currentPeriod:    _periodLabel({ year: currentYear, termNumber: currentTermNumber }),
       previousPeriod:   _periodLabel(previous),
       passMark,

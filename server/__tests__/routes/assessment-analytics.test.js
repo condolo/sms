@@ -34,7 +34,11 @@ const SCHOOL = 'school_test_001';
 jest.mock('../../middleware/auth', () => ({
   authMiddleware: (req, _res, next) => { req.jwtUser = mockJwtUser; next(); },
 }));
-jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => next() }));
+let mockWholeSchoolGrant = false;
+jest.mock('../../middleware/rbac', () => ({
+  rbac: () => (_req, _res, next) => next(),
+  hasExplicitSubGrant: jest.fn(() => Promise.resolve(mockWholeSchoolGrant)),
+}));
 jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) => next() }));
 jest.mock('../../middleware/module-gate', () => ({ moduleGate: () => (_req, _res, next) => next(), invalidateModuleConfigCache: jest.fn() }));
 // scopeMiddleware itself is already covered by its own dedicated tests
@@ -153,6 +157,7 @@ function mark(overrides = {}) {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockWholeSchoolGrant = false;
   mockJwtUser = { userId: 'usr_admin', schoolId: SCHOOL, role: 'admin', roles: ['admin'] };
   mockScope = null;
   mockYears = [YEAR_2025, YEAR_2026];
@@ -228,6 +233,47 @@ describe('GET /api/assessment/analytics — scoped teacher view', () => {
     expect(res.status).toBe(200);
     expect(res.body.data.subjects).toEqual([]);
     expect(res.body.data.overall).toBeNull();
+  });
+});
+
+describe('GET /api/assessment/analytics — explicit whole-school grant (reports__academic_analytics_school_wide)', () => {
+  beforeEach(() => {
+    // A section_head (or any non-management role) who is otherwise scoped
+    // to a handful of classes/subjects — same posture as the scoped-
+    // teacher block above, just a role that could plausibly hold this
+    // grant in practice.
+    mockJwtUser = { userId: 'usr_sectionhead', schoolId: SCHOOL, role: 'section_head', roles: ['section_head'] };
+    mockScope = { level: 'section', classIds: ['cls_a'] };
+    mockAssignmentRows = [{ schoolId: SCHOOL, teacherId: 'usr_sectionhead', classId: 'cls_a', subjectId: 'sub_math', streamId: null }];
+  });
+
+  test('without the grant, stays scoped exactly like any other non-management caller', async () => {
+    mockWholeSchoolGrant = false;
+    const res = await supertest(buildApp()).get('/api/assessment/analytics').query({ academicYearId: 'ay_2026', termNumber: 2, compareTo: 'none' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.scope).toBe('assigned');
+    expect(res.body.data.overall.count).toBe(2); // cls_a's 2 math marks only
+    expect(res.body.data.availableClasses).toEqual([{ id: 'cls_a', name: 'Form 1A' }]);
+  });
+
+  test('with the grant, sees every class — the exact same picture an unrestricted caller gets', async () => {
+    mockWholeSchoolGrant = true;
+    const res = await supertest(buildApp()).get('/api/assessment/analytics').query({ academicYearId: 'ay_2026', termNumber: 2, compareTo: 'none' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.scope).toBe('whole_school');
+    expect(res.body.data.overall.count).toBe(3); // all 3 marks, both classes — cls_b's English now included
+    expect(res.body.data.subjects.map(s => s.subjectId).sort()).toEqual(['sub_eng', 'sub_math']);
+    expect(res.body.data.availableClasses).toHaveLength(2); // both classes, not just their own
+  });
+
+  test('a caller already unrestricted (management) is unaffected by the grant check either way', async () => {
+    mockJwtUser = { userId: 'usr_admin', schoolId: SCHOOL, role: 'admin', roles: ['admin'] };
+    mockScope = null;
+    mockWholeSchoolGrant = false; // not granted, and shouldn't need to be
+    const res = await supertest(buildApp()).get('/api/assessment/analytics').query({ academicYearId: 'ay_2026', termNumber: 2, compareTo: 'none' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.scope).toBe('whole_school');
+    expect(res.body.data.overall.count).toBe(3);
   });
 });
 
