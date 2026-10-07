@@ -1,7 +1,7 @@
 /* ============================================================
    Report Cards — Settings panel (RCE5)
 
-   Six sub-tabs, each wrapping a server capability that already
+   Five sub-tabs, each wrapping a server capability that already
    existed (RCE1 toggles, RC7 subject-comments toggle, RC8 approval
    chain, RC9 publication policy, RC11 template registry, the older
    Kindergarten competency-band templates) but had no client UI here
@@ -12,21 +12,24 @@
                              ExamsPage's Configuration tab, not duplicated)
      Workflow             -> report-cards workflow-config (RC8)
      Publication Policy   -> report-cards publication-policy (RC9)
-     Templates             -> report-card-templates registry (RC11)
-     Kindergarten           -> rc-templates (competency bands, a separate,
-                                already-live, pre-RCE feature — moved here
-                                from the generic Settings page, not
-                                duplicated, so all report-card-shaped
-                                settings live under one module; kept
-                                distinctly named/tabbed from "Templates"
-                                above since the two are unrelated APIs)
+     Templates             -> report-card-templates registry (RC11),
+                                including per-SECTION defaults (the
+                                sectionId scoping resolveTemplate() already
+                                supported server-side but this screen never
+                                exposed), plus the older rc-templates
+                                (Kindergarten competency bands) folded in
+                                here as its own card — previously its own
+                                standalone "Kindergarten" tab, which read as
+                                if KG were itself a selectable layout
+                                (raised directly); it's a separate API, not
+                                merged data, just the same tab now.
    ============================================================ */
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence } from 'framer-motion';
 import {
   Loader2, Save, Plus, Trash2, MessageSquare, Search, Tag,
-  ListChecks, ShieldCheck, LayoutTemplate, SlidersHorizontal, X, Star, Baby,
+  ListChecks, ShieldCheck, LayoutTemplate, SlidersHorizontal, X, Star,
 } from 'lucide-react';
 import {
   academicConfig as academicConfigApi,
@@ -39,15 +42,25 @@ import {
 } from '@/api/client.js';
 import { Skeleton, Toast } from '../../grades/components/GradesPrimitives.jsx';
 import { AssetUploader } from '../../settings/SettingsPage.jsx';
+import { useSections } from '@/hooks/useSections.js';
 import RCTemplatesSection from './RCTemplatesSection.jsx';
 
+// Raised directly: "kindergarten template needs to be under templates and
+// removed" + "I didn't see section templates, its a default for whole
+// school" — a standalone "Kindergarten" tab sitting beside "Templates"
+// visually implied KG was a layout choice, when it was actually a second,
+// unrelated template system (rc-templates: competency bands, assigned per
+// class) with no connection to RC11's layoutKey registry at all. Folded
+// into the Templates tab below (still its own section, not merged data)
+// so there is exactly one place to manage report-card templates, and the
+// registry itself now exposes the section-scoping (KG/Primary/Secondary)
+// resolveTemplate() already supported server-side but had no UI for.
 const SUB_TABS = [
-  { id: 'general',      label: 'General',            icon: SlidersHorizontal },
-  { id: 'comments',     label: 'Comments',            icon: MessageSquare },
-  { id: 'workflow',     label: 'Workflow',            icon: ListChecks },
-  { id: 'policy',       label: 'Publication Policy',  icon: ShieldCheck },
-  { id: 'templates',    label: 'Templates',           icon: LayoutTemplate },
-  { id: 'kindergarten', label: 'Kindergarten',        icon: Baby },
+  { id: 'general',   label: 'General',            icon: SlidersHorizontal },
+  { id: 'comments',  label: 'Comments',            icon: MessageSquare },
+  { id: 'workflow',  label: 'Workflow',            icon: ListChecks },
+  { id: 'policy',    label: 'Publication Policy',  icon: ShieldCheck },
+  { id: 'templates', label: 'Templates',           icon: LayoutTemplate },
 ];
 
 export default function SettingsPanel() {
@@ -79,11 +92,15 @@ export default function SettingsPanel() {
           <SignatureBrandingSection />
         </div>
       )}
-      {subTab === 'comments'     && <CommentsSection />}
-      {subTab === 'workflow'     && <WorkflowSection />}
-      {subTab === 'policy'       && <PublicationPolicySection />}
-      {subTab === 'templates'    && <TemplatesSection />}
-      {subTab === 'kindergarten' && <RCTemplatesSection />}
+      {subTab === 'comments'  && <CommentsSection />}
+      {subTab === 'workflow'  && <WorkflowSection />}
+      {subTab === 'policy'    && <PublicationPolicySection />}
+      {subTab === 'templates' && (
+        <div className="space-y-4">
+          <TemplatesSection />
+          <RCTemplatesSection />
+        </div>
+      )}
     </div>
   );
 }
@@ -795,18 +812,21 @@ function PublicationPolicySection() {
 
 /* ══════════════════════════════════════════════════════════════
    Templates — RC11 report_card_templates registry. A radio-style
-   default picker + basic CRUD over the 3 built layouts; kindergarten
-   is shown disabled because no PDF/HTML renderer exists for it yet
-   (per the Template Engine plan's explicit decision to ship the two
-   data-only layouts first) — its band/subject/indicator definitions
-   already live in the adjacent Kindergarten tab, this disabled entry
-   is only about the missing rendering layout, not missing templates.
+   default picker + basic CRUD over the 3 built layouts, now with
+   per-section scoping (sectionId — see the "Applies to" picker in the
+   create form and resolveTemplate()'s own section→school→built-in
+   chain); kindergarten is shown disabled because no PDF/HTML renderer
+   exists for it yet (per the Template Engine plan's explicit decision
+   to ship the two data-only layouts first) — its band/subject/
+   indicator definitions already live in the Kindergarten card just
+   below (RCTemplatesSection, same tab), this disabled entry is only
+   about the missing rendering layout, not missing templates.
    ══════════════════════════════════════════════════════════════ */
 const LAYOUT_OPTIONS = [
   { key: 'legacy_tabular',       label: 'Legacy Tabular',                    disabled: true,  hint: 'Frozen — never offered for a new default.' },
   { key: 'subject_paired',       label: 'Subject + Comment Together',        disabled: false, hint: "Each subject's comment sits directly beneath its marks row." },
   { key: 'marks_then_comments',  label: 'Subjects First, Comments After',    disabled: false, hint: 'A clean marks grid, comments together afterward.' },
-  { key: 'kindergarten',         label: 'Kindergarten (competency bands)',   disabled: true,  hint: 'Templates are already managed in the Kindergarten tab — matching PDF/HTML rendering is still in development.' },
+  { key: 'kindergarten',         label: 'Kindergarten (competency bands)',   disabled: true,  hint: 'Templates are already managed in the Kindergarten card below — matching PDF/HTML rendering is still in development.' },
 ];
 
 function TemplatesSection() {
@@ -815,6 +835,16 @@ function TemplatesSection() {
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
   const [newLayout, setNewLayout] = useState('subject_paired');
+  // Raised directly: "I didn't see section templates, its a default for
+  // whole school" — resolveTemplate() (report-card-templates.js) already
+  // resolves section → school → built-in, and the schema already has
+  // sectionId, but this screen never surfaced it: every template landed
+  // in the single school-wide bucket with no way to scope one to, say,
+  // just Kindergarten while Primary/Secondary keep their own.
+  const [newSectionId, setNewSectionId] = useState('');
+
+  const { sections: sectionList } = useSections();
+  const sectionName = (id) => sectionList.find(x => x.id === id)?.name ?? null;
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['reportCardTemplates'],
@@ -823,11 +853,21 @@ function TemplatesSection() {
   const templates = data?.data ?? [];
 
   const { mutate: create, isPending: savingNew } = useMutation({
-    mutationFn: () => templatesApi.create({ name: newName.trim(), layoutKey: newLayout, isDefault: templates.length === 0 }),
+    mutationFn: () => {
+      const sectionId = newSectionId || null;
+      // First template in its own scope (section-specific, or the
+      // school-wide bucket) becomes that scope's default automatically —
+      // same convention as ConfigTab.jsx's grading-scale creation, so a
+      // school's very first template doesn't need a separate "set
+      // default" click to actually take effect.
+      const inScope = templates.filter(t => (t.sectionId || null) === sectionId);
+      return templatesApi.create({ name: newName.trim(), layoutKey: newLayout, sectionId, isDefault: inScope.length === 0 });
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['reportCardTemplates'] });
       setCreating(false);
       setNewName('');
+      setNewSectionId('');
       setToast({ msg: 'Template created.', type: 'success' });
     },
     onError: err => setToast({ msg: err?.message ?? 'Failed to create template.', type: 'error' }),
@@ -864,7 +904,7 @@ function TemplatesSection() {
       <div className="flex items-start justify-between gap-4 mb-3">
         <div>
           <h3 className="text-sm font-semibold text-slate-800 mb-1">Report Card Templates</h3>
-          <p className="text-xs text-slate-500">Which layout renders a school's report cards. New publishes use the current default; a published report keeps the layout it was published with, forever.</p>
+          <p className="text-xs text-slate-500">Which layout renders a school's report cards. Scope one to a section (e.g. Kindergarten) to override the whole-school default just for it — a class resolves its own section's default first, falling back to the whole-school one. New publishes use whichever resolves; a published report keeps the layout it was published with, forever.</p>
         </div>
         <button onClick={() => setCreating(c => !c)}
           className="shrink-0 flex items-center gap-1.5 border border-slate-200 hover:border-slate-400 text-slate-600 hover:text-slate-900 text-xs font-medium px-3 py-1.5 rounded-lg transition">
@@ -874,10 +914,19 @@ function TemplatesSection() {
 
       {creating && (
         <div className="mb-4 p-4 rounded-xl bg-slate-50 border border-slate-100 space-y-3">
-          <div>
-            <label className="text-xs font-medium text-slate-600 block mb-1">Name</label>
-            <input type="text" value={newName} onChange={e => setNewName(e.target.value)}
-              placeholder="e.g. Term Report — Secondary" className={iCls()} />
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="text-xs font-medium text-slate-600 block mb-1">Name</label>
+              <input type="text" value={newName} onChange={e => setNewName(e.target.value)}
+                placeholder="e.g. Term Report — Secondary" className={iCls()} />
+            </div>
+            <div className="w-44 shrink-0">
+              <label className="text-xs font-medium text-slate-600 block mb-1">Applies to</label>
+              <select value={newSectionId} onChange={e => setNewSectionId(e.target.value)} className={iCls()}>
+                <option value="">Whole school</option>
+                {sectionList.map(sec => <option key={sec.id} value={sec.id}>{sec.name}</option>)}
+              </select>
+            </div>
           </div>
           <div>
             <label className="text-xs font-medium text-slate-600 block mb-1">Layout</label>
@@ -896,7 +945,7 @@ function TemplatesSection() {
             </div>
           </div>
           <div className="flex gap-2 justify-end">
-            <button onClick={() => { setCreating(false); setNewName(''); }} className="text-xs text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg transition">Cancel</button>
+            <button onClick={() => { setCreating(false); setNewName(''); setNewSectionId(''); }} className="text-xs text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg transition">Cancel</button>
             <button onClick={() => create()} disabled={savingNew || !newName.trim()}
               className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-xs font-medium px-4 py-1.5 rounded-lg transition">
               {savingNew ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
@@ -923,8 +972,13 @@ function TemplatesSection() {
                     <Star size={16} fill={t.isDefault ? 'currentColor' : 'none'} />
                   </button>
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-slate-800 truncate">{t.name}</p>
-                    <p className="text-xs text-slate-400">{layout?.label ?? t.layoutKey}{t.isDefault && ' · Default'}</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-sm font-medium text-slate-800 truncate">{t.name}</p>
+                      {t.sectionId && (
+                        <span className="shrink-0 text-[10px] text-slate-500 bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5">{sectionName(t.sectionId) ?? t.sectionId}</span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-400">{layout?.label ?? t.layoutKey}{t.isDefault && (t.sectionId ? ' · Default for section' : ' · Default for whole school')}</p>
                   </div>
                 </div>
                 <button onClick={() => remove(t.id)} disabled={t.isDefault}

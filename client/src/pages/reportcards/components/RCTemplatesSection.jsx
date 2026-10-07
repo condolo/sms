@@ -1,10 +1,17 @@
 /* ============================================================
    RCTemplatesSection — competency-based report card templates for
    Kindergarten / early-childhood classes. Admin-only. Accessed from
-   Report Cards → Settings → Kindergarten (moved here from the generic
-   Settings page, not duplicated — see the Report Card Template
-   Engine plan's explicit decision to defer a real Kindergarten
-   renderer/scoring UI; this pre-existing screen is otherwise untouched).
+   Report Cards → Settings → Templates, as its own card beneath the
+   RC11 layout-template registry (TemplatesSection, same file's
+   SettingsPanel.jsx) — folded in from a separate standalone
+   "Kindergarten" tab per direct feedback that a tab sitting beside
+   "Templates" implied KG was itself a selectable layout, when it's
+   really a second, unrelated template system (bands/subjects/
+   indicators, assigned per class — nothing to do with RC11's
+   layoutKey). Still its own API/data model, not merged — see the
+   Report Card Template Engine plan's explicit decision to defer a
+   real Kindergarten renderer/scoring UI; this pre-existing screen is
+   otherwise untouched).
    ============================================================ */
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';

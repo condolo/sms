@@ -1133,7 +1133,7 @@ router.get('/bulk-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), s
     // Resolved AFTER the zero-match 404 check above — no point paying
     // for 3 extra queries on a request that's about to 404 anyway.
     const [bulkSchool, bulkCaConfig, bulkAssignments] = await Promise.all([
-      _model('schools').findOne({ id: schoolId }, { logoUrl: 1, tagline: 1, address: 1, phone: 1, email: 1, website: 1 }).lean().catch(() => null),
+      _model('schools').findOne({ id: schoolId }, { logoUrl: 1, tagline: 1, address: 1, phone: 1, email: 1, website: 1, principalSignatureUrl: 1, schoolStampUrl: 1 }).lean().catch(() => null),
       _getAssessmentConfig(schoolId, req.query.academicYearId || null),
       tenantModel('teaching_assignments', tenantContext(req))
         .find({ schoolId, classId: req.query.classId }).select('subjectId teacherName').lean().catch(() => []),
@@ -1453,7 +1453,12 @@ async function _fetchSignatureImages(snap) {
    helper now, used by both, so they can never drift apart again. */
 async function _loadRenderExtras(req, schoolId, snap) {
   const [school, behaviour, prevSnap, caConfig, assignments, subjectDocs] = await Promise.all([
-    _model('schools').findOne({ id: schoolId }, { logoUrl: 1, tagline: 1, address: 1, phone: 1, email: 1, website: 1 }).lean().catch(() => null),
+    // principalSignatureUrl/schoolStampUrl added as the live fallback
+    // _computeReportSections' signatures block now reads when a snapshot
+    // predates this field being frozen at publish time (every snapshot
+    // going forward carries its own, see POST /publish's "Load school
+    // signature/stamp URLs for snapshotting" step).
+    _model('schools').findOne({ id: schoolId }, { logoUrl: 1, tagline: 1, address: 1, phone: 1, email: 1, website: 1, principalSignatureUrl: 1, schoolStampUrl: 1 }).lean().catch(() => null),
     behaviourSummary(schoolId, snap.studentId).catch(() => null),
     snap.termNumber > 1
       ? tenantModel('report_card_snapshots', tenantContext(req)).findOne({
@@ -1667,6 +1672,16 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
     signatures: {
       classTeacherLabel: config.classTeacherSignatureLabel || 'Class Teacher',
       principalLabel:    config.principalSignatureLabel    || 'Principal',
+      // Reported directly: "the stamp and principal's signature didn't
+      // show" — true for the HTML renderers (browser print-to-PDF), which
+      // only ever received these as PDFKit image Buffers (images.*,
+      // _fetchSignatureImages) for the separate native-PDF path. A
+      // published snapshot already has them frozen (see POST /publish's
+      // "Load school signature/stamp URLs for snapshotting" step) so
+      // that's the first source; extra.school is the live fallback for an
+      // unpublished draft preview, which has no snapshot of its own yet.
+      principalSignatureUrl: snap.principalSignatureUrl ?? school?.principalSignatureUrl ?? null,
+      schoolStampUrl:         snap.schoolStampUrl         ?? school?.schoolStampUrl         ?? null,
     },
     footer: {
       footerNote: config.footerNote || 'This report card is computer-generated.',
@@ -2055,8 +2070,16 @@ router.post('/preview-html', authMiddleware, PLAN, MODGATE, rbac('grades', 'read
       .select('id name').lean().catch(() => []);
     const subjectNames = Object.fromEntries(subjectDocs.map(s => [s.id, s.name]));
 
+    // The client's `school` (useAuthStore session data) never carries
+    // principalSignatureUrl/schoolStampUrl — those aren't session fields —
+    // so without this live lookup, a draft preview could never show the
+    // sign-off images even though a published copy of the same report
+    // (which snapshots them at publish time) would.
+    const signOffDoc = await _model('schools').findOne({ id: schoolId }, { principalSignatureUrl: 1, schoolStampUrl: 1 }).lean().catch(() => null);
+    const schoolWithSignOff = { ...school, principalSignatureUrl: signOffDoc?.principalSignatureUrl || null, schoolStampUrl: signOffDoc?.schoolStampUrl || null };
+
     const sections = _computeReportSections(snap, config, null, {
-      school, behaviour: beh ?? null, deviations: studentDeviations ?? null,
+      school: schoolWithSignOff, behaviour: beh ?? null, deviations: studentDeviations ?? null,
       subjectTeacherCommentsEnabled: clientConfig?.subjectTeacherCommentsEnabled !== false,
       subjectNames,
     });

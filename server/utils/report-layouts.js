@@ -55,6 +55,24 @@ function _observationRatingsHtml(s) {
   </div>`;
 }
 
+/* Sign-off images for the HTML renderers — reported directly: "the stamp
+   and principal's signature didn't show." These were only ever drawn in
+   the PDFKit path (images.principalSignature/schoolStamp, Buffers fetched
+   server-side by _fetchSignatureImages for the native-PDF route);
+   s.signatures.principalSignatureUrl/schoolStampUrl are the same URLs
+   (data: URI or http(s) — see report-cards.js's _fetchImageBuf) as plain
+   strings a browser can load directly in an <img>, with no server-side
+   fetch needed here. Empty string when the school hasn't uploaded one —
+   same "zero trace" rule as every other optional block in this file. */
+function _principalSignatureImgHtml(s) {
+  if (!s.signatures.principalSignatureUrl) return '';
+  return `<img src="${_esc(s.signatures.principalSignatureUrl)}" alt="" style="display:block;height:30px;max-width:170px;object-fit:contain;margin:10px 0 2px" />`;
+}
+function _schoolStampImgHtml(s) {
+  if (!s.signatures.schoolStampUrl) return '';
+  return `<img src="${_esc(s.signatures.schoolStampUrl)}" alt="" style="position:absolute;top:0;right:0;height:52px;width:52px;object-fit:contain;opacity:0.85" />`;
+}
+
 /* PDF renderer — walks the IR and makes the pdfkit calls. Every
    coordinate/color/size constant here is unchanged from the original
    monolithic _buildPDFPage; only the source of each value moved from
@@ -420,12 +438,14 @@ function _renderLegacyTabularHtml(s) {
       <div style="margin-top:24px;border-top:1px solid #1e293b;width:180px;padding-top:4px;font-size:10px;color:#475569">${_esc(s.signatures.classTeacherLabel)} Signature</div>
     </div>` : ''}
     ${s.comments.showPrincipalRemark ? `
-    <div>
+    <div style="position:relative">
+      ${_schoolStampImgHtml(s)}
       <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">
         ${_esc(s.signatures.principalLabel)}: <span style="font-style:italic;font-weight:normal">${_esc(s.comments.principalName) || '___________________'}</span>
       </p>
       <div style="border:1px solid #e2e8f0;border-radius:4px;padding:8px 12px;min-height:70px;font-size:11px;color:#475569">${_esc(s.comments.principalRemark)}</div>
-      <div style="margin-top:24px;border-top:1px solid #1e293b;width:180px;padding-top:4px;font-size:10px;color:#475569">${_esc(s.signatures.principalLabel)} Signature</div>
+      ${_principalSignatureImgHtml(s)}
+      <div style="margin-top:${s.signatures.principalSignatureUrl ? '2px' : '24px'};border-top:1px solid #1e293b;width:180px;padding-top:4px;font-size:10px;color:#475569">${_esc(s.signatures.principalLabel)} Signature</div>
     </div>` : ''}
   </div>`;
 
@@ -1028,6 +1048,24 @@ function _renderSubjectPairedHtml(s) {
     </div>`).join('')}
   </div>` : '';
 
+  // SIGNATURES — this layout's HTML had no equivalent of its own PDF's
+  // unconditional signature line at all (reported directly: the stamp
+  // and principal's signature didn't show — for this template there
+  // wasn't even a line to put them on). Unconditional like the PDF
+  // (sigY in _renderSubjectPairedPdf is never gated by either remark
+  // toggle), not tied to showClassTeacherRemark/showPrincipalRemark.
+  const signaturesHtml = `
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:20px 0 0">
+    <div>
+      <div style="border-top:1px solid #1e293b;width:180px;padding-top:4px;font-size:10px;color:#475569">${_esc(s.signatures.classTeacherLabel)}</div>
+    </div>
+    <div style="position:relative">
+      ${_schoolStampImgHtml(s)}
+      ${_principalSignatureImgHtml(s)}
+      <div style="margin-top:${s.signatures.principalSignatureUrl ? '2px' : '0'};border-top:1px solid #1e293b;width:180px;padding-top:4px;font-size:10px;color:#475569">${_esc(s.signatures.principalLabel)}</div>
+    </div>
+  </div>`;
+
   const academicHtml = `
 <div style="page-break-before:always">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;border-bottom:2px solid #1e293b;padding-bottom:8px">
@@ -1055,6 +1093,7 @@ function _renderSubjectPairedHtml(s) {
   ${remarksHtml}
   ${_observationRatingsHtml(s)}
   ${behHtml}
+  ${signaturesHtml}
   <p style="text-align:center;font-size:9px;color:#94a3b8;margin-top:16px">${_esc(s.footer.footerNote)} — ${_esc(s.footer.genLine)}${s.footer.reportId ? ` — Report ID: ${_esc(s.footer.reportId)}` : ''}</p>
 </div>`;
 
@@ -1431,12 +1470,14 @@ function _renderMarksThenCommentsHtml(s) {
       <div style="margin-top:24px;border-top:1px solid #1e293b;width:180px;padding-top:4px;font-size:10px;color:#475569">${_esc(s.signatures.classTeacherLabel)} Signature</div>
     </div>` : ''}
     ${s.comments.showPrincipalRemark ? `
-    <div>
+    <div style="position:relative">
+      ${_schoolStampImgHtml(s)}
       <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">
         ${_esc(s.signatures.principalLabel)}: <span style="font-style:italic;font-weight:normal">${_esc(s.comments.principalName) || '___________________'}</span>
       </p>
       <div style="border:1px solid #e2e8f0;border-radius:4px;padding:8px 12px;min-height:70px;font-size:11px;color:#475569">${_esc(s.comments.principalRemark)}</div>
-      <div style="margin-top:24px;border-top:1px solid #1e293b;width:180px;padding-top:4px;font-size:10px;color:#475569">${_esc(s.signatures.principalLabel)} Signature</div>
+      ${_principalSignatureImgHtml(s)}
+      <div style="margin-top:${s.signatures.principalSignatureUrl ? '2px' : '24px'};border-top:1px solid #1e293b;width:180px;padding-top:4px;font-size:10px;color:#475569">${_esc(s.signatures.principalLabel)} Signature</div>
     </div>` : ''}
   </div>`;
 

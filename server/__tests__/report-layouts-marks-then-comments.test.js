@@ -245,3 +245,33 @@ describe('marks_then_comments.renderPdf — dynamic comment box sizing', () => {
     expect(heights2[1]).toBeGreaterThan(heights1[1]);
   });
 });
+
+describe('marks_then_comments.renderHtml — principal signature & school stamp (reported: "the stamp and principal\'s signature didn\'t show")', () => {
+  test('neither image appears when the school has uploaded neither', () => {
+    const html = LAYOUTS.marks_then_comments.renderHtml(computeSections());
+    expect(html).not.toContain('<img');
+  });
+
+  test('a published snapshot\'s own frozen URLs render as <img> tags', () => {
+    const html = LAYOUTS.marks_then_comments.renderHtml(
+      computeSections({ principalSignatureUrl: 'data:image/png;base64,AAAA', schoolStampUrl: 'data:image/png;base64,BBBB' })
+    );
+    expect(html).toContain('<img src="data:image/png;base64,AAAA"');
+    expect(html).toContain('<img src="data:image/png;base64,BBBB"');
+  });
+
+  test('falls back to the live school profile for an unpublished draft preview', () => {
+    const html = LAYOUTS.marks_then_comments.renderHtml(
+      computeSections({}, {}, { school: { principalSignatureUrl: 'data:image/png;base64,CCCC', schoolStampUrl: 'data:image/png;base64,DDDD' } })
+    );
+    expect(html).toContain('<img src="data:image/png;base64,CCCC"');
+    expect(html).toContain('<img src="data:image/png;base64,DDDD"');
+  });
+
+  test('turning off Principal\'s Comment removes the signature image too — it has nowhere left to sit', () => {
+    const html = LAYOUTS.marks_then_comments.renderHtml(
+      computeSections({ principalSignatureUrl: 'data:image/png;base64,AAAA' }, { showPrincipalRemark: false })
+    );
+    expect(html).not.toContain('<img');
+  });
+});

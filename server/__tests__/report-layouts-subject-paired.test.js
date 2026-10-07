@@ -267,3 +267,38 @@ describe('subject_paired.renderPdf — RCE3b dynamic box sizing', () => {
     expect(academicRectHeights.some(h => h > 40)).toBe(true);
   });
 });
+
+describe('subject_paired.renderHtml — signature line (reported: "the stamp and principal\'s signature didn\'t show")', () => {
+  // This layout's HTML had no signature line AT ALL before this fix —
+  // unlike legacy_tabular/marks_then_comments (which had the line but
+  // never drew the images on it), subject_paired's renderPdf always draws
+  // an unconditional signature line/images (not gated by either remark
+  // toggle — see renderPdf's own SIGNATURES block), so renderHtml now
+  // matches: unconditional, not tied to showClassTeacherRemark/showPrincipalRemark.
+  test('the signature line itself always renders, even with both remarks off', () => {
+    const html = LAYOUTS.subject_paired.renderHtml(computeSections({}, { showClassTeacherRemark: false, showPrincipalRemark: false }));
+    expect(html).toContain('Class Teacher');
+    expect(html).toContain('Principal');
+  });
+
+  test('no images when the school has uploaded neither', () => {
+    const html = LAYOUTS.subject_paired.renderHtml(computeSections());
+    expect(html).not.toContain('<img');
+  });
+
+  test('a published snapshot\'s own frozen signature/stamp URLs render as <img> tags', () => {
+    const html = LAYOUTS.subject_paired.renderHtml(
+      computeSections({ principalSignatureUrl: 'data:image/png;base64,AAAA', schoolStampUrl: 'data:image/png;base64,BBBB' })
+    );
+    expect(html).toContain('<img src="data:image/png;base64,AAAA"');
+    expect(html).toContain('<img src="data:image/png;base64,BBBB"');
+  });
+
+  test('falls back to the live school profile for an unpublished draft preview', () => {
+    const html = LAYOUTS.subject_paired.renderHtml(
+      computeSections({}, {}, { school: { principalSignatureUrl: 'data:image/png;base64,CCCC', schoolStampUrl: 'data:image/png;base64,DDDD' } })
+    );
+    expect(html).toContain('<img src="data:image/png;base64,CCCC"');
+    expect(html).toContain('<img src="data:image/png;base64,DDDD"');
+  });
+});
