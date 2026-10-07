@@ -319,8 +319,17 @@ describe('listing and removing schedules', () => {
     expect(r.id).toBe('bs_primary');
   });
 
-  test('the school-wide default cannot be removed by section', async () => {
+  // Previously blocked unconditionally; the client's own Remove button for
+  // the School Default never actually went through this path (it deletes
+  // by id), so the block was both unreachable from the UI and the only
+  // one of the two delete paths that had it — inconsistent, not a real
+  // protection. Deleting it is safe either way: affected classes simply
+  // fall back to the built-in default.
+  test('the school-wide default can now be removed by section, reverting to the built-in default', async () => {
     const res = await supertest(buildApp()).delete('/api/bell-schedule').query({ section: 'all' });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
+    expect(res.body.message).toMatch(/built-in/i);
+    const r = await resolveBellSchedule(SCHOOL, 'secondary', 'c_form1'); // no section/school default left
+    expect(r.source).toBe('built-in');
   });
 });

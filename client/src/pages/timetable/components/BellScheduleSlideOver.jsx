@@ -156,11 +156,17 @@ export default function BellScheduleSlideOver({ onClose }) {
     mutationFn: () => targetIsDefault && target.section !== 'all'
       ? bellApi.remove(target.section)
       : bellApi.removeById(target.id),
-    onSuccess: () => {
+    // The server already knows exactly what was deleted (a named class
+    // schedule, a section default, or the School Default itself) and
+    // returns an accurate message for each — using it here instead of one
+    // fixed string means deleting the School Default correctly says
+    // classes fall to the built-in default, not to a "section default"
+    // that, for the School Default itself, doesn't exist.
+    onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['bell-schedule'] });
       qc.invalidateQueries({ queryKey: ['timetable'] });
       setSelectedId(null);
-      showT('Schedule removed. Its classes now use the next schedule down.');
+      showT(res?.message ?? 'Schedule removed.');
     },
     onError: err => showT(err?.message ?? 'Failed to remove.', 'error'),
   });
@@ -352,9 +358,13 @@ export default function BellScheduleSlideOver({ onClose }) {
               )}
               {target && (
                 <button
-                  onClick={() => { if (window.confirm(targetIsDefault
-                    ? `Remove “${chipLabel(target)}”? The classes it covered use the next default down.`
-                    : `Remove “${target.name ?? 'this schedule'}”? Its classes use the next default down.`)) removeSchedule(); }}
+                  onClick={() => { if (window.confirm(
+                    targetIsDefault && target.section === 'all'
+                      ? 'Remove the School Default? Every class with no schedule of its own will fall back to the built-in default times.'
+                      : targetIsDefault
+                        ? `Remove “${chipLabel(target)}”? The classes it covered use the School Default instead.`
+                        : `Remove “${target.name ?? 'this schedule'}”? Its classes use the next default down.`
+                  )) removeSchedule(); }}
                   disabled={removing}
                   className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-red-500 underline underline-offset-2 transition ml-2"
                 >

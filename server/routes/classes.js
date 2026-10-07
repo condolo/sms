@@ -454,9 +454,21 @@ router.delete('/:id', authMiddleware, PLAN, MODGATE, rbac('classes', 'delete'), 
     if (!doc) return E.notFound(res, 'Class not found');
     // The class is no longer in any bell schedule, so its schedule's class count and the one-schedule rule stay true.
     const refs = [...new Set([doc.id, String(doc._id)].filter(Boolean))];
-    await tenantModel('bell_schedules', tenantContext(req))
-      .updateMany({ schoolId, classIds: { $in: refs } }, { $pull: { classIds: { $in: refs } } })
+    const Bs = tenantModel('bell_schedules', tenantContext(req));
+    await Bs.updateMany({ schoolId, classIds: { $in: refs } }, { $pull: { classIds: { $in: refs } } })
       .catch(err => console.error('[classes DELETE] bell schedule cleanup failed:', err.message));
+    // A pull that empties out a genuine class schedule (isDefault: false —
+    // this was never a section/school default to begin with) leaves a
+    // zombie: classIds: [] makes it match the SAME "default" query every
+    // real default does (resolveBellSchedule's SECTION_DEFAULT), so it
+    // would silently start competing, non-deterministically, with the
+    // school's actual default for every class with no schedule of its
+    // own. The bell-schedule PUT route itself already refuses to let an
+    // admin save a class schedule down to zero classes ("Remove the
+    // schedule instead") — this is that same rule, applied automatically
+    // when the last class leaves via deletion rather than an edit.
+    await Bs.deleteMany({ schoolId, classIds: { $size: 0 }, isDefault: false })
+      .catch(err => console.error('[classes DELETE] zombie bell schedule cleanup failed:', err.message));
     return ok(res, { id: paramId, deleted: true });
   } catch (err) {
     console.error('[classes DELETE/:id]', err);

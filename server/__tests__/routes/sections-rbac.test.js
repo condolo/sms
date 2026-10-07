@@ -61,12 +61,42 @@ function mockMakeRolePermsStore() {
   };
 }
 
-let mockSections, mockTeachers, mockClasses;
+// A richer matcher than this file's plain matchesFilter() — the cleanup
+// query uses $or/$exists/$size (the exact SECTION_DEFAULT shape
+// bell-schedule.js itself matches a default against).
+function _bellMatches(doc, filter) {
+  return Object.entries(filter || {}).every(([k, v]) => {
+    if (k === '$or') return v.some(sub => _bellMatches(doc, sub));
+    const val = doc[k];
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      if ('$exists' in v) return (val !== undefined) === v.$exists;
+      if ('$size' in v) return Array.isArray(val) && val.length === v.$size;
+    }
+    return val === v;
+  });
+}
+// Real (not blindly-stubbed) deleteOne, since the orphan-cleanup tests
+// below need to see what, if anything, actually got removed.
+function makeFakeBellScheduleStore(seed = []) {
+  let docs = [...seed];
+  return {
+    _docs: () => docs,
+    deleteOne: jest.fn((filter) => {
+      const idx = docs.findIndex(d => _bellMatches(d, filter));
+      if (idx === -1) return Promise.resolve({ deletedCount: 0 });
+      docs.splice(idx, 1);
+      return Promise.resolve({ deletedCount: 1 });
+    }),
+  };
+}
+
+let mockSections, mockTeachers, mockClasses, mockBellSchedules;
 jest.mock('../../utils/model', () => ({
   _model: jest.fn((c) => {
     if (c === 'sections')          return mockSections;
     if (c === 'teachers')          return mockTeachers;
     if (c === 'classes')           return mockClasses;
+    if (c === 'bell_schedules')    return mockBellSchedules;
     if (c === 'role_permissions')  return mockMakeRolePermsStore();
     return { find: jest.fn(() => mockChainArr([])), findOne: jest.fn(() => mockChainObj(null)) };
   }),
@@ -89,6 +119,7 @@ beforeEach(() => {
   mockSections = makeFakeCollection([{ id: 's1', schoolId: SCHOOL_A, key: 'primary', name: 'Primary', color: '#3b82f6', order: 2 }]);
   mockTeachers = makeFakeCollection([]);
   mockClasses  = makeFakeCollection([]);
+  mockBellSchedules = makeFakeBellScheduleStore([]);
 });
 
 test('GET / is open to a read-only role', async () => {
@@ -112,4 +143,39 @@ test('DELETE /:id is forbidden for a role with no settings grant', async () => {
   mockJwtUser = { userId: 'usr_teacher', schoolId: SCHOOL_A, role: 'teacher', roles: ['teacher'] };
   const res = await supertest(buildApp()).delete('/api/sections/s1');
   expect(res.status).toBe(403);
+});
+
+// Deleting a section leaves its own bell-schedule default permanently
+// unreachable — resolveBellSchedule only ever matches a section default
+// against a class whose live sectionKey equals it, and no class can carry
+// this key anymore once the section is gone (the active-class check above
+// already guarantees that). Left behind, it would linger in the Bell
+// Schedules list forever, visible but never actually applied to anything.
+describe('DELETE /:id — bell schedule cleanup', () => {
+  test("deleting a section removes its own bell-schedule default", async () => {
+    mockBellSchedules = makeFakeBellScheduleStore([
+      { id: 'bs_primary', schoolId: SCHOOL_A, section: 'primary', name: 'Primary default', classIds: [] },
+    ]);
+    const res = await supertest(buildApp()).delete('/api/sections/s1');
+    expect(res.status).toBe(200);
+    expect(mockBellSchedules._docs()).toHaveLength(0);
+  });
+
+  test("a DIFFERENT section's default, and any class-specific schedule, are left untouched", async () => {
+    mockBellSchedules = makeFakeBellScheduleStore([
+      { id: 'bs_primary',  schoolId: SCHOOL_A, section: 'primary',    name: 'Primary default', classIds: [] },
+      { id: 'bs_secondary', schoolId: SCHOOL_A, section: 'secondary', name: 'Secondary default', classIds: [] },
+      { id: 'bs_cls',      schoolId: SCHOOL_A, section: 'all',        name: 'Year 7 only', classIds: ['cls_7'] },
+    ]);
+    await supertest(buildApp()).delete('/api/sections/s1');
+    const remaining = mockBellSchedules._docs().map(d => d.id);
+    expect(remaining).toEqual(expect.arrayContaining(['bs_secondary', 'bs_cls']));
+    expect(remaining).not.toContain('bs_primary');
+  });
+
+  test('a section with no saved bell schedule deletes cleanly either way', async () => {
+    mockBellSchedules = makeFakeBellScheduleStore([]);
+    const res = await supertest(buildApp()).delete('/api/sections/s1');
+    expect(res.status).toBe(200);
+  });
 });

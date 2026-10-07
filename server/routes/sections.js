@@ -276,6 +276,20 @@ router.delete('/:id', authMiddleware, rbac('settings', 'delete', 'school'), asyn
     }
 
     await Sections.deleteOne({ id: req.params.id, schoolId });
+
+    // This section's own bell-schedule default (if it ever saved one) is
+    // now unreachable — resolveBellSchedule only ever matches a section
+    // default against a class whose live sectionKey equals it, and no
+    // class can carry this key anymore (the active-class check above just
+    // proved that). Left alone, it lingers as a dead entry in the Bell
+    // Schedules list forever, visible but never actually applied to
+    // anything. Mirrors classes.js's own cleanup when a class leaves a
+    // bell schedule — same "integrity cleanup on delete" posture, not a
+    // new pattern.
+    await tenantModel('bell_schedules', tenantContext(req))
+      .deleteOne({ schoolId, section: section.key, $or: [{ classIds: { $exists: false } }, { classIds: { $size: 0 } }] })
+      .catch(err => console.error('[sections DELETE] bell schedule cleanup failed:', err.message));
+
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) {
     console.error('[sections DELETE/:id]', err);

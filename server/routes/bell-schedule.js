@@ -220,9 +220,15 @@ router.get('/sections', authMiddleware, planGate('bell_schedule'), async (req, r
     ]);
 
     // Return one entry per this school's real sections (plus 'all'),
-    // indicating configured/default — not a fixed generic list.
+    // indicating configured/default — not a fixed generic list. Only a
+    // genuine DEFAULT (no classIds) counts as "this section is
+    // configured": 'all' can also hold any number of school-wide CLASS
+    // schedules (classIds.length > 0) sharing that same section value —
+    // keying on section alone without this check let the last such class
+    // schedule in `docs` silently overwrite (or masquerade as) the real
+    // School Default for 'all'.
     const configured = {};
-    docs.forEach(d => { configured[d.section] = d; });
+    docs.forEach(d => { if (!(d.classIds ?? []).length) configured[d.section] = d; });
 
     const result = [...sectionKeys].map(s => ({
       section:      s,
@@ -372,8 +378,16 @@ router.put('/', authMiddleware, planGate('bell_schedule'), rbac('timetable', 'up
   }
 });
 
-/* DELETE /api/bell-schedule?id=… — remove a named schedule; its classes fall back to the section default.
-   DELETE /api/bell-schedule?section=… — remove the section default (never the school-wide 'all'). */
+/* DELETE /api/bell-schedule?id=… — remove a named schedule or a default (the
+   school-wide 'all' included — see below) by its own id; its classes fall
+   back to the next schedule down.
+   DELETE /api/bell-schedule?section=… — remove a section default by section
+   key, 'all' included. Unlike PUT, this never requires the section to
+   still exist in Classes → Sections: the one real reason to delete a
+   section default by key rather than by id is that its section was
+   itself already deleted, leaving the default orphaned (see sections.js's
+   own cleanup, which handles the normal case — this covers anything from
+   before that existed, or any other way one is left behind). */
 router.delete('/', authMiddleware, planGate('bell_schedule'), rbac('timetable', 'delete', 'bell_schedule'), async (req, res) => {
   try {
     const schoolId = req.jwtUser.schoolId;
@@ -381,23 +395,34 @@ router.delete('/', authMiddleware, planGate('bell_schedule'), rbac('timetable', 
     const Bs       = tenantModel('bell_schedules', ctx);
 
     if (req.query.id) {
-      const r = await Bs.deleteOne({ schoolId, id: String(req.query.id) });
-      if (!r.deletedCount) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Bell schedule not found.' } });
+      const existing = await Bs.findOne({ schoolId, id: String(req.query.id) }).select('section classIds').lean();
+      if (!existing) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Bell schedule not found.' } });
+      await Bs.deleteOne({ schoolId, id: String(req.query.id) });
       await _resyncSafely(schoolId, ctx);
-      return res.json({ success: true, message: 'Bell schedule removed. Its classes now use the section default.' });
+      const wasSchoolDefault = existing.section === 'all' && !(existing.classIds ?? []).length;
+      return res.json({
+        success: true,
+        message: wasSchoolDefault
+          ? 'School Default removed. Classes with no other schedule now use the built-in default.'
+          : 'Bell schedule removed. Its classes now use the next schedule down.',
+      });
     }
 
     const section = req.query.section;
-    if (!section || section === 'all') {
-      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: "Cannot delete the school-wide 'all' schedule. Use PUT to update it." } });
+    if (!section) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'A section is required.' } });
     }
-    const sectionKeys = await _schoolSectionKeys(schoolId, ctx);
-    if (!sectionKeys.has(section)) {
-      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: `Unknown section '${section}'.` } });
+    const r = await Bs.deleteOne({ schoolId, section, ...SECTION_DEFAULT });
+    if (!r.deletedCount) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: `No default found for section '${section}'.` } });
     }
-    await Bs.deleteOne({ schoolId, section, ...SECTION_DEFAULT });
     await _resyncSafely(schoolId, ctx);
-    res.json({ success: true, message: `Section default for '${section}' removed. Will now use the school default.` });
+    res.json({
+      success: true,
+      message: section === 'all'
+        ? 'School Default removed. Classes with no other schedule now use the built-in default.'
+        : `Section default for '${section}' removed. Will now use the school default.`,
+    });
   } catch (err) {
     console.error('[bell-schedule] DELETE error:', err);
     res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Failed to delete bell schedule' } });

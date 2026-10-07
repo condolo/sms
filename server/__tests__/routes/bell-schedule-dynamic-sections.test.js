@@ -217,13 +217,41 @@ describe('DELETE /api/bell-schedule — revert a custom section', () => {
     expect(mockBellSchedules._docs()).toHaveLength(0);
   });
 
-  test('"all" cannot be deleted — unchanged behaviour', async () => {
+  // Previously blocked unconditionally ("Cannot delete the school-wide
+  // 'all' schedule") — but that block was only ever reached via this one
+  // query-param path; the client's own Remove button for the School
+  // Default actually went through DELETE ?id=, which had no such check
+  // at all. Rather than leave that inconsistency (protected one way,
+  // wide open the other), deleting the School Default is now allowed
+  // through both — it's a safe operation either way: classes with no
+  // other schedule simply fall back to the built-in default.
+  test('the School Default ("all") can now be deleted, reverting those classes to the built-in default', async () => {
+    mockBellSchedules = mockMakeFakeCollection([
+      { schoolId: SCHOOL_A, section: 'all', name: 'School default', periods: PERIODS, classIds: [], id: 'bs_all' },
+    ]);
     const res = await supertest(buildApp()).delete('/api/bell-schedule?section=all');
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
+    expect(res.body.message).toMatch(/built-in/i);
+    expect(mockBellSchedules._docs()).toHaveLength(0);
   });
 
-  test('an unknown section is rejected', async () => {
-    const res = await supertest(buildApp()).delete('/api/bell-schedule?section=not_real');
-    expect(res.status).toBe(400);
+  // Previously rejected with "Unknown section" — but a delete should never
+  // require the section to still exist in Classes → Sections: the whole
+  // point of deleting a stale section default BY KEY is that its section
+  // was already removed elsewhere, which is exactly what sections.js's own
+  // DELETE now also does proactively. This covers anything left over from
+  // before that existed.
+  test('an orphaned section default (its section no longer exists) can still be deleted, not rejected as "unknown"', async () => {
+    mockBellSchedules = mockMakeFakeCollection([
+      { schoolId: SCHOOL_A, section: 'ks3_section_removed', periods: PERIODS, classIds: [], id: 'bs_orphan' },
+    ]);
+    const res = await supertest(buildApp()).delete('/api/bell-schedule?section=ks3_section_removed');
+    expect(res.status).toBe(200);
+    expect(mockBellSchedules._docs()).toHaveLength(0);
+  });
+
+  test('deleting a section with nothing saved for it is a clean 404, not a false "unknown section" rejection', async () => {
+    const res = await supertest(buildApp()).delete('/api/bell-schedule?section=ks3_section');
+    expect(res.status).toBe(404);
   });
 });
