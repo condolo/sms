@@ -1029,7 +1029,18 @@ function MarkbookTab({ years }) {
         setToast({ msg: 'Marks saved successfully.', type: 'success' });
       }
     },
-    onError: err => setToast({ msg: err?.message ?? 'Save failed.', type: 'error' }),
+    onError: err => {
+      setToast({ msg: err?.message ?? 'Save failed.', type: 'error' });
+      // The server is authoritative on who may write which subject (canWriteSubject /
+      // unassignedPairs). A "not assigned to teach" rejection here means the cached
+      // assignment list that made this subject show as "assigned to you" in the picker
+      // above is wrong or stale — refetch it so the picker stops offering a subject the
+      // server has just proven cannot be saved. Raised directly: a subject appeared as
+      // assigned yet every save of it was rejected.
+      if (err?.message?.includes('not assigned to teach')) {
+        qc.invalidateQueries({ queryKey: ['teaching-assignments', 'mine'] });
+      }
+    },
   });
 
   const status = entryStatus(selectedEntry);
