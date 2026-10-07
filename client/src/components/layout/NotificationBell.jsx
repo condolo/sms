@@ -16,6 +16,7 @@
    opinion on routing.
    ============================================================ */
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Bell } from 'lucide-react';
 import clsx from 'clsx';
 import { messages as messagesApi } from '@/api/client.js';
@@ -50,6 +51,23 @@ export default function NotificationBell({ myUserId, onSelect }) {
     return () => clearInterval(t);
   }, [refreshCount]);
 
+  // Marking read happens on a different page (MessagesPage.jsx) or through
+  // this bell's own rows — either way, re-sync immediately rather than
+  // waiting out the rest of the poll interval.
+  useEffect(() => {
+    window.addEventListener('messages:read', refreshCount);
+    return () => window.removeEventListener('messages:read', refreshCount);
+  }, [refreshCount]);
+
+  // "View all" sends the viewer off to read messages elsewhere (the full
+  // Messages page, or this portal's own inline section) — re-sync the real
+  // count every time a route change lands back on a page this bell renders
+  // on, since this component stays mounted across in-app navigation (no
+  // remount to trigger the mount effect above again). Catches both "came
+  // back after reading everything" and "a new message arrived while away".
+  const location = useLocation();
+  useEffect(() => { refreshCount(); }, [location.pathname, refreshCount]);
+
   useEffect(() => {
     function handler(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
     document.addEventListener('mousedown', handler);
@@ -60,6 +78,7 @@ export default function NotificationBell({ myUserId, onSelect }) {
     const next = !open;
     setOpen(next);
     if (next) {
+      refreshCount();
       setLoadingList(true);
       messagesApi.list({ tab: 'inbox', limit: 8 })
         .then(r => setItems(r?.data ?? []))

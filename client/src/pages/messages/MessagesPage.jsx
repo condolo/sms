@@ -387,6 +387,11 @@ export default function MessagesPage() {
           ),
         };
       });
+      // NotificationBell (TopBar) has its own separate unread count, polled
+      // on an interval — without this it kept showing the pre-read count
+      // until the next poll or a route change, even though this page had
+      // just marked everything read.
+      window.dispatchEvent(new CustomEvent('messages:read'));
     },
   });
 
@@ -394,6 +399,7 @@ export default function MessagesPage() {
     const unread = msgs.filter(m => !m.isRead?.[userId]);
     await Promise.allSettled(unread.map(m => msgsApi.markRead(m.id ?? m._id)));
     qc.invalidateQueries({ queryKey: ['messages', 'inbox'] });
+    window.dispatchEvent(new CustomEvent('messages:read'));
   }
 
   const deleteMsg = useMutation({
