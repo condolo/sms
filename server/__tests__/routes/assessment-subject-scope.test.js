@@ -122,6 +122,30 @@ describe('POST /api/assessment/marks — subject-teacher scoping', () => {
     const res = await supertest(buildApp()).post('/api/assessment/marks').send(VALID_MARK);
     expect(res.status).toBe(201);
   });
+
+  // The admin/deputy-only gate on MT/ET entry was removed: it keyed off
+  // markConfig.teacherExamEntry, a flag no route or UI ever wrote, so it
+  // blocked every plain teacher unconditionally. A subject teacher who is
+  // actually assigned now enters MT/ET marks the same way as CA/HW — the
+  // subject-assignment check above is the only gate that applies.
+  test('a plain teacher, assigned to the subject/class, can now enter MT marks', async () => {
+    mockAssignmentDocs = [{ classId: 'cls_001', subjectId: 'subj_math' }];
+    const res = await supertest(buildApp()).post('/api/assessment/marks').send({ ...VALID_MARK, assessmentType: 'MT' });
+    expect(res.status).toBe(201);
+  });
+
+  test('a plain teacher, assigned to the subject/class, can now enter ET marks', async () => {
+    mockAssignmentDocs = [{ classId: 'cls_001', subjectId: 'subj_math' }];
+    const res = await supertest(buildApp()).post('/api/assessment/marks').send({ ...VALID_MARK, assessmentType: 'ET' });
+    expect(res.status).toBe(201);
+  });
+
+  test('an MT mark for a subject/class the teacher is NOT assigned to is still refused — the subject check still applies', async () => {
+    mockAssignmentDocs = [];
+    const res = await supertest(buildApp()).post('/api/assessment/marks').send({ ...VALID_MARK, assessmentType: 'MT' });
+    expect(res.status).toBe(403);
+    expect(mockMarksFindOne).not.toHaveBeenCalled();
+  });
 });
 
 describe('POST /api/assessment/marks/bulk — subject-teacher scoping', () => {
@@ -145,6 +169,16 @@ describe('POST /api/assessment/marks/bulk — subject-teacher scoping', () => {
         { ...VALID_MARK, subjectId: 'subj_math', studentId: 'stu_001' },
         { ...VALID_MARK, subjectId: 'subj_math', studentId: 'stu_002' }, // same pair, dedup'd to one check
       ],
+    });
+    expect(res.status).toBe(200);
+    expect(mockBulkWrite).toHaveBeenCalledTimes(1);
+  });
+
+  // Same gate removal as the single-mark route above, verified for bulk entry.
+  test('a plain teacher, assigned to the subject/class, can now bulk-enter MT marks', async () => {
+    mockAssignmentDocs = [{ classId: 'cls_001', subjectId: 'subj_math' }];
+    const res = await supertest(buildApp()).post('/api/assessment/marks/bulk').send({
+      marks: [{ ...VALID_MARK, subjectId: 'subj_math', assessmentType: 'MT' }],
     });
     expect(res.status).toBe(200);
     expect(mockBulkWrite).toHaveBeenCalledTimes(1);

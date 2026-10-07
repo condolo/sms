@@ -995,16 +995,13 @@ router.post('/marks', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), a
       return _err(res, `Invalid assessment type "${d.assessmentType}". Configured types: ${[...validMarkKeys].join(', ')}`);
     }
 
-    // Enforce that only admin/superadmin can add MT and ET
-    // (teachers add CA and HW by default; MT/ET require elevated permission)
-    const role = req.jwtUser.role;
-    const canAddExams = ['admin', 'superadmin', 'deputy_principal'].includes(role);
-    if (['MT', 'ET'].includes(d.assessmentType) && !canAddExams) {
-      const teacherCanEnterExams = markConfig.teacherExamEntry === true;
-      if (!teacherCanEnterExams) {
-        return _err(res, 'MT and ET marks can only be entered by admin or deputy. Contact your admin to enable teacher exam entry.', 403);
-      }
-    }
+    // MT and ET marks are entered the same way CA and HW are: by the subject teacher this
+    // route already checked above (canWriteSubject / isElective). There used to be a second,
+    // admin/deputy-only gate here for MT and ET specifically, behind a markConfig.teacherExamEntry
+    // toggle — but that toggle was never written anywhere (no route, no Settings screen), so it
+    // could never be true, and the gate blocked every teacher, for every school, unconditionally.
+    // The Markbook owns marks for every assessment type alike; moderation (mark_submissions), not
+    // an entry-time role check, is the intended safeguard for exam-type marks.
 
     // Guard: reject if the relevant schedule entry is locked by admin, if
     // this specific mark is already locked (post-approval), or if its
@@ -1169,15 +1166,9 @@ router.post('/marks/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
       return _err(res, `Invalid assessment type "${invalidMark.assessmentType}". Configured types: ${[...validBulkKeys].join(', ')}`);
     }
 
-    // Enforce that only admin/deputy_principal can bulk-enter MT and ET
-    const role = req.jwtUser.role;
-    const canAddExams = ['admin', 'superadmin', 'deputy_principal'].includes(role);
-    const hasExamTypes = marks.some(d => ['MT', 'ET'].includes(d.assessmentType));
-    if (hasExamTypes && !canAddExams) {
-      if (!bulkConfig.teacherExamEntry) {
-        return _err(res, 'MT and ET marks can only be entered by admin or deputy. Contact your admin to enable teacher exam entry.', 403);
-      }
-    }
+    // MT and ET marks are entered the same way CA and HW are: by the subject teacher
+    // (unassignedPairs / electiveMarkProblem, checked above). See the single-mark route's
+    // own comment for why the former admin/deputy-only gate here was removed.
 
     // Guard: reject if the relevant schedule entry is locked by admin
     const schedOr = [...new Set(marks.map(d => `${d.assessmentType}__${d.termNumber}`))].map(k => {
