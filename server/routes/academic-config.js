@@ -810,6 +810,12 @@ const SCHOOL_PROFILE_FIELDS = [
   'logoUrl', 'website', 'timezone', 'currency', 'adminName', 'adminEmail',
   'primaryColor', 'accentColor',
   'principalSignatureUrl', 'schoolStampUrl',   // used on report card PDFs
+  // Reported directly: "system should be aware who is the school
+  // principal" — report-cards.js previously had no school-level source
+  // for this at all, only a per-report manually-typed field (Comments
+  // tab), which had to be retyped for every student every term. This is
+  // the default; a per-report override still wins when one is typed.
+  'principalName',
 ];
 
 /* GET /api/academic-config/school-profile */

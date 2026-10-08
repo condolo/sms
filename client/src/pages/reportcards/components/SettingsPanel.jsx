@@ -309,6 +309,8 @@ function SignatureBrandingSection() {
   const [toast, setToast] = useState(null);
   const [sigUploading, setSigUploading] = useState(false);
   const [stampUploading, setStampUploading] = useState(false);
+  const [nameDraft, setNameDraft] = useState(null); // null = not yet edited this session
+  const [savingName, setSavingName] = useState(false);
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['academic-config', 'school-profile'],
@@ -316,6 +318,20 @@ function SignatureBrandingSection() {
     staleTime: 60_000,
   });
   const profile = data?.data ?? {};
+
+  async function saveName() {
+    setSavingName(true);
+    try {
+      await academicConfigApi.schoolProfile.update({ principalName: nameDraft?.trim() || null });
+      qc.invalidateQueries({ queryKey: ['academic-config', 'school-profile'] });
+      setNameDraft(null);
+      setToast({ msg: 'Saved.', type: 'success' });
+    } catch (err) {
+      setToast({ msg: err?.message ?? 'Failed to save.', type: 'error' });
+    } finally {
+      setSavingName(false);
+    }
+  }
 
   async function handleUpload(field, setUploading, b64) {
     setUploading(true);
@@ -351,6 +367,32 @@ function SignatureBrandingSection() {
           {toast && <Toast msg={toast.msg} type={toast.type} onDismiss={() => setToast(null)} />}
         </AnimatePresence>
       </div>
+      <div>
+        <h3 className="text-sm font-semibold text-slate-800">Principal's Name</h3>
+        <p className="text-xs text-slate-400 mt-0.5">
+          Reported directly: the system should already know who the principal is, rather than retyping it on every
+          student's report every term. This is the school-wide default; a name typed for one specific report (Comments
+          tab) still overrides it just for that report.
+        </p>
+        <div className="flex gap-2 mt-2">
+          <input
+            type="text" maxLength={150}
+            value={nameDraft ?? profile.principalName ?? ''}
+            onChange={e => setNameDraft(e.target.value)}
+            placeholder="e.g. Dr. Jane Mwangi"
+            className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400/30"
+          />
+          <button
+            onClick={saveName}
+            disabled={savingName || nameDraft === null}
+            className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
+          >
+            {savingName ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+            Save
+          </button>
+        </div>
+      </div>
+
       <div>
         <h3 className="text-sm font-semibold text-slate-800">Sign-off images</h3>
         <p className="text-xs text-slate-400 mt-0.5">Drawn onto every generated report card PDF, next to the labels above. Small images work best — a signature is a line drawing, not a photo.</p>

@@ -180,6 +180,31 @@ function _hashSnapshot(snap) {
   return crypto.createHash('sha256').update(payload).digest('hex');
 }
 
+/* ── School-timezone-aware timestamp for the report footer's "Generated:"
+   line. Reported directly: "is there somewhere in the system to
+   configure the time zones... it should be configured in the system" —
+   a school-level `timezone` field (IANA zone, e.g. "Africa/Nairobi")
+   already exists (schools.timezone, editable in Settings → School
+   Profile — SCHOOL_PROFILE_FIELDS in academic-config.js), the gap was
+   narrower than "no setting exists at all": nothing on a report card
+   ever actually READ it. The footer always printed raw server UTC
+   (`new Date().toUTCString()`) regardless. Falls back to UTC — same as
+   before this fix — when a school has no timezone set, or has an
+   invalid one saved (Intl throws on an unrecognised IANA zone string;
+   never let a bad save 500 the whole report). ── */
+function _formatInSchoolTz(date, timezone) {
+  try {
+    return new Intl.DateTimeFormat('en-GB', {
+      timeZone: timezone || 'UTC',
+      weekday: 'short', day: '2-digit', month: 'short', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+      timeZoneName: 'short',
+    }).format(date);
+  } catch (_) {
+    return date.toUTCString();
+  }
+}
+
 /* ── CA config loader (assessment_config + grade_boundaries) ── */
 /**
  * Load the school's assessment-type configuration and grading scale.
@@ -702,11 +727,13 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
     // ── Step 6c: Load school signature/stamp URLs for snapshotting ────────
     let principalSignatureUrl = null;
     let schoolStampUrl        = null;
+    let schoolPrincipalName   = null;
     let houseNameById         = {};
     try {
-      const schoolDoc = await _model('schools').findOne({ id: schoolId }).select('principalSignatureUrl schoolStampUrl houses').lean();
+      const schoolDoc = await _model('schools').findOne({ id: schoolId }).select('principalSignatureUrl schoolStampUrl principalName houses').lean();
       principalSignatureUrl = schoolDoc?.principalSignatureUrl || null;
       schoolStampUrl        = schoolDoc?.schoolStampUrl        || null;
+      schoolPrincipalName   = schoolDoc?.principalName         || null;
       // RCE1 — house names for the cover page; houses are a freeform
       // array on the school doc (no dedicated collection), keyed by
       // `id` when present else `name` itself (matches how the Settings
@@ -810,6 +837,12 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
           // Snapshot school signature/stamp URLs at publish time (stays valid even if URLs change later)
           principalSignatureUrl,
           schoolStampUrl,
+          // Same freezing logic, same reason — a report shouldn't
+          // retroactively show a different principal's name if the
+          // school updates this setting after the report was published.
+          // _computeReportSections' own fallback chain still lets a
+          // per-report manually-typed name (Comments tab) override this.
+          schoolPrincipalName,
 
           attendanceSummary: null,
           financialBlock:    blockedStudentIds.has(r.studentId),
@@ -1146,7 +1179,7 @@ router.get('/bulk-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), s
     // Resolved AFTER the zero-match 404 check above — no point paying
     // for 3 extra queries on a request that's about to 404 anyway.
     const [bulkSchool, bulkCaConfig, bulkAssignments] = await Promise.all([
-      _model('schools').findOne({ id: schoolId }, { logoUrl: 1, tagline: 1, address: 1, phone: 1, email: 1, website: 1, principalSignatureUrl: 1, schoolStampUrl: 1 }).lean().catch(() => null),
+      _model('schools').findOne({ id: schoolId }, { logoUrl: 1, tagline: 1, address: 1, phone: 1, email: 1, website: 1, principalSignatureUrl: 1, schoolStampUrl: 1, principalName: 1, timezone: 1 }).lean().catch(() => null),
       _getAssessmentConfig(schoolId, req.query.academicYearId || null),
       tenantModel('teaching_assignments', tenantContext(req))
         .find({ schoolId, classId: req.query.classId }).select('subjectId teacherName').lean().catch(() => []),
@@ -1471,7 +1504,7 @@ async function _loadRenderExtras(req, schoolId, snap) {
     // predates this field being frozen at publish time (every snapshot
     // going forward carries its own, see POST /publish's "Load school
     // signature/stamp URLs for snapshotting" step).
-    _model('schools').findOne({ id: schoolId }, { logoUrl: 1, tagline: 1, address: 1, phone: 1, email: 1, website: 1, principalSignatureUrl: 1, schoolStampUrl: 1 }).lean().catch(() => null),
+    _model('schools').findOne({ id: schoolId }, { logoUrl: 1, tagline: 1, address: 1, phone: 1, email: 1, website: 1, principalSignatureUrl: 1, schoolStampUrl: 1, principalName: 1, timezone: 1 }).lean().catch(() => null),
     behaviourSummary(schoolId, snap.studentId).catch(() => null),
     snap.termNumber > 1
       ? tenantModel('report_card_snapshots', tenantContext(req)).findOne({
@@ -1547,6 +1580,18 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
     subjectNames = {},
   } = extra;
   const isDraft = snap.status !== 'published' || snap.superseded;
+
+  // Reported directly: "system should be aware who is the school
+  // principal" — previously only the manually-typed per-report field
+  // (Comments tab) ever populated this, requiring it to be retyped for
+  // every student, every term. A per-report override still wins when
+  // one is typed; otherwise falls to the school-wide default, frozen at
+  // publish time for a real snapshot (snap.schoolPrincipalName — same
+  // "stays valid even if the setting changes later" posture as
+  // principalSignatureUrl/schoolStampUrl), or resolved live from the
+  // school doc for an unpublished draft preview (extra.school), which
+  // has no snapshot of its own yet.
+  const resolvedPrincipalName = snap.comments?.principalName || snap.schoolPrincipalName || school?.principalName || '';
 
   const weights     = snap.assessmentWeights || [];
   const typeEntries = weights.map(w => ({
@@ -1649,7 +1694,7 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
       closingDate:     snap.comments?.closingDate   || '',
       nextTermBegin:   snap.comments?.nextTermBegin || '',
       classTeacherName: snap.comments?.classTeacherName || '',
-      principalName:    snap.comments?.principalName    || '',
+      principalName:    resolvedPrincipalName,
       // RC7 — a disabled capability produces zero trace in the output
       // (Functional Architecture §11): no rows built at all, and the HTML
       // adapter uses this same flag to skip the section header/table too,
@@ -1698,7 +1743,7 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
     },
     footer: {
       footerNote: config.footerNote || 'This report card is computer-generated.',
-      genLine:    `Generated: ${new Date().toUTCString()}  |  v${snap.version || 1}  |  Batch: ${snap.batchId || '—'}`,
+      genLine:    `Generated: ${_formatInSchoolTz(new Date(), school?.timezone)}  |  v${snap.version || 1}  |  Batch: ${snap.batchId || '—'}`,
       reportId:   snap.reportId || null,
     },
     // ── RC3-only sections below — read only by _computeReportHTML,
@@ -1739,7 +1784,7 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
       schoolEmail:      school?.email   || '',
       schoolWebsite:    school?.website || '',
       classTeacherName: snap.comments?.classTeacherName || '',
-      principalName:    snap.comments?.principalName    || '',
+      principalName:    resolvedPrincipalName,
       studentPhotoUrl:  snap.studentPhotoUrl || null,
     },
     gradingKey: gradeBands.map((b, i) => ({
@@ -2125,8 +2170,14 @@ router.post('/preview-html', authMiddleware, PLAN, MODGATE, rbac('grades', 'read
     // so without this live lookup, a draft preview could never show the
     // sign-off images even though a published copy of the same report
     // (which snapshots them at publish time) would.
-    const signOffDoc = await _model('schools').findOne({ id: schoolId }, { principalSignatureUrl: 1, schoolStampUrl: 1 }).lean().catch(() => null);
-    const schoolWithSignOff = { ...school, principalSignatureUrl: signOffDoc?.principalSignatureUrl || null, schoolStampUrl: signOffDoc?.schoolStampUrl || null };
+    const signOffDoc = await _model('schools').findOne({ id: schoolId }, { principalSignatureUrl: 1, schoolStampUrl: 1, principalName: 1, timezone: 1 }).lean().catch(() => null);
+    const schoolWithSignOff = {
+      ...school,
+      principalSignatureUrl: signOffDoc?.principalSignatureUrl || null,
+      schoolStampUrl:        signOffDoc?.schoolStampUrl        || null,
+      principalName:         signOffDoc?.principalName         || null,
+      timezone:              signOffDoc?.timezone              || null,
+    };
 
     // Same reasoning as the config fix above — subjectTeacherCommentsEnabled
     // lives in assessment_config, not academic_config, so it needs its own
