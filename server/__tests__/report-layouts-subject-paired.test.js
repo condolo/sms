@@ -27,6 +27,9 @@ function makeSpyDoc() {
   const methods = [
     'addPage', 'rect', 'roundedRect', 'circle', 'fill', 'stroke', 'fillColor', 'fontSize',
     'font', 'text', 'image', 'save', 'translate', 'rotate', 'fillOpacity', 'restore', 'moveTo', 'lineTo',
+    // RCE8 — registerFont (premium embedded type system) and lineWidth
+    // (hairline rules in the new cover/sign-off/observation components).
+    'registerFont', 'lineWidth',
   ];
   for (const m of methods) {
     spy[m] = (...args) => { calls.push({ method: m, args }); return spy; };
@@ -40,6 +43,10 @@ function makeSpyDoc() {
     const lines = Math.max(1, Math.ceil(String(text ?? '').length / charsPerLine));
     return lines * 12;
   };
+  // RCE8 — _drawObservationRatingsPdf sizes each rating pill from the
+  // real label width; a rough chars * avg-glyph-width estimate is enough
+  // for a structural test (no test asserts an exact pixel width).
+  spy.widthOfString = (text) => String(text ?? '').length * 6;
   return { spy, calls };
 }
 
@@ -75,22 +82,22 @@ function computeSections(snapOverrides = {}, config = {}, extra = {}) {
 }
 
 describe('subject_paired.renderPdf — structure', () => {
-  test('draws a cover page then addPage()s into a separate academic page', () => {
+  // RCE8 — the cover no longer forces its own page (reviewer: "Do not
+  // reserve a full page for learner identity unless the content
+  // actually requires it"); with only 2 subjects, everything in this
+  // fixture fits on page 1, so isFirstPage=true now adds zero pages.
+  test('does not force a separate cover page when the content fits on page 1', () => {
     const { spy, calls } = makeSpyDoc();
     const sections = computeSections();
     LAYOUTS.subject_paired.renderPdf(spy, sections, {}, true);
-    const addPageCalls = calls.filter(c => c.method === 'addPage');
-    // isFirstPage=true means no leading addPage for the outer per-student
-    // break, but the cover->academic transition inside this layout must
-    // always addPage() exactly once.
-    expect(addPageCalls.length).toBe(1);
+    expect(calls.filter(c => c.method === 'addPage').length).toBe(0);
   });
 
-  test('isFirstPage=false adds one extra leading page (outer per-student break) plus the internal cover->academic break', () => {
+  test('isFirstPage=false still adds exactly the one leading page (outer per-student break)', () => {
     const { spy, calls } = makeSpyDoc();
     const sections = computeSections();
     LAYOUTS.subject_paired.renderPdf(spy, sections, {}, false);
-    expect(calls.filter(c => c.method === 'addPage').length).toBe(2);
+    expect(calls.filter(c => c.method === 'addPage').length).toBe(1);
   });
 
   test('does not throw when nothing optional is configured (no photo, no behaviour, no attendance)', () => {
@@ -231,20 +238,20 @@ describe('subject_paired.renderPdf — RCE3b dynamic box sizing', () => {
     const { spy: spy2, calls: calls2 } = makeSpyDoc();
     LAYOUTS.subject_paired.renderPdf(spy2, long, {}, true);
 
-    // Everything before the (single, isFirstPage=true) addPage() call is
-    // the cover page — skip it. On the academic page, rect #0 is math's
-    // marks row (fixed 18px), rect #1 is math's comment box.
-    function academicRects(calls) {
-      const addPageIdx = calls.findIndex(c => c.method === 'addPage');
-      return calls.slice(addPageIdx + 1).filter(c => c.method === 'rect');
+    // RCE8 — the cover no longer forces its own page, so cover and
+    // academic rects now share page 1 with no addPage boundary to skip
+    // past. Marks rows are the only rects fixed at exactly 18px high
+    // (the cover's own rects — photo border/placeholder — are taller);
+    // math's comment box is the very next rect drawn after its marks row.
+    function markRowAndCommentBox(calls) {
+      const heights = calls.filter(c => c.method === 'rect').map(c => c.args[3]);
+      const markRowIdx = heights.findIndex(h => h === 18);
+      return { markRow: heights[markRowIdx], commentBox: heights[markRowIdx + 1] };
     }
-    const rects1 = academicRects(calls1);
-    const rects2 = academicRects(calls2);
-    // rect #0 is the page header band (fixed 40px); #1 is the RCE3c
-    // column-header band (fixed 16px); #2 is math's marks row (fixed
-    // 18px); #3 is math's comment box — the one that should differ.
-    expect(rects1[2].args[3]).toBe(18); // sanity: this really is the marks row
-    expect(rects2[3].args[3]).toBeGreaterThan(rects1[3].args[3]);
+    const r1 = markRowAndCommentBox(calls1);
+    const r2 = markRowAndCommentBox(calls2);
+    expect(r1.markRow).toBe(18); // sanity: this really is a marks row
+    expect(r2.commentBox).toBeGreaterThan(r1.commentBox);
   });
 
   test('the class-teacher remark box grows to fit a long remark instead of a fixed 28px height', () => {
@@ -257,14 +264,14 @@ describe('subject_paired.renderPdf — RCE3b dynamic box sizing', () => {
     });
     const { spy, calls } = makeSpyDoc();
     LAYOUTS.subject_paired.renderPdf(spy, sections, {}, true);
-    // Skip the cover page (its photo placeholder is >100px tall, which
-    // would trivially satisfy a loose ">28" check on the whole document).
-    const addPageIdx = calls.findIndex(c => c.method === 'addPage');
-    const academicRectHeights = calls.slice(addPageIdx + 1).filter(c => c.method === 'rect').map(c => c.args[3]);
-    // Fixed heights already present on this page: 18 (marks rows), 32
-    // (summary bar) — a genuinely measured long-remark box must clear
-    // both by a real margin, not just "bigger than a small constant".
-    expect(academicRectHeights.some(h => h > 40)).toBe(true);
+    // RCE8 — the class-teacher's remark now renders as a _drawSignOffPdf
+    // atomic block: an outer roundedRect sized banner+measured-text+
+    // signature-row, not a fixed 28px box. The overall-performance anchor
+    // also uses a fixed-height (70px) roundedRect — a long remark's
+    // sign-off block must clear that by a real margin too, not just
+    // "bigger than a small constant".
+    const roundedRectHeights = calls.filter(c => c.method === 'roundedRect').map(c => c.args[3]);
+    expect(roundedRectHeights.some(h => h > 90)).toBe(true);
   });
 });
 

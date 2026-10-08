@@ -6,6 +6,22 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.170.0] — 2026-10-08 — feat(reports): premium institutional redesign of the native report-card PDF (RCE8)
+
+The native PDFKit renderer for `subject_paired` ("Template A") and `marks_then_comments` ("Template B") is redesigned end to end, following a multi-round design review against standalone HTML prototypes. The HTML preview path (`/preview-html`) is unchanged — this release is the native-PDF path, the one every download/bulk-export route actually produces.
+
+- **Real embedded typography.** Lora (serif, headings/grades), Work Sans (body/labels), IBM Plex Mono (marks/data) — OFL-licensed TTFs under `server/assets/fonts/` (see `OFL.txt` there), registered once per `PDFDocument` via `_registerReportFonts`. legacy_tabular is untouched (frozen, Helvetica, as documented in report-layouts.js's own header).
+- **The cover no longer reserves a full page.** It's now a compact masthead (logo-or-letter-avatar + school identity) and learner-identity block at the top of page 1; the results table/subject rows begin directly beneath it whenever there's room, instead of always forcing a second page.
+- **A real school logo renders when configured** (`school.logoUrl`, fetched into `images.schoolLogo` the same way `principalSignature`/`schoolStamp` already were) — falls back to the existing letter-avatar when unset, same fallback the HTML renderer already had.
+- **Overall Performance is now a single dominant anchor** (large value + the actual grading-schema grade, both drawn from real summary data — `summary.meanGrade`/`meanGradeLabel` now expose the `resolveGrade()` lookup the cover's "Mean Mark" row already computed, not a new calculation) with the grading scale as a subordinate strip beneath it. The pair is measured and paginated as one atomic block — it can no longer be split across a page boundary.
+- **Class Teacher Observations** render as a plain list with the selected rating as a filled pill, or "Not yet rated" in muted italic — replacing the old 3-column Excellent/Good/Improve checkbox table, whose empty boxes read as an incomplete paper form whenever nothing had been rated yet.
+- **The Class Teacher's General Comment and the Principal's Comment** each render as their own atomic sign-off block (banner, remark, signature image/line, name, role, date) via a new shared `_drawSignOffPdf`, replacing the old generic two-paragraph "REMARKS" boxes plus a separate blank-signature-line footer block.
+- **A continuation page no longer repeats the wrong header.** Pages added mid-results-table still repeat the CA/HW/MT/ET column strip; pages added anywhere after it (Overall Performance onward) get a plain one-line student/class/term repeat instead of a nonsensical marks-column header with no table under it.
+- **Fixed a latent "trailing near-blank page" bug** in both renderers: the footer was drawn exactly at the bottom margin line (`doc.page.height - 40`), which PDFKit treats as overflowing it and silently adds a whole extra page just to fit — moved to `-56`, matching legacy_tabular's own already-safe offset.
+- Dynamic assessment-type columns (CA/HW/MT/ET — whatever the school actually configured, never a hard-coded label) were already correct in both renderers; unchanged.
+- Verified by rendering real PDFs through the actual `renderPdf` functions (not only the mocked Jest doc) for both layouts, at both a 5-subject and a 12-subject/missing-assessment/missing-comment/long-comment stress case, and visually inspecting every page.
+- **Known follow-ups, intentionally out of scope here:** the HTML preview path still uses its earlier (already-upgraded-once) visual language, not this palette/type system; the bulk class-export route (`GET /api/report-cards/bulk-pdf`) wastes one blank page per student (its own `pdfDoc.addPage()` plus the renderer's `isFirstPage=false` leading `addPage()` both fire for every student) — pre-existing, not introduced here, not fixed in this pass.
+
 ## [v5.169.3] — 2026-10-05 — feat(finance): bulk enrolment in extra-curricular activities
 
 - **Enrol several students at once** (Finance → Extra-Curricular): pick a class, tick students across the search, choose one activity and the dates, and save. Each student gets their own enrolment. Students already enrolled in that activity are skipped and reported.

@@ -26,6 +26,9 @@ function makeSpyDoc() {
   const methods = [
     'addPage', 'rect', 'roundedRect', 'circle', 'fill', 'stroke', 'fillColor', 'fontSize',
     'font', 'text', 'image', 'save', 'translate', 'rotate', 'fillOpacity', 'restore', 'moveTo', 'lineTo',
+    // RCE8 — registerFont (premium embedded type system) and lineWidth
+    // (hairline rules in the new cover/sign-off/observation components).
+    'registerFont', 'lineWidth',
   ];
   for (const m of methods) {
     spy[m] = (...args) => { calls.push({ method: m, args }); return spy; };
@@ -36,6 +39,10 @@ function makeSpyDoc() {
     const lines = Math.max(1, Math.ceil(String(text ?? '').length / charsPerLine));
     return lines * 12;
   };
+  // RCE8 — _drawObservationRatingsPdf sizes each rating pill from the
+  // real label width; a rough chars * avg-glyph-width estimate is enough
+  // for a structural test (no test asserts an exact pixel width).
+  spy.widthOfString = (text) => String(text ?? '').length * 6;
   return { spy, calls };
 }
 
@@ -71,16 +78,20 @@ function computeSections(snapOverrides = {}, config = {}, extra = {}) {
 }
 
 describe('marks_then_comments.renderPdf — structure', () => {
-  test('draws cover -> marks page -> comments page: two addPage()s when isFirstPage=true', () => {
+  // RCE8 — the cover no longer forces its own page (same fix as
+  // subject_paired): the results table now starts right under it on
+  // page 1. Only the intentional, approved marks-page -> comments-page
+  // break remains, so isFirstPage=true now adds exactly one page.
+  test('cover + marks share page 1; one addPage() into the comments page when isFirstPage=true', () => {
     const { spy, calls } = makeSpyDoc();
     LAYOUTS.marks_then_comments.renderPdf(spy, computeSections(), {}, true);
-    expect(calls.filter(c => c.method === 'addPage').length).toBe(2);
+    expect(calls.filter(c => c.method === 'addPage').length).toBe(1);
   });
 
-  test('isFirstPage=false adds one extra leading page (outer per-student break)', () => {
+  test('isFirstPage=false adds one extra leading page (outer per-student break) plus the marks -> comments break', () => {
     const { spy, calls } = makeSpyDoc();
     LAYOUTS.marks_then_comments.renderPdf(spy, computeSections(), {}, false);
-    expect(calls.filter(c => c.method === 'addPage').length).toBe(3);
+    expect(calls.filter(c => c.method === 'addPage').length).toBe(2);
   });
 
   test('does not throw when nothing optional is configured', () => {
@@ -88,13 +99,15 @@ describe('marks_then_comments.renderPdf — structure', () => {
     expect(() => LAYOUTS.marks_then_comments.renderPdf(spy, computeSections(), {}, true)).not.toThrow();
   });
 
-  test('no per-subject comment text appears on the marks page — only after the second addPage (the defining difference from subject_paired)', () => {
+  test('no per-subject comment text appears on the cover+marks page — only after the (now single) addPage (the defining difference from subject_paired)', () => {
     const { spy, calls } = makeSpyDoc();
     LAYOUTS.marks_then_comments.renderPdf(spy, computeSections(), {}, true);
-    const addPageIdxs = calls.reduce((acc, c, i) => { if (c.method === 'addPage') acc.push(i); return acc; }, []);
-    const marksPageCalls = calls.slice(addPageIdxs[0] + 1, addPageIdxs[1]);
+    // RCE8 — cover and marks now share page 1 with no addPage between
+    // them, so the one remaining addPage is the marks -> comments break.
+    const addPageIdx = calls.findIndex(c => c.method === 'addPage');
+    const marksPageCalls = calls.slice(0, addPageIdx);
     expect(marksPageCalls.some(c => c.method === 'text' && String(c.args[0]).includes('Strong grasp of algebra'))).toBe(false);
-    const commentsPageCalls = calls.slice(addPageIdxs[1] + 1);
+    const commentsPageCalls = calls.slice(addPageIdx + 1);
     expect(commentsPageCalls.some(c => c.method === 'text' && String(c.args[0]).includes('Strong grasp of algebra'))).toBe(true);
   });
 
@@ -227,9 +240,12 @@ describe('marks_then_comments.renderPdf — dynamic comment box sizing', () => {
       english: 'OK.',
     } } });
 
+    // RCE8 — cover and marks now share page 1 with no addPage between
+    // them, so the one remaining addPage (index 0) is the marks ->
+    // comments break.
     function commentsPageRectHeights(calls) {
-      const addPageIdxs = calls.reduce((acc, c, i) => { if (c.method === 'addPage') acc.push(i); return acc; }, []);
-      return calls.slice(addPageIdxs[1] + 1).filter(c => c.method === 'rect').map(c => c.args[3]);
+      const addPageIdx = calls.findIndex(c => c.method === 'addPage');
+      return calls.slice(addPageIdx + 1).filter(c => c.method === 'rect').map(c => c.args[3]);
     }
     const { spy: spy1, calls: calls1 } = makeSpyDoc();
     LAYOUTS.marks_then_comments.renderPdf(spy1, short, {}, true);

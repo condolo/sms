@@ -23,6 +23,44 @@
    ============================================================ */
 'use strict';
 
+const path = require('path');
+
+/* ── RCE8 — premium institutional redesign: shared type system ──────
+   Real embedded fonts (Lora/Work Sans/IBM Plex Mono, OFL-licensed TTFs
+   under server/assets/fonts — see OFL.txt there), registered once per
+   PDFDocument. subject_paired and marks_then_comments both draw through
+   these names/colors so the two layouts share one visual system and
+   can't drift apart on it, per the approved design spec. legacy_tabular
+   is explicitly excluded (frozen, byte-for-byte, per this file's header
+   comment) and keeps drawing with the plain Helvetica/blue palette it
+   always has. */
+const FONT_DIR = path.join(__dirname, '..', 'assets', 'fonts');
+const FONTS = {
+  serifRegular: 'RC-Serif-Regular', serifSemibold: 'RC-Serif-SemiBold', serifBold: 'RC-Serif-Bold',
+  sansRegular: 'RC-Sans-Regular', sansItalic: 'RC-Sans-Italic', sansMedium: 'RC-Sans-Medium',
+  sansSemibold: 'RC-Sans-SemiBold', sansBold: 'RC-Sans-Bold',
+  monoRegular: 'RC-Mono-Regular', monoMedium: 'RC-Mono-Medium',
+};
+const FONT_FILES = {
+  [FONTS.serifRegular]: 'Lora-Regular.ttf', [FONTS.serifSemibold]: 'Lora-SemiBold.ttf', [FONTS.serifBold]: 'Lora-Bold.ttf',
+  [FONTS.sansRegular]: 'WorkSans-Regular.ttf', [FONTS.sansItalic]: 'WorkSans-Italic.ttf', [FONTS.sansMedium]: 'WorkSans-Medium.ttf',
+  [FONTS.sansSemibold]: 'WorkSans-SemiBold.ttf', [FONTS.sansBold]: 'WorkSans-Bold.ttf',
+  [FONTS.monoRegular]: 'IBMPlexMono-Regular.ttf', [FONTS.monoMedium]: 'IBMPlexMono-Medium.ttf',
+};
+// Idempotent per doc — registerFont is cheap, but a flag avoids redoing
+// it on every helper call. Guarded for test doubles that don't stub
+// registerFont (a spy doc only needs the drawing methods it asserts on).
+function _registerReportFonts(doc) {
+  if (typeof doc.registerFont !== 'function' || doc._rcFontsRegistered) return;
+  Object.entries(FONT_FILES).forEach(([name, file]) => doc.registerFont(name, path.join(FONT_DIR, file)));
+  doc._rcFontsRegistered = true;
+}
+
+const INK = '#15171c', INK_SOFT = '#5b5f68', INK_FAINT = '#9195a0';
+const SURFACE = '#f4f3f0', RULE = '#d8d6d0', RULE_SOFT = '#e8e6e1';
+const BRAND = '#1f2d3d', BRAND_WASH = '#eef1f4', ACCENT = '#8a5a2b';
+const FAIL_RED = '#b3261e', PASS_GREEN = '#2e7d32';
+
 function _esc(str) {
   return String(str ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
@@ -660,86 +698,104 @@ function _renderCoverHtml(s) {
 </div>`;
 }
 
+// RCE8 — compact header + learner identity, no longer a full centered
+// page of its own (reviewer: "Do not reserve a full page for learner
+// identity unless the content actually requires it... allowed to begin
+// on page 1 after the learner identity section"). Draws at the top of
+// whatever page is current and returns the Y it finished at, so the
+// caller can continue the results table immediately below it on the
+// same page instead of forcing addPage(). A real school logo renders
+// as an <img> when images.schoolLogo was fetched (school.logoUrl set);
+// otherwise the same letter-avatar fallback the HTML renderer already
+// used, now drawn in the brand palette instead of a generic grey circle.
 function _drawCoverPdf(doc, s, images) {
+  _registerReportFonts(doc);
   const cover = s.cover;
-  const PAGE_WIDTH  = doc.page.width;
-  const DARK = '#1a1a2e', GRAY = '#555555', BORDER = '#d1d5db';
-  const centerX = PAGE_WIDTH / 2;
+  const PAGE_WIDTH = doc.page.width - 80;
+  const X = 40;
+  let y = 40;
 
   if (s.watermarkText) {
-    doc.save().translate(centerX, doc.page.height / 2).rotate(-45)
+    doc.save().translate(doc.page.width / 2, doc.page.height / 2).rotate(-45)
        .fontSize(90).fillOpacity(0.06).fillColor('#cc0000')
        .text(s.watermarkText, -200, -45, { width: 400, align: 'center' })
        .restore();
   }
 
-  let y = 80;
-  const LOGO_SIZE = 80;
-  // PDF has no remote-image loading for the school logo — same limitation
-  // legacy_tabular's PDF path already has (only its HTML path draws
-  // logoUrl); a placeholder circle is drawn instead, identical in spirit
-  // to the HTML renderer's own "no logo" fallback.
-  doc.circle(centerX, y + LOGO_SIZE / 2, LOGO_SIZE / 2).fill('#e2e8f0');
-  doc.fillColor('#94a3b8').fontSize(28).font('Helvetica-Bold')
-     .text((cover.schoolName?.[0] || 'S').toUpperCase(), centerX - LOGO_SIZE / 2, y + LOGO_SIZE / 2 - 14, { width: LOGO_SIZE, align: 'center' });
-  y += LOGO_SIZE + 18;
-
-  doc.fillColor(DARK).fontSize(22).font('Helvetica-Bold')
-     .text(cover.schoolName, 40, y, { width: PAGE_WIDTH - 80, align: 'center' });
-  y += 28;
+  // Masthead — logo left, name/tagline/contact stacked right, left-
+  // aligned (reviewer: "the header info of cover page are found in
+  // schools settings"; premium institutional, not centered ceremony).
+  const LOGO = 54;
+  if (images.schoolLogo) {
+    try { doc.image(images.schoolLogo, X, y, { width: LOGO, height: LOGO, fit: [LOGO, LOGO] }); }
+    catch (_) { _drawLogoFallbackPdf(doc, cover, X, y, LOGO); }
+  } else {
+    _drawLogoFallbackPdf(doc, cover, X, y, LOGO);
+  }
+  const textX = X + LOGO + 14, textW = PAGE_WIDTH - LOGO - 14;
+  doc.fillColor(INK).font(FONTS.serifSemibold).fontSize(16).text(cover.schoolName, textX, y, { width: textW });
+  let ty = y + 20;
   if (cover.tagline) {
-    doc.fillColor(GRAY).fontSize(10).font('Helvetica-Oblique')
-       .text(cover.tagline, 40, y, { width: PAGE_WIDTH - 80, align: 'center' });
-    y += 16;
+    doc.fillColor(INK_SOFT).font(FONTS.sansItalic).fontSize(9).text(cover.tagline, textX, ty, { width: textW });
+    ty += 13;
   }
-  const contactLine = _schoolContactLine(cover);
-  if (contactLine) {
-    doc.fillColor('#94a3b8').fontSize(8).font('Helvetica')
-       .text(contactLine, 40, y, { width: PAGE_WIDTH - 80, align: 'center' });
-    y += 18;
-  } else {
-    y += 8;
-  }
+  const addressLine = cover.schoolAddress || '';
+  const contactSubLine = [cover.schoolPhone, cover.schoolEmail].filter(Boolean).join('   ');
+  if (addressLine)     { doc.fillColor(INK_SOFT).font(FONTS.sansRegular).fontSize(8).text(addressLine, textX, ty, { width: textW }); ty += 11; }
+  if (contactSubLine)  { doc.fillColor(INK_SOFT).font(FONTS.sansRegular).fontSize(8).text(contactSubLine, textX, ty, { width: textW }); ty += 11; }
+  y = Math.max(y + LOGO, ty) + 10;
 
-  const badgeW = 220, badgeH = 32;
-  doc.roundedRect(centerX - badgeW / 2, y, badgeW, badgeH, 4).fill(DARK);
-  doc.fillColor('white').fontSize(13).font('Helvetica-Bold')
-     .text(cover.title || 'REPORT CARD', centerX - badgeW / 2, y + 9, { width: badgeW, align: 'center' });
-  y += badgeH + 6;
-  doc.fillColor(GRAY).fontSize(9).font('Helvetica')
-     .text(`Academic Year ${cover.academicYear || '—'}   •   Term ${cover.termNumber ?? '—'}`, 40, y, { width: PAGE_WIDTH - 80, align: 'center' });
-  y += 26;
+  doc.moveTo(X, y).lineTo(X + PAGE_WIDTH, y).lineWidth(1.2).stroke(BRAND);
+  y += 11;
 
-  const PHOTO_W = 90, PHOTO_H = 110;
-  const photoX = centerX - PHOTO_W / 2;
-  doc.rect(photoX - 1, y - 1, PHOTO_W + 2, PHOTO_H + 2).stroke(BORDER);
-  if (images.studentPhoto) {
-    try {
-      doc.image(images.studentPhoto, photoX, y, { width: PHOTO_W, height: PHOTO_H, cover: [PHOTO_W, PHOTO_H] });
-    } catch (_) {
-      doc.rect(photoX, y, PHOTO_W, PHOTO_H).fill('#e2e8f0');
-    }
-  } else {
-    doc.rect(photoX, y, PHOTO_W, PHOTO_H).fill('#e2e8f0');
-    doc.fillColor('#94a3b8').fontSize(7.5).font('Helvetica')
-       .text('PHOTO', photoX, y + PHOTO_H / 2 - 4, { width: PHOTO_W, align: 'center' });
-  }
-  y += PHOTO_H + 22;
+  // Period bar — kicker left, year/term right.
+  doc.fillColor(ACCENT).font(FONTS.sansSemibold).fontSize(8.5).text((cover.title || 'ACADEMIC REPORT').toUpperCase(), X, y);
+  doc.fillColor(INK_SOFT).font(FONTS.monoRegular).fontSize(9.5)
+     .text(`${cover.academicYear || '—'}  ·  Term ${cover.termNumber ?? '—'}`, X, y, { width: PAGE_WIDTH, align: 'right' });
+  y += 21;
 
-  const rows = [
-    ['Student Name', cover.studentName], ['Admission No.', cover.admissionNo],
-    ['Class', cover.className], ['Stream', cover.streamName || '—'],
-    ['House', cover.houseName || '—'],
-    ['Class Teacher', cover.classTeacherName || '—'], ['Principal', cover.principalName || '—'],
+  // Learner identity — name (serif, dominant) + class/admission subline
+  // + a 2-column meta grid, photo fixed at the right.
+  const PHOTO_W = 62, PHOTO_H = 76;
+  const identityW = PAGE_WIDTH - PHOTO_W - 16;
+  doc.fillColor(INK).font(FONTS.serifSemibold).fontSize(20).text(cover.studentName, X, y, { width: identityW });
+  y += 25;
+  const subline = [cover.className, cover.admissionNo ? `Admission ${cover.admissionNo}` : null].filter(Boolean).join('   ·   ');
+  doc.fillColor(INK_SOFT).font(FONTS.sansRegular).fontSize(9).text(subline.toUpperCase(), X, y, { width: identityW });
+  y += 17;
+
+  const metaRows = [
+    ['Class Teacher', cover.classTeacherName || '—'], ['Stream', cover.streamName || '—'],
+    ['House', cover.houseName || '—'], ['Principal', cover.principalName || '—'],
   ];
-  const tableW = 360, rowH = 22;
-  const tableX = centerX - tableW / 2;
-  rows.forEach(([label, value], i) => {
-    const ry = y + i * rowH;
-    doc.rect(tableX, ry, tableW, rowH).fill(i % 2 === 0 ? '#f8fafc' : 'white').stroke(BORDER);
-    doc.fillColor(GRAY).fontSize(9).font('Helvetica-Bold').text(label, tableX + 10, ry + 6, { width: tableW * 0.42 });
-    doc.fillColor(DARK).fontSize(9).font('Helvetica').text(String(value), tableX + tableW * 0.46, ry + 6, { width: tableW * 0.5 });
+  const metaColW = identityW / 2, metaStartY = y;
+  metaRows.forEach(([label, value], i) => {
+    const col = i % 2, row = Math.floor(i / 2);
+    const mx = X + col * metaColW, my = metaStartY + row * 25;
+    doc.fillColor(INK_FAINT).font(FONTS.sansRegular).fontSize(6.5).text(label.toUpperCase(), mx, my, { width: metaColW - 10 });
+    doc.fillColor(INK).font(FONTS.sansMedium).fontSize(9).text(value, mx, my + 9, { width: metaColW - 10 });
   });
+  const identityBottom = metaStartY + Math.ceil(metaRows.length / 2) * 25;
+
+  const photoX = X + PAGE_WIDTH - PHOTO_W;
+  doc.rect(photoX - 1, y - 1, PHOTO_W + 2, PHOTO_H + 2).stroke(RULE);
+  if (images.studentPhoto) {
+    try { doc.image(images.studentPhoto, photoX, y, { width: PHOTO_W, height: PHOTO_H, cover: [PHOTO_W, PHOTO_H] }); }
+    catch (_) { doc.rect(photoX, y, PHOTO_W, PHOTO_H).fill(SURFACE); }
+  } else {
+    doc.rect(photoX, y, PHOTO_W, PHOTO_H).fill(SURFACE);
+    doc.fillColor(INK_FAINT).font(FONTS.sansRegular).fontSize(7).text('PHOTO', photoX, y + PHOTO_H / 2 - 4, { width: PHOTO_W, align: 'center' });
+  }
+
+  y = Math.max(identityBottom, y + PHOTO_H) + 16;
+  doc.moveTo(X, y).lineTo(X + PAGE_WIDTH, y).lineWidth(0.75).stroke(RULE_SOFT);
+  return y + 10;
+}
+
+function _drawLogoFallbackPdf(doc, cover, x, y, size) {
+  doc.circle(x + size / 2, y + size / 2, size / 2).fill(BRAND_WASH);
+  doc.fillColor(BRAND).font(FONTS.serifSemibold).fontSize(Math.round(size * 0.37))
+     .text((cover.schoolName?.[0] || 'S').toUpperCase(), x, y + size / 2 - size * 0.19, { width: size, align: 'center' });
 }
 
 /* ── Dynamic PDF text boxes (RCE3b) ──────────────────────────────
@@ -777,24 +833,159 @@ function _drawFlowBox(doc, x, y, width, blocks) {
   return h;
 }
 
+/* ── RCE8 shared components — overall-performance anchor, observation
+   ratings (pills, not a checkbox grid), and one signer's sign-off block.
+   Each has a _measure.../_draw... pair so callers can ensureSpace() the
+   real height first, keeping the whole block atomic (never split across
+   a page boundary) exactly like _measureFlowBox/_drawFlowBox already do
+   for comment boxes. Used by both subject_paired and marks_then_comments
+   — legacy_tabular is untouched (frozen). ── */
+function _measureOverallPerformancePdf(doc, s, width) {
+  _registerReportFonts(doc);
+  const BOX_H = 70;
+  let h = BOX_H + 14;
+  if (s.gradingKey.length) {
+    const strip = s.gradingKey.map(b => `${b.grade} ${b.range}`).join('     ');
+    doc.font(FONTS.monoRegular).fontSize(9);
+    h += 12 + doc.heightOfString(strip, { width }) + 4;
+  }
+  return h;
+}
+
+function _drawOverallPerformancePdf(doc, s, x, width, y) {
+  _registerReportFonts(doc);
+  const BOX_H = 70, PAD = 18;
+  doc.roundedRect(x, y, width, BOX_H, 4).fill(BRAND_WASH);
+  doc.fillColor(ACCENT).font(FONTS.sansSemibold).fontSize(9).text('OVERALL PERFORMANCE', x + PAD, y + 13);
+
+  // Headline — the average (when shown) is the dominant figure, else
+  // total score; meanGrade is the same resolveGrade() lookup the cover's
+  // "Mean Mark" row already used, just exposed to renderers directly
+  // (RCE8 — not a new/invented data point).
+  const headline = s.summary.showAverage && s.summary.averageScore != null
+    ? `${s.summary.averageScore.toFixed(1)}%` : (s.summary.totalScore != null ? s.summary.totalScore.toFixed(1) : '—');
+  doc.fillColor(INK).font(FONTS.serifBold).fontSize(28)
+     .text(headline + (s.summary.meanGrade ? `  ${s.summary.meanGrade}` : ''), x + PAD, y + 25);
+
+  const subParts = [];
+  if (s.summary.totalScore != null) subParts.push(`Total ${s.summary.totalScore.toFixed(1)}`);
+  if (s.summary.subjectCount) subParts.push(`${s.summary.subjectCount} subject${s.summary.subjectCount === 1 ? '' : 's'}`);
+  if (s.summary.showGPA) subParts.push(s.summary.gpaText);
+  if (s.summary.showRanking && s.summary.rankText) subParts.push(s.summary.rankText);
+  doc.fillColor(INK_SOFT).font(FONTS.monoRegular).fontSize(9).text(subParts.join('   ·   '), x + PAD, y + 56, { width: width - PAD * 2 });
+
+  let ny = y + BOX_H + 14;
+  if (s.gradingKey.length) {
+    doc.fillColor(INK_SOFT).font(FONTS.sansSemibold).fontSize(8).text('GRADING SCALE', x, ny);
+    ny += 12;
+    const strip = s.gradingKey.map(b => `${b.grade} ${b.range}`).join('     ');
+    doc.fillColor(INK_FAINT).font(FONTS.monoRegular).fontSize(9).text(strip, x, ny, { width });
+    ny += doc.heightOfString(strip, { width }) + 4;
+  }
+  return ny;
+}
+
+function _measureObservationRatingsPdf(s) {
+  if (!s.comments.showObservationRatings || !s.comments.observationRatings.length) return 0;
+  return 16 + s.comments.observationRatings.length * 20 + 4;
+}
+
+// Each category shows its selected rating as a filled pill — obvious at
+// a glance — or "Not yet rated" in muted italic when null. Replaces the
+// old 3-column Excellent/Good/Improve checkbox table, whose empty boxes
+// read like an incomplete paper form when nothing was rated yet.
+function _drawObservationRatingsPdf(doc, s, x, width, y) {
+  if (!s.comments.showObservationRatings || !s.comments.observationRatings.length) return y;
+  _registerReportFonts(doc);
+  doc.fillColor(INK_SOFT).font(FONTS.sansSemibold).fontSize(9).text('CLASS TEACHER OBSERVATIONS', x, y);
+  y += 16;
+  doc.lineWidth(0.75).moveTo(x, y).lineTo(x + width, y).stroke(RULE_SOFT);
+  const ROW_H = 20;
+  s.comments.observationRatings.forEach(({ category, rating }) => {
+    doc.fillColor(INK).font(FONTS.sansRegular).fontSize(10).text(category, x, y + 5, { width: width * 0.6 });
+    if (rating) {
+      const label = rating.charAt(0).toUpperCase() + rating.slice(1);
+      doc.font(FONTS.sansBold).fontSize(9);
+      const pillW = doc.widthOfString(label) + 20;
+      const pillX = x + width - pillW;
+      doc.roundedRect(pillX, y + 2, pillW, 15, 3).fill(BRAND_WASH);
+      doc.fillColor(BRAND).text(label, pillX, y + 6, { width: pillW, align: 'center' });
+    } else {
+      doc.fillColor(INK_FAINT).font(FONTS.sansItalic).fontSize(9).text('Not yet rated', x, y + 6, { width, align: 'right' });
+    }
+    y += ROW_H;
+    doc.lineWidth(0.5).moveTo(x, y - 1).lineTo(x + width, y - 1).stroke(RULE_SOFT);
+  });
+  return y + 6;
+}
+
+function _measureSignOffPdf(doc, width, remarkText) {
+  _registerReportFonts(doc);
+  const PAD_X = 16, BANNER_H = 24, BODY_GAP = 10, SIGROW_H = 46;
+  doc.font(FONTS.sansRegular).fontSize(9.5);
+  const textH = doc.heightOfString(remarkText || '', { width: width - PAD_X * 2 });
+  return BANNER_H + BODY_GAP + textH + SIGROW_H + 10;
+}
+
+// One signer's full block — banner, remark text, then signature image
+// (above the line) / name+role (below it) / date alongside. Used for
+// both the Class Teacher's General Comment and the Principal's Comment
+// — stampImg is only ever passed for the Principal (no "class teacher
+// stamp" concept), same posture the HTML renderer's _remarkSignOffHtml
+// already follows. Always one atomic block (ensureSpace the full
+// _measureSignOffPdf height before calling this).
+function _drawSignOffPdf(doc, x, y, width, { roleLabel, personName, remarkText, signatureImg, stampImg, signDate }) {
+  _registerReportFonts(doc);
+  const PAD_X = 16, BANNER_H = 24, SIGROW_H = 46;
+  doc.font(FONTS.sansRegular).fontSize(9.5);
+  const textH = doc.heightOfString(remarkText || '', { width: width - PAD_X * 2 });
+  const totalH = BANNER_H + 10 + textH + SIGROW_H + 10;
+
+  doc.lineWidth(1).roundedRect(x, y, width, totalH, 5).stroke(RULE);
+  doc.rect(x, y, width, BANNER_H).fill(BRAND);
+  doc.fillColor('white').font(FONTS.sansSemibold).fontSize(9)
+     .text(`${roleLabel}'s General Comment`.toUpperCase(), x, y + 8, { width, align: 'center' });
+
+  let ty = y + BANNER_H + 10;
+  doc.fillColor(INK_SOFT).font(FONTS.sansRegular).fontSize(9.5).text(remarkText || '', x + PAD_X, ty, { width: width - PAD_X * 2 });
+  ty += textH + 12;
+
+  const sigW = 150;
+  if (signatureImg) {
+    try { doc.image(signatureImg, x + PAD_X, ty - 20, { height: 22, fit: [sigW, 22] }); } catch (_) { /* non-fatal */ }
+  }
+  const lineY = ty + 4;
+  doc.lineWidth(0.75).moveTo(x + PAD_X, lineY).lineTo(x + PAD_X + sigW, lineY).stroke(INK);
+  doc.fillColor(INK).font(FONTS.sansRegular).fontSize(9).text(personName || '—', x + PAD_X, lineY + 4, { width: sigW });
+  doc.fillColor(INK_SOFT).font(FONTS.sansSemibold).fontSize(8).text(roleLabel, x + PAD_X, lineY + 15, { width: sigW });
+  if (stampImg) {
+    try { doc.image(stampImg, x + width - PAD_X - 44, ty - 16, { height: 38, fit: [44, 38] }); } catch (_) { /* non-fatal */ }
+  }
+  if (signDate) {
+    doc.fillColor(INK_FAINT).font(FONTS.sansRegular).fontSize(8.5)
+       .text(`Date: ${signDate}`, x, lineY + 4, { width: width - PAD_X, align: 'right' });
+  }
+  return y + totalH;
+}
+
 /* ── subject_paired (RCE3): every subject's marks row is immediately
    followed by that subject's own teacher comment row, so a parent
    reads feedback right next to the score it's about, instead of
    scanning a separate comments page. ── */
 function _renderSubjectPairedPdf(doc, s, images, isFirstPage) {
+  _registerReportFonts(doc);
   if (!isFirstPage) doc.addPage();
-  _drawCoverPdf(doc, s, images);
-  doc.addPage();
 
-  const DARK = '#1a1a2e', ACCENT = '#2563eb', GRAY = '#555555', LIGHT_GRAY = '#f3f4f6', BORDER = '#d1d5db';
+  const X = 40;
   const PAGE_WIDTH = doc.page.width - 80;
   const BOTTOM     = doc.page.height - 55;
 
-  /* SUBJECT ROWS — marks row + comment row directly beneath each.
-     Column layout computed before drawHeader() so the repeating
-     per-page header band below can draw a real column-header row
-     (CA/HW/MT/ET/AVG/Grade[/Dev]) — every mark on the page must be
-     legible without cross-referencing another page. */
+  // RCE8 — cover no longer owns a whole page; the results table starts
+  // directly beneath it on page 1 whenever there's room (reviewer: "Do
+  // not reserve a full page for learner identity unless the content
+  // actually requires it").
+  let rowY = _drawCoverPdf(doc, s, images);
+
   const typeEntries = s.resultsTable.typeEntries;
   const showDev = s.resultsTable.showDeviation;
   const W_SUBJECT = 150, W_SCORE = 42, W_GRADE = 42, W_DEV = showDev ? 40 : 0;
@@ -818,30 +1009,34 @@ function _renderSubjectPairedPdf(doc, s, images, isFirstPage) {
     ...(showDev ? [{ label: 'Dev', width: W_DEV }] : []),
   ];
   const colWidths = colDefs.map(c => c.width);
-  const colX = []; let cx = 40;
+  const colX = []; let cx = X;
   for (const w of colWidths) { colX.push(cx); cx += w + 5; }
 
-  let rowY;
-  function drawHeader() {
-    doc.rect(40, 40, PAGE_WIDTH, 40).fill(DARK);
-    doc.fillColor('white').fontSize(12).font('Helvetica-Bold')
-       .text(s.header.schoolName, 50, 49, { width: PAGE_WIDTH - 20 });
-    doc.fontSize(8).font('Helvetica')
-       .text(`${s.studentInfo.studentName} — ${s.studentInfo.className} — ${s.studentInfo.termLine}`, 50, 66, { width: PAGE_WIDTH - 20 });
-    // Column-header band — repeats on every page (including after a
-    // page break mid-list), same ACCENT band style legacy_tabular uses.
-    doc.rect(40, 84, PAGE_WIDTH, 16).fill(ACCENT);
-    doc.fillColor('white').fontSize(7).font('Helvetica-Bold');
-    colDefs.forEach((col, i) => {
-      doc.text(col.label, colX[i] + 3, 88, { width: colWidths[i] - 3, align: 'center' });
-    });
-    rowY = 105;
+  function drawColumnHeader(y) {
+    doc.rect(X, y, PAGE_WIDTH, 16).fill(BRAND);
+    doc.fillColor('white').font(FONTS.sansSemibold).fontSize(7.5);
+    colDefs.forEach((col, i) => doc.text(col.label, colX[i] + 3, y + 4, { width: colWidths[i] - 3, align: 'center' }));
+    return y + 16;
+  }
+  // Page 1's column-header strip sits right under the cover (which
+  // already carries school/student identity, so no repeating dark band
+  // is needed there). A page added mid-list gets a slim one-line
+  // context repeat first, so a parent who flips straight to a later
+  // page isn't lost.
+  rowY = drawColumnHeader(rowY) + 4;
+  function drawContinuationHeader() {
+    doc.fillColor(INK_FAINT).font(FONTS.sansRegular).fontSize(8)
+       .text(`${s.studentInfo.studentName}  ·  ${s.studentInfo.className}  ·  ${s.studentInfo.termLine}`, X, 40, { width: PAGE_WIDTH });
+    return drawColumnHeader(56) + 4;
   }
   function ensureSpace(h) {
-    if (rowY + h > BOTTOM) { doc.addPage(); drawHeader(); }
+    if (rowY + h > BOTTOM) { doc.addPage(); rowY = drawContinuationHeader(); }
   }
-  drawHeader();
 
+  /* SUBJECT ROWS — marks row + comment row directly beneath each,
+     measured together so the pair can never be split across a page
+     boundary (reviewer: "If it cannot fit in the remaining page
+     space, move the complete block to the next page"). */
   s.resultsTable.rows.forEach(row => {
     const commentEnabled = s.comments.subjectTeacherCommentsEnabled;
     const commentEntry   = s.comments.subjectComments.find(c => c.subjectId === row.subjectId);
@@ -853,35 +1048,35 @@ function _renderSubjectPairedPdf(doc, s, images, isFirstPage) {
     // was ever created for this class+subject).
     const commentLabel   = commentEntry?.teacherName ? `${commentEntry.teacherName}:` : 'Subject Teacher:';
     const commentBlocks  = commentEnabled ? [
-      ...(row.remarksText ? [{ text: `Grade remark: ${row.remarksText}`, font: 'Helvetica-Oblique', fontSize: 7, color: GRAY }] : []),
-      { text: commentLabel, font: 'Helvetica-Bold', fontSize: 7, color: GRAY, gapAfter: 2 },
-      { text: commentText || '— No comment entered —', font: 'Helvetica', fontSize: 8, color: DARK },
+      ...(row.remarksText ? [{ text: `Grade remark: ${row.remarksText}`, font: FONTS.sansItalic, fontSize: 7.5, color: INK_SOFT }] : []),
+      { text: commentLabel, font: FONTS.sansBold, fontSize: 7.5, color: INK_SOFT, gapAfter: 2 },
+      { text: commentText || '— No comment entered —', font: FONTS.sansRegular, fontSize: 8.5, color: commentText ? INK : INK_FAINT },
     ] : [];
     const commentH = commentEnabled ? _measureFlowBox(doc, PAGE_WIDTH, commentBlocks) : 0;
     ensureSpace(18 + commentH + 4);
 
-    doc.rect(40, rowY, PAGE_WIDTH, 18).fill(row.failed ? '#fef2f2' : LIGHT_GRAY);
-    doc.fillColor(row.failed ? '#dc2626' : DARK).fontSize(8.5).font('Helvetica-Bold')
-       .text(row.nameLine, colX[0] + 3, rowY + 5, { width: colWidths[0] - 3 });
+    doc.rect(X, rowY, PAGE_WIDTH, 18).fill(row.failed ? '#fdecea' : SURFACE);
+    doc.fillColor(row.failed ? FAIL_RED : INK).font(FONTS.serifSemibold).fontSize(9)
+       .text(row.nameLine, colX[0] + 3, rowY + 4.5, { width: colWidths[0] - 3 });
     row.typeValues.forEach((val, ti) => {
       const ci = 1 + ti;
-      doc.fillColor(DARK).fontSize(8.5).font('Helvetica')
+      doc.fillColor(INK_SOFT).font(FONTS.monoRegular).fontSize(8.5)
          .text(val, colX[ci] + 3, rowY + 5, { width: colWidths[ci] - 3, align: 'center' });
     });
     const scoreIdx = 1 + typeEntries.length, gradeIdx = scoreIdx + 1, devIdx = gradeIdx + 1;
-    doc.fillColor(DARK).fontSize(8.5).font('Helvetica')
+    doc.fillColor(INK).font(FONTS.monoMedium).fontSize(8.5)
        .text(row.scoreText, colX[scoreIdx] + 3, rowY + 5, { width: colWidths[scoreIdx] - 3, align: 'center' });
-    doc.font('Helvetica-Bold').fillColor(row.hasGrade ? (row.failed ? '#dc2626' : ACCENT) : GRAY)
-       .text(row.gradeText, colX[gradeIdx] + 3, rowY + 5, { width: colWidths[gradeIdx] - 3, align: 'center' });
+    doc.font(FONTS.serifBold).fontSize(9.5).fillColor(row.hasGrade ? (row.failed ? FAIL_RED : INK) : INK_FAINT)
+       .text(row.gradeText, colX[gradeIdx] + 3, rowY + 4, { width: colWidths[gradeIdx] - 3, align: 'center' });
     if (showDev) {
-      const devColor = row.deviationText == null ? GRAY : (row.deviationText.startsWith('-') ? '#dc2626' : '#16a34a');
-      doc.font('Helvetica').fontSize(8).fillColor(devColor)
+      const devColor = row.deviationText == null ? INK_FAINT : (row.deviationText.startsWith('-') ? FAIL_RED : PASS_GREEN);
+      doc.font(FONTS.monoRegular).fontSize(8).fillColor(devColor)
          .text(row.deviationText ?? '—', colX[devIdx] + 3, rowY + 5, { width: colWidths[devIdx] - 3, align: 'center' });
     }
     rowY += 18;
 
     if (commentEnabled) {
-      _drawFlowBox(doc, 40, rowY, PAGE_WIDTH, commentBlocks);
+      _drawFlowBox(doc, X, rowY, PAGE_WIDTH, commentBlocks);
       rowY += commentH;
     }
     rowY += 5;
@@ -889,147 +1084,120 @@ function _renderSubjectPairedPdf(doc, s, images, isFirstPage) {
 
   if (s.resultsTable.rankingNote) {
     ensureSpace(14);
-    doc.fillColor(GRAY).fontSize(7).font('Helvetica').text(s.resultsTable.rankingNote, 40, rowY, { width: PAGE_WIDTH });
+    doc.fillColor(INK_FAINT).font(FONTS.sansRegular).fontSize(7.5).text(s.resultsTable.rankingNote, X, rowY, { width: PAGE_WIDTH });
     rowY += 14;
   }
 
-  /* SUMMARY */
-  ensureSpace(32);
-  rowY += 4;
-  doc.rect(40, rowY, PAGE_WIDTH, 28).fill('#eff6ff').stroke(BORDER);
-  doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text(s.summary.totalText, 50, rowY + 5);
-  if (s.summary.showAverage) doc.text(s.summary.averageText, 160, rowY + 5);
-  if (s.summary.showGPA)     doc.text(s.summary.gpaText, 265, rowY + 5);
-  if (s.summary.showRanking) doc.fillColor(ACCENT).text(s.summary.rankText, 355, rowY + 5);
-  rowY += 32;
+  // RCE8 — from here on, nothing is a marks row, so a page added mid-
+  // closing-section must not repeat the CA/HW/MT/ET column-header strip
+  // (confusing — there's no table to label). Just the slim one-line
+  // context repeat.
+  function drawBareContinuationHeader() {
+    doc.fillColor(INK_FAINT).font(FONTS.sansRegular).fontSize(8)
+       .text(`${s.studentInfo.studentName}  ·  ${s.studentInfo.className}  ·  ${s.studentInfo.termLine}`, X, 40, { width: PAGE_WIDTH });
+    doc.lineWidth(0.75).moveTo(X, 54).lineTo(X + PAGE_WIDTH, 54).stroke(RULE_SOFT);
+    return 64;
+  }
+  function ensureSpaceAfterResults(h) {
+    if (rowY + h > BOTTOM) { doc.addPage(); rowY = drawBareContinuationHeader(); }
+  }
+
+  /* OVERALL PERFORMANCE + GRADING KEY — one atomic block (reviewer:
+     "Overall result + grading key must be treated as an atomic block.
+     No text, value, label or border may be clipped at a page boundary"). */
+  rowY += 6;
+  ensureSpaceAfterResults(_measureOverallPerformancePdf(doc, s, PAGE_WIDTH));
+  rowY = _drawOverallPerformancePdf(doc, s, X, PAGE_WIDTH, rowY);
 
   /* ATTENDANCE */
   if (s.attendance) {
-    ensureSpace(30);
-    doc.rect(40, rowY, PAGE_WIDTH, 26).fill(LIGHT_GRAY).stroke(BORDER);
-    doc.fillColor(GRAY).fontSize(8).font('Helvetica').text('ATTENDANCE', 50, rowY + 4);
-    doc.fillColor(DARK).fontSize(9).font('Helvetica').text(s.attendance.text, 50, rowY + 14, { width: PAGE_WIDTH - 20 });
-    rowY += 30;
-  }
-
-  /* GRADING KEY */
-  if (s.gradingKey.length) {
-    ensureSpace(16 + s.gradingKey.length * 14);
-    doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text('GRADING KEY', 40, rowY);
-    rowY += 14;
-    s.gradingKey.forEach(b => {
-      doc.fillColor(GRAY).fontSize(8).font('Helvetica')
-         .text(`${b.grade}   ${b.range}   ${b.points}pts   ${b.label}`, 40, rowY, { width: PAGE_WIDTH });
-      rowY += 13;
-    });
-    rowY += 6;
-  }
-
-  /* REMARKS — the RC8 report-remark chain if configured, else the
-     classic class-teacher/principal boxes (each independently gated
-     by RCE1's showClassTeacherRemark/showPrincipalRemark). */
-  if (s.comments.reportRemarks.length > 0) {
-    s.comments.reportRemarks.forEach(r => {
-      const blocks = [{ text: r.text, font: 'Helvetica', fontSize: 9, color: DARK }];
-      const h = _measureFlowBox(doc, PAGE_WIDTH, blocks);
-      ensureSpace(12 + h + 6);
-      doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text(r.label.toUpperCase() + ':', 40, rowY);
-      rowY += 12;
-      _drawFlowBox(doc, 40, rowY, PAGE_WIDTH, blocks);
-      rowY += h + 6;
-    });
-  } else {
-    if (s.comments.showClassTeacherRemark) {
-      const blocks = [{ text: s.comments.classTeacherRemark, font: 'Helvetica', fontSize: 9, color: DARK }];
-      const h = _measureFlowBox(doc, PAGE_WIDTH, blocks);
-      ensureSpace(12 + h + 6);
-      doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text(`${s.signatures.classTeacherLabel.toUpperCase()}'S REMARK:`, 40, rowY);
-      rowY += 12;
-      _drawFlowBox(doc, 40, rowY, PAGE_WIDTH, blocks);
-      rowY += h + 6;
-    }
-    if (s.comments.showPrincipalRemark) {
-      const blocks = [{ text: s.comments.principalRemark, font: 'Helvetica', fontSize: 9, color: DARK }];
-      const h = _measureFlowBox(doc, PAGE_WIDTH, blocks);
-      ensureSpace(12 + h + 6);
-      doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text(`${s.signatures.principalLabel.toUpperCase()}'S COMMENT:`, 40, rowY);
-      rowY += 12;
-      _drawFlowBox(doc, 40, rowY, PAGE_WIDTH, blocks);
-      rowY += h + 6;
-    }
-  }
-
-  /* CLASS TEACHER OBSERVATIONS (2026-09) — off unless the school has
-     turned it on and defined at least one category, same "zero trace
-     when disabled" rule every other optional section here follows. */
-  if (s.comments.showObservationRatings && s.comments.observationRatings.length) {
-    const rowH = 16;
-    ensureSpace(20 + s.comments.observationRatings.length * rowH);
-    doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text('CLASS TEACHER OBSERVATIONS', 40, rowY);
-    rowY += 14;
-    const catW = PAGE_WIDTH * 0.4;
-    const colW = (PAGE_WIDTH - catW) / 3;
-    ['Excellent', 'Good', 'Improve'].forEach((label, i) => {
-      doc.fillColor(GRAY).fontSize(7).font('Helvetica-Bold').text(label.toUpperCase(), 40 + catW + i * colW, rowY, { width: colW, align: 'center' });
-    });
-    rowY += 12;
-    s.comments.observationRatings.forEach(({ category, rating }) => {
-      doc.rect(40, rowY, PAGE_WIDTH, rowH).stroke(BORDER);
-      doc.fillColor(DARK).fontSize(8).font('Helvetica').text(category, 44, rowY + 4, { width: catW - 8 });
-      ['excellent', 'good', 'improve'].forEach((v, i) => {
-        if (rating === v) {
-          doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text('X', 40 + catW + i * colW, rowY + 4, { width: colW, align: 'center' });
-        }
-      });
-      rowY += rowH;
-    });
-    rowY += 6;
+    ensureSpaceAfterResults(30);
+    doc.rect(X, rowY, PAGE_WIDTH, 26).fill(SURFACE).stroke(RULE);
+    doc.fillColor(INK_SOFT).font(FONTS.sansSemibold).fontSize(8).text('ATTENDANCE', X + 10, rowY + 4);
+    doc.fillColor(INK).font(FONTS.sansRegular).fontSize(9).text(s.attendance.text, X + 10, rowY + 14, { width: PAGE_WIDTH - 20 });
+    rowY += 30 + 10;
   }
 
   /* BEHAVIOUR */
   if (s.behaviour) {
-    ensureSpace(60);
-    doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text('BEHAVIOUR', 40, rowY);
+    ensureSpaceAfterResults(60);
+    doc.fillColor(INK_SOFT).font(FONTS.sansSemibold).fontSize(9).text('BEHAVIOUR', X, rowY);
     rowY += 14;
     const tiles = [
-      { label: 'Merits', value: s.behaviour.merits, color: '#16a34a' },
-      { label: 'Demerits', value: s.behaviour.demerits, color: '#dc2626' },
-      { label: 'Net Points', value: s.behaviour.points, color: s.behaviour.points >= 0 ? '#16a34a' : '#dc2626' },
-      { label: 'Total', value: s.behaviour.total, color: GRAY },
+      { label: 'Merits', value: s.behaviour.merits, color: PASS_GREEN },
+      { label: 'Demerits', value: s.behaviour.demerits, color: FAIL_RED },
+      { label: 'Net Points', value: s.behaviour.points, color: s.behaviour.points >= 0 ? PASS_GREEN : FAIL_RED },
+      { label: 'Total', value: s.behaviour.total, color: INK_SOFT },
     ];
     const tileW = (PAGE_WIDTH - 30) / 4;
     tiles.forEach((t, i) => {
-      const tx = 40 + i * (tileW + 10);
-      doc.rect(tx, rowY, tileW, 34).stroke(BORDER);
-      doc.fillColor(GRAY).fontSize(6.5).font('Helvetica').text(t.label.toUpperCase(), tx + 6, rowY + 5, { width: tileW - 12, align: 'center' });
-      doc.fillColor(t.color).fontSize(14).font('Helvetica-Bold').text(String(t.value), tx, rowY + 15, { width: tileW, align: 'center' });
+      const tx = X + i * (tileW + 10);
+      doc.rect(tx, rowY, tileW, 34).stroke(RULE);
+      doc.fillColor(INK_FAINT).font(FONTS.sansRegular).fontSize(6.5).text(t.label.toUpperCase(), tx + 6, rowY + 5, { width: tileW - 12, align: 'center' });
+      doc.fillColor(t.color).font(FONTS.serifBold).fontSize(14).text(String(t.value), tx, rowY + 15, { width: tileW, align: 'center' });
     });
-    rowY += 44;
+    rowY += 44 + 10;
   }
 
-  /* SIGNATURES */
-  ensureSpace(56);
-  const sigY = rowY + 6;
-  const sigW = (PAGE_WIDTH - 20) / 2;
-  if (images.principalSignature) {
-    try { doc.image(images.principalSignature, 40 + sigW + 10, sigY - 26, { height: 26, fit: [sigW - 10, 26] }); } catch (_) { /* non-fatal */ }
+  /* CLASS TEACHER OBSERVATIONS — pills, atomic (reviewer: "the selected
+     rating should be visually obvious"; "do not make the report look
+     like an incomplete paper form full of empty checkboxes"). Off
+     unless the school has turned it on and defined at least one
+     category, same "zero trace when disabled" rule every other
+     optional section here follows. */
+  const obsH = _measureObservationRatingsPdf(s);
+  if (obsH) {
+    ensureSpaceAfterResults(obsH);
+    rowY = _drawObservationRatingsPdf(doc, s, X, PAGE_WIDTH, rowY) + 10;
   }
-  if (images.schoolStamp) {
-    try { doc.image(images.schoolStamp, 40 + PAGE_WIDTH - 56, sigY - 34, { height: 34, fit: [50, 34] }); } catch (_) { /* non-fatal */ }
-  }
-  doc.moveTo(40, sigY + 18).lineTo(40 + sigW - 10, sigY + 18).stroke(DARK);
-  doc.moveTo(40 + sigW + 10, sigY + 18).lineTo(40 + PAGE_WIDTH, sigY + 18).stroke(DARK);
-  doc.fillColor(GRAY).fontSize(8).font('Helvetica')
-     .text(s.signatures.classTeacherLabel, 40, sigY + 22, { width: sigW })
-     .text(s.signatures.principalLabel, 40 + sigW + 10, sigY + 22, { width: sigW });
 
-  /* FOOTER */
-  const footerY = doc.page.height - 40;
-  doc.fillColor(GRAY).fontSize(7).font('Helvetica')
-     .text(s.footer.footerNote, 40, footerY, { width: PAGE_WIDTH, align: 'center' });
+  /* SIGN-OFFS — the RC8 report-remark chain if configured (its own
+     flexible N-remark shape doesn't map to a single-signer block, so it
+     keeps its original flow-box presentation, just in the new palette);
+     otherwise the Class Teacher's General Comment and the Principal's
+     Comment each render as their own atomic sign-off block — distinct
+     comment types, per the approved design (never silently merged). */
+  if (s.comments.reportRemarks.length > 0) {
+    s.comments.reportRemarks.forEach(r => {
+      const blocks = [{ text: r.text, font: FONTS.sansRegular, fontSize: 9, color: INK }];
+      const h = _measureFlowBox(doc, PAGE_WIDTH, blocks);
+      ensureSpaceAfterResults(12 + h + 6);
+      doc.fillColor(INK_SOFT).font(FONTS.sansSemibold).fontSize(9).text(r.label.toUpperCase() + ':', X, rowY);
+      rowY += 12;
+      _drawFlowBox(doc, X, rowY, PAGE_WIDTH, blocks);
+      rowY += h + 6;
+    });
+  } else {
+    if (s.comments.showClassTeacherRemark) {
+      ensureSpaceAfterResults(_measureSignOffPdf(doc, PAGE_WIDTH, s.comments.classTeacherRemark));
+      rowY = _drawSignOffPdf(doc, X, rowY, PAGE_WIDTH, {
+        roleLabel: s.signatures.classTeacherLabel, personName: s.cover.classTeacherName,
+        remarkText: s.comments.classTeacherRemark, signatureImg: null, stampImg: null,
+        signDate: s.footer.signDate,
+      }) + 10;
+    }
+    if (s.comments.showPrincipalRemark) {
+      ensureSpaceAfterResults(_measureSignOffPdf(doc, PAGE_WIDTH, s.comments.principalRemark));
+      rowY = _drawSignOffPdf(doc, X, rowY, PAGE_WIDTH, {
+        roleLabel: s.signatures.principalLabel, personName: s.cover.principalName,
+        remarkText: s.comments.principalRemark, signatureImg: images.principalSignature || null,
+        stampImg: images.schoolStamp || null, signDate: s.footer.signDate,
+      }) + 10;
+    }
+  }
+
+  /* FOOTER — RCE8: was `doc.page.height - 40`, i.e. flush with the
+     bottom margin itself; PDFKit treats text drawn right at the margin
+     as overflowing it and silently adds a trailing near-blank page just
+     to fit it, producing exactly the "near-blank page" the reviewer's
+     QA explicitly checks for. -56 matches legacy_tabular's own
+     (already-safe) footer offset. */
+  const footerY = doc.page.height - 56;
+  doc.fillColor(INK_FAINT).font(FONTS.sansRegular).fontSize(7.5)
+     .text(s.footer.footerNote, X, footerY, { width: PAGE_WIDTH, align: 'center' });
   if (s.footer.reportId) {
-    doc.fillColor(GRAY).fontSize(6.5).font('Helvetica')
-       .text(`Report ID: ${s.footer.reportId}  |  ${s.footer.genLine}`, 40, footerY + 12, { width: PAGE_WIDTH, align: 'center' });
+    doc.fillColor(INK_FAINT).font(FONTS.monoRegular).fontSize(6.5)
+       .text(`Report ID: ${s.footer.reportId}  |  ${s.footer.genLine}`, X, footerY + 12, { width: PAGE_WIDTH, align: 'center' });
   }
 }
 
@@ -1203,27 +1371,34 @@ ${academicHtml}
    this layout is for schools that want a clean, scan-friendly marks
    grid uninterrupted by prose, with feedback read separately after. ── */
 function _renderMarksThenCommentsPdf(doc, s, images, isFirstPage) {
+  _registerReportFonts(doc);
   if (!isFirstPage) doc.addPage();
-  _drawCoverPdf(doc, s, images);
-  doc.addPage();
 
-  const DARK = '#1a1a2e', ACCENT = '#2563eb', GRAY = '#555555', LIGHT_GRAY = '#f3f4f6', BORDER = '#d1d5db';
+  const X = 40;
   const PAGE_WIDTH = doc.page.width - 80;
   const BOTTOM     = doc.page.height - 55;
 
+  // RCE8 — cover no longer owns a whole page; the results table starts
+  // directly beneath it on page 1 whenever there's room, same fix as
+  // subject_paired's (this layout's own cover/results/commentary/
+  // observations/general-comment structure is otherwise unchanged —
+  // reviewer: "Template B is much stronger... retain the current
+  // overall structure").
+  let rowY = _drawCoverPdf(doc, s, images);
+
   function drawTitleHeader(title) {
-    doc.rect(40, 40, PAGE_WIDTH, 40).fill(DARK);
-    doc.fillColor('white').fontSize(12).font('Helvetica-Bold')
-       .text(s.header.schoolName, 50, 49, { width: PAGE_WIDTH - 20 });
-    doc.fontSize(8).font('Helvetica')
-       .text(`${s.studentInfo.studentName} — ${s.studentInfo.className} — ${s.studentInfo.termLine}`, 50, 66, { width: PAGE_WIDTH - 20 });
-    doc.fillColor(GRAY).fontSize(9).font('Helvetica-Bold').text(title, 40, 88);
+    doc.rect(X, 40, PAGE_WIDTH, 40).fill(BRAND);
+    doc.fillColor('white').font(FONTS.serifSemibold).fontSize(12)
+       .text(s.header.schoolName, X + 10, 49, { width: PAGE_WIDTH - 20 });
+    doc.font(FONTS.sansRegular).fontSize(8)
+       .text(`${s.studentInfo.studentName} — ${s.studentInfo.className} — ${s.studentInfo.termLine}`, X + 10, 66, { width: PAGE_WIDTH - 20 });
+    doc.fillColor(INK_SOFT).font(FONTS.sansSemibold).fontSize(9).text(title, X, 88);
     return 104;
   }
 
-  /* ── MARKS TABLE PAGE(S) — same column convention as subject_paired
-     (RCE3c: type KEYs not labels, 'AVG' not 'Score'), but every subject
-     drawn back-to-back with no comment box between rows. ── */
+  /* ── MARKS TABLE — same column convention as subject_paired (RCE3c:
+     type KEYs not labels, 'AVG' not 'Score'), every subject drawn
+     back-to-back with no comment box between rows. ── */
   const typeEntries = s.resultsTable.typeEntries;
   const showDev = s.resultsTable.showDeviation;
   const W_SUBJECT = 150, W_SCORE = 42, W_GRADE = 42, W_DEV = showDev ? 40 : 0;
@@ -1240,42 +1415,44 @@ function _renderMarksThenCommentsPdf(doc, s, images, isFirstPage) {
     ...(showDev ? [{ label: 'Dev', width: W_DEV }] : []),
   ];
   const colWidths = colDefs.map(c => c.width);
-  const colX = []; let cx = 40;
+  const colX = []; let cx = X;
   for (const w of colWidths) { colX.push(cx); cx += w + 5; }
 
-  let rowY;
-  function drawMarksHeader() {
-    rowY = drawTitleHeader('ACADEMIC RESULTS');
-    doc.rect(40, rowY, PAGE_WIDTH, 16).fill(ACCENT);
-    doc.fillColor('white').fontSize(7).font('Helvetica-Bold');
-    colDefs.forEach((col, i) => {
-      doc.text(col.label, colX[i] + 3, rowY + 4, { width: colWidths[i] - 3, align: 'center' });
-    });
-    rowY += 16;
+  function drawColumnHeader(y) {
+    doc.rect(X, y, PAGE_WIDTH, 16).fill(BRAND);
+    doc.fillColor('white').font(FONTS.sansSemibold).fontSize(7.5);
+    colDefs.forEach((col, i) => doc.text(col.label, colX[i] + 3, y + 4, { width: colWidths[i] - 3, align: 'center' }));
+    return y + 16;
+  }
+  doc.fillColor(INK_SOFT).font(FONTS.sansSemibold).fontSize(9).text('ACADEMIC RESULTS', X, rowY);
+  rowY = drawColumnHeader(rowY + 14) + 4;
+  function drawMarksContinuationHeader() {
+    doc.fillColor(INK_FAINT).font(FONTS.sansRegular).fontSize(8)
+       .text(`${s.studentInfo.studentName}  ·  ${s.studentInfo.className}  ·  ${s.studentInfo.termLine}`, X, 40, { width: PAGE_WIDTH });
+    return drawColumnHeader(56) + 4;
   }
   function ensureMarksSpace(h) {
-    if (rowY + h > BOTTOM) { doc.addPage(); drawMarksHeader(); }
+    if (rowY + h > BOTTOM) { doc.addPage(); rowY = drawMarksContinuationHeader(); }
   }
-  drawMarksHeader();
 
-  s.resultsTable.rows.forEach((row, idx) => {
+  s.resultsTable.rows.forEach(row => {
     ensureMarksSpace(18);
-    doc.rect(40, rowY, PAGE_WIDTH, 18).fill(row.failed ? '#fef2f2' : (idx % 2 === 0 ? 'white' : LIGHT_GRAY));
-    doc.fillColor(row.failed ? '#dc2626' : DARK).fontSize(8.5).font('Helvetica-Bold')
-       .text(row.nameLine, colX[0] + 3, rowY + 5, { width: colWidths[0] - 3 });
+    doc.rect(X, rowY, PAGE_WIDTH, 18).fill(row.failed ? '#fdecea' : SURFACE);
+    doc.fillColor(row.failed ? FAIL_RED : INK).font(FONTS.serifSemibold).fontSize(9)
+       .text(row.nameLine, colX[0] + 3, rowY + 4.5, { width: colWidths[0] - 3 });
     row.typeValues.forEach((val, ti) => {
       const ci = 1 + ti;
-      doc.fillColor(DARK).fontSize(8.5).font('Helvetica')
+      doc.fillColor(INK_SOFT).font(FONTS.monoRegular).fontSize(8.5)
          .text(val, colX[ci] + 3, rowY + 5, { width: colWidths[ci] - 3, align: 'center' });
     });
     const scoreIdx = 1 + typeEntries.length, gradeIdx = scoreIdx + 1, devIdx = gradeIdx + 1;
-    doc.fillColor(DARK).fontSize(8.5).font('Helvetica')
+    doc.fillColor(INK).font(FONTS.monoMedium).fontSize(8.5)
        .text(row.scoreText, colX[scoreIdx] + 3, rowY + 5, { width: colWidths[scoreIdx] - 3, align: 'center' });
-    doc.font('Helvetica-Bold').fillColor(row.hasGrade ? (row.failed ? '#dc2626' : ACCENT) : GRAY)
-       .text(row.gradeText, colX[gradeIdx] + 3, rowY + 5, { width: colWidths[gradeIdx] - 3, align: 'center' });
+    doc.font(FONTS.serifBold).fontSize(9.5).fillColor(row.hasGrade ? (row.failed ? FAIL_RED : INK) : INK_FAINT)
+       .text(row.gradeText, colX[gradeIdx] + 3, rowY + 4, { width: colWidths[gradeIdx] - 3, align: 'center' });
     if (showDev) {
-      const devColor = row.deviationText == null ? GRAY : (row.deviationText.startsWith('-') ? '#dc2626' : '#16a34a');
-      doc.font('Helvetica').fontSize(8).fillColor(devColor)
+      const devColor = row.deviationText == null ? INK_FAINT : (row.deviationText.startsWith('-') ? FAIL_RED : PASS_GREEN);
+      doc.font(FONTS.monoRegular).fontSize(8).fillColor(devColor)
          .text(row.deviationText ?? '—', colX[devIdx] + 3, rowY + 5, { width: colWidths[devIdx] - 3, align: 'center' });
     }
     rowY += 18;
@@ -1283,170 +1460,135 @@ function _renderMarksThenCommentsPdf(doc, s, images, isFirstPage) {
 
   if (s.resultsTable.rankingNote) {
     ensureMarksSpace(14);
-    doc.fillColor(GRAY).fontSize(7).font('Helvetica').text(s.resultsTable.rankingNote, 40, rowY, { width: PAGE_WIDTH });
+    doc.fillColor(INK_FAINT).font(FONTS.sansRegular).fontSize(7.5).text(s.resultsTable.rankingNote, X, rowY, { width: PAGE_WIDTH });
     rowY += 14;
   }
 
-  ensureMarksSpace(32);
-  rowY += 4;
-  doc.rect(40, rowY, PAGE_WIDTH, 28).fill('#eff6ff').stroke(BORDER);
-  doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text(s.summary.totalText, 50, rowY + 5);
-  if (s.summary.showAverage) doc.text(s.summary.averageText, 160, rowY + 5);
-  if (s.summary.showGPA)     doc.text(s.summary.gpaText, 265, rowY + 5);
-  if (s.summary.showRanking) doc.fillColor(ACCENT).text(s.summary.rankText, 355, rowY + 5);
-  rowY += 32;
+  // RCE8 — from here on, nothing is a marks row, so a page added
+  // mid-closing-section must not repeat the CA/HW/MT/ET column-header
+  // strip (same fix as subject_paired — there's no table to label).
+  function drawBareContinuationHeader() {
+    doc.fillColor(INK_FAINT).font(FONTS.sansRegular).fontSize(8)
+       .text(`${s.studentInfo.studentName}  ·  ${s.studentInfo.className}  ·  ${s.studentInfo.termLine}`, X, 40, { width: PAGE_WIDTH });
+    doc.lineWidth(0.75).moveTo(X, 54).lineTo(X + PAGE_WIDTH, 54).stroke(RULE_SOFT);
+    return 64;
+  }
+  function ensureSpaceAfterResults(h) {
+    if (rowY + h > BOTTOM) { doc.addPage(); rowY = drawBareContinuationHeader(); }
+  }
+
+  /* OVERALL PERFORMANCE + GRADING KEY — one atomic block, same as
+     subject_paired (reviewer: never split across a page boundary). */
+  rowY += 6;
+  ensureSpaceAfterResults(_measureOverallPerformancePdf(doc, s, PAGE_WIDTH));
+  rowY = _drawOverallPerformancePdf(doc, s, X, PAGE_WIDTH, rowY);
 
   if (s.attendance) {
-    ensureMarksSpace(30);
-    doc.rect(40, rowY, PAGE_WIDTH, 26).fill(LIGHT_GRAY).stroke(BORDER);
-    doc.fillColor(GRAY).fontSize(8).font('Helvetica').text('ATTENDANCE', 50, rowY + 4);
-    doc.fillColor(DARK).fontSize(9).font('Helvetica').text(s.attendance.text, 50, rowY + 14, { width: PAGE_WIDTH - 20 });
+    ensureSpaceAfterResults(30);
+    doc.rect(X, rowY, PAGE_WIDTH, 26).fill(SURFACE).stroke(RULE);
+    doc.fillColor(INK_SOFT).font(FONTS.sansSemibold).fontSize(8).text('ATTENDANCE', X + 10, rowY + 4);
+    doc.fillColor(INK).font(FONTS.sansRegular).fontSize(9).text(s.attendance.text, X + 10, rowY + 14, { width: PAGE_WIDTH - 20 });
     rowY += 30;
   }
 
-  if (s.gradingKey.length) {
-    ensureMarksSpace(16 + s.gradingKey.length * 14);
-    doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text('GRADING KEY', 40, rowY);
-    rowY += 14;
-    s.gradingKey.forEach(b => {
-      doc.fillColor(GRAY).fontSize(8).font('Helvetica')
-         .text(`${b.grade}   ${b.range}   ${b.points}pts   ${b.label}`, 40, rowY, { width: PAGE_WIDTH });
-      rowY += 13;
-    });
-  }
-
-  /* ── COMMENTS PAGE — every subject's teacher comment together, then
-     remarks/behaviour/signatures. Comments are prefixed "{Subject} —
+  /* ── COMMENTS PAGE — every subject's teacher comment together
+     (flows naturally; never one subject per page), then observations
+     and the two sign-offs. Comments are prefixed "{Subject} —
      {Teacher}:" since they're no longer sitting directly under that
-     subject's own marks row (subject_paired's row context is gone here,
-     so the subject name has to be restated). ── */
+     subject's own marks row (subject_paired's row context is gone
+     here, so the subject name has to be restated). ── */
   doc.addPage();
-  rowY = drawTitleHeader('TEACHER COMMENTS');
+  rowY = drawTitleHeader('SUBJECT TEACHER COMMENTS');
   function ensureCommentsSpace(h) {
-    if (rowY + h > BOTTOM) { doc.addPage(); rowY = drawTitleHeader('TEACHER COMMENTS (cont.)'); }
+    if (rowY + h > BOTTOM) { doc.addPage(); rowY = drawTitleHeader('SUBJECT TEACHER COMMENTS (cont.)'); }
   }
 
   if (s.comments.subjectTeacherCommentsEnabled) {
     if (s.comments.subjectComments.length === 0) {
-      doc.fillColor(GRAY).fontSize(9).font('Helvetica-Oblique').text('No subjects on this report.', 40, rowY);
+      doc.fillColor(INK_FAINT).font(FONTS.sansItalic).fontSize(9).text('No subjects on this report.', X, rowY);
       rowY += 16;
     }
     s.comments.subjectComments.forEach(c => {
       const label = c.teacherName ? `${c.subjectName} — ${c.teacherName}:` : `${c.subjectName} — Subject Teacher:`;
+      const commentText = c.text || '';
       const blocks = [
-        { text: label, font: 'Helvetica-Bold', fontSize: 8, color: DARK, gapAfter: 2 },
-        { text: c.text || '— No comment entered —', font: 'Helvetica', fontSize: 8.5, color: GRAY },
+        { text: label, font: FONTS.sansBold, fontSize: 8.5, color: INK, gapAfter: 2 },
+        { text: commentText || '— No comment entered —', font: FONTS.sansRegular, fontSize: 8.5, color: commentText ? INK_SOFT : INK_FAINT },
       ];
       const h = _measureFlowBox(doc, PAGE_WIDTH, blocks);
       ensureCommentsSpace(h + 6);
-      _drawFlowBox(doc, 40, rowY, PAGE_WIDTH, blocks);
+      _drawFlowBox(doc, X, rowY, PAGE_WIDTH, blocks);
       rowY += h + 6;
     });
   }
 
-  /* REMARKS — RC8 chain if configured, else classic class-teacher/
-     principal boxes, each independently gated by RCE1's toggles. */
+  /* CLASS TEACHER OBSERVATIONS — pills, atomic. */
+  const obsH = _measureObservationRatingsPdf(s);
+  if (obsH) {
+    ensureCommentsSpace(obsH);
+    rowY = _drawObservationRatingsPdf(doc, s, X, PAGE_WIDTH, rowY) + 10;
+  }
+
+  if (s.behaviour) {
+    ensureCommentsSpace(60);
+    doc.fillColor(INK_SOFT).font(FONTS.sansSemibold).fontSize(9).text('BEHAVIOUR', X, rowY);
+    rowY += 14;
+    const tiles = [
+      { label: 'Merits', value: s.behaviour.merits, color: PASS_GREEN },
+      { label: 'Demerits', value: s.behaviour.demerits, color: FAIL_RED },
+      { label: 'Net Points', value: s.behaviour.points, color: s.behaviour.points >= 0 ? PASS_GREEN : FAIL_RED },
+      { label: 'Total', value: s.behaviour.total, color: INK_SOFT },
+    ];
+    const tileW = (PAGE_WIDTH - 30) / 4;
+    tiles.forEach((t, i) => {
+      const tx = X + i * (tileW + 10);
+      doc.rect(tx, rowY, tileW, 34).stroke(RULE);
+      doc.fillColor(INK_FAINT).font(FONTS.sansRegular).fontSize(6.5).text(t.label.toUpperCase(), tx + 6, rowY + 5, { width: tileW - 12, align: 'center' });
+      doc.fillColor(t.color).font(FONTS.serifBold).fontSize(14).text(String(t.value), tx, rowY + 15, { width: tileW, align: 'center' });
+    });
+    rowY += 44 + 10;
+  }
+
+  /* SIGN-OFFS — RC8 chain if configured, else the Class Teacher's
+     General Comment and the Principal's Comment as their own atomic
+     sign-off blocks, same as subject_paired. */
   if (s.comments.reportRemarks.length > 0) {
     s.comments.reportRemarks.forEach(r => {
-      const blocks = [{ text: r.text, font: 'Helvetica', fontSize: 9, color: DARK }];
+      const blocks = [{ text: r.text, font: FONTS.sansRegular, fontSize: 9, color: INK }];
       const h = _measureFlowBox(doc, PAGE_WIDTH, blocks);
       ensureCommentsSpace(12 + h + 6);
-      doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text(r.label.toUpperCase() + ':', 40, rowY);
+      doc.fillColor(INK_SOFT).font(FONTS.sansSemibold).fontSize(9).text(r.label.toUpperCase() + ':', X, rowY);
       rowY += 12;
-      _drawFlowBox(doc, 40, rowY, PAGE_WIDTH, blocks);
+      _drawFlowBox(doc, X, rowY, PAGE_WIDTH, blocks);
       rowY += h + 6;
     });
   } else {
     if (s.comments.showClassTeacherRemark) {
-      const blocks = [{ text: s.comments.classTeacherRemark, font: 'Helvetica', fontSize: 9, color: DARK }];
-      const h = _measureFlowBox(doc, PAGE_WIDTH, blocks);
-      ensureCommentsSpace(12 + h + 6);
-      doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text(`${s.signatures.classTeacherLabel.toUpperCase()}'S REMARK:`, 40, rowY);
-      rowY += 12;
-      _drawFlowBox(doc, 40, rowY, PAGE_WIDTH, blocks);
-      rowY += h + 6;
+      ensureCommentsSpace(_measureSignOffPdf(doc, PAGE_WIDTH, s.comments.classTeacherRemark));
+      rowY = _drawSignOffPdf(doc, X, rowY, PAGE_WIDTH, {
+        roleLabel: s.signatures.classTeacherLabel, personName: s.cover.classTeacherName,
+        remarkText: s.comments.classTeacherRemark, signatureImg: null, stampImg: null,
+        signDate: s.footer.signDate,
+      }) + 10;
     }
     if (s.comments.showPrincipalRemark) {
-      const blocks = [{ text: s.comments.principalRemark, font: 'Helvetica', fontSize: 9, color: DARK }];
-      const h = _measureFlowBox(doc, PAGE_WIDTH, blocks);
-      ensureCommentsSpace(12 + h + 6);
-      doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text(`${s.signatures.principalLabel.toUpperCase()}'S COMMENT:`, 40, rowY);
-      rowY += 12;
-      _drawFlowBox(doc, 40, rowY, PAGE_WIDTH, blocks);
-      rowY += h + 6;
+      ensureCommentsSpace(_measureSignOffPdf(doc, PAGE_WIDTH, s.comments.principalRemark));
+      rowY = _drawSignOffPdf(doc, X, rowY, PAGE_WIDTH, {
+        roleLabel: s.signatures.principalLabel, personName: s.cover.principalName,
+        remarkText: s.comments.principalRemark, signatureImg: images.principalSignature || null,
+        stampImg: images.schoolStamp || null, signDate: s.footer.signDate,
+      }) + 10;
     }
   }
 
-  /* CLASS TEACHER OBSERVATIONS (2026-09) — off unless the school has
-     turned it on and defined at least one category. */
-  if (s.comments.showObservationRatings && s.comments.observationRatings.length) {
-    const rowH = 16;
-    ensureCommentsSpace(20 + s.comments.observationRatings.length * rowH);
-    doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text('CLASS TEACHER OBSERVATIONS', 40, rowY);
-    rowY += 14;
-    const catW = PAGE_WIDTH * 0.4;
-    const colW = (PAGE_WIDTH - catW) / 3;
-    ['Excellent', 'Good', 'Improve'].forEach((label, i) => {
-      doc.fillColor(GRAY).fontSize(7).font('Helvetica-Bold').text(label.toUpperCase(), 40 + catW + i * colW, rowY, { width: colW, align: 'center' });
-    });
-    rowY += 12;
-    s.comments.observationRatings.forEach(({ category, rating }) => {
-      doc.rect(40, rowY, PAGE_WIDTH, rowH).stroke(BORDER);
-      doc.fillColor(DARK).fontSize(8).font('Helvetica').text(category, 44, rowY + 4, { width: catW - 8 });
-      ['excellent', 'good', 'improve'].forEach((v, i) => {
-        if (rating === v) {
-          doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text('X', 40 + catW + i * colW, rowY + 4, { width: colW, align: 'center' });
-        }
-      });
-      rowY += rowH;
-    });
-    rowY += 6;
-  }
-
-  /* BEHAVIOUR */
-  if (s.behaviour) {
-    ensureCommentsSpace(60);
-    doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text('BEHAVIOUR', 40, rowY);
-    rowY += 14;
-    const tiles = [
-      { label: 'Merits', value: s.behaviour.merits, color: '#16a34a' },
-      { label: 'Demerits', value: s.behaviour.demerits, color: '#dc2626' },
-      { label: 'Net Points', value: s.behaviour.points, color: s.behaviour.points >= 0 ? '#16a34a' : '#dc2626' },
-      { label: 'Total', value: s.behaviour.total, color: GRAY },
-    ];
-    const tileW = (PAGE_WIDTH - 30) / 4;
-    tiles.forEach((t, i) => {
-      const tx = 40 + i * (tileW + 10);
-      doc.rect(tx, rowY, tileW, 34).stroke(BORDER);
-      doc.fillColor(GRAY).fontSize(6.5).font('Helvetica').text(t.label.toUpperCase(), tx + 6, rowY + 5, { width: tileW - 12, align: 'center' });
-      doc.fillColor(t.color).fontSize(14).font('Helvetica-Bold').text(String(t.value), tx, rowY + 15, { width: tileW, align: 'center' });
-    });
-    rowY += 44;
-  }
-
-  /* SIGNATURES */
-  ensureCommentsSpace(56);
-  const sigY = rowY + 6;
-  const sigW = (PAGE_WIDTH - 20) / 2;
-  if (images.principalSignature) {
-    try { doc.image(images.principalSignature, 40 + sigW + 10, sigY - 26, { height: 26, fit: [sigW - 10, 26] }); } catch (_) { /* non-fatal */ }
-  }
-  if (images.schoolStamp) {
-    try { doc.image(images.schoolStamp, 40 + PAGE_WIDTH - 56, sigY - 34, { height: 34, fit: [50, 34] }); } catch (_) { /* non-fatal */ }
-  }
-  doc.moveTo(40, sigY + 18).lineTo(40 + sigW - 10, sigY + 18).stroke(DARK);
-  doc.moveTo(40 + sigW + 10, sigY + 18).lineTo(40 + PAGE_WIDTH, sigY + 18).stroke(DARK);
-  doc.fillColor(GRAY).fontSize(8).font('Helvetica')
-     .text(s.signatures.classTeacherLabel, 40, sigY + 22, { width: sigW })
-     .text(s.signatures.principalLabel, 40 + sigW + 10, sigY + 22, { width: sigW });
-
-  /* FOOTER */
-  const footerY = doc.page.height - 40;
-  doc.fillColor(GRAY).fontSize(7).font('Helvetica')
-     .text(s.footer.footerNote, 40, footerY, { width: PAGE_WIDTH, align: 'center' });
+  /* FOOTER — RCE8: see subject_paired's identical fix for why this is
+     -56, not the bottom margin itself (-40). */
+  const footerY = doc.page.height - 56;
+  doc.fillColor(INK_FAINT).font(FONTS.sansRegular).fontSize(7.5)
+     .text(s.footer.footerNote, X, footerY, { width: PAGE_WIDTH, align: 'center' });
   if (s.footer.reportId) {
-    doc.fillColor(GRAY).fontSize(6.5).font('Helvetica')
-       .text(`Report ID: ${s.footer.reportId}  |  ${s.footer.genLine}`, 40, footerY + 12, { width: PAGE_WIDTH, align: 'center' });
+    doc.fillColor(INK_FAINT).font(FONTS.monoRegular).fontSize(6.5)
+       .text(`Report ID: ${s.footer.reportId}  |  ${s.footer.genLine}`, X, footerY + 12, { width: PAGE_WIDTH, align: 'center' });
   }
 }
 

@@ -1,0 +1,14 @@
+These fonts are embedded in Msingi report-card PDFs under the SIL Open
+Font License, Version 1.1 (https://scripts.sil.org/OFL) — free to embed,
+modify, and redistribute. Full license text: https://openfontlicense.org
+
+  Lora          — Copyright 2011 The Lora Project Authors
+                  (https://github.com/cyrealtype/Lora-Cyrillic), with
+                  Reserved Font Name "Lora".
+  Work Sans     — Copyright 2019 The Work Sans Project Authors
+                  (https://github.com/weiweihuanghuang/Work-Sans).
+  IBM Plex Mono — Copyright 2017 IBM Corp., with Reserved Font Name "Plex".
+
+Each file here is a static TTF re-exported (decompressed, unmodified
+outlines/metrics) from the corresponding @fontsource npm package, itself
+built from Google Fonts' published WOFF2 releases.

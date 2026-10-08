@@ -1227,6 +1227,9 @@ router.get('/bulk-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), s
       school: bulkSchool, subjectTeacherNames: bulkSubjectTeacherNames,
       subjectTeacherCommentsEnabled: bulkCaConfig.subjectTeacherCommentsEnabled !== false,
     };
+    // RCE8 — same real-logo-or-fallback behavior as the single-PDF route,
+    // fetched once for the whole batch (same school for every student).
+    bulkImages.schoolLogo = await _fetchImageBuf(bulkSchool?.logoUrl).catch(() => null);
 
     // Start streaming response now — headers sent before cursor begins
     res.setHeader('Content-Type', 'application/pdf');
@@ -1710,6 +1713,15 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
       gpaText:     `GPA: ${snap.gpa?.toFixed(2) ?? '—'}`,
       showRanking,
       rankText:    showRanking ? `Class Rank: ${snap.rankings.class.rank} / ${snap.rankings.class.outOf}` : null,
+      // RCE8 — raw values + the already-computed overall grade (same
+      // resolveGrade() lookup the cover's "Mean Mark" row has used all
+      // along — exposed here too, not re-derived, so a renderer can build
+      // a single "69.6% · B+" headline instead of re-parsing totalText).
+      totalScore:   snap.totalScore ?? null,
+      averageScore: snap.averageScore ?? null,
+      subjectCount: Object.keys(snap.subjects || {}).length,
+      meanGrade:      meanGrade?.grade ?? null,
+      meanGradeLabel: meanGrade?.descriptor ?? null,
     },
     attendance: showAttendance ? {
       text: `Present: ${attendance.daysPresent}   Absent: ${attendance.daysAbsent}   Total Days: ${attendance.totalSchoolDays}` +
@@ -2024,6 +2036,10 @@ router.get('/:id/pdf', authMiddleware, PLAN, MODGATE, _pdfAccess, scopeMiddlewar
 
     const pdfImages = await _fetchSignatureImages(snap);
     pdfImages.studentPhoto = await _fetchImageBuf(snap.studentPhotoUrl).catch(() => null);
+    // RCE8 — the school's real logo, drawn by _drawCoverPdf when present;
+    // falls back to the same letter-avatar the HTML renderer already used
+    // when a school hasn't uploaded one.
+    pdfImages.schoolLogo = await _fetchImageBuf(extra.school?.logoUrl).catch(() => null);
     _buildPDFPage(doc, snap, config, attData, true, pdfImages, extra);
     doc.end();
   } catch (err) { console.error('[report-cards/:id/pdf]', err); return E.serverError(res); }
