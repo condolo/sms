@@ -33,25 +33,35 @@ function _esc(str) {
    toggle. Empty string when the school hasn't turned this on, or has
    turned it on but defined zero categories — same "zero trace when
    disabled" rule subjectTeacherCommentsEnabled already follows. */
+// Redesigned per a shared reference layout: a grid of per-category cards
+// (dark header bar + an Excellent/Good/Improve checkbox row each) instead
+// of one long Category-vs-rating table — reported directly ("Class
+// teacher observation, see the design"). 3 cards per row, wrapping to
+// as many rows as the school has categories (2 rows of 3 for the
+// 6-category default). Uses the report's own existing dark navy accent
+// (already used for every other section header in this file) rather than
+// introducing a new, inconsistent colour just for this one grid.
 function _observationRatingsHtml(s) {
   if (!s.comments.showObservationRatings || !s.comments.observationRatings.length) return '';
-  const RATING_LABELS = { excellent: 'Excellent', good: 'Good', improve: 'Improve' };
+  const LEVELS = [['excellent', 'Excellent'], ['good', 'Good'], ['improve', 'Improve']];
+  const cards = s.comments.observationRatings.map(({ category, rating }) => `
+    <div style="border:1px solid #cbd5e1;border-radius:6px;overflow:hidden">
+      <div style="background:#1e293b;color:#fff;text-align:center;font-weight:700;font-size:10px;letter-spacing:.6px;padding:6px 4px;text-transform:uppercase">${_esc(category)}</div>
+      <table style="width:100%;border-collapse:collapse;table-layout:fixed">
+        <tr>${LEVELS.map(([, label], i) => `
+          <td style="text-align:center;font-size:8px;font-weight:700;letter-spacing:.3px;color:#475569;padding:5px 2px;${i < 2 ? 'border-right:1px solid #e2e8f0;' : ''}">${label.toUpperCase()}</td>`).join('')}
+        </tr>
+        <tr>${LEVELS.map(([v], i) => `
+          <td style="text-align:center;padding:7px 2px;border-top:1px solid #e2e8f0;${i < 2 ? 'border-right:1px solid #e2e8f0;' : ''}">
+            <span style="display:inline-block;width:12px;height:12px;border:1.5px solid #475569;border-radius:2px;${rating === v ? 'background:#1e293b' : ''}"></span>
+          </td>`).join('')}
+        </tr>
+      </table>
+    </div>`).join('');
   return `
   <div style="margin:16px 0">
-    <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 6px">Class Teacher Observations</p>
-    <table style="width:100%;border-collapse:collapse;font-size:10px">
-      <thead><tr>
-        <th style="border:1px solid #e2e8f0;padding:5px 8px;text-align:left;background:#f8fafc">Category</th>
-        ${['excellent', 'good', 'improve'].map(v => `<th style="border:1px solid #e2e8f0;padding:5px 8px;background:#f8fafc">${RATING_LABELS[v]}</th>`).join('')}
-      </tr></thead>
-      <tbody>
-        ${s.comments.observationRatings.map(({ category, rating }) => `
-        <tr>
-          <td style="border:1px solid #e2e8f0;padding:5px 8px">${_esc(category)}</td>
-          ${['excellent', 'good', 'improve'].map(v => `<td style="border:1px solid #e2e8f0;padding:5px 8px;text-align:center">${rating === v ? '&#10003;' : ''}</td>`).join('')}
-        </tr>`).join('')}
-      </tbody>
-    </table>
+    <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 8px">Class Teacher Observations</p>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">${cards}</div>
   </div>`;
 }
 
@@ -71,6 +81,61 @@ function _principalSignatureImgHtml(s) {
 function _schoolStampImgHtml(s) {
   if (!s.signatures.schoolStampUrl) return '';
   return `<img src="${_esc(s.signatures.schoolStampUrl)}" alt="" style="position:absolute;top:0;right:0;height:52px;width:52px;object-fit:contain;opacity:0.85" />`;
+}
+
+// Reported directly: "I need... the footer see" (a reference design's
+// prominent term-dates bar). closingDate/nextTermBegin already existed
+// in the IR and in the Comments tab a school fills in, but were only
+// ever rendered by legacy_tabular — subject_paired and marks_then_comments
+// silently dropped them. One shared helper now, used by all three, so
+// they can't drift apart again (same convention as _observationRatingsHtml).
+function _termDatesFooterHtml(s) {
+  if (!s.comments.closingDate && !s.comments.nextTermBegin) return '';
+  const term = s.cover?.termNumber != null ? `Term ${_esc(s.cover.termNumber)}` : 'Term';
+  return `
+  <div style="display:grid;grid-template-columns:1fr 1fr;background:#e2e8f0;border-radius:4px;overflow:hidden;margin:16px 0 0;font-size:10px;font-weight:600;color:#334155">
+    <div style="padding:8px 14px;border-right:1px solid #cbd5e1">${term} Ended on: ${s.comments.closingDate ? _esc(s.comments.closingDate) : '—'}</div>
+    <div style="padding:8px 14px;text-align:right">Next Term begins on: ${s.comments.nextTermBegin ? _esc(s.comments.nextTermBegin) : '—'}</div>
+  </div>`;
+}
+
+// Sports & Talent — same "previously legacy_tabular-only" gap as the
+// dates above, split out as its own small field now that the dates have
+// their own prominent bar instead of sharing a 3-column grid with it.
+function _sportsAndTalentHtml(s) {
+  if (!s.comments.sportsAndTalent) return '';
+  return `
+  <div style="margin:16px 0 0">
+    <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">Sports &amp; Talent</p>
+    <p style="margin:0;padding:6px 10px;border:1px solid #e2e8f0;border-radius:4px;font-size:11px">${_esc(s.comments.sportsAndTalent)}</p>
+  </div>`;
+}
+
+// One signer's full block — banner header, remark text, then a proper
+// sign-off row (signature image above the line, name below it, role/
+// title below the name, a "Date:" alongside) — redesigned per a shared
+// reference layout (reported directly: the old layout put the name
+// ABOVE the comment box and just a bare label under the line, with no
+// date at all). Used for both Class Teacher and Principal — stampUrl is
+// only ever passed for the Principal's block (there's no "class teacher
+// stamp" concept), matching every prior fix's "only Principal/stamp" posture.
+function _remarkSignOffHtml({ roleLabel, personName, remarkText, signatureUrl, stampUrl, signDate }) {
+  return `
+    <div style="position:relative">
+      ${stampUrl ? `<img src="${_esc(stampUrl)}" alt="" style="position:absolute;top:28px;right:0;height:50px;width:50px;object-fit:contain;opacity:0.85" />` : ''}
+      <div style="background:#1e293b;color:#fff;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;text-align:center;padding:7px;border-radius:4px 4px 0 0">${_esc(roleLabel)}'s General Comment</div>
+      <div style="border:1px solid #e2e8f0;border-top:none;border-radius:0 0 4px 4px;padding:10px 12px;min-height:66px;font-size:11px;color:#475569">${_esc(remarkText)}</div>
+      <div style="margin-top:18px;display:flex;align-items:flex-end;justify-content:space-between;gap:16px">
+        <div>
+          ${signatureUrl ? `<img src="${_esc(signatureUrl)}" alt="" style="height:32px;max-width:160px;object-fit:contain;display:block;margin-bottom:4px" />` : '<div style="height:32px"></div>'}
+          <div style="border-top:1px solid #1e293b;width:170px;padding-top:4px">
+            <p style="margin:0;font-size:11px;color:#1e293b">${_esc(personName) || '—'}</p>
+            <p style="margin:0;font-size:10px;font-weight:700;color:#475569">${_esc(roleLabel)}</p>
+          </div>
+        </div>
+        ${signDate ? `<p style="margin:0 0 4px;font-size:10px;color:#475569;white-space:nowrap">Date: ${_esc(signDate)}</p>` : ''}
+      </div>
+    </div>`;
 }
 
 /* PDF renderer — walks the IR and makes the pdfkit calls. Every
@@ -337,12 +402,15 @@ function _renderLegacyTabularHtml(s) {
   // little content it holds. 260mm leaves real headroom under the 267mm
   // ceiling for borders/line-height rounding, still comfortably fills a
   // single page.
+  // Header redesigned per a shared reference layout (logo left, school
+  // name/address/phone+email stacked right) — previously this cover
+  // didn't show the school's contact details at all, only name+tagline;
+  // _schoolHeaderHtml is the same helper _renderCoverHtml uses, so this
+  // layout and the other two can't drift apart on it again.
   const coverHtml = `
 <div style="min-height:260mm;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:32px;text-align:center">
-  ${logoHtml}
+  ${_schoolHeaderHtml(s.cover, logoHtml)}
   <div>
-    <h1 style="font-size:26px;font-weight:900;margin:0 0 4px;color:#0f172a">${_esc(s.header.schoolName)}</h1>
-    ${s.cover.tagline ? `<p style="font-size:13px;font-style:italic;color:#64748b;margin:0 0 16px">${_esc(s.cover.tagline)}</p>` : '<div style="margin-bottom:16px"></div>'}
     <div style="display:inline-block;background:#1e293b;color:#fff;padding:10px 32px;border-radius:6px;font-size:15px;font-weight:700;letter-spacing:1.5px">
       ${_esc(s.cover.subtitle)}
     </div>
@@ -440,24 +508,15 @@ function _renderLegacyTabularHtml(s) {
     </div>`).join('')}
   </div>` : `
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
-    ${s.comments.showClassTeacherRemark ? `
-    <div>
-      <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">
-        ${_esc(s.signatures.classTeacherLabel)}: <span style="font-style:italic;font-weight:normal">${_esc(s.comments.classTeacherName) || '___________________'}</span>
-      </p>
-      <div style="border:1px solid #e2e8f0;border-radius:4px;padding:8px 12px;min-height:70px;font-size:11px;color:#475569">${_esc(s.comments.classTeacherRemark)}</div>
-      <div style="margin-top:24px;border-top:1px solid #1e293b;width:180px;padding-top:4px;font-size:10px;color:#475569">${_esc(s.signatures.classTeacherLabel)} Signature</div>
-    </div>` : ''}
-    ${s.comments.showPrincipalRemark ? `
-    <div style="position:relative">
-      ${_schoolStampImgHtml(s)}
-      <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">
-        ${_esc(s.signatures.principalLabel)}: <span style="font-style:italic;font-weight:normal">${_esc(s.comments.principalName) || '___________________'}</span>
-      </p>
-      <div style="border:1px solid #e2e8f0;border-radius:4px;padding:8px 12px;min-height:70px;font-size:11px;color:#475569">${_esc(s.comments.principalRemark)}</div>
-      ${_principalSignatureImgHtml(s)}
-      <div style="margin-top:${s.signatures.principalSignatureUrl ? '2px' : '24px'};border-top:1px solid #1e293b;width:180px;padding-top:4px;font-size:10px;color:#475569">${_esc(s.signatures.principalLabel)} Signature</div>
-    </div>` : ''}
+    ${s.comments.showClassTeacherRemark ? _remarkSignOffHtml({
+      roleLabel: s.signatures.classTeacherLabel, personName: s.comments.classTeacherName,
+      remarkText: s.comments.classTeacherRemark, signDate: s.footer.signDate,
+    }) : ''}
+    ${s.comments.showPrincipalRemark ? _remarkSignOffHtml({
+      roleLabel: s.signatures.principalLabel, personName: s.comments.principalName,
+      remarkText: s.comments.principalRemark, signatureUrl: s.signatures.principalSignatureUrl,
+      stampUrl: s.signatures.schoolStampUrl, signDate: s.footer.signDate,
+    }) : ''}
   </div>`;
 
   const commentsHtml = `
@@ -472,20 +531,8 @@ function _renderLegacyTabularHtml(s) {
   ${_observationRatingsHtml(s)}
   ${subjectCommentsSectionHtml}
   ${reportRemarksSectionHtml}
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;border-top:1px solid #e2e8f0;padding-top:12px">
-    <div>
-      <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">Sports &amp; Talent</p>
-      <p style="margin:0;padding:6px 10px;border:1px solid #e2e8f0;border-radius:4px;min-height:28px;font-size:11px">${_esc(s.comments.sportsAndTalent)}</p>
-    </div>
-    <div>
-      <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">Closing Date</p>
-      <p style="margin:0;padding:6px 10px;border:1px solid #e2e8f0;border-radius:4px;min-height:28px;font-size:11px">${_esc(s.comments.closingDate)}</p>
-    </div>
-    <div>
-      <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">Next Term Begins</p>
-      <p style="margin:0;padding:6px 10px;border:1px solid #e2e8f0;border-radius:4px;min-height:28px;font-size:11px">${_esc(s.comments.nextTermBegin)}</p>
-    </div>
-  </div>
+  ${_sportsAndTalentHtml(s)}
+  ${_termDatesFooterHtml(s)}
 </div>`;
 
   // beh is already null when showBehaviourSection is off OR there's
@@ -550,9 +597,33 @@ function _schoolContactLine(cover) {
   return [cover.schoolAddress, cover.schoolPhone, cover.schoolEmail, cover.schoolWebsite].filter(Boolean).join('  •  ');
 }
 
+// Cover-page identity header — redesigned per a shared reference layout:
+// logo on the left, school name/address/phone+email stacked on the right
+// (left-aligned), instead of everything centered in one column. The data
+// itself already existed (schoolAddress/schoolPhone/schoolEmail —
+// school profile fields, set in Settings — reported directly: "the
+// header info of cover page are found in schools settings"); this is a
+// layout change, not a new data source. Shared between legacy_tabular's
+// own inline cover and the subject_paired/marks_then_comments cover so
+// the two can't drift apart.
+function _schoolHeaderHtml(cover, logoHtml) {
+  const addressLine = cover.schoolAddress || '';
+  const contactSubLine = [cover.schoolPhone, cover.schoolEmail].filter(Boolean).join('   ');
+  return `
+  <div style="display:flex;align-items:center;gap:18px;text-align:left">
+    ${logoHtml}
+    <div>
+      <h1 style="font-size:20px;font-weight:800;margin:0 0 4px;color:#0f172a">${_esc(cover.schoolName)}</h1>
+      ${cover.tagline ? `<p style="font-size:11px;font-style:italic;color:#64748b;margin:0 0 4px">${_esc(cover.tagline)}</p>` : ''}
+      ${addressLine ? `<p style="font-size:10px;color:#475569;margin:0 0 2px">${_esc(addressLine)}</p>` : ''}
+      ${contactSubLine ? `<p style="font-size:10px;color:#475569;margin:0">${_esc(contactSubLine)}</p>` : ''}
+      ${cover.schoolWebsite ? `<p style="font-size:10px;color:#475569;margin:0">${_esc(cover.schoolWebsite)}</p>` : ''}
+    </div>
+  </div>`;
+}
+
 function _renderCoverHtml(s) {
   const cover = s.cover;
-  const contactLine = _schoolContactLine(cover);
   const logoHtml = cover.logoUrl
     ? `<img src="${_esc(cover.logoUrl)}" style="height:100px;width:100px;object-fit:contain;border-radius:8px" />`
     : `<div style="width:100px;height:100px;background:#e2e8f0;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:38px;font-weight:bold;color:#94a3b8">${_esc((cover.schoolName?.[0] ?? 'S').toUpperCase())}</div>`;
@@ -573,13 +644,12 @@ function _renderCoverHtml(s) {
   // reasoning on both (redundant text line; 277mm exceeds the 267mm
   // actually printable on an A4 page under this file's own @page{margin:
   // 1.5cm} rule, guaranteeing a near-blank second page on every print).
+  // Header redesigned per a shared reference layout — see
+  // _schoolHeaderHtml's own comment.
   return `
 <div style="min-height:260mm;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;text-align:center">
-  ${logoHtml}
+  ${_schoolHeaderHtml(cover, logoHtml)}
   <div>
-    <h1 style="font-size:24px;font-weight:900;margin:0 0 4px;color:#0f172a">${_esc(cover.schoolName)}</h1>
-    ${cover.tagline ? `<p style="font-size:12px;font-style:italic;color:#64748b;margin:0 0 6px">${_esc(cover.tagline)}</p>` : ''}
-    ${contactLine ? `<p style="font-size:10px;color:#94a3b8;margin:0 0 14px">${_esc(contactLine)}</p>` : '<div style="margin-bottom:14px"></div>'}
     <div style="display:inline-block;background:#1e293b;color:#fff;padding:8px 28px;border-radius:6px;font-size:14px;font-weight:700;letter-spacing:1.5px">
       ${_esc(cover.title)}
     </div>
@@ -1105,6 +1175,8 @@ function _renderSubjectPairedHtml(s) {
   ${_observationRatingsHtml(s)}
   ${behHtml}
   ${signaturesHtml}
+  ${_sportsAndTalentHtml(s)}
+  ${_termDatesFooterHtml(s)}
   <p style="text-align:center;font-size:9px;color:#94a3b8;margin-top:16px">${_esc(s.footer.footerNote)} — ${_esc(s.footer.genLine)}${s.footer.reportId ? ` — Report ID: ${_esc(s.footer.reportId)}` : ''}</p>
 </div>`;
 
@@ -1472,24 +1544,15 @@ function _renderMarksThenCommentsHtml(s) {
     </div>`).join('')}
   </div>` : `
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
-    ${s.comments.showClassTeacherRemark ? `
-    <div>
-      <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">
-        ${_esc(s.signatures.classTeacherLabel)}: <span style="font-style:italic;font-weight:normal">${_esc(s.comments.classTeacherName) || '___________________'}</span>
-      </p>
-      <div style="border:1px solid #e2e8f0;border-radius:4px;padding:8px 12px;min-height:70px;font-size:11px;color:#475569">${_esc(s.comments.classTeacherRemark)}</div>
-      <div style="margin-top:24px;border-top:1px solid #1e293b;width:180px;padding-top:4px;font-size:10px;color:#475569">${_esc(s.signatures.classTeacherLabel)} Signature</div>
-    </div>` : ''}
-    ${s.comments.showPrincipalRemark ? `
-    <div style="position:relative">
-      ${_schoolStampImgHtml(s)}
-      <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">
-        ${_esc(s.signatures.principalLabel)}: <span style="font-style:italic;font-weight:normal">${_esc(s.comments.principalName) || '___________________'}</span>
-      </p>
-      <div style="border:1px solid #e2e8f0;border-radius:4px;padding:8px 12px;min-height:70px;font-size:11px;color:#475569">${_esc(s.comments.principalRemark)}</div>
-      ${_principalSignatureImgHtml(s)}
-      <div style="margin-top:${s.signatures.principalSignatureUrl ? '2px' : '24px'};border-top:1px solid #1e293b;width:180px;padding-top:4px;font-size:10px;color:#475569">${_esc(s.signatures.principalLabel)} Signature</div>
-    </div>` : ''}
+    ${s.comments.showClassTeacherRemark ? _remarkSignOffHtml({
+      roleLabel: s.signatures.classTeacherLabel, personName: s.comments.classTeacherName,
+      remarkText: s.comments.classTeacherRemark, signDate: s.footer.signDate,
+    }) : ''}
+    ${s.comments.showPrincipalRemark ? _remarkSignOffHtml({
+      roleLabel: s.signatures.principalLabel, personName: s.comments.principalName,
+      remarkText: s.comments.principalRemark, signatureUrl: s.signatures.principalSignatureUrl,
+      stampUrl: s.signatures.schoolStampUrl, signDate: s.footer.signDate,
+    }) : ''}
   </div>`;
 
   const beh = s.behaviour;
@@ -1514,6 +1577,8 @@ function _renderMarksThenCommentsHtml(s) {
   ${subjectCommentsSectionHtml}
   ${remarksSectionHtml}
   ${behHtml}
+  ${_sportsAndTalentHtml(s)}
+  ${_termDatesFooterHtml(s)}
   <p style="text-align:center;font-size:9px;color:#94a3b8;margin-top:16px">${_esc(s.footer.footerNote)} — ${_esc(s.footer.genLine)}${s.footer.reportId ? ` — Report ID: ${_esc(s.footer.reportId)}` : ''}</p>
 </div>`;
 

@@ -205,6 +205,20 @@ function _formatInSchoolTz(date, timezone) {
   }
 }
 
+/* Date-only variant (DD/MM/YYYY) — same timezone-aware/fail-safe posture
+   as _formatInSchoolTz above, for the signature block's "Date:" line
+   (reported directly, alongside a reference design: a signature should
+   carry its own plain date, not a full generation timestamp). */
+function _formatDateInSchoolTz(date, timezone) {
+  try {
+    return new Intl.DateTimeFormat('en-GB', {
+      timeZone: timezone || 'UTC', day: '2-digit', month: '2-digit', year: 'numeric',
+    }).format(date);
+  } catch (_) {
+    return date.toISOString().slice(0, 10);
+  }
+}
+
 /* ── CA config loader (assessment_config + grade_boundaries) ── */
 /**
  * Load the school's assessment-type configuration and grading scale.
@@ -263,16 +277,37 @@ function _normalizeGradeScaleBands(bands) {
 }
 
 /**
- * RC5 — closes the draft-to-published comment carry-forward gap
- * (docs/audits/REPORT_CARD_COMMENT_LIFECYCLE_REVIEW.md, "Recommendation 1").
+ * RC5, extended — closes the draft-to-published comment carry-forward gap
+ * (docs/audits/REPORT_CARD_COMMENT_LIFECYCLE_REVIEW.md, "Recommendation 1"),
+ * now for a RE-publish too, not just the first one.
+ *
  * On a student's first-ever publish for a term, there is no `prev` snapshot
  * to carry `comments` forward from, so it used to start completely blank —
  * regardless of what a teacher had already typed into
- * `report_card_draft_comments`. When there's no `prev`, this seeds the new
- * snapshot's `comments` from that draft doc instead; a re-publish keeps
- * carrying `prev.comments` forward exactly as before (this fix does not
- * decide draft-vs-published precedence once a report has been published
- * once — that's the approval-workflow question, out of scope here).
+ * `report_card_draft_comments`. RC5 fixed that case. But a re-publish kept
+ * returning `prev.comments` VERBATIM, ignoring the draft entirely, forever —
+ * explicitly left that way as a deferred "approval-workflow question, out
+ * of scope" at the time. Reported directly since: "follow the root of
+ * comments, it's still not appearing... at least subject teacher is
+ * appearing" — once a report had been published even once (including an
+ * early test publish), every comment typed into the Comments tab
+ * afterward — subject comments, class teacher/principal remarks, Sports &
+ * Talent, closing date — was silently invisible on every later view,
+ * download, or re-publish of that student's report, no matter how many
+ * times "Publish" was clicked again, because none of that ever reaches
+ * `report_card_snapshots`.
+ *
+ * `report_card_draft_comments` is the continuously-edited source of truth
+ * regardless of publish status (the Comments tab writes there whether or
+ * not a report has ever been published) — there is no separate mechanism
+ * that edits an already-published snapshot's comments directly. So a
+ * re-publish now prefers the CURRENT draft for every field; `prev.comments`
+ * is only a fallback for a field the draft doc genuinely doesn't have
+ * (e.g. the draft row was deleted outright after a report was published),
+ * not a permanent freeze of whatever existed at the very first publish.
+ * This does not retroactively change any already-published snapshot —
+ * snapshots stay immutable; it only changes what the NEXT publish writes.
+ *
  * Carries every comment-shaped field the draft doc has, not just the three
  * `CommentSchema`/`PUT /:id/comments` already covers, since Sports &
  * Talent / Closing Date / Next Term / the two signer names are genuine
@@ -281,24 +316,24 @@ function _normalizeGradeScaleBands(bands) {
  * without exercising the transaction-wrapped full /publish route.
  */
 function _resolveSnapComments(prev, draft) {
-  if (prev?.comments) return prev.comments;
+  const base = prev?.comments || {};
   return {
-    subjectComments:    draft?.subjectComments    ?? {},
-    classTeacherRemark: draft?.classTeacherRemark  ?? '',
-    principalRemark:    draft?.principalRemark     ?? '',
-    sportsAndTalent:    draft?.sportsAndTalent     ?? '',
-    closingDate:        draft?.closingDate         ?? '',
-    nextTermBegin:      draft?.nextTermBegin       ?? '',
-    classTeacherName:   draft?.classTeacherName    ?? '',
-    principalName:      draft?.principalName       ?? '',
+    subjectComments:    draft?.subjectComments    ?? base.subjectComments    ?? {},
+    classTeacherRemark: draft?.classTeacherRemark  ?? base.classTeacherRemark ?? '',
+    principalRemark:    draft?.principalRemark     ?? base.principalRemark    ?? '',
+    sportsAndTalent:    draft?.sportsAndTalent     ?? base.sportsAndTalent    ?? '',
+    closingDate:        draft?.closingDate         ?? base.closingDate       ?? '',
+    nextTermBegin:      draft?.nextTermBegin       ?? base.nextTermBegin     ?? '',
+    classTeacherName:   draft?.classTeacherName    ?? base.classTeacherName  ?? '',
+    principalName:      draft?.principalName       ?? base.principalName    ?? '',
     // RC8 — populated only for schools using the report_comment_approval
     // chain (PATCH /draft-comments/:studentId/advance); empty for every
     // other school, same as subjectComments defaulting to {}.
-    reportRemarks:      draft?.reportRemarks       ?? [],
+    reportRemarks:      draft?.reportRemarks       ?? base.reportRemarks    ?? [],
     // Class-teacher observation ratings — { [category]: 'excellent'|'good'|'improve' }.
     // Empty for every school not using showObservationRatings, same posture
     // as every other field here.
-    observationRatings: draft?.observationRatings  ?? {},
+    observationRatings: draft?.observationRatings  ?? base.observationRatings ?? {},
   };
 }
 
@@ -1745,6 +1780,11 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
       footerNote: config.footerNote || 'This report card is computer-generated.',
       genLine:    `Generated: ${_formatInSchoolTz(new Date(), school?.timezone)}  |  v${snap.version || 1}  |  Batch: ${snap.batchId || '—'}`,
       reportId:   snap.reportId || null,
+      // The signature block's own "Date:" — a published report's real
+      // publish date (frozen, meaningful as "signed on"; doesn't drift
+      // every time the PDF is re-downloaded later), falling back to
+      // today for an unpublished draft preview, which has no publishedAt yet.
+      signDate: _formatDateInSchoolTz(snap.publishedAt ? new Date(snap.publishedAt) : new Date(), school?.timezone),
     },
     // ── RC3-only sections below — read only by _computeReportHTML,
     //    never by _drawReportPage (PDF stays pixel-for-pixel unchanged) ──

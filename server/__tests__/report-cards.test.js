@@ -453,7 +453,8 @@ describe('_normalizeGradeScaleBands', () => {
 });
 
 /* ─────────────────────────────────────────────────────────────── */
-/*  _resolveSnapComments (RC5 — draft-to-published carry-forward)  */
+/*  _resolveSnapComments (RC5 — draft-to-published carry-forward,       */
+/*  extended to a RE-publish too — see the function's own comment)      */
 /*                                                                  */
 /*  docs/audits/REPORT_CARD_COMMENT_LIFECYCLE_REVIEW.md's           */
 /*  "Recommendation 1": a first-ever publish (no `prev` snapshot)   */
@@ -462,16 +463,39 @@ describe('_normalizeGradeScaleBands', () => {
 /*  report_card_draft_comments. Tested directly (like               */
 /*  _hashSnapshot/_normalizeGradeScaleBands above) rather than       */
 /*  through the transaction-wrapped full /publish route.            */
+/*                                                                   */
+/*  Reported directly, later: "follow the root of comments, it's    */
+/*  still not appearing" — a re-publish used to return prev.comments */
+/*  VERBATIM forever, so anything typed into the Comments tab after  */
+/*  the FIRST publish (ever) never reached any later view/download/  */
+/*  re-publish of that report. A re-publish now prefers the CURRENT  */
+/*  draft, falling back to prev only for a field the draft doesn't   */
+/*  have at all.                                                     */
 /* ─────────────────────────────────────────────────────────────── */
 describe('_resolveSnapComments', () => {
   const resolve = reportCardsRouter._resolveSnapComments;
 
-  test('a re-publish (prev exists) carries prev.comments forward untouched, ignoring the draft', () => {
+  test('a re-publish (prev exists) now prefers the CURRENT draft, not prev.comments frozen at the first publish', () => {
     const prev = { comments: { subjectComments: { math: 'Great work' }, classTeacherRemark: 'Well done', principalRemark: '' } };
-    const draft = { subjectComments: { math: 'A DIFFERENT draft comment' }, sportsAndTalent: 'Captain of football' };
+    const draft = { subjectComments: { math: 'A newer draft comment' }, sportsAndTalent: 'Captain of football' };
     const out = resolve(prev, draft);
-    expect(out).toBe(prev.comments); // same reference — untouched
-    expect(out.subjectComments.math).toBe('Great work');
+    expect(out.subjectComments.math).toBe('A newer draft comment');
+    expect(out.sportsAndTalent).toBe('Captain of football');
+  });
+
+  test('a re-publish still falls back to prev.comments for a field the draft genuinely does not have (e.g. the draft row was deleted after publishing)', () => {
+    const prev = { comments: { classTeacherRemark: 'Well done', principalRemark: 'Keep it up.' } };
+    const draft = { classTeacherRemark: 'Updated remark' }; // no principalRemark key at all on the draft doc
+    const out = resolve(prev, draft);
+    expect(out.classTeacherRemark).toBe('Updated remark');
+    expect(out.principalRemark).toBe('Keep it up.');
+  });
+
+  test('a re-publish with NO draft doc at all (deleted outright) falls back entirely to prev.comments', () => {
+    const prev = { comments: { classTeacherRemark: 'Well done', subjectComments: { math: 'Great work' } } };
+    const out = resolve(prev, undefined);
+    expect(out.classTeacherRemark).toBe('Well done');
+    expect(out.subjectComments).toEqual({ math: 'Great work' });
   });
 
   test('a first-ever publish (no prev) seeds every field from the draft doc', () => {
@@ -819,7 +843,9 @@ describe('_computeReportSections / _computeReportHTML — RC8 report-level remar
     const html = reportCardsRouter._computeReportHTML(s);
     expect(html).toContain('Legacy remark');
     expect(html).toContain('Legacy principal remark');
-    expect(html).toContain('Class Teacher Signature');
+    // Signature block banner — unique to the fixed Class Teacher/Principal
+    // layout, never rendered by the dynamic reportRemarks chain below.
+    expect(html).toContain("Class Teacher's General Comment");
   });
 
   test('HTML adapter: chain configured renders the dynamic remark list, not the fixed layout', () => {

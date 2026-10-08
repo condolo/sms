@@ -183,6 +183,24 @@ describe('legacy_tabular.renderHtml — Observation Ratings now actually appear'
     expect(html).toContain('Confidence');
   });
 
+  // Reported directly: "Class teacher observation, see the design" — a
+  // grid of per-category cards (EXCELLENT/GOOD/IMPROVE checkboxes each),
+  // not the old one long category-vs-rating table.
+  test('renders as a 3-column card grid, with the selected rating\'s checkbox filled', () => {
+    const sections = computeSections(
+      { comments: { ...baseSnap().comments, observationRatings: { Teamwork: 'good' } } },
+      { showObservationRatings: true, observationCategories: ['Teamwork'] },
+    );
+    const html = LAYOUTS.legacy_tabular.renderHtml(sections);
+    expect(html).toContain('grid-template-columns:repeat(3,1fr)');
+    expect(html).toContain('EXCELLENT');
+    expect(html).toContain('GOOD');
+    expect(html).toContain('IMPROVE');
+    // Exactly one of the three checkbox spans for this category is filled.
+    const filled = (html.match(/background:#1e293b"><\/span>/g) || []).length;
+    expect(filled).toBe(1);
+  });
+
   // Raised directly: "should be grid view just before" — the grid used to
   // render after Subject Teacher Comments; moved ahead of it.
   test('the Observation Ratings grid is positioned before Subject Teacher Comments, not after', () => {
@@ -380,5 +398,74 @@ describe('footer timestamp — school-timezone-aware (reported: "configure the t
   test('an invalid/corrupt saved timezone string fails safe to UTC instead of throwing', () => {
     const sections = computeSections({}, {}, { school: { timezone: 'Not/ARealZone' } });
     expect(() => LAYOUTS.legacy_tabular.renderHtml(sections)).not.toThrow();
+  });
+});
+
+describe('sign-off block — redesigned per a shared reference layout', () => {
+  test('a banner header, the role/title below the name (not above), and a Date: line all appear', () => {
+    const html = LAYOUTS.legacy_tabular.renderHtml(computeSections());
+    expect(html).toContain("Class Teacher's General Comment");
+    expect(html).toContain("Principal's General Comment");
+    expect(html).toMatch(/Date: \d{2}\/\d{2}\/\d{4}/);
+  });
+
+  test('the term-dates footer bar renders when closing/next-term dates are set', () => {
+    const sections = computeSections({ comments: { ...baseSnap().comments, closingDate: '2026-11-28', nextTermBegin: '2027-01-12' } }, {}, {});
+    const html = LAYOUTS.legacy_tabular.renderHtml(sections);
+    expect(html).toContain('Ended on: 2026-11-28');
+    expect(html).toContain('Next Term begins on: 2027-01-12');
+  });
+
+  test('the term-dates footer bar is absent when neither date is set', () => {
+    const html = LAYOUTS.legacy_tabular.renderHtml(computeSections());
+    expect(html).not.toContain('begins on:');
+  });
+
+  test('Sports & Talent still renders as its own field when set', () => {
+    const sections = computeSections({ comments: { ...baseSnap().comments, sportsAndTalent: 'Captain of football' } }, {}, {});
+    const html = LAYOUTS.legacy_tabular.renderHtml(sections);
+    expect(html).toContain('Captain of football');
+  });
+});
+
+describe('subject_paired/marks_then_comments now also render Sports & Talent and the term-dates bar (previously legacy_tabular-only)', () => {
+  test('subject_paired', () => {
+    const sections = computeSections({ comments: { ...baseSnap().comments, sportsAndTalent: 'Chess club captain', closingDate: '2026-11-28', nextTermBegin: '2027-01-12' } }, {}, {});
+    const html = LAYOUTS.subject_paired.renderHtml(sections);
+    expect(html).toContain('Chess club captain');
+    expect(html).toContain('Ended on: 2026-11-28');
+    expect(html).toContain('Next Term begins on: 2027-01-12');
+  });
+
+  test('marks_then_comments', () => {
+    const sections = computeSections({ comments: { ...baseSnap().comments, sportsAndTalent: 'Chess club captain', closingDate: '2026-11-28', nextTermBegin: '2027-01-12' } }, {}, {});
+    const html = LAYOUTS.marks_then_comments.renderHtml(sections);
+    expect(html).toContain('Chess club captain');
+    expect(html).toContain('Ended on: 2026-11-28');
+    expect(html).toContain('Next Term begins on: 2027-01-12');
+  });
+});
+
+describe('cover header — redesigned per a shared reference layout (logo left, contact info stacked right)', () => {
+  function sectionsWithSchool(extraSchool) {
+    return computeSections({}, {}, { school: { logoUrl: null, tagline: 'Excellence in all we do', address: '123 Main St', phone: '0700 000000', email: 'info@school.ac.ke', website: 'www.school.ac.ke', ...extraSchool } });
+  }
+
+  test('legacy_tabular cover now shows address/phone/email — previously showed none at all', () => {
+    const html = LAYOUTS.legacy_tabular.renderHtml(sectionsWithSchool());
+    expect(html).toContain('123 Main St');
+    expect(html).toContain('0700 000000');
+    expect(html).toContain('info@school.ac.ke');
+  });
+
+  test('the shared cover (subject_paired/marks_then_comments) also shows them', () => {
+    const html = LAYOUTS.subject_paired.renderHtml(sectionsWithSchool());
+    expect(html).toContain('123 Main St');
+    expect(html).toContain('0700 000000');
+  });
+
+  test('no school contact info configured — blank, not an error', () => {
+    const html = LAYOUTS.legacy_tabular.renderHtml(computeSections());
+    expect(html).toContain('<!DOCTYPE html>');
   });
 });
