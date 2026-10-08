@@ -2021,6 +2021,12 @@ const PreviewHtmlSchema = z.object({
     firstName: z.string().optional(), lastName: z.string().optional(),
     admissionNumber: z.string().optional(), photo: z.string().nullable().optional(),
   }).optional(),
+  // Reported directly: "no subject teachers name" — this route never had
+  // a classId to resolve teaching_assignments with at all (only the
+  // display-name className string below), so subjectTeacherNames was
+  // always {} in a draft preview even when a published copy of the same
+  // report (which does this lookup in _loadRenderExtras) would show it.
+  classId: z.string().optional(),
   className: z.string().optional(),
   termNum: z.number().int().min(1).max(3).optional(),
   academicYear: z.string().optional(),
@@ -2048,7 +2054,8 @@ router.post('/preview-html', authMiddleware, PLAN, MODGATE, rbac('grades', 'read
   try {
     const { data, error } = _validate(PreviewHtmlSchema, req.body);
     if (error) return E.validation(res, error);
-    const { student, studentInfo, className, termNum, academicYear, school, draftComment, studentDeviations, behaviourSummary: beh, config: clientConfig } = data;
+    const { student, studentInfo, classId, className, termNum, academicYear, school, draftComment, studentDeviations, behaviourSummary: beh, config: clientConfig } = data;
+    const { schoolId } = req.jwtUser;
 
     const gradingSchema = clientConfig?.gradeScale?.bands ?? [];
 
@@ -2072,16 +2079,46 @@ router.post('/preview-html', authMiddleware, PLAN, MODGATE, rbac('grades', 'read
       rankings: student.rankings ?? {},
       comments: _resolveSnapComments(null, { ...draftComment, classTeacherName: draftComment?.classTeacherName || student.classTeacherName || '' }),
     };
-    const config = { rankingEnabled: !!clientConfig?.rankingEnabled, showGPA: !!clientConfig?.showGPA, showAttendanceSummary: false };
+    // Reported directly: "the system still struggling to implement what
+    // is on off, like principal's comment is turned off in report card
+    // setting but still appears" — confirmed real, and it was every
+    // display toggle, not just that one. This route built its own
+    // hand-picked {rankingEnabled, showGPA, showAttendanceSummary:false}
+    // object instead of loading the school's real academic_config — every
+    // OTHER toggle (showClassTeacherRemark, showPrincipalRemark,
+    // showDeviation, showClassAverage, showBehaviour,
+    // showObservationRatings/observationCategories, the signature labels,
+    // footerNote) was simply never read here, so _computeReportSections'
+    // own `config.X !== false` defaulting treated every one of them as
+    // "on" unconditionally — the live, unpublished preview could never
+    // actually reflect what the school had configured, only what every
+    // *published* route (which all correctly call _loadConfig) would.
+    // showAttendanceSummary no longer needs forcing to false: the IR's
+    // own showAttendance already requires `attendance` to be non-null
+    // (it's null here — no attendance fetch in this route), so the real
+    // config value is safe to pass straight through.
+    const config = await _loadConfig(schoolId);
 
     // Same subject-name resolution _loadRenderExtras does for a published
     // snapshot — this preview path never had it, so the on-screen "print
     // preview" showed raw subjectIds too.
-    const { schoolId } = req.jwtUser;
     const subjectDocs = await tenantModel('subjects', tenantContext(req))
       .find({ schoolId, id: { $in: Object.keys(student.subjects || {}) } })
       .select('id name').lean().catch(() => []);
     const subjectNames = Object.fromEntries(subjectDocs.map(s => [s.id, s.name]));
+
+    // Same subject-teacher resolution _loadRenderExtras does for a
+    // published snapshot — see classId's own schema comment above for
+    // why this needed a new field, not just a new query.
+    const assignmentDocs = classId
+      ? await tenantModel('teaching_assignments', tenantContext(req))
+          .find({ schoolId, classId, subjectId: { $in: Object.keys(student.subjects || {}) } })
+          .select('subjectId teacherName').lean().catch(() => [])
+      : [];
+    const subjectTeacherNames = {};
+    for (const a of assignmentDocs) {
+      if (!subjectTeacherNames[a.subjectId]) subjectTeacherNames[a.subjectId] = a.teacherName || '';
+    }
 
     // The client's `school` (useAuthStore session data) never carries
     // principalSignatureUrl/schoolStampUrl — those aren't session fields —
@@ -2091,10 +2128,15 @@ router.post('/preview-html', authMiddleware, PLAN, MODGATE, rbac('grades', 'read
     const signOffDoc = await _model('schools').findOne({ id: schoolId }, { principalSignatureUrl: 1, schoolStampUrl: 1 }).lean().catch(() => null);
     const schoolWithSignOff = { ...school, principalSignatureUrl: signOffDoc?.principalSignatureUrl || null, schoolStampUrl: signOffDoc?.schoolStampUrl || null };
 
+    // Same reasoning as the config fix above — subjectTeacherCommentsEnabled
+    // lives in assessment_config, not academic_config, so it needs its own
+    // live lookup rather than trusting whatever the client happened to send.
+    const subjectTeacherCommentsLive = (await _getAssessmentConfig(schoolId, null).catch(() => null))?.subjectTeacherCommentsEnabled;
+
     const sections = _computeReportSections(snap, config, null, {
       school: schoolWithSignOff, behaviour: beh ?? null, deviations: studentDeviations ?? null,
-      subjectTeacherCommentsEnabled: clientConfig?.subjectTeacherCommentsEnabled !== false,
-      subjectNames,
+      subjectTeacherCommentsEnabled: subjectTeacherCommentsLive !== false,
+      subjectNames, subjectTeacherNames,
     });
     // RCE2 — an unpublished draft has no frozen layoutKey of its own, so
     // preview uses the school's LIVE current default (school-wide, no

@@ -12,6 +12,8 @@
      student          — generate output: { studentId, subjects, totalScore, averageScore,
                           gpa, subjectCount, rankings, classTeacherId, classTeacherName }
      studentInfo      — { firstName, lastName, admissionNumber }
+     classId          — the class's real id, for the preview's own
+                          subject-teacher-name lookup (teaching_assignments)
      className        — class name string
      subjectMap       — { [subjectId]: { name } }
      customTypes      — [{ key, label, instances, weight }]
@@ -156,7 +158,7 @@ function SectionTab({ active, onClick, icon: Icon, label }) {
 }
 
 export default function StudentReportCard({
-  student, studentInfo, className, subjectMap,
+  student, studentInfo, classId, className, subjectMap,
   customTypes, gradeScale, instanceMarks,
   draftComment, onSaveComment, onSaveSubjectComment, termNum, school, academicYear,
   studentDeviations, behaviourSummary, snapshot,
@@ -262,7 +264,7 @@ export default function StudentReportCard({
       const { data } = snapshot?.id
         ? await reportCardsApi.html(snapshot.id)
         : await reportCardsApi.previewHtml({
-            student, studentInfo, className, termNum, academicYear, school,
+            student, studentInfo, classId, className, termNum, academicYear, school,
             draftComment: comment,
             studentDeviations, behaviourSummary,
             config: { gradeScale, customTypes: types },

@@ -403,8 +403,13 @@ function _renderLegacyTabularHtml(s) {
   </table>
 </div>`;
 
+  // Reported directly: "no subject teachers name" — this table never
+  // showed c.teacherName at all (only subject + text), unlike both newer
+  // layouts' own subject-comment tables. Brought to parity: Subject |
+  // Teacher | Comment, same column shape marks_then_comments already uses.
   const subjectCommentRows = s.comments.subjectComments.map(c => `
-    <tr><td style="${tdS};font-weight:600;width:160px;vertical-align:top">${_esc(c.subjectName)}</td>
+    <tr><td style="${tdS};font-weight:600;width:150px;vertical-align:top">${_esc(c.subjectName)}</td>
+        <td style="${tdS};font-weight:600;width:130px;vertical-align:top;color:#475569">${c.teacherName ? _esc(c.teacherName) : '<span style="color:#cbd5e1;font-style:italic">Unassigned</span>'}</td>
         <td style="${tdS};font-size:11px;color:#475569">${c.text ? _esc(c.text) : '<span style="color:#cbd5e1;font-style:italic">No comment entered</span>'}</td></tr>`).join('');
 
   // RC7 — a disabled capability leaves zero trace: no section header, no
@@ -413,7 +418,8 @@ function _renderLegacyTabularHtml(s) {
   const subjectCommentsSectionHtml = s.comments.subjectTeacherCommentsEnabled ? `
   <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 6px">Subject Teacher Comments</p>
   <table style="width:100%;border-collapse:collapse;margin-bottom:16px;font-size:11px">
-    ${subjectCommentRows || `<tr><td colspan="2" style="${tdS};color:#94a3b8;font-style:italic">No subjects on this report.</td></tr>`}
+    <thead><tr><th style="${thS};text-align:left">Subject</th><th style="${thS};text-align:left">Teacher</th><th style="${thS};text-align:left">Comment</th></tr></thead>
+    <tbody>${subjectCommentRows || `<tr><td colspan="3" style="${tdS};color:#94a3b8;font-style:italic">No subjects on this report.</td></tr>`}</tbody>
   </table>` : '';
 
   // RC8 — a school using the report_comment_approval chain renders its
@@ -458,9 +464,9 @@ function _renderLegacyTabularHtml(s) {
       <p style="margin:0;font-size:12px;font-weight:700;letter-spacing:1px">TEACHER COMMENTS — ${_esc(s.studentInfo.studentName)}</p>
     </div>
   </div>
+  ${_observationRatingsHtml(s)}
   ${subjectCommentsSectionHtml}
   ${reportRemarksSectionHtml}
-  ${_observationRatingsHtml(s)}
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;border-top:1px solid #e2e8f0;padding-top:12px">
     <div>
       <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">Sports &amp; Talent</p>
@@ -1499,9 +1505,9 @@ function _renderMarksThenCommentsHtml(s) {
   const commentsHtml = `
 <div style="page-break-before:always">
   ${pageHeaderHtml('Teacher Comments')}
+  ${_observationRatingsHtml(s)}
   ${subjectCommentsSectionHtml}
   ${remarksSectionHtml}
-  ${_observationRatingsHtml(s)}
   ${behHtml}
   <p style="text-align:center;font-size:9px;color:#94a3b8;margin-top:16px">${_esc(s.footer.footerNote)} — ${_esc(s.footer.genLine)}${s.footer.reportId ? ` — Report ID: ${_esc(s.footer.reportId)}` : ''}</p>
 </div>`;

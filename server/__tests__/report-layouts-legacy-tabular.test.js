@@ -182,6 +182,32 @@ describe('legacy_tabular.renderHtml — Observation Ratings now actually appear'
     expect(html).toContain('Teamwork');
     expect(html).toContain('Confidence');
   });
+
+  // Raised directly: "should be grid view just before" — the grid used to
+  // render after Subject Teacher Comments; moved ahead of it.
+  test('the Observation Ratings grid is positioned before Subject Teacher Comments, not after', () => {
+    const sections = computeSections(
+      { comments: { ...baseSnap().comments, observationRatings: { Teamwork: 'good' } } },
+      { showObservationRatings: true, observationCategories: ['Teamwork'] },
+    );
+    const html = LAYOUTS.legacy_tabular.renderHtml(sections);
+    expect(html.indexOf('Class Teacher Observations')).toBeLessThan(html.indexOf('Subject Teacher Comments'));
+  });
+});
+
+describe('legacy_tabular.renderHtml — subject teacher name (reported: "no subject teachers name")', () => {
+  test('the Subject Teacher Comments table now has its own Teacher column, like the other two layouts', () => {
+    const sections = computeSections({}, {}, { subjectTeacherNames: { math: 'Mr. Kamau' } });
+    const html = LAYOUTS.legacy_tabular.renderHtml(sections);
+    expect(html).toContain('Mr. Kamau');
+    expect(html).toContain('>Teacher<'); // the new column header
+  });
+
+  test('an unassigned subject shows "Unassigned", not a blank cell', () => {
+    const sections = computeSections({}, {}, { subjectTeacherNames: {} });
+    const html = LAYOUTS.legacy_tabular.renderHtml(sections);
+    expect(html).toContain('Unassigned');
+  });
 });
 
 describe('legacy_tabular.renderHtml — Behaviour page is skipped, not shown empty', () => {

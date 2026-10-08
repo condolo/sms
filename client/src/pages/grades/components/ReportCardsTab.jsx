@@ -459,6 +459,7 @@ export default function ReportCardsTab() {
               key={student.studentId}
               student={student}
               studentInfo={studentInfoMap[student.studentId]}
+              classId={classId}
               className={className}
               subjectMap={subjectMap}
               customTypes={customTypes}

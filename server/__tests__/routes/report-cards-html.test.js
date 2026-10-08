@@ -24,6 +24,14 @@ let mockSchoolDoc;
 let mockIncidentsAgg;
 let mockLastPointsReset;
 let mockAssessmentConfig = { customTypes: [], subjectTeacherCommentsEnabled: true };
+// academic_config (ranking/display toggles) is separate from assessment_config
+// (CA types) above — POST /preview-html now loads it live via _loadConfig
+// (previously hand-built a 3-field object instead), so it needs a seed here
+// too. mergeConfig is mocked below as a trivial passthrough (c => c ?? {}),
+// not the real default-filling merge, so this doc must carry every field a
+// test actually asserts on rather than relying on DEFAULT_REPORT_CONFIG.
+let mockAcademicConfig = { rankingEnabled: true, showRankOnReport: true, showGPA: true };
+let mockTeachingAssignments = [];
 let mockInvoices = [];
 const mockAuditLogCreate = jest.fn().mockResolvedValue({});
 
@@ -72,8 +80,10 @@ jest.mock('../../utils/tenant-model', () => ({
       };
     }
     if (col === 'invoices') return { find: jest.fn(() => mockChain(mockInvoices)) };
+    if (col === 'teaching_assignments') return { find: jest.fn(() => mockChain(mockTeachingAssignments)) };
     if (col === 'mark_audit_log') return { create: mockAuditLogCreate };
     if (col === 'assessment_config') return { findOne: jest.fn(() => mockChain(mockAssessmentConfig)) };
+    if (col === 'academic_config')   return { findOne: jest.fn(() => mockChain(mockAcademicConfig)) };
     return { findOne: jest.fn(() => mockChain(null)), find: jest.fn(() => mockChain([])) };
   }),
   tenantContext: jest.fn((req) => ({ schoolId: req?.jwtUser?.schoolId ?? null })),
@@ -143,6 +153,8 @@ beforeEach(() => {
   mockIncidentsAgg = [];
   mockLastPointsReset = [];
   mockAssessmentConfig = { customTypes: [], subjectTeacherCommentsEnabled: true };
+  mockAcademicConfig = { rankingEnabled: true, showRankOnReport: true, showGPA: true };
+  mockTeachingAssignments = [];
   mockInvoices = [];
 });
 
@@ -329,5 +341,61 @@ describe('POST /api/report-cards/preview-html', () => {
     });
     expect(res.status).toBe(200);
     expect(res.body.data.html).toContain('<!DOCTYPE html>');
+  });
+
+  // Reported directly: "the system still struggling to implement what is
+  // on off, like principal's comment is turned off in report card setting
+  // but still appears." Confirmed real: this route built its own
+  // {rankingEnabled, showGPA, showAttendanceSummary:false} object instead
+  // of loading the school's real academic_config, so every OTHER toggle
+  // (including showPrincipalRemark/showClassTeacherRemark) always
+  // defaulted to "on" regardless of what the school had configured.
+  describe('loads the school\'s LIVE academic_config, not a hand-picked subset (the fix)', () => {
+    test('showPrincipalRemark:false in the real config hides it from the preview, even though the client never sent that toggle', async () => {
+      const withIt = await supertest(buildApp()).post('/report-cards/preview-html').send(validBody());
+      mockAcademicConfig = { ...mockAcademicConfig, showPrincipalRemark: false };
+      const withoutIt = await supertest(buildApp()).post('/report-cards/preview-html').send(validBody());
+      expect(withoutIt.status).toBe(200);
+      // With the toggle on (baseline), the empty principal remark's own
+      // placeholder shows; with it off, neither the placeholder nor any
+      // trace of the section should.
+      expect(withIt.body.data.html).toContain('No comment entered');
+      expect(withoutIt.body.data.html).not.toContain('No comment entered');
+    });
+
+    test('showClassTeacherRemark:false hides the class teacher box', async () => {
+      mockAcademicConfig = { ...mockAcademicConfig, showClassTeacherRemark: false };
+      const app = buildApp();
+      const res = await supertest(app).post('/report-cards/preview-html').send(validBody({
+        draftComment: { classTeacherRemark: 'Great term', principalRemark: '', subjectComments: { math: 'Good' } },
+      }));
+      expect(res.status).toBe(200);
+      expect(res.body.data.html).not.toContain('Great term');
+    });
+
+    test('both on by default (school never configured either) — unchanged default behavior', async () => {
+      const app = buildApp();
+      const res = await supertest(app).post('/report-cards/preview-html').send(validBody());
+      expect(res.body.data.html).toContain('Great term');
+    });
+  });
+
+  // Reported directly: "no subject teachers name" — this route never had
+  // a classId to resolve teaching_assignments with, so the subject
+  // teacher's name never appeared next to their own comment in preview.
+  test('resolves the subject teacher\'s name from teaching_assignments once classId is sent', async () => {
+    mockTeachingAssignments = [{ subjectId: 'math', teacherName: 'Mr. Kamau' }];
+    const app = buildApp();
+    const res = await supertest(app).post('/report-cards/preview-html').send(validBody({ classId: 'cls_7a' }));
+    expect(res.status).toBe(200);
+    expect(res.body.data.html).toContain('Mr. Kamau');
+  });
+
+  test('no classId sent — subject teacher name is simply absent, not an error (backward compatible)', async () => {
+    mockTeachingAssignments = [{ subjectId: 'math', teacherName: 'Mr. Kamau' }];
+    const app = buildApp();
+    const res = await supertest(app).post('/report-cards/preview-html').send(validBody());
+    expect(res.status).toBe(200);
+    expect(res.body.data.html).not.toContain('Mr. Kamau');
   });
 });
