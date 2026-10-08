@@ -933,8 +933,13 @@ function MarkbookTab({ years }) {
      instance at a different stage — tracked per column, not as one
      grid-wide status. */
   const { data: submissionsData, refetch: refetchSubmissions } = useQuery({
-    queryKey: ['markSubmissions', { classId, streamId: activeStreamId, subjectId, termNumber: selectedEntry?.termNumber, assessmentType: selectedEntry?.assessmentType }],
-    queryFn:  () => markSubmissionsApi.list({ classId, streamId: activeStreamId || undefined, subjectId, termNumber: selectedEntry.termNumber, assessmentType: selectedEntry.assessmentType }),
+    queryKey: ['markSubmissions', { classId, streamId: activeStreamId, subjectId, termNumber: selectedEntry?.termNumber, assessmentType: selectedEntry?.assessmentType, academicYearId: selectedEntry?.academicYearId }],
+    // academicYearId included — found during a full exam-config → Markbook
+    // → report-card flow audit: omitting it meant a DIFFERENT year's
+    // submission for the same class/subject/term/type/instance could
+    // surface here, showing the wrong lock/submitted/approved status (or
+    // hiding the real current-year one) in submissionByInstance below.
+    queryFn:  () => markSubmissionsApi.list({ classId, streamId: activeStreamId || undefined, subjectId, termNumber: selectedEntry.termNumber, assessmentType: selectedEntry.assessmentType, academicYearId: selectedEntry.academicYearId || undefined }),
     enabled:  canQuery,
     staleTime: 15_000,
   });

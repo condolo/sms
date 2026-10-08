@@ -1013,8 +1013,22 @@ router.post('/marks', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), a
     // rather than factored out, since the two routes' data shapes differ
     // (one mark vs an array) enough that a shared helper would need its own
     // array-wrapping boilerplate at each call site anyway.
+    //
+    // All three checks below are scoped with _yearFilterPart, matching the
+    // bulk route's own upsert-matching precedent a few lines down. Found
+    // during a full exam-config → Markbook → report-card flow audit: none
+    // of the three originally filtered by academicYearId at all, so a lock
+    // or a submitted/approved review set on ONE academic year's window
+    // silently blocked mark entry for every OTHER year sharing the same
+    // termNumber+assessmentType+instance — which is every year, since
+    // terms/types repeat annually by design. A school that had ever locked
+    // or reviewed, say, Term 2 CA1 in one year would find Term 2 CA1 mark
+    // entry permanently blocked the following year, with no obviously
+    // related cause ("locked by admin" pointing at a schedule entry for a
+    // year nobody was looking at).
     const lockedScheduleEntry = await tenantModel('assessment_schedule', tenantContext(req)).findOne({
       schoolId, isLocked: true, assessmentType: d.assessmentType, termNumber: d.termNumber,
+      ..._yearFilterPart(d.academicYearId || null),
     }).lean();
     if (lockedScheduleEntry) {
       return _err(res, `"${lockedScheduleEntry.label || lockedScheduleEntry.assessmentType}" for Term ${lockedScheduleEntry.termNumber} has been locked by admin. Mark entry is not allowed until it is unlocked.`, 403);
@@ -1031,7 +1045,7 @@ router.post('/marks', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), a
       instance:       d.instance,
     };
 
-    const lockedExisting = await Marks.findOne({ ...naturalKey, isLocked: true }).lean();
+    const lockedExisting = await Marks.findOne({ ...naturalKey, isLocked: true, ..._yearFilterPart(d.academicYearId || null) }).lean();
     if (lockedExisting) {
       return _err(res, 'This mark is locked. Submit an unlock request via the approval workflow.', 403);
     }
@@ -1040,6 +1054,7 @@ router.post('/marks', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), a
       schoolId, classId: d.classId, subjectId: d.subjectId, termNumber: d.termNumber,
       assessmentType: d.assessmentType, instance: d.instance, status: { $in: ['submitted', 'approved'] },
       streamId: { $in: [markStudent?.streamId ?? null, null] },
+      ..._yearFilterPart(d.academicYearId || null),
     }).lean();
     if (underReview) {
       return _err(res, `These marks are ${underReview.status} for review and cannot be edited — recall the submission first.`, 403);
@@ -1170,10 +1185,14 @@ router.post('/marks/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
     // (unassignedPairs / electiveMarkProblem, checked above). See the single-mark route's
     // own comment for why the former admin/deputy-only gate here was removed.
 
-    // Guard: reject if the relevant schedule entry is locked by admin
-    const schedOr = [...new Set(marks.map(d => `${d.assessmentType}__${d.termNumber}`))].map(k => {
-      const [assessmentType, termNumber] = k.split('__');
-      return { assessmentType, termNumber: Number(termNumber) };
+    // Guard: reject if the relevant schedule entry is locked by admin.
+    // academicYearId included in the key (via _yearFilterPart per entry) —
+    // same fix as the single-mark route's identical check, and for the
+    // same reason: without it, a lock set on ONE year's window blocked
+    // entry for every OTHER year sharing the same termNumber+assessmentType.
+    const schedOr = [...new Set(marks.map(d => `${d.assessmentType}__${d.termNumber}__${d.academicYearId || ''}`))].map(k => {
+      const [assessmentType, termNumber, academicYearId] = k.split('__');
+      return { assessmentType, termNumber: Number(termNumber), ..._yearFilterPart(academicYearId || null) };
     });
     const lockedScheduleEntry = await tenantModel('assessment_schedule', tenantContext(req)).findOne({
       schoolId,
@@ -1217,13 +1236,22 @@ router.post('/marks/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
     // before this, a teacher could submit a class/subject's marks for
     // review and then keep silently editing them right up until an admin
     // got around to locking — defeating the entire point of "submitted".
-    // Matched on the same key mark-submissions.js itself uses by default
-    // (no academicYearId — that field is optional there too, same
-    // null-prone legacy posture every other assessment collection has).
-    const subOr = [...new Set(marks.map(d => `${d.classId}::${d.subjectId}::${d.termNumber}::${d.assessmentType}::${d.instance}::${streamByStudent[d.studentId] ?? ''}`))]
+    // academicYearId now included (via _yearFilterPart) — previously
+    // matched on the key alone, with no year at all, meaning a submitted
+    // or approved record from a PRIOR year blocked mark entry for the
+    // CURRENT year's same class/subject/term/type/instance/stream, the
+    // same cross-year false-block as the schedule-lock check above (the
+    // Markbook UI does send academicYearId on submit — see
+    // ExamsPage.jsx's markSubmissionsApi.submit call — so this was a real,
+    // reachable gap, not a hypothetical one).
+    const subOr = [...new Set(marks.map(d => `${d.classId}::${d.subjectId}::${d.termNumber}::${d.assessmentType}::${d.instance}::${streamByStudent[d.studentId] ?? ''}::${d.academicYearId || ''}`))]
       .map(k => {
-        const [classId, subjectId, termNumber, assessmentType, instance, sid] = k.split('::');
-        return { classId, subjectId, termNumber: Number(termNumber), assessmentType, instance: Number(instance), streamId: { $in: [sid || null, null] } };
+        const [classId, subjectId, termNumber, assessmentType, instance, sid, academicYearId] = k.split('::');
+        return {
+          classId, subjectId, termNumber: Number(termNumber), assessmentType, instance: Number(instance),
+          streamId: { $in: [sid || null, null] },
+          ..._yearFilterPart(academicYearId || null),
+        };
       });
     const underReview = await tenantModel('mark_submissions', tenantContext(req)).findOne({
       schoolId,

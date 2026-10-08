@@ -3,7 +3,7 @@
    ============================================================ */
 import { useState, useMemo, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ClipboardList, FileText, Send, CheckCircle, Loader2 } from 'lucide-react';
+import { AlertTriangle, ClipboardList, FileText, Send, CheckCircle, Loader2, Download } from 'lucide-react';
 import {
   assessment as assessmentApi,
   classes as classesApi,
@@ -46,10 +46,18 @@ export default function ReportCardsTab() {
   useEffect(() => { setStreamId(''); }, [classId]);
 
   const [publishError, setPublishError] = useState('');
+  const [downloadError, setDownloadError] = useState('');
+  const [downloadingKey, setDownloadingKey] = useState(''); // 'class' | 'stream' | ''
 
   const school      = useAuthStore(s => s.session?.school);
   const academicYear = school?.academicYear ?? '';
   const role        = useAuthStore(s => s.session?.user?.role ?? '');
+  // Same floor GET /bulk-pdf itself enforces (subject-scope.js's
+  // isManagement) — showing the button to a role the server would just
+  // 403 isn't useful, and this is deliberately broader than Publish's own
+  // admin/superadmin-only gate (deputy/principal/hod can legitimately
+  // want a printable batch without also holding publish rights).
+  const isManagementRole = ['admin', 'superadmin', 'deputy_principal', 'deputy', 'principal', 'hod'].includes(role);
 
   /* ── Data queries ─────────────────────────────────────── */
 
@@ -186,6 +194,38 @@ export default function ReportCardsTab() {
     onError: (err) => setPublishError(err?.message ?? 'Publish failed'),
   });
 
+  /* ── Bulk download — "can the system allow download per stream or
+     class?" GET /bulk-pdf already existed server-side (cursor-streamed,
+     RBAC/scope-checked, correctly draws sign-off images via the native
+     PDFKit renderer) but had no client wrapper and no button anywhere
+     called it; it also had no streamId filter, so even a wired-up caller
+     could only ever get the whole class merged into one PDF. Both are
+     fixed server-side — this just calls through. */
+  async function downloadBulk(scope) {
+    setDownloadError('');
+    setDownloadingKey(scope);
+    try {
+      const nameParts = [className || 'class'];
+      if (scope === 'stream' && streamId) {
+        nameParts.push(streamsList.find(st => (st.id ?? st._id) === streamId)?.name ?? 'stream');
+      }
+      nameParts.push(`Term${termNum}`);
+      if (displayAcademicYear) nameParts.push(displayAcademicYear);
+      const filename = `Report Cards - ${nameParts.join(' - ')}.pdf`.replace(/[\\/:*?"<>|]/g, '');
+
+      await reportCardsApi.bulkPdf({
+        classId,
+        streamId: scope === 'stream' ? (streamId || undefined) : undefined,
+        termNumber: Number(termNum),
+        academicYearId: yearId || undefined,
+      }, filename);
+    } catch (err) {
+      setDownloadError(err?.message ?? 'Download failed — no published report cards found for this selection?');
+    } finally {
+      setDownloadingKey('');
+    }
+  }
+
   /* ── Comment save mutation ────────────────────────────── */
 
   const { mutateAsync: saveComment } = useMutation({
@@ -244,6 +284,12 @@ export default function ReportCardsTab() {
   const visibleStudents = streamId
     ? students.filter(s => studentInfoMap[s.studentId]?.streamId === streamId)
     : students;
+
+  // Download only makes sense once something has actually been
+  // published — /bulk-pdf reads report_card_snapshots directly, not the
+  // live /generate preview above, so this checks snapshotsMap (published,
+  // non-superseded), not students.length.
+  const hasPublishedSnapshots = Object.keys(snapshotsMap ?? {}).length > 0;
 
   // Term-over-term deviation: current score − previous term score, per student per subject
   // deviationMap[studentId] = { subjects: { [subjectId]: number|null }, mean: number|null }
@@ -312,6 +358,33 @@ export default function ReportCardsTab() {
             options={yearsList.map(y => ({ value: y.id ?? y._id, label: y.name ?? y.year }))}
             placeholder={currentPeriod.academicYear ? `Current (${currentPeriod.academicYear})` : 'Current year'}
           />
+          {canQuery && isManagementRole && hasPublishedSnapshots && (
+            <div className="flex flex-col gap-1">
+              <div className="flex gap-2">
+                <button
+                  onClick={() => downloadBulk('class')}
+                  disabled={!!downloadingKey}
+                  title={`Download every published report card for ${className || 'this class'}`}
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 text-slate-700 text-sm font-medium hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {downloadingKey === 'class' ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                  Download Class
+                </button>
+                {streamId && (
+                  <button
+                    onClick={() => downloadBulk('stream')}
+                    disabled={!!downloadingKey}
+                    title="Download only this stream's published report cards"
+                    className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 text-slate-700 text-sm font-medium hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {downloadingKey === 'stream' ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                    Download Stream
+                  </button>
+                )}
+              </div>
+              {downloadError && <p className="text-xs text-red-500">{downloadError}</p>}
+            </div>
+          )}
           {canQuery && ['admin', 'superadmin'].includes(role) && (
             <div className="flex flex-col gap-1 ml-auto">
               <button

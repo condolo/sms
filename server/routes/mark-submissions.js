@@ -39,6 +39,32 @@ const MARKS_UNLOCK_WORKFLOW_KEY = 'marks_unlock';
 const MARKS_REVIEW_WORKFLOW_KEY = 'marks_review';
 const RELOCK_DELAY_MS = 24 * 60 * 60 * 1000; // 24h — Governance Spec §3
 
+// Same helper, same precedent, as assessment.js's/academic-calc.js's own
+// _yearFilterPart — matches the given year OR a legacy null-tagged row,
+// never a DIFFERENT explicitly-tagged year. Needed here (not imported —
+// neither of those files exports it) for GET / below. A falsy input
+// returns {} (no filter), the right default for a LIST endpoint: "no
+// year given" reasonably means "show every year" (same convention
+// GET /schedule in assessment.js already uses).
+function _yearFilterPart(academicYearId) {
+  return academicYearId
+    ? { $or: [{ academicYearId }, { academicYearId: null }, { academicYearId: { $exists: false } }] }
+    : {};
+}
+
+// Same precedent, but NOT identical — see _yearFilterPart's own comment
+// on why a bare {} default is right for a list. A lock is a narrowing,
+// mutating action, not a list: if the submission itself has no
+// academicYearId (a legacy row predating consistent year-tagging), it
+// must still only touch OTHER legacy-tagged marks, never silently fall
+// through to "every year's marks for this natural key" the way a bare
+// {} filter would.
+function _lockYearFilterPart(academicYearId) {
+  return academicYearId
+    ? { $or: [{ academicYearId }, { academicYearId: null }, { academicYearId: { $exists: false } }] }
+    : { $or: [{ academicYearId: null }, { academicYearId: { $exists: false } }] };
+}
+
 const SubmitSchema = z.object({
   classId:        z.string().min(1),
   subjectId:      z.string().min(1),
@@ -72,7 +98,13 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), async (re
     if (req.query.classId)        filter.classId        = req.query.classId;
     if (req.query.subjectId)      filter.subjectId      = req.query.subjectId;
     if (req.query.termNumber)     filter.termNumber     = Number(req.query.termNumber);
-    if (req.query.academicYearId) filter.academicYearId = req.query.academicYearId;
+    // _yearFilterPart, not a strict equality match — the Markbook grid
+    // (ExamsPage.jsx) now always sends its resolved academicYearId (see
+    // its submit call and this fix's own notes elsewhere in this file),
+    // and a strict match here would have hidden every submission created
+    // before that — the exact backward-compat concern _yearFilterPart
+    // exists for everywhere else it's used.
+    Object.assign(filter, _yearFilterPart(req.query.academicYearId || null));
     if (req.query.assessmentType) filter.assessmentType = req.query.assessmentType;
     if (req.query.status)         filter.status         = req.query.status;
     if (req.query.examSeriesId)   filter.examSeriesId   = req.query.examSeriesId;
@@ -466,7 +498,15 @@ router.post('/:id/lock', authMiddleware, PLAN, MODGATE, rbac('grades', 'update')
       { new: true }
     ).lean();
 
-    // Also lock the underlying assessment_marks records
+    // Also lock the underlying assessment_marks records. academicYearId
+    // included (via _lockYearFilterPart) — found during a full exam-config →
+    // Markbook → report-card flow audit: without it, locking THIS
+    // submission (one specific academic year's window) also silently
+    // locked every OTHER year's assessment_marks sharing the same class/
+    // subject/term/type/instance/stream — e.g. locking this year's Term 2
+    // CA1 submission would also re-lock last year's already-settled Term
+    // 2 CA1 marks, and vice versa were a historical submission ever
+    // (re-)locked after a new year's matching window opened.
     const markFilter = {
       schoolId,
       classId:        sub.classId,
@@ -475,6 +515,7 @@ router.post('/:id/lock', authMiddleware, PLAN, MODGATE, rbac('grades', 'update')
       assessmentType: sub.assessmentType,
       instance:       sub.instance,
       ...(sub.streamId ? { streamId: sub.streamId } : {}),
+      ..._lockYearFilterPart(sub.academicYearId || null),
     };
     await tenantModel('assessment_marks', tenantContext(req)).updateMany(markFilter, {
       $set: { isLocked: true, lockedAt: new Date().toISOString(), lockedBySubmissionId: sub.id },

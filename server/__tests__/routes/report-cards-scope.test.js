@@ -219,6 +219,27 @@ describe('GET /api/report-cards/bulk-pdf — scope (had no scope check at all)',
     const res = await supertest(buildApp()).get('/api/report-cards/bulk-pdf').query({ classId: CLASS_B });
     expect(res.status).not.toBe(403);
   });
+
+  // Raised directly: "can the system allow download per stream or
+  // class?" — this route previously only ever filtered by classId,
+  // merging every stream into one PDF with no way to narrow to one.
+  // Asserted via the countDocuments-driven 404 branch (the same branch
+  // every other test in this describe block already exercises) rather
+  // than the actual PDF-streaming success path, which this supertest
+  // harness isn't set up to drive to completion for any test here —
+  // proof enough: with TWO real snapshots present, neither matching
+  // 'strm_nonexistent', getting a 404 only happens if the streamId
+  // filter is genuinely applied and narrows the match count to zero.
+  test('streamId narrows the match set — a streamId matching no snapshot 404s even though the class has published cards', async () => {
+    mockJwtUser = { userId: 'usr_admin_1', schoolId: SCHOOL, role: 'admin', roles: ['admin'] };
+    mockScope = null;
+    mockSnapshotDocs = [
+      { id: 'rc_s1', schoolId: SCHOOL, studentId: 'stu_a', classId: CLASS_A, streamId: 'strm_east', status: 'published', superseded: false },
+      { id: 'rc_s2', schoolId: SCHOOL, studentId: 'stu_b', classId: CLASS_A, streamId: 'strm_west', status: 'published', superseded: false },
+    ];
+    const res = await supertest(buildApp()).get('/api/report-cards/bulk-pdf').query({ classId: CLASS_A, streamId: 'strm_nonexistent' });
+    expect(res.status).toBe(404);
+  });
 });
 
 describe('PUT /api/report-cards/:id/comments — subject-teacher scoping on subjectComments', () => {

@@ -1107,7 +1107,20 @@ router.get('/bulk-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), s
       superseded: { $ne: true }, status: 'published',
     };
     if (req.query.termId)         filter.termId         = req.query.termId;
+    // termNumber alongside termId — report-cards.js's own snapshots-list
+    // route (GET /) already accepts either; this route only ever took
+    // termId, which the client UI (ReportCardsTab.jsx) doesn't track at
+    // all (it only has a plain term NUMBER, 1/2/3) — so a "download this
+    // term's batch" request had no way to actually scope by term.
+    if (req.query.termNumber)     filter.termNumber     = Number(req.query.termNumber);
     if (req.query.academicYearId) filter.academicYearId = req.query.academicYearId;
+    // Per-stream download — raised directly: "can the system allow
+    // download per stream or class?" This route only ever filtered by
+    // classId, merging every stream's reports into one PDF with no way
+    // to narrow to a single stream. streamId is denormalized onto every
+    // snapshot at publish time (RCE1 — see POST /publish), so this is a
+    // plain equality filter, no extra lookup needed.
+    if (req.query.streamId)       filter.streamId       = req.query.streamId;
 
     const config = await _loadConfig(schoolId);
 

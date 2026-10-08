@@ -1051,6 +1051,17 @@ export const reportCards = {
   // StudentReportCard.jsx's old hand-built printCard() string.
   html:        (id)   => _get(`/report-cards/${id}/html`),
   previewHtml: (data) => _post('/report-cards/preview-html', data),
+  // Native PDFKit download for one published report card. The server
+  // route (GET /:id/pdf) was fully implemented and tested, but had no
+  // client wrapper and no button anywhere called it — the only existing
+  // "download" path was opening the HTML render in a new window and
+  // relying on the browser's own print-to-PDF.
+  pdf: (id, filename) => _downloadPdf(`/report-cards/${id}/pdf`, filename ?? `report-card-${id}.pdf`),
+  // Bulk, cursor-streamed PDF for a whole class, optionally narrowed to
+  // one stream (GET /bulk-pdf — also fully implemented, RBAC/scope-
+  // checked, and never reachable from the UI before this). Raised
+  // directly: "can the system allow download per stream or class?"
+  bulkPdf: (params, filename) => _downloadPdf('/report-cards/bulk-pdf', filename ?? 'report-cards.pdf', params),
   // RC8 — report-comment approval chain config (workflow_configs, keyed
   // 'report_comment_approval'), same generic engine HR's leave chain uses.
   workflowConfig: {
