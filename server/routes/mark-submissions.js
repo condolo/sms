@@ -180,6 +180,30 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), async 
     if (data.streamId) markFilter.streamId = data.streamId;
     const marks = await tenantModel('assessment_marks', tenantContext(req)).find(markFilter).select('studentId rawScore').lean();
 
+    // Completeness check — reported directly: a teacher could submit for
+    // review with a student still missing a mark entirely, with no
+    // warning either way. Every roster student needs SOME recorded row
+    // (a real score, or a deliberate ABS/MIS/EXM/INC state — the Markbook
+    // already requires picking one or the other per student) before the
+    // whole subject can go to review; a student simply never touched is
+    // not the same as a student deliberately marked absent. Blocks
+    // rather than warns: the two legitimate reasons to have no row yet
+    // (a brand-new transfer, a cell genuinely forgotten) both mean the
+    // mark isn't actually ready for review, and the mark itself is a
+    // single click away — unlike, say, a comment, nothing here is lost
+    // by waiting.
+    const rosterFilter = { schoolId, classId: data.classId, status: 'active' };
+    if (data.streamId) rosterFilter.streamId = data.streamId;
+    const roster = await tenantModel('students', tenantContext(req)).find(rosterFilter).select('id firstName lastName').lean();
+    const markedIds = new Set(marks.map(m => m.studentId));
+    const missing = roster.filter(s => !markedIds.has(s.id));
+    if (missing.length > 0) {
+      return res.status(400).json({
+        error: `${missing.length} student${missing.length === 1 ? '' : 's'} still ${missing.length === 1 ? 'has' : 'have'} no mark recorded for this assessment. Enter a score or mark them Absent/Missing/Exempt/Incomplete before submitting for review.`,
+        missingStudents: missing.map(s => ({ id: s.id, name: `${s.firstName ?? ''} ${s.lastName ?? ''}`.trim() })),
+      });
+    }
+
     // Upsert: one submission per class/subject/term/type/instance combination
     const now = new Date().toISOString();
     const existing = await tenantModel('mark_submissions', tenantContext(req)).findOne({ schoolId, ...markFilter }).lean();

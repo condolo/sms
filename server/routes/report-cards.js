@@ -714,19 +714,28 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
       for (const s of streamDocs) streamNameById[s.id] = s.name;
     }
 
-    // ── Step 6a: Batch-load draft comments for first-ever publishes (RC5) ──
-    // Only students with no `prev` snapshot need this for comment
-    // carry-forward — a re-publish keeps carrying prev.comments forward,
-    // unchanged. RC9's completeness gates below are a different question
-    // ("did the draft get filled in") and need every student's draft doc
-    // regardless of prev, so the load widens to all studentIds whenever
-    // either completeness rule is active.
-    const needsCompletenessCheck = policy.require_subject_comments_complete || policy.require_report_remarks_complete;
-    const draftLoadIds = needsCompletenessCheck ? studentIds : studentIds.filter(sid => !existingMap[sid]);
+    // ── Step 6a: Batch-load draft comments for EVERY student on EVERY
+    // publish (first-ever or re-publish alike) ──
+    // Previously only students with no `prev` snapshot had their draft
+    // loaded at all — "a re-publish keeps carrying prev.comments forward,
+    // unchanged" was the stated reasoning. That directly undid
+    // _resolveSnapComments' own documented contract ("not a permanent
+    // freeze... this does not retroactively change any already-published
+    // snapshot; it only changes what the NEXT publish writes") for the
+    // common case: any school without an RC9 completeness policy turned
+    // on. _resolveSnapComments itself always preferred a fresh draft over
+    // the frozen prev — the merge logic was correct — but `draft` was
+    // simply never loaded for a re-publish, so it had nothing fresh to
+    // prefer, and a comment typed into the Markbook after first publish
+    // was silently dropped on every re-publish. This is the second time
+    // this exact symptom ("re-publish ignores new comments") has been
+    // reported — the first fix only reached the merge function, not this
+    // upstream load gate. One extra indexed query per publish is cheap;
+    // always load it.
     const draftCommentsMap = {};
-    if (draftLoadIds.length && termNum != null) {
+    if (studentIds.length && termNum != null) {
       const draftDocs = await tenantModel('report_card_draft_comments', tenantContext(req))
-        .find({ schoolId, studentId: { $in: draftLoadIds }, termNumber: termNum }).lean();
+        .find({ schoolId, studentId: { $in: studentIds }, termNumber: termNum }).lean();
       for (const d of draftDocs) draftCommentsMap[d.studentId] = d;
     }
 
@@ -1293,7 +1302,18 @@ router.get('/draft-comments', authMiddleware, PLAN, MODGATE, rbac('report_cards'
   try {
     const { schoolId } = req.jwtUser;
     const filter = { schoolId };
-    if (req.query.classId)    filter.classId    = req.query.classId;
+    // Resolved via the students collection (each draft doc's own classId
+    // mirrors the student's classId at save time, but isn't the
+    // authoritative source — a student moved classes, or a doc saved
+    // before PUT /draft-comments/:studentId started resolving classId
+    // server-side, could carry a stale value there). Matching by the
+    // CURRENT roster instead means a draft is never missed just because
+    // its own classId field drifted.
+    if (req.query.classId) {
+      const rosterIds = await tenantModel('students', tenantContext(req))
+        .distinct('id', { schoolId, classId: req.query.classId });
+      filter.studentId = { $in: rosterIds };
+    }
     if (req.query.termNumber) filter.termNumber = Number(req.query.termNumber);
     const docs = await tenantModel('report_card_draft_comments', tenantContext(req)).find(filter).lean();
     return ok(res, await scopeDraftCommentsForCaller(req, docs));
@@ -2267,7 +2287,7 @@ router.put('/draft-comments/:studentId', authMiddleware, PLAN, MODGATE, rbac('re
   try {
     const { schoolId, userId: updatedBy } = req.jwtUser;
     const { studentId } = req.params;
-    const { classId, termNumber, classTeacherName, classTeacherRemark,
+    const { termNumber, classTeacherName, classTeacherRemark,
             sportsAndTalent, principalName, principalRemark, closingDate, nextTermBegin,
             subjectComments, observationRatings } = req.body;
     if (!termNumber) return E.badRequest(res, 'termNumber is required');
@@ -2284,6 +2304,18 @@ router.put('/draft-comments/:studentId', authMiddleware, PLAN, MODGATE, rbac('re
     // from what is stored, so echoing unchanged fields back still succeeds.
     const placement = await studentPlacement(req, studentId);
     if (!placement) return E.notFound(res, 'Student not found');
+    // classId is always resolved server-side from the student's current
+    // placement, never trusted from the request body — this route used to
+    // take a client-supplied classId while PUT .../subject/:subjectId
+    // (below) already resolved it this way. The two could disagree (e.g.
+    // a stale client-side class list, or a student moved classes between
+    // the two saves), silently flipping the stored classId on their
+    // shared draft doc to a value that no longer matched what the
+    // Markbook's classId-filtered GET was asking for — making the whole
+    // draft (comments included) invisible there even though it was still
+    // in the database. Same fix needs no client change: the body never
+    // needed to send classId correctly in the first place.
+    const classId = placement.classId;
     const existing = await tenantModel('report_card_draft_comments', tenantContext(req))
       .findOne({ schoolId, studentId, termNumber: Number(termNumber) }).lean();
     if (classTeacherRemark !== undefined && (classTeacherRemark ?? '') !== (existing?.classTeacherRemark ?? '')) {

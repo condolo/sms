@@ -52,6 +52,8 @@ jest.mock('../../utils/model', () => ({
 let mockUsersDocs;
 let mockMessagesCreate;
 let mockSubmissionsCreate;
+let mockAssessmentMarksDocs;
+let mockStudentsDocs;
 jest.mock('../../utils/tenant-model', () => ({
   tenantModel: jest.fn((collection) => {
     if (collection === 'mark_submissions') {
@@ -61,8 +63,9 @@ jest.mock('../../utils/tenant-model', () => ({
       };
     }
     if (collection === 'assessment_marks') {
-      return { find: () => mockChain([{ studentId: 'stu_1', rawScore: 70 }]) };
+      return { find: () => mockChain(mockAssessmentMarksDocs) };
     }
+    if (collection === 'students')  return { find: () => mockChain(mockStudentsDocs) };
     if (collection === 'classes')  return { findOne: () => mockChain({ id: 'cls_001', name: 'Form 1A' }) };
     if (collection === 'subjects') return { findOne: () => mockChain({ id: 'subj_eng', name: 'English Language' }) };
     if (collection === 'users')    return { find: () => mockChain(mockUsersDocs) };
@@ -96,6 +99,8 @@ beforeEach(() => {
   ];
   mockMessagesCreate = jest.fn();
   mockSubmissionsCreate = jest.fn();
+  mockAssessmentMarksDocs = [{ studentId: 'stu_1', rawScore: 70 }];
+  mockStudentsDocs = [{ id: 'stu_1', firstName: 'Amara', lastName: 'Osei' }];
 });
 
 describe('POST /api/mark-submissions — reviewer notification', () => {
@@ -122,6 +127,41 @@ describe('POST /api/mark-submissions — reviewer notification', () => {
 
   test('a notification failure never blocks the submission itself', async () => {
     mockMessagesCreate = jest.fn(() => { throw new Error('messages store unavailable'); });
+    const res = await supertest(buildApp()).post('/api/mark-submissions').send(VALID_SUBMIT);
+    expect(res.status).toBe(201);
+    expect(mockSubmissionsCreate).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('POST /api/mark-submissions — completeness check (reported directly: a teacher could submit with a student still missing a mark, with no warning)', () => {
+  test('blocks the submission and names the student when a roster student has no mark row at all', async () => {
+    mockStudentsDocs = [
+      { id: 'stu_1', firstName: 'Amara', lastName: 'Osei' },
+      { id: 'stu_2', firstName: 'James', lastName: 'Mwangi' }, // never entered — no row in assessment_marks
+    ];
+    const res = await supertest(buildApp()).post('/api/mark-submissions').send(VALID_SUBMIT);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/1 student still has no mark recorded/);
+    expect(res.body.missingStudents).toEqual([{ id: 'stu_2', name: 'James Mwangi' }]);
+    expect(mockSubmissionsCreate).not.toHaveBeenCalled();
+  });
+
+  test('a student marked Absent/Missing/Exempt/Incomplete counts as recorded — only a true blank blocks', async () => {
+    mockStudentsDocs = [
+      { id: 'stu_1', firstName: 'Amara', lastName: 'Osei' },
+      { id: 'stu_2', firstName: 'James', lastName: 'Mwangi' },
+    ];
+    // rawScore is null for an ABS/MIS/EXM/INC row, but the row itself exists.
+    mockAssessmentMarksDocs = [
+      { studentId: 'stu_1', rawScore: 70 },
+      { studentId: 'stu_2', rawScore: null },
+    ];
+    const res = await supertest(buildApp()).post('/api/mark-submissions').send(VALID_SUBMIT);
+    expect(res.status).toBe(201);
+    expect(mockSubmissionsCreate).toHaveBeenCalledTimes(1);
+  });
+
+  test('every roster student marked — submission proceeds as normal', async () => {
     const res = await supertest(buildApp()).post('/api/mark-submissions').send(VALID_SUBMIT);
     expect(res.status).toBe(201);
     expect(mockSubmissionsCreate).toHaveBeenCalledTimes(1);
