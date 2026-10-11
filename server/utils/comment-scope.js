@@ -1,7 +1,7 @@
 /* ============================================================
    Msingi — Report comment rights (Markbook comments)
 
-   Rules, as decided 2026-10-05:
+   Rules, as decided 2026-10-11 (revised from 2026-10-05):
 
    • Subject teacher comment (per student, per subject, per term):
      same rights as marks — the caller needs a teaching_assignments row
@@ -16,10 +16,17 @@
 
    • Principal remark: admin / superadmin only (same as the snapshot route).
 
-   • Lock: a subject's comments lock together with that subject's mark
-     submission for the class and term (submitted, approved or locked).
-     Management roles can still edit a locked comment, and every such
-     edit is audited, so the override is visible rather than silent.
+   • Lock: none. A subject's comment used to lock together with that
+     subject's mark submission (submitted/approved/locked) — reported
+     directly as unworkable: a teacher must be able to submit marks then
+     write the comment afterward, or write the comment first and submit
+     marks later, in either order, without one blocking the other.
+     Removed entirely (commentLockState, 2026-10-05, is gone) rather than
+     narrowed, per that explicit instruction — nothing about marks status,
+     submission state, or the assessment-schedule lock blocks a comment
+     write any more. The only remaining freeze is report publish itself:
+     once published, the snapshot is immutable regardless of later draft
+     edits (a later re-publish picks up the new text, same as always).
 
    • Read: management sees everything. Anyone else sees the full draft
      for streams they form-tutor, and for every other stream only the
@@ -31,8 +38,6 @@
 const { tenantModel, tenantContext } = require('./tenant-model');
 const { resolveHomeroomStreamIds } = require('./scopeEngine');
 const { isManagement } = require('./subject-scope');
-
-const LOCKING_SUBMISSION_STATUSES = ['submitted', 'approved', 'locked'];
 
 /** The student's class and stream — the unit every comment right is scoped to. */
 async function studentPlacement(req, studentId) {
@@ -48,27 +53,6 @@ async function canWriteClassRemark(req, streamId) {
   if (!streamId) return false;
   const formStreamIds = await resolveHomeroomStreamIds(req);
   return formStreamIds.includes(streamId);
-}
-
-/**
- * Locked when a mark submission for this class, subject, term and the
- * student's stream is submitted, approved or locked. A legacy whole-class
- * submission (no streamId) also locks it. Returns { locked, status }, where
- * status is the most advanced matching status, for the error message.
- */
-async function commentLockState(req, classId, subjectId, termNumber, streamId) {
-  const { schoolId } = req.jwtUser;
-  const subs = await tenantModel('mark_submissions', tenantContext(req))
-    .find({
-      schoolId, classId, subjectId, termNumber: Number(termNumber),
-      status: { $in: LOCKING_SUBMISSION_STATUSES },
-      streamId: { $in: [streamId ?? null, null] },
-    })
-    .select('status').lean();
-  if (subs.length === 0) return { locked: false, status: null };
-  const rank = { submitted: 1, approved: 2, locked: 3 };
-  const status = subs.reduce((best, s) => (rank[s.status] > rank[best] ? s.status : best), subs[0].status);
-  return { locked: true, status };
 }
 
 /**
@@ -126,6 +110,5 @@ async function scopeDraftCommentsForCaller(req, docs) {
 }
 
 module.exports = {
-  studentPlacement, canWriteClassRemark, commentLockState, scopeDraftCommentsForCaller,
-  LOCKING_SUBMISSION_STATUSES,
+  studentPlacement, canWriteClassRemark, scopeDraftCommentsForCaller,
 };

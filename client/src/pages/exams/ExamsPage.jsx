@@ -978,8 +978,10 @@ function MarkbookTab({ years }) {
     },
     onError:   err => setToast({ msg: err?.message ?? 'Could not save the comment.', type: 'error' }),
   });
-  // Comments are locked with the subject's marks: once any column is submitted or approved.
-  const commentsLocked = !!selectedEntry?.isLocked || (cols.length > 0 && cols.every(c => isInstanceReadOnly(c.instance)));
+  // Comments are never locked (2026-10-11) — a teacher can submit marks
+  // then write the comment after, or write it first and submit marks
+  // later, in either order. Nothing about marks status, submission
+  // state, or the assessment-schedule lock disables this field any more.
 
   const { mutate: submitForReview, isPending: submitting } = useMutation({
     mutationFn: () => Promise.all(
@@ -1441,7 +1443,7 @@ function MarkbookTab({ years }) {
                         <td className="px-2 py-1.5">
                           <GridComment
                             value={draftCommentsByStudent?.[sid]?.subjectComments?.[subjectId] ?? ''}
-                            disabled={commentsLocked}
+                            disabled={false}
                             saved={commentSavedKeys.has(`${sid}|${subjectId}`)}
                             onSave={text => saveGridComment({ studentId: sid, text })}
                             onEdit={() => setCommentSavedKeys(prev => {

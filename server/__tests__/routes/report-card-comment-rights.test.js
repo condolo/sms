@@ -69,6 +69,9 @@ function makeStore(col) {
       return chain(doc);
     },
     create: async (d) => { rows().push(d); return d; },
+    // GET /draft-comments?classId= resolves the roster via students.distinct('id', ...)
+    // rather than trusting a draft doc's own (possibly stale) classId field.
+    distinct: async (field, f) => [...new Set(rows().filter(d => matches(d, f)).map(d => d[field]))],
   };
 }
 jest.mock('../../utils/tenant-model', () => {
@@ -137,34 +140,35 @@ describe('subject comment — same rights as marks', () => {
   });
 });
 
-describe('subject comment — locks with the mark submission', () => {
-  test('a teacher cannot edit once the subject\'s marks are submitted', async () => {
+describe('subject comment — never locked by marks (2026-10-11)', () => {
+  // Reported directly: a teacher must be able to submit marks for review
+  // then write the comment afterward, or write it first and submit marks
+  // later, in either order — commentLockState (and the audited-override
+  // path for it) is gone entirely, not narrowed.
+  test('a teacher can still edit the comment after the subject\'s marks are submitted', async () => {
     mockDb.mark_submissions.push({ schoolId: SCHOOL, classId: 'c8a', subjectId: 'bio', termNumber: 3, status: 'submitted' });
     const res = await supertest(buildApp()).put(subjectUrl('stu1', 'bio')).send({ termNumber: 3, comment: 'Changed' });
-    expect(res.status).toBe(403);
-    expect(res.body.error?.message ?? res.body.message ?? JSON.stringify(res.body)).toMatch(/locked/);
+    expect(res.status).toBe(200);
+    expect(mockDb.report_card_draft_comments.find(d => d.studentId === 'stu1').subjectComments.bio).toBe('Changed');
   });
 
-  test('an administrator can still edit a locked comment, and that edit is audited', async () => {
+  test('a teacher can still edit the comment after the subject\'s marks are approved or locked', async () => {
+    mockDb.mark_submissions.push({ schoolId: SCHOOL, classId: 'c8a', subjectId: 'bio', termNumber: 3, status: 'locked' });
+    const res = await supertest(buildApp()).put(subjectUrl('stu1', 'bio')).send({ termNumber: 3, comment: 'Still editable' });
+    expect(res.status).toBe(200);
+    expect(mockAuditLog).not.toHaveBeenCalledWith(expect.objectContaining({ action: 'report_comment.locked_edit' })); // nothing left to "override"
+  });
+
+  test('a comment can be written before marks exist at all, and marks can be submitted after — neither direction blocks the other', async () => {
+    // Comment first.
+    const commentRes = await supertest(buildApp()).put(subjectUrl('stu1', 'bio')).send({ termNumber: 3, comment: 'Written before any marks submission' });
+    expect(commentRes.status).toBe(200);
+    // Marks submitted after — submission itself is a different route (mark-submissions.js),
+    // but the mark_submissions row it would create is simulated here directly: the point is
+    // that the EXISTING comment is untouched and still editable afterward.
     mockDb.mark_submissions.push({ schoolId: SCHOOL, classId: 'c8a', subjectId: 'bio', termNumber: 3, status: 'approved' });
-    mockUser = { ...ADMIN };
-    const res = await supertest(buildApp()).put(subjectUrl('stu1', 'bio')).send({ termNumber: 3, comment: 'Corrected' });
-    expect(res.status).toBe(200);
-    expect(mockAuditLog).toHaveBeenCalledWith(expect.objectContaining({ action: 'report_comment.locked_edit' }));
-  });
-
-  test('a submission for one stream locks only that stream, not the other streams of the class', async () => {
-    mockDb.mark_submissions.push({ schoolId: SCHOOL, classId: 'c8a', subjectId: 'math', termNumber: 3, status: 'submitted', streamId: 'st_A' });
-    const locked = await supertest(buildApp()).put(subjectUrl('stu1', 'math')).send({ termNumber: 3, comment: 'x' });
-    expect(locked.status).toBe(403);
-    const open = await supertest(buildApp()).put(subjectUrl('stu2', 'math')).send({ termNumber: 3, comment: 'Open stream' });
-    expect(open.status).toBe(200);
-  });
-
-  test('a draft mark submission does not lock comments', async () => {
-    mockDb.mark_submissions.push({ schoolId: SCHOOL, classId: 'c8a', subjectId: 'bio', termNumber: 3, status: 'draft' });
-    const res = await supertest(buildApp()).put(subjectUrl('stu1', 'bio')).send({ termNumber: 3, comment: 'Still open' });
-    expect(res.status).toBe(200);
+    const secondEdit = await supertest(buildApp()).put(subjectUrl('stu1', 'bio')).send({ termNumber: 3, comment: 'Edited again after marks approved' });
+    expect(secondEdit.status).toBe(200);
   });
 });
 

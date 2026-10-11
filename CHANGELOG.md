@@ -6,6 +6,65 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.170.2] — 2026-10-11 — fix(report-cards): subject comments no longer lock with the mark submission
+
+Reported directly: a teacher must be able to submit marks for review and
+write the subject comment afterward, or write the comment first and
+submit marks later — in either order, with neither blocking the other.
+
+- Removed `commentLockState` (`comment-scope.js`) entirely, not narrowed.
+  It previously locked a subject's comment the moment *any* assessment
+  type/instance's `mark_submissions` record for that class/subject/term
+  reached `submitted`/`approved`/`locked` — including the assessment-
+  schedule admin-lock case. None of that gates a comment write any more;
+  the only check left is `canWriteSubject` (the teacher must still be
+  assigned to the subject), unchanged.
+- The Markbook's own client-side gate (`commentsLocked` in
+  `ExamsPage.jsx`) is removed to match — it was already slightly out of
+  sync with the server rule (locking only once *every* assessment column
+  was submitted, vs. the server's *any one*), so this also closes that
+  mismatch rather than leaving it in a different wrong state.
+- The audited-admin-override path for editing a locked comment
+  (`report_comment.locked_edit`) is removed along with the lock itself —
+  there is nothing left to override.
+- Report publish is unaffected and remains the one real freeze point:
+  a published snapshot's comments are still immutable regardless of
+  later draft edits, exactly as before (see v5.170.0's "re-publish"
+  fix) — this change is only about what a teacher can do to the *draft*
+  before publish.
+
+## [v5.170.1] — 2026-10-11 — fix(report-cards): re-publish dropped fresh comments again + Markbook classId drift + missing-marks validation
+
+Three issues reported directly against the Markbook/report-card comment
+flow, each traced to root cause rather than patched at the symptom:
+
+- `POST /publish` only loaded a student's draft comment for their
+  first-ever publish. `_resolveSnapComments` (the merge function) always
+  preferred a fresh draft over the frozen one, correctly — but on every
+  re-publish, the fresh draft was never even loaded, so it had nothing
+  to prefer. A comment typed into the Markbook after first publish was
+  silently dropped on every re-publish. This is the second time this
+  exact symptom has been reported; the first fix (see RC5 in this file's
+  history) only reached the merge function, not this upstream load gate.
+  Every publish now loads every student's current draft comment.
+- `PUT /draft-comments/:studentId` trusted a client-supplied `classId`,
+  while `PUT .../subject/:subjectId` (the Markbook's own save) always
+  resolved it server-side from the student's placement. The two sharing
+  one record meant a disagreement could silently flip the record's
+  `classId` to a value the Markbook's classId-filtered `GET` no longer
+  matched — a comment genuinely saved, invisible from the Markbook.
+  Fixed on both the write side (always server-resolved now) and the
+  read side (matched against the current class roster, not the record's
+  own possibly-stale `classId` field — repairs already-affected records
+  too, not just new saves).
+- `POST /api/mark-submissions` had no completeness check at all: a
+  teacher could submit a class for review missing marks for a whole
+  student, silently. Now blocked with the exact list of missing
+  students until each has a real score or a deliberate
+  Absent/Missing/Exempt/Incomplete state.
+
+10 new regression tests across the three fixes.
+
 ## [v5.170.0] — 2026-10-08 — feat(reports): premium institutional redesign of the native report-card PDF (RCE8)
 
 The native PDFKit renderer for `subject_paired` ("Template A") and `marks_then_comments` ("Template B") is redesigned end to end, following a multi-round design review against standalone HTML prototypes. The HTML preview path (`/preview-html`) is unchanged — this release is the native-PDF path, the one every download/bulk-export route actually produces.

@@ -47,7 +47,7 @@ const AuditService       = require('../services/audit');
 const { sanitisePdfStr } = require('../utils/sanitisePdf');
 const { notifyGuardiansForStudents } = require('../utils/notify-students');
 const { canWriteSubject, unassignedPairs, isManagement } = require('../utils/subject-scope');
-const { studentPlacement, canWriteClassRemark, commentLockState, scopeDraftCommentsForCaller } = require('../utils/comment-scope');
+const { studentPlacement, canWriteClassRemark, scopeDraftCommentsForCaller } = require('../utils/comment-scope');
 const { canViewFullReport, viewReportFor } = require('../utils/report-view-scope');
 const { isElective, enrolledStudentIds, canTeachElective } = require('../utils/elective-scope');
 const { getWorkflowConfig, saveWorkflowConfig, resolveStep, resolveAssigneeLabel } = require('../utils/workflow-config');
@@ -2402,15 +2402,9 @@ router.put('/draft-comments/:studentId/subject/:subjectId', authMiddleware, PLAN
       return E.forbidden(res, 'You are not assigned to teach this subject in this class.');
     }
 
-    // Lock: comments lock with the subject's mark submission. Management can still
-    // edit a locked comment; every such edit is audited.
-    const lock = await commentLockState(req, classId, subjectId, termNumber, placement.streamId);
-    if (lock.locked) {
-      if (!isManagement(req)) {
-        return E.forbidden(res, `These comments are locked because the marks for this subject are ${lock.status}. Only an administrator can change them.`);
-      }
-      AuditService.log({ action: 'report_comment.locked_edit', actor: req.jwtUser, schoolId, target: { type: 'report_card_draft_comments', id: `${studentId}_${termNumber}` }, details: { subjectId, classId, termNumber: Number(termNumber), markStatus: lock.status }, req });
-    }
+    // No lock here any more (2026-10-11) — a comment write is never
+    // blocked by marks status, submission state, or the assessment-
+    // schedule lock. See comment-scope.js's header for why.
 
     const doc = await tenantModel('report_card_draft_comments', tenantContext(req)).findOneAndUpdate(
       { schoolId, studentId, termNumber: Number(termNumber) },
