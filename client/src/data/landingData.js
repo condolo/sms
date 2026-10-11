@@ -803,6 +803,7 @@ export const PARTNER_SCHOOLS = [
   { name: 'Trinitas International School',   logo: '/logos/trinitas-international-school.jpg' },
   { name: 'Trinity International School',    logo: '/logos/trinity-international-school.png' },
   { name: 'Kileleshwa Academy',              logo: '/logos/kileleshwa-academy.png' },
+  { name: 'Green Hills International School', logo: '/logos/green-hills-international-school.jpg' },
 ];
 
 // ── CMS defaults (shown when DB has no override) ───────────────
