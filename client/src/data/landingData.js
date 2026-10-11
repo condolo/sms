@@ -797,6 +797,14 @@ export const STATUS_LABEL = {
   overdue: 'Overdue',
 };
 
+// ── Partner schools — logo marquee (Landing.jsx, "Where Msingi is live") ──
+export const PARTNER_SCHOOLS = [
+  { name: 'Mascit Lab Academy',              logo: '/logos/mascit-lab-academy.jpg' },
+  { name: 'Trinitas International School',   logo: '/logos/trinitas-international-school.jpg' },
+  { name: 'Trinity International School',    logo: '/logos/trinity-international-school.png' },
+  { name: 'Kileleshwa Academy',              logo: '/logos/kileleshwa-academy.png' },
+];
+
 // ── CMS defaults (shown when DB has no override) ───────────────
 export const CMS_DEFAULTS = {
   hero: {
@@ -821,8 +829,8 @@ export const CMS_DEFAULTS = {
     bullets:  t.bullets,
   })),
   trust: {
-    schools: ['Mascit Lab Academy'],
-    tagline: 'Now live · actively onboarding partner schools for 2026',
+    schools: PARTNER_SCHOOLS.map(s => s.name),
+    tagline: 'Now live in 4 schools · actively onboarding more for 2026',
   },
   footer: {
     tagline: 'Decision Intelligence for Educational Leaders.',

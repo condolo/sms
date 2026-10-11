@@ -10,7 +10,7 @@ import {
   ArrowRight, CheckCircle2, ChevronRight,
   Globe, Layers, Lock, ShieldCheck, Menu, X,
 } from 'lucide-react';
-import { ECOSYSTEM_NODES } from '@/data/landingData';
+import { ECOSYSTEM_NODES, PARTNER_SCHOOLS } from '@/data/landingData';
 import { EASE, fadeUp, stagger, VP } from '@/utils/animations';
 import { schoolPortalUrl, storeSchoolSlug } from '@/utils/schoolDetect.js';
 import { getLandingCMS } from '@/utils/landingCMS';
@@ -18,6 +18,7 @@ import { CMS_DEFAULTS } from '@/data/landingData';
 import PublicNav    from '@/components/landing/PublicNav';
 import PublicFooter from '@/components/landing/PublicFooter';
 import DeviceMockup from '@/components/landing/DeviceMockup';
+import LogoMarquee  from '@/components/landing/LogoMarquee';
 import PlansSection    from '@/components/landing/PlansSection';
 import FloatingActions from '@/components/landing/FloatingActions';
 import ModulePreviewPanel from '@/components/landing/ModulePreviewPanel';
@@ -468,11 +469,11 @@ export default function Landing() {
           </div>
           <div className="relative max-w-4xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}
-              className="flex flex-col sm:flex-row gap-8 items-start sm:items-center">
+              className="flex flex-col sm:flex-row gap-8 items-start sm:items-center mb-10">
               <motion.div variants={fadeUp} className="flex-1">
                 <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">Where Msingi is live</p>
                 <p className="font-['Crimson_Pro'] text-2xl font-bold text-slate-900 mb-2">
-                  Live at Mascit Lab Academy.
+                  Live in {PARTNER_SCHOOLS.length} schools across Kenya.
                 </p>
                 <p className="text-slate-500 text-base leading-relaxed">
                   We are actively onboarding partner schools for the 2026 academic year. Early schools have direct input into the product roadmap.
@@ -484,6 +485,10 @@ export default function Landing() {
                   Enquire about early access <ArrowRight size={14} />
                 </Link>
               </motion.div>
+            </motion.div>
+
+            <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={fadeUp}>
+              <LogoMarquee schools={PARTNER_SCHOOLS} />
             </motion.div>
           </div>
         </section>
