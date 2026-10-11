@@ -128,7 +128,7 @@ const SOLUTIONS = {
 export default function SolutionPage() {
   const { role } = useParams();
   const sol = SOLUTIONS[role];
-  if (!sol) return <Navigate to="/platform" replace />;
+  if (!sol) return <Navigate to="/platform-overview" replace />;
 
   return (
     <div className="min-h-screen bg-white text-slate-900 antialiased">
@@ -141,7 +141,7 @@ export default function SolutionPage() {
       </Helmet>
 
       <BreadcrumbSchema items={[
-        { name: 'Solutions', href: '/platform' },
+        { name: 'Solutions', href: '/platform-overview' },
         { name: sol.role, href: `/solutions/${role}` },
       ]} />
       <PublicNav />

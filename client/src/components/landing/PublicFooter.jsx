@@ -9,7 +9,7 @@ const COLS = [
   {
     heading: 'Product',
     links: [
-      { label: 'Platform',          href: '/platform'       },
+      { label: 'Platform',          href: '/platform-overview' },
       { label: 'Pricing',           href: '/pricing'        },
       { label: 'Security',          href: '/security'       },
       { label: 'Implementation',    href: '/implementation' },

@@ -22,7 +22,7 @@ const RESOURCES = [
     Icon: BookOpen,
     title: 'Platform overview',
     desc: 'Every module explained — what it does, who uses it, and how it connects to the rest of the school.',
-    href: '/platform',
+    href: '/platform-overview',
     cta: 'See all modules',
   },
   {
@@ -274,7 +274,7 @@ export default function KnowledgeCentre() {
                   Book a discovery session <ArrowRight size={14} />
                 </Link>
                 <Link
-                  to="/platform"
+                  to="/platform-overview"
                   className="inline-flex items-center gap-2 rounded-xl border border-slate-700 px-6 py-3 text-sm font-semibold text-slate-300 hover:border-slate-500 hover:text-white transition-all"
                 >
                   Explore the platform

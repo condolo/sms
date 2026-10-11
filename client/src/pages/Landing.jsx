@@ -300,7 +300,7 @@ export default function Landing() {
                 Data entered once flows everywhere it needs to be — without re-entry, without a spreadsheet to bridge the gap.
               </motion.p>
               <motion.div variants={fadeUp} className="mt-5">
-                <Link to="/platform"
+                <Link to="/platform-overview"
                   className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-400 hover:text-white transition-colors">
                   See the full platform overview <ArrowRight size={13} />
                 </Link>
@@ -357,7 +357,7 @@ export default function Landing() {
                 ))}
               </motion.div>
               <motion.div variants={fadeUp} className="sm:ml-auto flex-shrink-0">
-                <Link to="/platform" className="text-xs font-semibold text-slate-400 hover:text-slate-700 transition-colors">
+                <Link to="/platform-overview" className="text-xs font-semibold text-slate-400 hover:text-slate-700 transition-colors">
                   No extra charge →
                 </Link>
               </motion.div>
@@ -398,7 +398,7 @@ export default function Landing() {
                 ))}
                 {/* Overflow card */}
                 <motion.div variants={fadeUp}>
-                  <Link to="/platform"
+                  <Link to="/platform-overview"
                     className="group flex flex-col gap-2 p-5 bg-slate-900 border border-slate-800 rounded-2xl hover:bg-slate-800 transition-all">
                     <p className="text-sm font-semibold text-white">Full platform overview</p>
                     <p className="text-sm text-slate-400 leading-relaxed flex-1">{ECOSYSTEM_NODES.length} modules. How they connect. What they replace.</p>

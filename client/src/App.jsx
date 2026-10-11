@@ -166,7 +166,7 @@ export const router = createBrowserRouter([
   // ── Website v2 — public marketing pages ──────────────────────────────────
   { path: '/why',            element: <WhyPage /> },
   { path: '/about',          element: <AboutPage /> },
-  { path: '/platform',       element: <PlatformPage /> },
+  { path: '/platform-overview', element: <PlatformPage /> },
   { path: '/pricing',        element: <PricingPage /> },
   { path: '/security',       element: <SecurityPage /> },
   { path: '/difference',     element: <DifferencePage /> },

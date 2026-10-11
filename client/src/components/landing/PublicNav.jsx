@@ -20,9 +20,9 @@ const NAV = [
   },
   {
     label: 'Platform',
-    href: '/platform',
+    href: '/platform-overview',
     children: [
-      { label: 'Platform Overview',    href: '/platform'        },
+      { label: 'Platform Overview',    href: '/platform-overview'        },
       { label: 'For Principals',       href: '/solutions/principal'   },
       { label: 'For Teachers',         href: '/solutions/teacher'     },
       { label: 'For Finance',          href: '/solutions/finance'     },

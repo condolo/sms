@@ -126,7 +126,7 @@ export default function WhyPage() {
                   className="inline-flex items-center gap-2 rounded-xl bg-white px-6 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-100 transition-all">
                   Read the founder's story <ArrowRight size={14} />
                 </Link>
-                <Link to="/platform"
+                <Link to="/platform-overview"
                   className="inline-flex items-center gap-2 rounded-xl border border-slate-700 px-6 py-3 text-sm font-semibold text-slate-300 hover:border-slate-500 hover:text-white transition-all">
                   See the platform
                 </Link>

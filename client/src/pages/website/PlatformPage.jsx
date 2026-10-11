@@ -74,12 +74,12 @@ export default function PlatformPage() {
       <Helmet>
         <title>{`Platform Overview | Msingi — ${MODULE_COUNT} Modules, One Record`}</title>
         <meta name="description" content={`${MODULE_COUNT} connected modules. One institutional record. Attendance, grades, finance, admissions, report cards, and parent portals — all connected.`} />
-        <link rel="canonical" href="https://msingi.io/platform" />
+        <link rel="canonical" href="https://msingi.io/platform-overview" />
         <meta property="og:title" content={`Msingi Platform — ${MODULE_COUNT} Modules, One Record`} />
-        <meta property="og:url" content="https://msingi.io/platform" />
+        <meta property="og:url" content="https://msingi.io/platform-overview" />
       </Helmet>
 
-      <BreadcrumbSchema items={[{ name: 'Platform', href: '/platform' }]} />
+      <BreadcrumbSchema items={[{ name: 'Platform', href: '/platform-overview' }]} />
       <PublicNav />
 
       <main>

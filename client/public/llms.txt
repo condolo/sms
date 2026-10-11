@@ -65,7 +65,7 @@ https://msingi.io/contact
 
 - /why — Philosophy and manifesto
 - /about — Founder story (Collins Ndolo)
-- /platform — 24-module platform overview
+- /platform-overview — 28-module platform overview
 - /pricing — Transparent per-student pricing
 - /security — Trust Centre, compliance, responsible AI
 - /difference — The Msingi Difference (vs generic ERPs and point solutions)
