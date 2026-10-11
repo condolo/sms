@@ -176,6 +176,14 @@ async function _sendAsSchool(to, subject, html, { schoolName, schoolEmail, schoo
   return result;
 }
 
+/* HTML-escape — every other template below interpolates admin/staff-
+   entered strings (already a trusted path); sendContactEnquiry is the
+   one function fed directly by an anonymous public visitor, so its own
+   fields get escaped before going into the template. */
+function _escapeHtml(str) {
+  return String(str ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
 /* ── Shared HTML wrapper ───────────────────────────────────
    schoolName — if provided, shown as a subtitle under the logo
 */
@@ -944,8 +952,52 @@ async function sendAbsenteeStaffAlert({
   return _sendAsSchool(recipientEmail, `🚸 ${subject} — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
 }
 
+/* 26. Marketing-site contact form — public enquiry, no school/user context.
+   `to` is the platform-configured contact address (platform_settings.contactEmail,
+   resolved by the caller — this util has no DB context of its own), falling
+   back to SUPPORT_EMAIL. Sent with the visitor's own address as Reply-To, so
+   a reply from that inbox goes straight back to them. */
+async function sendContactEnquiry({ name, institution, role, email, phone, inquiry, message, to }) {
+  const esc = _escapeHtml;
+  const html = _wrap(`
+    <h2>📬 New Contact Enquiry</h2>
+    <p>A visitor submitted the contact form on msingi.io.</p>
+    <div class="info">
+      <p><strong>Name:</strong> ${esc(name)}</p>
+      <p><strong>School:</strong> ${esc(institution)}</p>
+      ${role ? `<p><strong>Role:</strong> ${esc(role)}</p>` : ''}
+      <p><strong>Email:</strong> ${esc(email)}</p>
+      ${phone ? `<p><strong>Phone:</strong> ${esc(phone)}</p>` : ''}
+      ${inquiry ? `<p><strong>Interested in:</strong> ${esc(inquiry)}</p>` : ''}
+    </div>
+    ${message ? `<p style="white-space:pre-line">${esc(message)}</p>` : ''}
+    <p style="font-size:13px;color:#6b7280">Reply directly to this email to respond to ${esc(name)}.</p>
+  `);
+  // institution feeds the Subject line — strip CR/LF so it can never smuggle extra mail headers.
+  const safeSubjectInstitution = String(institution).replace(/[\r\n]+/g, ' ');
+  return _send(to || SUPPORT_EMAIL, `Msingi Enquiry — ${safeSubjectInstitution}`, html, { replyTo: email });
+}
+
+/* 27. Contact-form auto-reply — confirms receipt directly to the visitor's
+   own address, the one piece of this flow that actually needs a verified-
+   format email to be worth sending at all (the route validates it first). */
+async function sendContactConfirmation({ name, email, institution, contactPhone }) {
+  const esc   = _escapeHtml;
+  const phone = (contactPhone || '').replace(/\D/g, '');
+  const html  = _wrap(`
+    <h2>We've received your enquiry 👋</h2>
+    <p>Hi ${esc(name)},</p>
+    <p>Thanks for reaching out about <strong>${esc(institution)}</strong>. Our team has received your message and will respond within one business day.</p>
+    ${phone ? `<p>Need a faster response? Message us on WhatsApp: <a href="https://wa.me/${phone}">${esc(contactPhone)}</a>.</p>` : ''}
+    <p style="font-size:13px;color:#6b7280">This confirms your enquiry was received — no action needed from you right now.</p>
+  `);
+  return _send(email, `We've received your enquiry — Msingi`, html);
+}
+
 module.exports = {
   invalidateSmtpCache,
+  sendContactEnquiry,
+  sendContactConfirmation,
   sendRegistrationPending,
   sendAdminNewSchoolAlert,
   sendApprovalWelcome,

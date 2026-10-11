@@ -1,7 +1,7 @@
 /**
  * Msingi — Contact / Discovery Session Page (v2)
  */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -11,7 +11,12 @@ import PublicNav    from '@/components/landing/PublicNav';
 import PublicFooter from '@/components/landing/PublicFooter';
 import BreadcrumbSchema from '@/components/landing/BreadcrumbSchema';
 import FloatingActions from '@/components/landing/FloatingActions';
+import TurnstileWidget  from '@/components/landing/TurnstileWidget';
 import { useWaUrl } from '@/hooks/useWaUrl';
+
+// Only enforced client-side when a site key is actually configured — see
+// TurnstileWidget's own comment; keeps local/dev working with no key set.
+const TURNSTILE_REQUIRED = !!import.meta.env.VITE_TURNSTILE_SITE_KEY;
 
 const WHO_WE_WORK_WITH = [
   { Icon: Building2,     label: 'School owners and directors'                          },
@@ -71,28 +76,55 @@ export default function Contact() {
   });
   const [submitted, setSubmitted] = useState(false);
   const [sending,   setSending]   = useState(false);
+  const [error,     setError]     = useState('');
+  const [turnstileToken, setTurnstileToken] = useState('');
+  const turnstileRef = useRef(null);
 
   useEffect(() => { window.scrollTo({ top: 0, behavior: 'smooth' }); }, []);
 
   function handleChange(e) {
     setForm(f => ({ ...f, [e.target.name]: e.target.value }));
+    if (error) setError('');
   }
+
+  // Same baseline check the server repeats (it never trusts this one) — just
+  // catches an obviously malformed address before a round-trip, since this
+  // form's whole point is that an auto-reply gets sent to it.
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
   async function handleSubmit(e) {
     e.preventDefault();
     if (!form.name || !form.institution || !form.email) return;
+    if (!EMAIL_RE.test(form.email)) {
+      setError('Enter a valid email address — we send a confirmation there.');
+      return;
+    }
+    if (TURNSTILE_REQUIRED && !turnstileToken) {
+      setError('Please complete the verification check below.');
+      return;
+    }
+
     setSending(true);
-
-    const subject = encodeURIComponent(`Msingi Enquiry — ${form.institution}`);
-    const body    = encodeURIComponent(
-      `Name: ${form.name}\nInstitution: ${form.institution}\nRole: ${form.role}\n` +
-      `Email: ${form.email}\nPhone: ${form.phone}\nInquiry: ${form.inquiry}\n\n${form.message}`
-    );
-
-    await new Promise(r => setTimeout(r, 800));
-    setSending(false);
-    setSubmitted(true);
-    window.location.href = `mailto:support@msingi.io?subject=${subject}&body=${body}`;
+    setError('');
+    try {
+      const res = await fetch('/api/public/contact', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ ...form, turnstileToken }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.success) {
+        throw new Error(json?.error?.message || 'Could not send your enquiry — please try WhatsApp instead.');
+      }
+      setSubmitted(true);
+    } catch (err) {
+      setError(err.message || 'Something went wrong — please try again or reach us on WhatsApp.');
+    } finally {
+      setSending(false);
+      // Turnstile tokens are single-use — reset so a retry gets a fresh one.
+      turnstileRef.current?.reset();
+      setTurnstileToken('');
+    }
   }
 
   return (
@@ -305,11 +337,21 @@ export default function Contact() {
                           className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-300 transition resize-none" />
                       </div>
 
+                      {/* Verification */}
+                      <TurnstileWidget
+                        ref={turnstileRef}
+                        onVerify={setTurnstileToken}
+                        onExpire={() => setTurnstileToken('')}
+                      />
+
                       {/* Submit */}
+                      {error && (
+                        <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3.5 py-2.5">{error}</p>
+                      )}
                       <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 pt-2">
                         <button type="submit"
-                          disabled={sending || !form.name || !form.institution || !form.email}
-                          className="group inline-flex items-center gap-2 rounded-xl bg-slate-900 px-6 py-3 text-sm font-semibold text-white hover:bg-indigo-600 disabled:opacity-40 transition-all shadow-sm">
+                          disabled={sending || !form.name || !form.institution || !form.email || (TURNSTILE_REQUIRED && !turnstileToken)}
+                          className="group inline-flex items-center gap-2 rounded-xl bg-slate-900 px-6 py-3 text-sm font-semibold text-white hover:bg-amber-600 disabled:opacity-40 transition-all shadow-sm">
                           {sending
                             ? <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                             : <ArrowRight size={14} className="group-hover:translate-x-0.5 transition-transform" />

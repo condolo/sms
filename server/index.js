@@ -95,12 +95,15 @@ try {
     contentSecurityPolicy: {
       directives: {
         defaultSrc:     ["'self'"],
-        scriptSrc:      ["'self'"],
+        // challenges.cloudflare.com: Cloudflare Turnstile (contact-form
+        // captcha, public.js) — needs its script loaded, its own iframe
+        // for the challenge widget, and an XHR channel back to itself.
+        scriptSrc:      ["'self'", 'https://challenges.cloudflare.com'],
         styleSrc:       ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
         fontSrc:        ["'self'", 'https://fonts.gstatic.com'],
         imgSrc:         ["'self'", 'data:', 'blob:'],
-        connectSrc:     ["'self'"],
-        frameSrc:       ["'none'"],
+        connectSrc:     ["'self'", 'https://challenges.cloudflare.com'],
+        frameSrc:       ['https://challenges.cloudflare.com'],
         frameAncestors: ["'none'"],
         objectSrc:      ["'none'"],
         baseUri:        ["'self'"],

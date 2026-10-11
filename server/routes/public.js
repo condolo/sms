@@ -4,8 +4,12 @@
    so the login page can display the school's logo, name, and
    colors without the user having logged in yet.
    ============================================================ */
-const express  = require('express');
+const express   = require('express');
+const rateLimit = require('express-rate-limit');
+const { z }     = require('zod');
 const { _model } = require('../utils/model');
+const { sendContactEnquiry, sendContactConfirmation } = require('../utils/email');
+const { ok, E } = require('../utils/response');
 
 const router = express.Router();
 
@@ -380,6 +384,96 @@ router.get('/platform-asset/:type', async (req, res) => {
   } catch (err) {
     console.error('[public/platform-asset]', err.message);
     res.status(500).json({ error: 'Server error' });
+  }
+});
+
+/* POST /api/public/contact — marketing-site "Send enquiry" form.
+   Sends straight to the platform's configured contact address (Platform
+   Admin → Branding → contactEmail, same field the WhatsApp widget reads
+   contactPhone from) instead of popping the visitor's own mailto: client.
+   Also auto-replies to the visitor's own address, which is why email gets
+   real format validation here rather than trusting the browser's <input
+   type="email"> alone — a malformed address would otherwise bounce
+   silently with the visitor never knowing. */
+const ContactSchema = z.object({
+  name:            z.string().trim().min(1).max(200),
+  institution:     z.string().trim().min(1).max(200),
+  role:            z.string().trim().max(100).optional().or(z.literal('')),
+  email:           z.string().trim().email().max(300),
+  phone:           z.string().trim().max(50).optional().or(z.literal('')),
+  inquiry:         z.string().trim().max(200).optional().or(z.literal('')),
+  message:         z.string().trim().max(3000).optional().or(z.literal('')),
+  turnstileToken:  z.string().max(3000).optional().or(z.literal('')),
+});
+
+// Cloudflare Turnstile — same graceful-skip-when-unconfigured convention as
+// email.js's SMTP_READY: a missing secret means local/dev never gets blocked
+// by a captcha it has no key for, but production (where this must be set)
+// refuses any submission that doesn't pass. Never throws — a Cloudflare
+// outage or network hiccup fails the request, not the whole route crashing.
+const TURNSTILE_SECRET = process.env.TURNSTILE_SECRET_KEY;
+if (!TURNSTILE_SECRET) {
+  console.warn('[public/contact] ⚠️  TURNSTILE_SECRET_KEY not set — contact-form captcha is DISABLED.');
+}
+async function _verifyTurnstile(token, remoteip) {
+  if (!TURNSTILE_SECRET) return true; // not configured — skip (dev/test)
+  if (!token) return false;
+  try {
+    const params = new URLSearchParams({ secret: TURNSTILE_SECRET, response: token });
+    if (remoteip) params.set('remoteip', remoteip);
+    const res = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params,
+    });
+    const json = await res.json();
+    return json?.success === true;
+  } catch (err) {
+    console.error('[public/contact] Turnstile verify request failed:', err.message);
+    return false;
+  }
+}
+
+// Dedicated, tighter limiter — this route sends real email on every call,
+// unlike the read-only branding lookups above that share this router's
+// generous top-level apiLimiter (index.js). Keyed by IP; 5/15min comfortably
+// covers one genuine visitor filling the form (incl. a retry) while bounding
+// abuse of the outbound mail quota.
+const contactLimiter = rateLimit({
+  windowMs:        15 * 60 * 1000,
+  max:             5,
+  standardHeaders: true,
+  legacyHeaders:   false,
+  message:         { success: false, error: { code: 'RATE_LIMIT', message: 'Too many enquiries — please try again later, or reach us on WhatsApp.' } },
+  skip:            () => process.env.NODE_ENV === 'test',
+});
+
+router.post('/contact', contactLimiter, async (req, res) => {
+  try {
+    const parsed = ContactSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return E.validation(res, parsed.error.issues.map(i => ({ field: i.path.join('.'), message: i.message })));
+    }
+    const data = parsed.data;
+
+    const captchaOk = await _verifyTurnstile(data.turnstileToken, req.ip);
+    if (!captchaOk) return E.badRequest(res, 'Captcha verification failed — please try again.');
+
+    const settings = await _model('platform_settings').findOne({}, { contactEmail: 1, contactPhone: 1 }).lean();
+    const contactEmail = settings?.contactEmail || undefined; // sendContactEnquiry falls back to SUPPORT_EMAIL itself
+
+    const sent = await sendContactEnquiry({ ...data, to: contactEmail });
+    if (!sent) return E.serverError(res, 'Could not send your enquiry right now — please try WhatsApp instead.');
+
+    // Best-effort — the visitor's own confirmation never blocks the success
+    // response; the enquiry itself is already safely sent at this point.
+    sendContactConfirmation({ name: data.name, email: data.email, institution: data.institution, contactPhone: settings?.contactPhone })
+      .catch(err => console.error('[public/contact] confirmation email failed:', err.message));
+
+    return ok(res, { received: true });
+  } catch (err) {
+    console.error('[public/contact]', err.message);
+    return E.serverError(res);
   }
 });
 
