@@ -6,6 +6,36 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.170.3] — 2026-10-11 — feat(exams): Review tab — the mark-submissions moderation queue, relocated and filterable
+
+The mark_submissions moderation queue (approve/reject/lock/unlock) existed
+but was only reachable at the bottom of Grades/Exams' shared Configuration
+tab — easy to miss, and unfiltered (one flat list of every submission in
+the school). Reported directly: admin went looking for this on the Exams
+page and couldn't find it.
+
+- New **Review** tab on the Exams & Assessment page (admin-only, between
+  Markbook and Reminders), reusing the exact same `mark-submissions.js`
+  backend and the same component logic — relocated, not duplicated, per
+  this codebase's own standing rule against a second moderation chain.
+- Removed entirely from `ConfigTab.jsx` (shared by both Grades' and
+  Exams' own Configuration tab, so this closes it in both places with
+  one change) — including its now-unused `classes`/`subjects`/
+  `markSubmissions` API imports.
+- Added Academic Year / Class / Stream filters. The backend route
+  (`GET /api/mark-submissions`) already fully supported all three as
+  query params — this was purely a missing UI, no server change needed.
+- The per-subject inline review affordance already in the Markbook grid
+  itself (approve/reject right next to the subject you're looking at) is
+  untouched — it's an intentional second access point for a narrower
+  case, not the same thing as this cross-class overview.
+- `rejectionReason` remains the only note on a submission — admin writes
+  it at reject time, the teacher already saw it in the Markbook grid
+  (unchanged). No new general comment field was added, by explicit
+  decision: this note is one-way and reject-specific, not a two-way
+  thread, and it has no connection to `report_card_draft_comments` —
+  confirmed those two collections never reference each other.
+
 ## [v5.170.2] — 2026-10-11 — fix(report-cards): subject comments no longer lock with the mark submission
 
 Reported directly: a teacher must be able to submit marks for review and
