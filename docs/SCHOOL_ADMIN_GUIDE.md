@@ -334,6 +334,10 @@ Each role has a permission matrix — you can customise what each role can **Vie
 
 Hover a role in the list and click the pencil icon — this works for both custom roles and Msingi's own built-in roles (Teacher, Finance, Deputy Principal, etc.). Renaming only changes the **name shown throughout the app**; it never changes what that role can access, and staff already assigned to it keep their access unaffected. A built-in role's rename can be reset back to its default name from the same dialog. A custom role can also be deleted entirely (trash icon); a built-in role can only be **hidden** from the invite form (eye icon) — existing staff already on it keep their access, and it can be restored at any time.
 
+### Who can review submitted marks *(2026-10)*
+
+Admin, Principal, and Section Head can always approve, reject, or lock a mark submission in the Markbook's **Review** tab (Exams module) — this floor can't be removed. To let another role (for example, a Deputy Principal or a specific HOD) review submissions too, grant them the **Mark Submissions** permission for the Grades module here in Role Permissions. Without it, they can still enter and submit their own marks, but can't act on anyone else's submission.
+
 ---
 
 ## 9. Your Subscription Plan

@@ -46,7 +46,7 @@ export const ECOSYSTEM_NODES = [
 // ── Conviction before/after pairs ─────────────────────────────
 export const CONVICTION_PAIRS = [
   { before: 'Fee tracking in Excel, reconciled every Friday',               after: 'Real-time fee ledger with every payment, every receipt, tracked live'  },
-  { before: 'Report cards assembled manually by the registrar',             after: 'Governed publishing chain: Teacher → HOD → Principal → Parent Portal'  },
+  { before: 'Report cards assembled manually by the registrar',             after: 'Governed publishing chain: marks submitted, reviewed, then published to the Parent Portal' },
   { before: "Curriculum coverage tracked in a teacher's notebook",          after: 'Syllabus tracker with every topic marked and every subject covered live' },
   { before: 'Parent notices via personal WhatsApp groups',                  after: 'Structured institutional channels with a permanent audit trail'          },
   { before: 'Leadership decisions on week-old paper summaries',             after: 'Live director dashboard spanning attendance, grades, and finance'        },
@@ -71,7 +71,7 @@ export const SHOWCASE_TAB_DATA = [
     Icon:     FileText,
     headline: "No report published without every gate cleared.",
     bullets: [
-      "A five-stage approval chain the platform enforces, not email threads",
+      "Marks reviewed and approved by an eligible reviewer before publishing — enforced by the platform, not email threads",
       "Every action logged with attribution: who approved, when, and what was reviewed",
       "Publication is blocked until the full chain is complete. The trail is permanent",
     ],
@@ -382,29 +382,28 @@ export const MODULE_PREVIEWS = {
     },
   },
   'Reports': {
-    tagline: 'Five-stage approval pipeline — no report card leaves without every gate cleared.',
+    tagline: 'Governed publishing — no report card leaves without review and approval.',
     outcomes: [
-      'Teacher enters marks → HOD reviews → Deputy approves → Principal authorises → Published to parent portal',
-      'Publication blocked until every stage is cleared for every student in the class — no partial releases',
+      'Teacher submits marks → an eligible reviewer approves → Principal publishes to the parent portal',
+      "Publication is blocked while any subject's marks are still unreviewed — a report previews as provisional until then",
       'Every action timestamped and attributed — a permanently auditable chain of custody',
       "Parents receive an in-portal notification the moment their child's report card is published",
     ],
     results: [
-      'Report cards published in hours, not days — approval stages run in parallel, not in sequence',
-      'No unsigned, unreviewed or incorrect report card reaches a parent',
+      'Report cards published once marks are approved, not days later chasing signatures',
+      'No unreviewed or incorrect report card reaches a parent',
       'Full audit trail protects the school in the event of a grade dispute',
     ],
-    badge: '5-Stage Approval',
+    badge: 'Reviewed & Approved',
     connectedModules: ['Grades & Exams', 'Analytics', 'Finance', 'Student Records'],
     demoPath: '/reports',
     mockup: {
       type: 'pipeline',
       rows: [
-        { stage: 'Teacher Entry', count: 4,  color: 'bg-slate-500'  },
-        { stage: 'HOD Review',    count: 3,  color: 'bg-blue-500'   },
-        { stage: 'Deputy',        count: 2,  color: 'bg-amber-500'  },
-        { stage: 'Principal',     count: 1,  color: 'bg-indigo-500' },
-        { stage: 'Published',     count: 8,  color: 'bg-emerald-500'},
+        { stage: 'Draft',     count: 4,  color: 'bg-slate-500'  },
+        { stage: 'Submitted', count: 3,  color: 'bg-blue-500'   },
+        { stage: 'Approved',  count: 2,  color: 'bg-amber-500'  },
+        { stage: 'Published', count: 8,  color: 'bg-emerald-500'},
       ],
     },
   },

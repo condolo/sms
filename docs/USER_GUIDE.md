@@ -460,41 +460,38 @@ Click **📧 Notify Teachers** to send an email + in-app notification to all tea
 
 ---
 
-## 9. Exams
+## 9. Exams *(updated 2026-10-11 — exams are now scheduling records; marks live in the Markbook)*
+
+An exam is the **sitting** — class, subject, date, room — not where marks are stored. Creating one automatically opens the matching window in the Markbook for the assigned subject/stream teacher; marks are entered and moderated there, not on the exam itself.
 
 ### Creating an Exam
 1. Navigate to **Exams → + New Exam**.
-2. Set name, type (Test / Mock / Terminal / Internal / External / Coursework), subject, class, date, time, and room.
-3. Optionally assign a subject teacher owner — if your school enforces subject assignments, only this teacher can enter results.
-4. Click **Save**. The exam starts in **Scheduled** status.
+2. Set name, type (CA / Homework / Mid-Term / End-Term / Coursework), subject, class, date, time, and room.
+3. Click **Save**. The exam starts in **Scheduled** status, and its Markbook window opens for the assigned teacher automatically.
 
 ### Exam Lifecycle
-Exams follow a strict approval process to protect data integrity:
+Exams use a simple 4-state scheduling tracker — there is no results-approval chain on the exam record itself:
 
 ```
-Scheduled → In Progress → Completed → Moderated → Approved → Locked → Published → Archived
+Scheduled → In Progress → Completed
+            (or → Cancelled from either state)
 ```
 
 | Status | Who can set it | What it means |
 |---|---|---|
-| **Scheduled** | System | Exam is created, not yet started |
+| **Scheduled** | System, Admin | Exam is created, not yet started |
 | **In Progress** | Teacher, Admin | Exam is underway |
-| **Completed** | Teacher, Admin | Results have been entered |
-| **Moderated** | Admin only | Results reviewed by moderator |
-| **Approved** | Admin only | Results approved, ready to lock |
-| **Locked** | Admin only | Results frozen — no further edits |
-| **Published** | Admin only | Results visible on report cards |
-| **Archived** | Admin only | Exam is permanently closed |
+| **Completed** | Teacher, Admin | The sitting is over |
+| **Cancelled** | Admin | Exam will not take place |
 
-> Teachers can only advance exams to **In Progress** and **Completed**. All steps from Moderated onward require an administrator.
+### Entering and Moderating Marks (Markbook)
+1. Go to the **Markbook** tab and filter by class, subject, term, and assessment type.
+2. Enter each student's score, or use the mark-state options for Absent / Missing / Exempt / Incomplete.
+3. Click **Submit for review** once the class is complete.
+4. An admin, principal, or section head — or anyone your school has explicitly granted reviewer rights to in Settings — approves or rejects the submission from the **Review** tab, which can be filtered by year, class, and stream. A rejection carries a reason and reopens the grid for that teacher; a note can be left for the teacher there (internal, never printed on the report card).
+5. An approved submission can be locked. A locked submission can be unlocked on request with a reason; it automatically re-locks 24 hours later unless an admin acts again first.
 
-### Recording Results
-1. Open an exam.
-2. Click **Enter Results**.
-3. Type scores for each student, or use the mark state buttons (ABS / MIS / EXM) for non-scoring situations.
-4. Click **Save** — class statistics (highest, lowest, average, pass count) are computed instantly.
-
-> **Note**: Results cannot be edited once an exam is **Locked**. Contact your school administrator to unlock with a recorded reason.
+> **Note**: Subject comments are never blocked by any of this — see §9a below. A teacher can submit marks and write the comment in either order.
 
 ### Status History
 Every status change is logged. Open an exam and click **Status History** to see a full audit trail: who changed it, when, and why.
@@ -509,11 +506,13 @@ The **Timetable** tab shows all scheduled exams in a calendar view. Export as PD
 ### How Report Cards Are Generated
 Your school administrator generates report cards at the end of each term. The process:
 
-1. All exam results must be **Approved** before generation is allowed
+1. A preview can be generated at any time, but it's flagged **provisional** until every subject's marks for that class/term have been approved in the Markbook's Review queue (§9) — publishing is blocked while any subject is still unmoderated, unless an admin explicitly records a reason to bypass it
 2. Admin clicks **Publish Report Cards** for the class and term
-3. The system combines continuous assessment grades and exam results using the school's configured weights
+3. The system combines the Markbook's marks (CA/HW/MT/ET) using the school's configured weights
 4. Final scores are calculated, grades assigned, and class rankings computed
 5. A **permanent, versioned snapshot** is created for each student
+
+> **Comments are never locked by marks.** A subject teacher can write or edit their comment before marks are submitted, after they're approved or locked, or anywhere in between — submitting marks never blocks the comment, and writing the comment never blocks submitting marks.
 
 ### Versioning — Your Records Are Safe
 If a report card needs to be corrected and republished, the **original version is never deleted**. Each republication creates a new version (v1 → v2 → v3). You can always view older versions if needed. Superseded versions are clearly marked.

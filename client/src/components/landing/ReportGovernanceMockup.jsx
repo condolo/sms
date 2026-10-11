@@ -1,17 +1,15 @@
 import { CheckCircle } from 'lucide-react';
 
 const REPORT_STAGES = [
-  { stage: 'Grade Submission', person: 'Mr. Kariuki',    status: 'Complete', date: '14 May 16:04', ok: true  },
-  { stage: 'HOD Review',       person: 'Mrs. Wanjiku',   status: 'Approved', date: '15 May 09:30', ok: true  },
-  { stage: 'Moderation',       person: 'Deputy Ochieng', status: 'Passed',   date: '16 May 14:45', ok: true  },
-  { stage: 'Principal Sign',   person: 'Dr. Mwangi',     status: 'Pending',  date: '— awaiting',   ok: false },
-  { stage: 'Parent Portal',    person: '28 families',    status: 'Locked',   date: '— blocked',    ok: false },
+  { stage: 'Marks Submitted',      person: 'Mr. Kariuki',           status: 'Complete', date: '14 May 16:04', ok: true  },
+  { stage: 'Reviewed & Approved',  person: 'Mrs. Wanjiku, Sec. Head', status: 'Approved', date: '15 May 09:30', ok: true  },
+  { stage: 'Principal Publish',    person: 'Dr. Mwangi',            status: 'Pending',  date: '— awaiting',   ok: false },
+  { stage: 'Parent Portal',        person: '28 families',           status: 'Locked',   date: '— blocked',    ok: false },
 ];
 
 const AUDIT_TRAIL = [
-  'Grade submission locked by Mr. Kariuki · 14 May 16:04',
-  'HOD Mrs. Wanjiku reviewed all 28 reports · 15 May 09:30',
-  'Deputy Ochieng moderated 2 flagged grades · 16 May 14:45',
+  'Marks submitted for review by Mr. Kariuki · 14 May 16:04',
+  'Reviewed and approved by Mrs. Wanjiku (Section Head) · 15 May 09:30',
 ];
 
 export default function ReportGovernanceMockup() {
@@ -37,7 +35,7 @@ export default function ReportGovernanceMockup() {
           <p className="text-sm font-semibold text-slate-900">Report Cards · Term 2 · 2025–26</p>
           <p className="text-[10px] text-slate-400 mt-0.5">28 reports · 9 subjects · Initiated 14 May · Target publish: 23 May</p>
         </div>
-        <span className="px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 text-xs font-semibold shrink-0">3 / 5 Done</span>
+        <span className="px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 text-xs font-semibold shrink-0">2 / 4 Done</span>
       </div>
 
       <div className="p-4">

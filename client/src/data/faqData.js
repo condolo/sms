@@ -39,11 +39,11 @@ export const FAQ_CATEGORIES = [
       },
       {
         q: 'How long does it take to publish report cards?',
-        a: 'Report cards that previously took a week of chasing signatures can be published in hours. Msingi enforces a five-stage approval chain — Teacher → HOD → Deputy → Principal → Parent Portal — and runs stages in parallel where possible. Publication is blocked until every stage is cleared for every student in the class. The moment the principal approves, parents are notified and the report card is live in their portal.',
+        a: 'Report cards that previously took a week of chasing signatures can be published in hours. Msingi blocks publication until every subject\'s marks for the class have been reviewed and approved by an eligible reviewer — admin, principal, section head, or anyone the school has granted that right. The moment the principal publishes, parents are notified and the report card is live in their portal.',
       },
       {
         q: 'What if a parent disputes a grade?',
-        a: 'Every mark entry, HOD review, and moderation step is permanently logged with the name of the person who took the action and the exact timestamp. If a parent questions a grade, you can show them the full approval chain in seconds — who submitted, who reviewed, who moderated, and when. The audit trail is permanent and cannot be edited after the fact.',
+        a: 'Every mark entry and every review action is permanently logged with the name of the person who took it and the exact timestamp. If a parent questions a grade, you can show them the full record in seconds — who entered it, who reviewed and approved it, and when. The audit trail is permanent and cannot be edited after the fact.',
       },
     ],
   },
@@ -87,7 +87,7 @@ export const LANDING_FAQ_TEASER = [
   },
   {
     q: 'How long does it take to publish report cards?',
-    a: 'Report cards that previously took a week of chasing signatures can be published in hours. Msingi enforces a five-stage approval chain and blocks publication until every stage is cleared. The moment the principal approves, parents are notified and the report card is live in their portal.',
+    a: 'Report cards that previously took a week of chasing signatures can be published in hours. Msingi blocks publication until marks are reviewed and approved. The moment the principal publishes, parents are notified and the report card is live in their portal.',
   },
 ];
 
