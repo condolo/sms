@@ -132,7 +132,7 @@ export default function KnowledgeCentre() {
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-6">
                 Knowledge Centre
               </motion.p>
-              <motion.h1 variants={fadeUp} className="text-4xl sm:text-5xl font-bold tracking-tighter text-white leading-[1.07] mb-6">
+              <motion.h1 variants={fadeUp} className="font-['Crimson_Pro'] text-4xl sm:text-5xl font-bold tracking-tighter text-white leading-[1.07] mb-6">
                 Everything you need to know{' '}
                 <span className="text-slate-400">before you decide.</span>
               </motion.h1>
@@ -146,26 +146,26 @@ export default function KnowledgeCentre() {
         {/* Resource cards */}
         <section className="relative py-20 bg-white border-b border-slate-100 overflow-hidden">
           <div className="absolute inset-0 pointer-events-none">
-            <div className="absolute -top-24 -left-24 w-96 h-96 bg-indigo-100/50 rounded-full blur-3xl" />
+            <div className="absolute -top-24 -left-24 w-96 h-96 bg-slate-100/50 rounded-full blur-3xl" />
             <div className="absolute bottom-0 right-0 w-96 h-96 bg-blue-50 rounded-full blur-3xl" />
           </div>
           <div className="relative max-w-6xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger(0.06)}>
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">Guides & resources</motion.p>
-              <motion.h2 variants={fadeUp} className="text-2xl font-bold text-slate-900 mb-10">Start here.</motion.h2>
+              <motion.h2 variants={fadeUp} className="font-['Crimson_Pro'] text-2xl font-bold text-slate-900 mb-10">Start here.</motion.h2>
               <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
                 {RESOURCES.map((r, i) => (
                   <motion.div key={i} variants={fadeUp}>
                     <Link
                       to={r.href}
-                      className="group flex flex-col h-full border border-slate-200 rounded-2xl p-6 hover:border-indigo-200 hover:shadow-sm transition-all"
+                      className="group flex flex-col h-full border border-slate-200 rounded-2xl p-6 hover:border-amber-200 hover:shadow-sm transition-all"
                     >
-                      <div className="w-9 h-9 rounded-xl bg-slate-100 group-hover:bg-indigo-50 flex items-center justify-center mb-4 transition-colors">
-                        <r.Icon size={16} className="text-slate-600 group-hover:text-indigo-600 transition-colors" />
+                      <div className="w-9 h-9 rounded-xl bg-slate-100 group-hover:bg-amber-50 flex items-center justify-center mb-4 transition-colors">
+                        <r.Icon size={16} className="text-slate-600 group-hover:text-amber-600 transition-colors" />
                       </div>
                       <p className="font-semibold text-slate-900 mb-2 text-sm">{r.title}</p>
                       <p className="text-xs text-slate-500 leading-relaxed flex-1 mb-4">{r.desc}</p>
-                      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 group-hover:gap-2.5 transition-all">
+                      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-600 group-hover:gap-2.5 transition-all">
                         {r.cta} <ArrowRight size={12} />
                       </span>
                     </Link>
@@ -179,7 +179,7 @@ export default function KnowledgeCentre() {
         {/* FAQ section */}
         <section className="relative py-20 bg-slate-50 overflow-hidden">
           <div className="absolute inset-0 pointer-events-none">
-            <div className="absolute top-0 right-1/4 w-96 h-96 bg-indigo-100/60 rounded-full blur-3xl" />
+            <div className="absolute top-0 right-1/4 w-96 h-96 bg-slate-200/60 rounded-full blur-3xl" />
             <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-blue-100/50 rounded-full blur-3xl" />
           </div>
           <div className="relative max-w-4xl mx-auto px-6 lg:px-8">
@@ -187,7 +187,7 @@ export default function KnowledgeCentre() {
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">
                 Common questions
               </motion.p>
-              <motion.h2 variants={fadeUp} className="text-2xl font-bold text-slate-900 mb-8">
+              <motion.h2 variants={fadeUp} className="font-['Crimson_Pro'] text-2xl font-bold text-slate-900 mb-8">
                 What schools ask before switching.
               </motion.h2>
 
@@ -260,7 +260,7 @@ export default function KnowledgeCentre() {
         <section className="py-20 bg-slate-950">
           <div className="max-w-2xl mx-auto px-6 lg:px-8 text-center">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
-              <motion.h2 variants={fadeUp} className="text-3xl font-bold text-white mb-4">
+              <motion.h2 variants={fadeUp} className="font-['Crimson_Pro'] text-3xl font-bold text-white mb-4">
                 Still have questions?
               </motion.h2>
               <motion.p variants={fadeUp} className="text-slate-400 mb-8">

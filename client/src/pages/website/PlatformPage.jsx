@@ -88,7 +88,7 @@ export default function PlatformPage() {
           <div className="max-w-4xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" animate="visible" variants={stagger(0.08)}>
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-6">Platform Overview</motion.p>
-              <motion.h1 variants={fadeUp} className="text-4xl sm:text-5xl lg:text-[56px] font-bold tracking-tighter text-white leading-[1.06] mb-6">
+              <motion.h1 variants={fadeUp} className="font-['Crimson_Pro'] text-4xl sm:text-5xl lg:text-[56px] font-bold tracking-tighter text-white leading-[1.06] mb-6">
                 {MODULE_COUNT} modules. One record.{' '}
                 <span className="text-slate-400">No reconciliation.</span>
               </motion.h1>
@@ -110,13 +110,13 @@ export default function PlatformPage() {
         {/* Module groups */}
         <section className="relative py-20 bg-white border-b border-slate-100 overflow-hidden">
           <div className="absolute inset-0 pointer-events-none">
-            <div className="absolute -top-24 -left-24 w-96 h-96 bg-indigo-100/50 rounded-full blur-3xl" />
+            <div className="absolute -top-24 -left-24 w-96 h-96 bg-slate-100/50 rounded-full blur-3xl" />
             <div className="absolute bottom-0 right-0 w-96 h-96 bg-blue-50 rounded-full blur-3xl" />
           </div>
           <div className="relative max-w-6xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">{MODULE_COUNT} modules</motion.p>
-              <motion.h2 variants={fadeUp} className="text-2xl font-bold text-slate-900 mb-12">Organised across four functional areas.</motion.h2>
+              <motion.h2 variants={fadeUp} className="font-['Crimson_Pro'] text-2xl font-bold text-slate-900 mb-12">Organised across four functional areas.</motion.h2>
               <div className="grid sm:grid-cols-2 gap-8">
                 {GROUPS.map(group => (
                   <motion.div key={group.label} variants={fadeUp}>
@@ -149,13 +149,13 @@ export default function PlatformPage() {
         {/* How it connects */}
         <section className="relative py-20 bg-slate-50 border-b border-slate-100 overflow-hidden">
           <div className="absolute inset-0 pointer-events-none">
-            <div className="absolute top-0 right-1/4 w-96 h-96 bg-indigo-100/60 rounded-full blur-3xl" />
+            <div className="absolute top-0 right-1/4 w-96 h-96 bg-slate-200/60 rounded-full blur-3xl" />
             <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-blue-100/50 rounded-full blur-3xl" />
           </div>
           <div className="relative max-w-4xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">How it connects</motion.p>
-              <motion.h2 variants={fadeUp} className="text-2xl font-bold text-slate-900 mb-10">One connected chain. No manual handoff.</motion.h2>
+              <motion.h2 variants={fadeUp} className="font-['Crimson_Pro'] text-2xl font-bold text-slate-900 mb-10">One connected chain. No manual handoff.</motion.h2>
               <div className="flex flex-wrap gap-0">
                 {FLOW.map((step, i) => (
                   <motion.div key={i} variants={fadeUp} className="flex items-center gap-0">
@@ -175,13 +175,13 @@ export default function PlatformPage() {
         {/* Curriculum */}
         <section className="relative py-20 bg-white border-b border-slate-100 overflow-hidden">
           <div className="absolute inset-0 pointer-events-none">
-            <div className="absolute -top-24 -left-24 w-96 h-96 bg-indigo-100/50 rounded-full blur-3xl" />
+            <div className="absolute -top-24 -left-24 w-96 h-96 bg-slate-100/50 rounded-full blur-3xl" />
             <div className="absolute bottom-0 right-0 w-96 h-96 bg-blue-50 rounded-full blur-3xl" />
           </div>
           <div className="relative max-w-4xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">Curriculum support</motion.p>
-              <motion.h2 variants={fadeUp} className="text-2xl font-bold text-slate-900 mb-6">Built for every curriculum your school runs.</motion.h2>
+              <motion.h2 variants={fadeUp} className="font-['Crimson_Pro'] text-2xl font-bold text-slate-900 mb-6">Built for every curriculum your school runs.</motion.h2>
               <motion.p variants={fadeUp} className="text-slate-500 mb-8 max-w-xl">No customisation fee. No separate module. Every supported curriculum is built into the academic engine from day one.</motion.p>
               <motion.div variants={fadeUp} className="flex flex-wrap gap-3">
                 {CURRICULUM.map(c => (
@@ -196,7 +196,7 @@ export default function PlatformPage() {
         <section className="py-20 bg-slate-950">
           <div className="max-w-2xl mx-auto px-6 lg:px-8 text-center">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
-              <motion.h2 variants={fadeUp} className="text-3xl font-bold text-white mb-4">Ready to see it running?</motion.h2>
+              <motion.h2 variants={fadeUp} className="font-['Crimson_Pro'] text-3xl font-bold text-white mb-4">Ready to see it running?</motion.h2>
               <motion.p variants={fadeUp} className="text-slate-400 mb-8">A 30-minute demo shows everything live — your questions, your curriculum, your workflows.</motion.p>
               <motion.div variants={fadeUp} className="flex flex-col sm:flex-row items-center justify-center gap-3">
                 <Link to="/contact" className="inline-flex items-center gap-2 rounded-xl bg-white px-6 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-100 transition-all">

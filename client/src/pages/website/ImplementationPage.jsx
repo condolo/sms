@@ -69,7 +69,7 @@ export default function ImplementationPage() {
           <div className="max-w-4xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" animate="visible" variants={stagger(0.08)}>
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-6">Implementation</motion.p>
-              <motion.h1 variants={fadeUp} className="text-4xl sm:text-5xl lg:text-[54px] font-bold tracking-tighter text-white leading-[1.07] mb-6">
+              <motion.h1 variants={fadeUp} className="font-['Crimson_Pro'] text-4xl sm:text-5xl lg:text-[54px] font-bold tracking-tighter text-white leading-[1.07] mb-6">
                 Most schools are live in 30 days.{' '}
                 <span className="text-slate-400">We handle the migration.</span>
               </motion.h1>
@@ -83,12 +83,12 @@ export default function ImplementationPage() {
         {/* 4-phase timeline */}
         <section className="relative py-20 bg-white border-b border-slate-100 overflow-hidden">
           <div className="absolute inset-0 pointer-events-none">
-            <div className="absolute -top-24 -left-24 w-96 h-96 bg-indigo-100/50 rounded-full blur-3xl" />
+            <div className="absolute -top-24 -left-24 w-96 h-96 bg-slate-100/50 rounded-full blur-3xl" />
             <div className="absolute bottom-0 right-0 w-96 h-96 bg-blue-50 rounded-full blur-3xl" />
           </div>
           <div className="relative max-w-4xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger(0.08)}>
-              <motion.h2 variants={fadeUp} className="text-2xl font-bold text-slate-900 mb-12">Four phases. One implementation contact throughout.</motion.h2>
+              <motion.h2 variants={fadeUp} className="font-['Crimson_Pro'] text-2xl font-bold text-slate-900 mb-12">Four phases. One implementation contact throughout.</motion.h2>
               <div className="space-y-4">
                 {PHASES.map((phase, i) => (
                   <motion.div key={i} variants={fadeUp}
@@ -114,12 +114,12 @@ export default function ImplementationPage() {
         {/* What we migrate */}
         <section className="relative py-20 bg-slate-50 border-b border-slate-100 overflow-hidden">
           <div className="absolute inset-0 pointer-events-none">
-            <div className="absolute top-0 right-1/4 w-96 h-96 bg-indigo-100/60 rounded-full blur-3xl" />
+            <div className="absolute top-0 right-1/4 w-96 h-96 bg-slate-200/60 rounded-full blur-3xl" />
             <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-blue-100/50 rounded-full blur-3xl" />
           </div>
           <div className="relative max-w-4xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
-              <motion.h2 variants={fadeUp} className="text-2xl font-bold text-slate-900 mb-4">What we migrate.</motion.h2>
+              <motion.h2 variants={fadeUp} className="font-['Crimson_Pro'] text-2xl font-bold text-slate-900 mb-4">What we migrate.</motion.h2>
               <motion.p variants={fadeUp} className="text-slate-500 mb-8">Every record. Verified. No data left behind.</motion.p>
               <motion.div variants={fadeUp} className="grid sm:grid-cols-2 gap-3">
                 {['Student records & profiles', 'Fee history & payment records', 'Academic history & grades', 'Staff records & HR files', 'Class structures & streams', 'Timetable configuration', 'Previous report cards', 'Parent contact information'].map(item => (
@@ -136,12 +136,12 @@ export default function ImplementationPage() {
         {/* Common concerns */}
         <section className="relative py-20 bg-white border-b border-slate-100 overflow-hidden">
           <div className="absolute inset-0 pointer-events-none">
-            <div className="absolute -top-24 -left-24 w-96 h-96 bg-indigo-100/50 rounded-full blur-3xl" />
+            <div className="absolute -top-24 -left-24 w-96 h-96 bg-slate-100/50 rounded-full blur-3xl" />
             <div className="absolute bottom-0 right-0 w-96 h-96 bg-blue-50 rounded-full blur-3xl" />
           </div>
           <div className="relative max-w-3xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
-              <motion.h2 variants={fadeUp} className="text-2xl font-bold text-slate-900 mb-10">Things schools always ask before switching.</motion.h2>
+              <motion.h2 variants={fadeUp} className="font-['Crimson_Pro'] text-2xl font-bold text-slate-900 mb-10">Things schools always ask before switching.</motion.h2>
               <div className="space-y-6">
                 {CONCERNS.map(({ concern, answer }, i) => (
                   <motion.div key={i} variants={fadeUp} className="border-b border-slate-200 pb-6 last:border-0">
@@ -158,7 +158,7 @@ export default function ImplementationPage() {
         <section className="py-20 bg-slate-950">
           <div className="max-w-2xl mx-auto px-6 lg:px-8 text-center">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
-              <motion.h2 variants={fadeUp} className="text-3xl font-bold text-white mb-4">Start with a discovery session.</motion.h2>
+              <motion.h2 variants={fadeUp} className="font-['Crimson_Pro'] text-3xl font-bold text-white mb-4">Start with a discovery session.</motion.h2>
               <motion.p variants={fadeUp} className="text-slate-400 mb-8">We audit your current records and tell you exactly what implementation looks like for your school — before any commitment.</motion.p>
               <motion.div variants={fadeUp}>
                 <Link to="/contact" className="inline-flex items-center gap-2 rounded-xl bg-white px-6 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-100 transition-all">

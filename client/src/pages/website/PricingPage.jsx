@@ -101,13 +101,13 @@ export default function PricingPage() {
         {/* Hero */}
         <section className="relative pt-32 pb-16 bg-slate-50 border-b border-slate-100 overflow-hidden">
           <div className="absolute inset-0 pointer-events-none">
-            <div className="absolute top-0 left-1/4 w-96 h-96 bg-indigo-100/60 rounded-full blur-3xl" />
+            <div className="absolute top-0 left-1/4 w-96 h-96 bg-slate-200/60 rounded-full blur-3xl" />
             <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-blue-100/50 rounded-full blur-3xl" />
           </div>
           <div className="relative max-w-3xl mx-auto px-6 lg:px-8 text-center">
             <motion.div initial="hidden" animate="visible" variants={stagger(0.08)}>
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-4">Pricing</motion.p>
-              <motion.h1 variants={fadeUp} className="text-4xl sm:text-5xl font-bold tracking-tighter text-slate-900 mb-4">
+              <motion.h1 variants={fadeUp} className="font-['Crimson_Pro'] text-4xl sm:text-5xl font-bold tracking-tighter text-slate-900 mb-4">
                 Transparent pricing. No surprises. No lock-in.
               </motion.h1>
               <motion.p variants={fadeUp} className="text-lg text-slate-500 leading-relaxed">
@@ -127,11 +127,11 @@ export default function PricingPage() {
                   transition={{ duration: 0.4 }}
                   className={`rounded-2xl border p-8 flex flex-col ${
                     tier.highlight
-                      ? 'border-indigo-300 bg-indigo-50 ring-2 ring-indigo-200'
+                      ? 'border-amber-300 bg-amber-50 ring-2 ring-amber-200'
                       : 'border-slate-200 bg-white'
                   }`}>
                   {tier.highlight && (
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-indigo-600 mb-3">Most popular</p>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-amber-600 mb-3">Most popular</p>
                   )}
                   <h2 className="text-xl font-bold text-slate-900 mb-1">{tier.name}</h2>
                   <p className="text-sm text-slate-500 mb-5">{tier.desc}</p>
@@ -150,7 +150,7 @@ export default function PricingPage() {
                   <Link to="/contact"
                     className={`inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold transition-all ${
                       tier.highlight
-                        ? 'bg-indigo-600 text-white hover:bg-indigo-500 shadow-md shadow-indigo-600/25'
+                        ? 'bg-amber-600 text-white hover:bg-amber-500 shadow-md shadow-amber-600/25'
                         : 'bg-slate-900 text-white hover:bg-slate-700'
                     }`}>
                     {tier.cta} <ArrowRight size={14} />
@@ -164,12 +164,12 @@ export default function PricingPage() {
         {/* Cost estimator */}
         <section className="relative py-16 bg-slate-50 border-y border-slate-100 overflow-hidden">
           <div className="absolute inset-0 pointer-events-none">
-            <div className="absolute top-0 right-1/4 w-96 h-96 bg-indigo-100/60 rounded-full blur-3xl" />
+            <div className="absolute top-0 right-1/4 w-96 h-96 bg-slate-200/60 rounded-full blur-3xl" />
             <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-blue-100/50 rounded-full blur-3xl" />
           </div>
           <div className="relative max-w-2xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
-              <motion.h2 variants={fadeUp} className="text-2xl font-bold text-slate-900 mb-2">Estimate your cost</motion.h2>
+              <motion.h2 variants={fadeUp} className="font-['Crimson_Pro'] text-2xl font-bold text-slate-900 mb-2">Estimate your cost</motion.h2>
               <motion.p variants={fadeUp} className="text-slate-500 mb-8 text-sm">Drag to set your student count. Multiply by your number of terms for annual cost.</motion.p>
               <motion.div variants={fadeUp} className="bg-white rounded-2xl border border-slate-200 p-8">
                 <div className="mb-6">
@@ -179,14 +179,14 @@ export default function PricingPage() {
                   </div>
                   <input type="range" min={50} max={3000} step={50} value={students}
                     onChange={e => setStudents(Number(e.target.value))}
-                    className="w-full accent-indigo-600" />
+                    className="w-full accent-amber-600" />
                   <div className="flex justify-between text-xs text-slate-400 mt-1">
                     <span>50</span><span>3,000</span>
                   </div>
                 </div>
                 <div className="grid grid-cols-3 gap-4 pt-4 border-t border-slate-100">
                   {TIERS.map(tier => (
-                    <div key={tier.name} className={`rounded-xl p-4 text-center ${tier.highlight ? 'bg-indigo-50 border border-indigo-200' : 'bg-slate-50'}`}>
+                    <div key={tier.name} className={`rounded-xl p-4 text-center ${tier.highlight ? 'bg-amber-50 border border-amber-200' : 'bg-slate-50'}`}>
                       <p className="text-xs font-semibold text-slate-500 mb-1">{tier.name}</p>
                       <p className="text-xl font-bold text-slate-900">KES {(students * tier.price).toLocaleString()}</p>
                       <p className="text-xs text-slate-400 mt-0.5">per term</p>
@@ -202,7 +202,7 @@ export default function PricingPage() {
         <section className="py-20">
           <div className="max-w-3xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
-              <motion.h2 variants={fadeUp} className="text-2xl font-bold text-slate-900 mb-10">Pricing questions, answered directly.</motion.h2>
+              <motion.h2 variants={fadeUp} className="font-['Crimson_Pro'] text-2xl font-bold text-slate-900 mb-10">Pricing questions, answered directly.</motion.h2>
               <div className="space-y-6">
                 {FAQS.map(({ q, a }, i) => (
                   <motion.div key={i} variants={fadeUp} className="border-b border-slate-200 pb-6 last:border-0">

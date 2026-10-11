@@ -41,7 +41,7 @@ export default function WhyPage() {
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-6">
                 Our Philosophy
               </motion.p>
-              <motion.h1 variants={fadeUp} className="text-4xl sm:text-5xl lg:text-[56px] font-bold tracking-tighter text-white leading-[1.06] mb-8">
+              <motion.h1 variants={fadeUp} className="font-['Crimson_Pro'] text-4xl sm:text-5xl lg:text-[56px] font-bold tracking-tighter text-white leading-[1.06] mb-8">
                 We built Msingi because African schools deserve technology built for them —{' '}
                 <span className="text-slate-400">not adapted for them.</span>
               </motion.h1>
@@ -55,7 +55,7 @@ export default function WhyPage() {
         {/* Morning narrative */}
         <section className="relative py-20 bg-white border-b border-slate-100 overflow-hidden">
           <div className="absolute inset-0 pointer-events-none">
-            <div className="absolute -top-24 -left-24 w-96 h-96 bg-indigo-100/50 rounded-full blur-3xl" />
+            <div className="absolute -top-24 -left-24 w-96 h-96 bg-slate-100/50 rounded-full blur-3xl" />
             <div className="absolute bottom-0 right-0 w-96 h-96 bg-blue-50 rounded-full blur-3xl" />
           </div>
           <div className="relative max-w-3xl mx-auto px-6 lg:px-8">
@@ -86,13 +86,13 @@ export default function WhyPage() {
         {/* We believe */}
         <section className="relative py-20 bg-slate-50 overflow-hidden">
           <div className="absolute inset-0 pointer-events-none">
-            <div className="absolute top-0 right-1/4 w-96 h-96 bg-indigo-100/60 rounded-full blur-3xl" />
+            <div className="absolute top-0 right-1/4 w-96 h-96 bg-slate-200/60 rounded-full blur-3xl" />
             <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-blue-100/50 rounded-full blur-3xl" />
           </div>
           <div className="relative max-w-3xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger(0.07)}>
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-4">What we believe</motion.p>
-              <motion.h2 variants={fadeUp} className="text-2xl font-bold text-slate-900 mb-10">Our commitments to every school we work with.</motion.h2>
+              <motion.h2 variants={fadeUp} className="font-['Crimson_Pro'] text-2xl font-bold text-slate-900 mb-10">Our commitments to every school we work with.</motion.h2>
               <div className="space-y-4">
                 {BELIEFS.map((belief, i) => (
                   <motion.div key={i} variants={fadeUp}
@@ -112,7 +112,7 @@ export default function WhyPage() {
         <section className="py-20 bg-slate-950">
           <div className="max-w-3xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
-              <motion.h2 variants={fadeUp} className="text-2xl font-bold text-white mb-6">
+              <motion.h2 variants={fadeUp} className="font-['Crimson_Pro'] text-2xl font-bold text-white mb-6">
                 This is not a startup experiment.
               </motion.h2>
               <motion.p variants={fadeUp} className="text-slate-400 leading-relaxed mb-4">

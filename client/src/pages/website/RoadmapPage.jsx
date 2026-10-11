@@ -89,7 +89,7 @@ export default function RoadmapPage() {
           <div className="max-w-4xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" animate="visible" variants={stagger(0.08)}>
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-6">Vision Roadmap</motion.p>
-              <motion.h1 variants={fadeUp} className="text-4xl sm:text-5xl font-bold tracking-tighter text-white leading-[1.07] mb-6">
+              <motion.h1 variants={fadeUp} className="font-['Crimson_Pro'] text-4xl sm:text-5xl font-bold tracking-tighter text-white leading-[1.07] mb-6">
                 Where Msingi is going —{' '}
                 <span className="text-slate-400">and why.</span>
               </motion.h1>
@@ -103,7 +103,7 @@ export default function RoadmapPage() {
         {/* Three horizons */}
         <section className="relative py-20 bg-white border-b border-slate-100 overflow-hidden">
           <div className="absolute inset-0 pointer-events-none">
-            <div className="absolute -top-24 -left-24 w-96 h-96 bg-indigo-100/50 rounded-full blur-3xl" />
+            <div className="absolute -top-24 -left-24 w-96 h-96 bg-slate-100/50 rounded-full blur-3xl" />
             <div className="absolute bottom-0 right-0 w-96 h-96 bg-blue-50 rounded-full blur-3xl" />
           </div>
           <div className="relative max-w-6xl mx-auto px-6 lg:px-8">
@@ -136,12 +136,12 @@ export default function RoadmapPage() {
         {/* Guiding principles */}
         <section className="relative py-20 bg-slate-50 border-b border-slate-100 overflow-hidden">
           <div className="absolute inset-0 pointer-events-none">
-            <div className="absolute top-0 right-1/4 w-96 h-96 bg-indigo-100/60 rounded-full blur-3xl" />
+            <div className="absolute top-0 right-1/4 w-96 h-96 bg-slate-200/60 rounded-full blur-3xl" />
             <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-blue-100/50 rounded-full blur-3xl" />
           </div>
           <div className="relative max-w-4xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
-              <motion.h2 variants={fadeUp} className="text-2xl font-bold text-slate-900 mb-10">What guides our decisions.</motion.h2>
+              <motion.h2 variants={fadeUp} className="font-['Crimson_Pro'] text-2xl font-bold text-slate-900 mb-10">What guides our decisions.</motion.h2>
               <div className="grid sm:grid-cols-3 gap-6">
                 {PRINCIPLES.map(p => (
                   <motion.div key={p.title} variants={fadeUp} className="bg-white border border-slate-200 rounded-xl p-6">
@@ -158,7 +158,7 @@ export default function RoadmapPage() {
         <section className="py-20 bg-slate-950">
           <div className="max-w-2xl mx-auto px-6 lg:px-8 text-center">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
-              <motion.h2 variants={fadeUp} className="text-3xl font-bold text-white mb-4">Shape the roadmap.</motion.h2>
+              <motion.h2 variants={fadeUp} className="font-['Crimson_Pro'] text-3xl font-bold text-white mb-4">Shape the roadmap.</motion.h2>
               <motion.p variants={fadeUp} className="text-slate-400 mb-8">Schools that onboard early have direct input into what gets built next.</motion.p>
               <motion.div variants={fadeUp}>
                 <Link to="/contact" className="inline-flex items-center gap-2 rounded-xl bg-white px-6 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-100 transition-all">

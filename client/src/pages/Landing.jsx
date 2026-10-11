@@ -170,8 +170,8 @@ export default function Landing() {
         <section className="relative pt-32 pb-20 bg-slate-950 overflow-hidden">
           {/* Subtle background texture */}
           <div className="absolute inset-0 pointer-events-none">
-            <div className="absolute top-0 left-1/4 w-96 h-96 bg-indigo-900/20 rounded-full blur-3xl" />
-            <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-indigo-950/40 rounded-full blur-3xl" />
+            <div className="absolute top-0 left-1/4 w-96 h-96 bg-slate-800/20 rounded-full blur-3xl" />
+            <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-slate-900/40 rounded-full blur-3xl" />
           </div>
 
           <div className="relative max-w-7xl mx-auto px-6 lg:px-8">
@@ -182,22 +182,19 @@ export default function Landing() {
                 className="min-w-0 text-center lg:text-left">
 
                 <motion.h1 variants={fadeUp}
-                  className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tighter text-white leading-[1.1] mb-7">
-                  The school management platform
+                  className="font-['Crimson_Pro'] text-4xl sm:text-5xl lg:text-7xl font-bold text-white leading-[1.08] mb-7">
+                  One student record.
                   <br />
-                  <span className="text-slate-400">built for Africa.</span>
+                  <span className="text-slate-400">Admission to report card.</span>
                 </motion.h1>
 
-                <motion.p variants={fadeUp} className="text-xl sm:text-2xl text-slate-400 max-w-xl mx-auto lg:mx-0 leading-relaxed mb-3">
-                  {ECOSYSTEM_NODES.length} connected modules. One institutional record. CBC, CAIE, IB, M-Pesa — native.
-                </motion.p>
-                <motion.p variants={fadeUp} className="text-lg text-slate-500 italic mb-10">
-                  Not adapted for Africa. Built for it.
+                <motion.p variants={fadeUp} className="text-xl sm:text-2xl text-slate-400 max-w-xl mx-auto lg:mx-0 leading-relaxed mb-10">
+                  Attendance, grades, fees and report cards all draw from the same student record — graded against CBC, CAIE or IB, fees reconciled through M-Pesa, nothing re-typed between systems.
                 </motion.p>
 
                 <motion.div variants={fadeUp} className="flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-3">
                   <Link to="/contact"
-                    className="group inline-flex items-center gap-2 rounded-xl bg-white px-7 py-3.5 text-sm font-semibold text-slate-900 hover:bg-slate-100 transition-all shadow-lg">
+                    className="group inline-flex items-center gap-2 rounded-xl bg-amber-600 px-7 py-3.5 text-sm font-semibold text-white hover:bg-amber-500 transition-all shadow-lg shadow-amber-900/30">
                     Book a 30-min session
                     <ArrowRight size={15} className="group-hover:translate-x-0.5 transition-transform" />
                   </Link>
@@ -216,6 +213,7 @@ export default function Landing() {
                 transition={{ duration: 0.9, delay: 0.3, ease: EASE }}
                 className="min-w-0 overflow-hidden pb-10 pl-6 sm:pl-10">
                 <DeviceMockup />
+                <p className="text-xs text-slate-600 mt-3 pl-6 sm:pl-10">Illustrative preview — not a real school's data.</p>
               </motion.div>
             </div>
           </div>
@@ -224,7 +222,7 @@ export default function Landing() {
         {/* ══ 2. MORNING NARRATIVE ════════════════════════════════════════════ */}
         <section className="relative py-20 bg-white border-b border-slate-100 overflow-hidden">
           <div className="absolute inset-0 pointer-events-none">
-            <div className="absolute -top-24 -left-24 w-96 h-96 bg-indigo-100/50 rounded-full blur-3xl" />
+            <div className="absolute -top-24 -left-24 w-96 h-96 bg-slate-100/50 rounded-full blur-3xl" />
             <div className="absolute bottom-0 right-0 w-96 h-96 bg-blue-50 rounded-full blur-3xl" />
           </div>
           <div className="relative max-w-6xl mx-auto px-6 lg:px-8">
@@ -232,7 +230,7 @@ export default function Landing() {
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">
                 A new term begins
               </motion.p>
-              <motion.h2 variants={fadeUp} className="text-3xl sm:text-4xl font-bold tracking-tight text-slate-900 leading-tight mb-10">
+              <motion.h2 variants={fadeUp} className="font-['Crimson_Pro'] text-3xl sm:text-4xl font-bold tracking-tight text-slate-900 leading-tight mb-10">
                 Before the first student arrives,<br />
                 <span className="text-slate-400">Msingi has already done its work.</span>
               </motion.h2>
@@ -251,7 +249,7 @@ export default function Landing() {
                         : 'bg-slate-50 border border-slate-100 hover:bg-slate-100'
                     }`}>
                     <span className={`text-xs font-mono font-semibold flex-shrink-0 mt-0.5 ${
-                      activeMoment === i ? 'text-indigo-400' : 'text-slate-400'
+                      activeMoment === i ? 'text-amber-400' : 'text-slate-400'
                     }`}>
                       {m.time}
                     </span>
@@ -278,7 +276,7 @@ export default function Landing() {
                 </motion.p>
                 <motion.div variants={fadeUp}>
                   <Link to="/why"
-                    className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-900 hover:text-indigo-600 transition-colors">
+                    className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-900 hover:text-amber-600 transition-colors">
                     Read why we built it <ArrowRight size={13} />
                   </Link>
                 </motion.div>
@@ -294,7 +292,7 @@ export default function Landing() {
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-4">
                 Platform
               </motion.p>
-              <motion.h2 variants={fadeUp} className="text-3xl sm:text-4xl font-bold tracking-tight text-white mb-4 leading-tight">
+              <motion.h2 variants={fadeUp} className="font-['Crimson_Pro'] text-3xl sm:text-4xl font-bold tracking-tight text-white mb-4 leading-tight">
                 {ECOSYSTEM_NODES.length} modules. One record. No reconciliation.
               </motion.h2>
               <motion.p variants={fadeUp} className="text-lg text-slate-400 max-w-xl leading-relaxed">
@@ -309,7 +307,7 @@ export default function Landing() {
             </motion.div>
 
             <div className="relative rounded-3xl border border-slate-800/60 bg-slate-900/40 p-6 sm:p-8 lg:p-10">
-              <div className="absolute inset-0 rounded-3xl bg-gradient-to-br from-indigo-950/30 via-transparent to-slate-950/30 pointer-events-none" />
+              <div className="absolute inset-0 rounded-3xl bg-gradient-to-br from-slate-800/40 via-transparent to-slate-950/30 pointer-events-none" />
               <motion.div
                 initial="hidden" whileInView="visible" viewport={VP} variants={stagger(0.04)}
                 className="relative grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7 gap-y-8 gap-x-4 sm:gap-x-6">
@@ -369,7 +367,7 @@ export default function Landing() {
         {/* ══ 5. SOLUTIONS ───────────────────────────────────────────────────── */}
         <section id="solutions" className="relative py-24 sm:py-28 bg-slate-50 border-b border-slate-100 overflow-hidden">
           <div className="absolute inset-0 pointer-events-none">
-            <div className="absolute top-0 right-1/4 w-96 h-96 bg-indigo-100/60 rounded-full blur-3xl" />
+            <div className="absolute top-0 right-1/4 w-96 h-96 bg-slate-200/60 rounded-full blur-3xl" />
             <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-blue-100/50 rounded-full blur-3xl" />
           </div>
           <div className="relative max-w-6xl mx-auto px-6 lg:px-8">
@@ -377,7 +375,7 @@ export default function Landing() {
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">
                 Solutions
               </motion.p>
-              <motion.h2 variants={fadeUp} className="text-3xl sm:text-4xl font-bold tracking-tight text-slate-900 leading-tight mb-12">
+              <motion.h2 variants={fadeUp} className="font-['Crimson_Pro'] text-3xl sm:text-4xl font-bold tracking-tight text-slate-900 leading-tight mb-12">
                 Different people. Different outcomes.<br />
                 <span className="text-slate-400">One platform.</span>
               </motion.h2>
@@ -387,11 +385,11 @@ export default function Landing() {
                   <motion.div key={i} variants={fadeUp}>
                     <Link to={s.href}
                       className="group flex flex-col gap-2 p-5 bg-white border border-slate-200 rounded-2xl hover:border-slate-400 hover:shadow-sm transition-all">
-                      <p className="text-sm font-semibold text-slate-900 group-hover:text-indigo-600 transition-colors">
+                      <p className="text-sm font-semibold text-slate-900 group-hover:text-amber-600 transition-colors">
                         {s.role}
                       </p>
                       <p className="text-sm text-slate-500 leading-relaxed flex-1">{s.line}</p>
-                      <span className="text-xs font-semibold text-slate-400 group-hover:text-indigo-500 transition-colors flex items-center gap-1 mt-1">
+                      <span className="text-xs font-semibold text-slate-400 group-hover:text-amber-600 transition-colors flex items-center gap-1 mt-1">
                         See how it works <ArrowRight size={11} />
                       </span>
                     </Link>
@@ -423,7 +421,7 @@ export default function Landing() {
           <div className="max-w-7xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-4">Security</motion.p>
-              <motion.h2 variants={fadeUp} className="text-3xl sm:text-4xl font-bold tracking-tight text-white mb-4 leading-tight">
+              <motion.h2 variants={fadeUp} className="font-['Crimson_Pro'] text-3xl sm:text-4xl font-bold tracking-tight text-white mb-4 leading-tight">
                 Built for institutional trust.<br />
                 <span className="text-slate-500">Not a startup experiment.</span>
               </motion.h2>
@@ -466,14 +464,14 @@ export default function Landing() {
         {/* ══ 9. HONEST SOCIAL PROOF ════════════════════════════════════════ */}
         <section className="relative py-16 bg-white border-b border-slate-100 overflow-hidden">
           <div className="absolute inset-0 pointer-events-none">
-            <div className="absolute top-0 left-1/3 w-80 h-80 bg-indigo-100/50 rounded-full blur-3xl" />
+            <div className="absolute top-0 left-1/3 w-80 h-80 bg-slate-100/50 rounded-full blur-3xl" />
           </div>
           <div className="relative max-w-4xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}
               className="flex flex-col sm:flex-row gap-8 items-start sm:items-center">
               <motion.div variants={fadeUp} className="flex-1">
                 <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">Where Msingi is live</p>
-                <p className="text-2xl font-bold text-slate-900 mb-2">
+                <p className="font-['Crimson_Pro'] text-2xl font-bold text-slate-900 mb-2">
                   Live at Mascit Lab Academy.
                 </p>
                 <p className="text-slate-500 text-base leading-relaxed">
@@ -482,7 +480,7 @@ export default function Landing() {
               </motion.div>
               <motion.div variants={fadeUp} className="flex-shrink-0">
                 <Link to="/contact"
-                  className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-6 py-3 text-sm font-semibold text-white hover:bg-indigo-600 transition-all">
+                  className="inline-flex items-center gap-2 rounded-xl bg-amber-600 px-6 py-3 text-sm font-semibold text-white hover:bg-amber-500 transition-all">
                   Enquire about early access <ArrowRight size={14} />
                 </Link>
               </motion.div>
@@ -493,7 +491,7 @@ export default function Landing() {
         {/* ══ 10. FINAL CTA ═════════════════════════════════════════════════ */}
         <section className="relative py-24 sm:py-32 bg-slate-50 overflow-hidden">
           <div className="absolute inset-0 pointer-events-none">
-            <div className="absolute top-0 left-1/4 w-96 h-96 bg-indigo-100/60 rounded-full blur-3xl" />
+            <div className="absolute top-0 left-1/4 w-96 h-96 bg-slate-200/60 rounded-full blur-3xl" />
             <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-blue-100/50 rounded-full blur-3xl" />
           </div>
           <div className="relative max-w-3xl mx-auto px-6 lg:px-8 text-center">
@@ -502,7 +500,7 @@ export default function Landing() {
                 The next step
               </motion.p>
               <motion.h2 variants={fadeUp}
-                className="text-4xl sm:text-5xl font-bold tracking-tighter text-slate-900 leading-[1.05] mb-6">
+                className="font-['Crimson_Pro'] text-4xl sm:text-5xl font-bold tracking-tighter text-slate-900 leading-[1.05] mb-6">
                 A 30-minute session.<br />No commitment required.
               </motion.h2>
               <motion.p variants={fadeUp} className="text-lg text-slate-500 leading-relaxed mb-3 max-w-lg mx-auto">
@@ -513,7 +511,7 @@ export default function Landing() {
               </motion.p>
               <motion.div variants={fadeUp} className="flex flex-col sm:flex-row items-center justify-center gap-3">
                 <Link to="/contact"
-                  className="group inline-flex items-center gap-2 rounded-xl bg-slate-900 px-8 py-4 text-sm font-semibold text-white hover:bg-indigo-600 transition-all shadow-lg">
+                  className="group inline-flex items-center gap-2 rounded-xl bg-amber-600 px-8 py-4 text-sm font-semibold text-white hover:bg-amber-500 transition-all shadow-lg shadow-amber-900/20">
                   Book a discovery session
                   <ArrowRight size={15} className="group-hover:translate-x-0.5 transition-transform" />
                 </Link>

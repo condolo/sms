@@ -154,7 +154,7 @@ export default function SolutionPage() {
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-6">
                 {sol.role}
               </motion.p>
-              <motion.h1 variants={fadeUp} className="text-4xl sm:text-5xl font-bold tracking-tighter text-white leading-[1.07] mb-6">
+              <motion.h1 variants={fadeUp} className="font-['Crimson_Pro'] text-4xl sm:text-5xl font-bold tracking-tighter text-white leading-[1.07] mb-6">
                 {sol.h1}
               </motion.h1>
               <motion.p variants={fadeUp} className="text-lg text-slate-400 leading-relaxed max-w-2xl">
@@ -167,7 +167,7 @@ export default function SolutionPage() {
         {/* Narrative */}
         <section className="relative py-20 bg-white border-b border-slate-100 overflow-hidden">
           <div className="absolute inset-0 pointer-events-none">
-            <div className="absolute -top-24 -left-24 w-96 h-96 bg-indigo-100/50 rounded-full blur-3xl" />
+            <div className="absolute -top-24 -left-24 w-96 h-96 bg-slate-100/50 rounded-full blur-3xl" />
             <div className="absolute bottom-0 right-0 w-96 h-96 bg-blue-50 rounded-full blur-3xl" />
           </div>
           <div className="relative max-w-3xl mx-auto px-6 lg:px-8">
@@ -184,12 +184,12 @@ export default function SolutionPage() {
         {/* Features */}
         <section className="relative py-20 bg-slate-50 border-b border-slate-100 overflow-hidden">
           <div className="absolute inset-0 pointer-events-none">
-            <div className="absolute top-0 right-1/4 w-96 h-96 bg-indigo-100/60 rounded-full blur-3xl" />
+            <div className="absolute top-0 right-1/4 w-96 h-96 bg-slate-200/60 rounded-full blur-3xl" />
             <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-blue-100/50 rounded-full blur-3xl" />
           </div>
           <div className="relative max-w-4xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
-              <motion.h2 variants={fadeUp} className="text-2xl font-bold text-slate-900 mb-10">What they see in Msingi.</motion.h2>
+              <motion.h2 variants={fadeUp} className="font-['Crimson_Pro'] text-2xl font-bold text-slate-900 mb-10">What they see in Msingi.</motion.h2>
               <div className="grid sm:grid-cols-2 gap-5">
                 {sol.features.map((f, i) => (
                   <motion.div key={i} variants={fadeUp} className="bg-white border border-slate-200 rounded-2xl p-6">
@@ -208,12 +208,12 @@ export default function SolutionPage() {
         {/* Before / after */}
         <section className="relative py-20 bg-white border-b border-slate-100 overflow-hidden">
           <div className="absolute inset-0 pointer-events-none">
-            <div className="absolute -top-24 -left-24 w-96 h-96 bg-indigo-100/50 rounded-full blur-3xl" />
+            <div className="absolute -top-24 -left-24 w-96 h-96 bg-slate-100/50 rounded-full blur-3xl" />
             <div className="absolute bottom-0 right-0 w-96 h-96 bg-blue-50 rounded-full blur-3xl" />
           </div>
           <div className="relative max-w-4xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
-              <motion.h2 variants={fadeUp} className="text-2xl font-bold text-slate-900 mb-10">What changes.</motion.h2>
+              <motion.h2 variants={fadeUp} className="font-['Crimson_Pro'] text-2xl font-bold text-slate-900 mb-10">What changes.</motion.h2>
               <div className="space-y-4">
                 {sol.before.map(([bef, aft], i) => (
                   <motion.div key={i} variants={fadeUp} className="grid sm:grid-cols-[1fr_auto_1fr] gap-3 items-center">
@@ -222,10 +222,10 @@ export default function SolutionPage() {
                       <p className="text-sm text-slate-500">{bef}</p>
                     </div>
                     <div className="hidden sm:flex items-center justify-center">
-                      <ArrowRight size={14} className="text-indigo-400" />
+                      <ArrowRight size={14} className="text-amber-400" />
                     </div>
-                    <div className="flex items-start gap-3 bg-indigo-50 border border-indigo-100 rounded-xl px-4 py-3.5">
-                      <CheckCircle2 size={14} className="text-indigo-500 shrink-0 mt-0.5" />
+                    <div className="flex items-start gap-3 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3.5">
+                      <CheckCircle2 size={14} className="text-amber-500 shrink-0 mt-0.5" />
                       <p className="text-sm font-medium text-slate-800">{aft}</p>
                     </div>
                   </motion.div>
@@ -239,7 +239,7 @@ export default function SolutionPage() {
         <section className="py-20 bg-slate-950">
           <div className="max-w-2xl mx-auto px-6 lg:px-8 text-center">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
-              <motion.h2 variants={fadeUp} className="text-3xl font-bold text-white mb-4">See it live in 30 minutes.</motion.h2>
+              <motion.h2 variants={fadeUp} className="font-['Crimson_Pro'] text-3xl font-bold text-white mb-4">See it live in 30 minutes.</motion.h2>
               <motion.p variants={fadeUp} className="text-slate-400 mb-8">No commitment. A conversation about your school.</motion.p>
               <motion.div variants={fadeUp}>
                 <Link to={sol.ctaHref || '/contact'}

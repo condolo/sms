@@ -86,7 +86,7 @@ export default function WhyChoosePage() {
           <div className="max-w-4xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" animate="visible" variants={stagger(0.08)}>
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-6">Why Schools Choose Msingi</motion.p>
-              <motion.h1 variants={fadeUp} className="text-4xl sm:text-5xl lg:text-[54px] font-bold tracking-tighter text-white leading-[1.07] mb-6">
+              <motion.h1 variants={fadeUp} className="font-['Crimson_Pro'] text-4xl sm:text-5xl lg:text-[54px] font-bold tracking-tighter text-white leading-[1.07] mb-6">
                 What school leaders tell us{' '}
                 <span className="text-slate-400">after the first year.</span>
               </motion.h1>
@@ -106,7 +106,7 @@ export default function WhyChoosePage() {
                   <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-2">
                     {String(i + 1).padStart(2, '0')}
                   </motion.p>
-                  <motion.h2 variants={fadeUp} className="text-2xl font-bold text-slate-900 mb-6">{section.title}</motion.h2>
+                  <motion.h2 variants={fadeUp} className="font-['Crimson_Pro'] text-2xl font-bold text-slate-900 mb-6">{section.title}</motion.h2>
                   {section.body.map((para, j) => (
                     <motion.p key={j} variants={fadeUp} className="text-base text-slate-600 leading-relaxed mb-4 last:mb-0">
                       {para}
@@ -122,7 +122,7 @@ export default function WhyChoosePage() {
         <section className="py-20 bg-slate-950">
           <div className="max-w-2xl mx-auto px-6 lg:px-8 text-center">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
-              <motion.h2 variants={fadeUp} className="text-3xl font-bold text-white mb-4">
+              <motion.h2 variants={fadeUp} className="font-['Crimson_Pro'] text-3xl font-bold text-white mb-4">
                 A 30-minute conversation tells you more than this page.
               </motion.h2>
               <motion.p variants={fadeUp} className="text-slate-400 mb-8">

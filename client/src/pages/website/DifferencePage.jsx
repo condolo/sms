@@ -54,7 +54,7 @@ export default function DifferencePage() {
           <div className="max-w-4xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" animate="visible" variants={stagger(0.08)}>
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-6">The Msingi Difference</motion.p>
-              <motion.h1 variants={fadeUp} className="text-4xl sm:text-5xl lg:text-[54px] font-bold tracking-tighter text-white leading-[1.07] mb-6">
+              <motion.h1 variants={fadeUp} className="font-['Crimson_Pro'] text-4xl sm:text-5xl lg:text-[54px] font-bold tracking-tighter text-white leading-[1.07] mb-6">
                 This is not school software.{' '}
                 <span className="text-slate-400">It is a school operating system.</span>
               </motion.h1>
@@ -68,22 +68,22 @@ export default function DifferencePage() {
         {/* Comparison */}
         <section className="relative py-20 bg-white border-b border-slate-100 overflow-hidden">
           <div className="absolute inset-0 pointer-events-none">
-            <div className="absolute -top-24 -left-24 w-96 h-96 bg-indigo-100/50 rounded-full blur-3xl" />
+            <div className="absolute -top-24 -left-24 w-96 h-96 bg-slate-100/50 rounded-full blur-3xl" />
             <div className="absolute bottom-0 right-0 w-96 h-96 bg-blue-50 rounded-full blur-3xl" />
           </div>
           <div className="relative max-w-6xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">How Msingi differs</motion.p>
-              <motion.h2 variants={fadeUp} className="text-2xl font-bold text-slate-900 mb-10">Not a feature comparison. A category distinction.</motion.h2>
+              <motion.h2 variants={fadeUp} className="font-['Crimson_Pro'] text-2xl font-bold text-slate-900 mb-10">Not a feature comparison. A category distinction.</motion.h2>
               <div className="grid lg:grid-cols-3 gap-6">
                 {COMPARISON.map(col => (
                   <motion.div key={col.label} variants={fadeUp}
-                    className={`rounded-2xl border p-7 ${col.dim ? 'border-slate-200 bg-slate-50' : 'border-indigo-200 bg-indigo-50 ring-2 ring-indigo-100'}`}>
-                    <p className={`text-sm font-semibold mb-5 ${col.dim ? 'text-slate-400' : 'text-indigo-700'}`}>{col.label}</p>
+                    className={`rounded-2xl border p-7 ${col.dim ? 'border-slate-200 bg-slate-50' : 'border-amber-200 bg-amber-50 ring-2 ring-amber-100'}`}>
+                    <p className={`text-sm font-semibold mb-5 ${col.dim ? 'text-slate-400' : 'text-amber-700'}`}>{col.label}</p>
                     <ul className="space-y-3">
                       {col.traits.map(t => (
                         <li key={t} className={`flex items-start gap-2 text-sm ${col.dim ? 'text-slate-400' : 'text-slate-700'}`}>
-                          <span className={`mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${col.dim ? 'bg-slate-300' : 'bg-indigo-500'}`} />
+                          <span className={`mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${col.dim ? 'bg-slate-300' : 'bg-amber-500'}`} />
                           {t}
                         </li>
                       ))}
@@ -98,12 +98,12 @@ export default function DifferencePage() {
         {/* Six pillars */}
         <section className="relative py-20 bg-slate-50 border-b border-slate-100 overflow-hidden">
           <div className="absolute inset-0 pointer-events-none">
-            <div className="absolute top-0 right-1/4 w-96 h-96 bg-indigo-100/60 rounded-full blur-3xl" />
+            <div className="absolute top-0 right-1/4 w-96 h-96 bg-slate-200/60 rounded-full blur-3xl" />
             <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-blue-100/50 rounded-full blur-3xl" />
           </div>
           <div className="relative max-w-6xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
-              <motion.h2 variants={fadeUp} className="text-2xl font-bold text-slate-900 mb-10">Six things that set Msingi apart.</motion.h2>
+              <motion.h2 variants={fadeUp} className="font-['Crimson_Pro'] text-2xl font-bold text-slate-900 mb-10">Six things that set Msingi apart.</motion.h2>
               <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
                 {PILLARS.map((p, i) => (
                   <motion.div key={i} variants={fadeUp}
@@ -121,7 +121,7 @@ export default function DifferencePage() {
         <section className="py-20 bg-slate-950">
           <div className="max-w-2xl mx-auto px-6 lg:px-8 text-center">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
-              <motion.h2 variants={fadeUp} className="text-3xl font-bold text-white mb-4">See the difference in a demo.</motion.h2>
+              <motion.h2 variants={fadeUp} className="font-['Crimson_Pro'] text-3xl font-bold text-white mb-4">See the difference in a demo.</motion.h2>
               <motion.p variants={fadeUp} className="text-slate-400 mb-8">Thirty minutes. Live platform. Your questions.</motion.p>
               <motion.div variants={fadeUp} className="flex flex-col sm:flex-row items-center justify-center gap-3">
                 <Link to="/contact" className="inline-flex items-center gap-2 rounded-xl bg-white px-6 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-100 transition-all">

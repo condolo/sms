@@ -81,9 +81,8 @@ export default function DashboardMockup() {
               <p className="text-sm font-semibold text-slate-800">Dashboard</p>
             </div>
             <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1.5 bg-emerald-50 border border-emerald-100 rounded-full px-2.5 py-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
-                <span className="text-[10px] text-emerald-700 font-semibold">Live</span>
+              <div className="flex items-center gap-1.5 bg-slate-100 border border-slate-200 rounded-full px-2.5 py-1">
+                <span className="text-[10px] text-slate-500 font-semibold">Sample preview</span>
               </div>
               <span className="text-[10px] text-slate-400 bg-slate-100 rounded-lg px-2 py-1 font-medium">Term 2 · 2025–26</span>
               <div className="w-7 h-7 rounded-full bg-indigo-600 flex items-center justify-center text-white text-[10px] font-bold">PM</div>
@@ -147,8 +146,7 @@ export default function DashboardMockup() {
               {/* Activity feed */}
               <div className="bg-white rounded-xl p-3.5 border border-slate-100 shadow-sm flex flex-col">
                 <div className="flex items-center justify-between mb-2.5 flex-shrink-0">
-                  <p className="text-[11px] font-semibold text-slate-800">Live Activity</p>
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  <p className="text-[11px] font-semibold text-slate-800">Recent Activity</p>
                 </div>
                 <div className="space-y-2.5 flex-1">
                   {ACTIVITY_FEED.map(({ Icon, accent, bg, text, sub, time }, i) => (
