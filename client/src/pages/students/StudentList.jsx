@@ -292,14 +292,21 @@ export default function StudentList() {
     setBulkPortalLoading(true);
     setBulkPortalResult(null);
     try {
-      const merged = { created: 0, skipped: 0, errors: [], credentials: [] };
+      const merged = {
+        created: 0, skipped: 0, errors: [], credentials: [],
+        parentsCreated: 0, parentsSkipped: 0, parentErrors: [], parentPortalAllowed: false,
+      };
       for (let i = 0; i < ids.length; i += 200) {
         const res  = await studentsApi.bulkPortalAccounts(ids.slice(i, i + 200));
         const data = res.data ?? res;
         merged.created += data.created ?? 0;
         merged.skipped += data.skipped ?? 0;
-        if (Array.isArray(data.errors))      merged.errors.push(...data.errors);
-        if (Array.isArray(data.credentials)) merged.credentials.push(...data.credentials);
+        merged.parentsCreated += data.parentsCreated ?? 0;
+        merged.parentsSkipped += data.parentsSkipped ?? 0;
+        merged.parentPortalAllowed = merged.parentPortalAllowed || !!data.parentPortalAllowed;
+        if (Array.isArray(data.errors))       merged.errors.push(...data.errors);
+        if (Array.isArray(data.parentErrors)) merged.parentErrors.push(...data.parentErrors);
+        if (Array.isArray(data.credentials))  merged.credentials.push(...data.credentials);
       }
       setBulkPortalResult(merged);
       if (merged.credentials.length > 0) downloadCredentialsCsv(merged.credentials);
@@ -339,9 +346,14 @@ export default function StudentList() {
      the result banner until it's dismissed. */
   function downloadCredentialsCsv(credentials) {
     const esc  = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    // Parent columns, same row as their child — a sibling pair repeats the
+    // identical Parent Email/Password on both rows on purpose: it's one
+    // shared parent account, not two. Blank when this student's parent
+    // wasn't processed this run (no parent email on file, already had an
+    // account, or the school isn't on the Family tier).
     const rows = [
-      ['Student Name', 'Admission Number (Username)', 'Temporary Password'],
-      ...credentials.map(c => [c.name, c.admissionNumber, c.tempPassword]),
+      ['Student Name', 'Admission Number (Username)', 'Temporary Password', 'Parent Name', 'Parent Email', 'Parent Temporary Password'],
+      ...credentials.map(c => [c.name, c.admissionNumber, c.tempPassword, c.parentName ?? '', c.parentEmail ?? '', c.parentTempPassword ?? '']),
     ];
     // ﻿ BOM so Excel opens it as UTF-8
     const csv  = '﻿' + rows.map(r => r.map(esc).join(',')).join('\r\n');
@@ -764,7 +776,7 @@ export default function StudentList() {
         {/* ── Activate-all confirm banner ─────────────────── */}
         {showActivateAllConfirm && (
           <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-violet-50 border border-violet-200 rounded-xl text-sm text-violet-900">
-            <span>Create a portal account for <span className="font-semibold">every active student who doesn't already have one</span> — up to 1,000 in one go. Already-active accounts are never touched. Credentials download automatically as a CSV once this finishes.</span>
+            <span>Create a student portal account for <span className="font-semibold">every active student who doesn't already have one</span>, and a parent portal account for every parent on file who doesn't already have one (Family tier only) — up to 1,000 students in one go. Already-active accounts are never touched; siblings share one parent account. Credentials download automatically as a CSV once this finishes.</span>
             <div className="flex items-center gap-3 shrink-0">
               <button onClick={() => setShowActivateAllConfirm(false)} className="text-xs font-medium text-violet-700 hover:text-violet-900">
                 Cancel
@@ -786,9 +798,16 @@ export default function StudentList() {
             <div className="flex items-center gap-2">
               <CheckCircle2 size={14} className="shrink-0 text-emerald-600" />
               <span>
-                <span className="font-semibold">{bulkPortalResult.created}</span> portal account{bulkPortalResult.created !== 1 ? 's' : ''} created
+                <span className="font-semibold">{bulkPortalResult.created}</span> student portal account{bulkPortalResult.created !== 1 ? 's' : ''} created
                 {bulkPortalResult.skipped > 0 && <span className="text-emerald-600"> · {bulkPortalResult.skipped} skipped (already active or ineligible)</span>}
                 {bulkPortalResult.errors?.length > 0 && <span className="text-amber-700"> · {bulkPortalResult.errors.length} failed</span>}
+                {typeof bulkPortalResult.parentsCreated === 'number' && bulkPortalResult.parentsCreated > 0 && (
+                  <span> · <span className="font-semibold">{bulkPortalResult.parentsCreated}</span> parent account{bulkPortalResult.parentsCreated !== 1 ? 's' : ''} created/reset</span>
+                )}
+                {bulkPortalResult.parentErrors?.length > 0 && <span className="text-amber-700"> · {bulkPortalResult.parentErrors.length} parent accounts failed</span>}
+                {bulkPortalResult.parentPortalAllowed === false && (
+                  <span className="text-emerald-600"> · parent portal requires the Family tier</span>
+                )}
               </span>
             </div>
             <div className="flex items-center gap-3 shrink-0">

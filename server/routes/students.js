@@ -1227,7 +1227,7 @@ router.post('/bulk-portal-accounts', authMiddleware, PLAN, MODGATE, rbac('studen
           }
         }
         await Students.updateOne({ _id: student._id }, { $set: { hasPortalAccount: true, updatedAt: now } });
-        credentials.push({ name, admissionNumber: student.admissionNumber, username, tempPassword, action: existing ? 'reset' : 'created' });
+        credentials.push({ studentId: studentDocId, name, admissionNumber: student.admissionNumber, username, tempPassword, action: existing ? 'reset' : 'created' });
         created++;
       } catch (e) {
         errors.push({ studentId: studentDocId, message: e.message });
@@ -1238,8 +1238,125 @@ router.post('/bulk-portal-accounts', authMiddleware, PLAN, MODGATE, rbac('studen
     // "all" mode, where `docs` already IS the full eligible set.
     if (!all) skipped += Math.max(0, studentIds.length - docs.length);
 
-    console.log(`[students] Bulk portal accounts: ${created} created, ${skipped} skipped, ${errors.length} errors — by ${userId}`);
-    return ok(res, { created, skipped, errors, credentials, eligible: docs.length });
+    // ── Parent portal accounts, same batch (2026-10) ──────────────────
+    // "Activate All Portals" only ever created STUDENT accounts — reported
+    // directly: "activating all portals just activate the students only,
+    // after which you can't activate parents portal." The bug wasn't just
+    // a missing feature: `docs` above is filtered to students WITHOUT a
+    // student account yet, so a student who already had one (the common
+    // case on a re-run) was never even visited by this handler, and no
+    // parent-account logic existed anywhere in this route to visit it
+    // with. Eligibility is re-derived independently here — active,
+    // has a parentEmail on file, no parent account yet — not reused from
+    // `docs`, specifically so a student with an existing student account
+    // still gets its parent processed.
+    let parentsCreated = 0, parentsSkipped = 0;
+    const parentErrors = [];
+    const parentCredentials = []; // one row per sibling — see grouping below
+    const parentPortalAllowed = _portalAllowed(school, 'parent');
+
+    if (parentPortalAllowed) {
+      const parentDocs = all
+        ? await Students.find({
+            schoolId,
+            status: { $nin: ['withdrawn', 'graduated', 'transferred'] },
+            hasParentAccount: { $ne: true },
+            parentEmail: { $exists: true, $nin: [null, ''] },
+          }).lean()
+        : docs.filter(d => d.parentEmail && !d.hasParentAccount && !['withdrawn', 'graduated', 'transferred'].includes(d.status));
+
+      // Group by normalized parent email first — siblings share ONE parent
+      // account. Processing per-student (like the single-student route
+      // does, safely, one call at a time) would reset the SAME account's
+      // password once per sibling within this one batch, leaving every
+      // password but the last one handed out invalid.
+      const byEmail = new Map();
+      for (const stu of parentDocs) {
+        if (!stu.parentEmail) continue; // defensive — the query above should already exclude these
+        const email = stu.parentEmail.toLowerCase().trim();
+        if (!email) continue;
+        if (!byEmail.has(email)) byEmail.set(email, []);
+        byEmail.get(email).push(stu);
+      }
+
+      const emailUtil = require('../utils/email');
+      await Promise.all([...byEmail.entries()].map(async ([parentEmail, siblings]) => {
+        try {
+          const parentName = siblings[0].parentName || 'Parent';
+          const siblingIds = siblings.map(s => s.id || String(s._id));
+          const tempPassword = _genTempPassword();
+          const hash = await bcrypt.hash(tempPassword, 12);
+
+          const existingParent = await Users.findOne({ email: parentEmail, schoolId, role: 'parent' }).lean();
+          if (existingParent) {
+            await Users.updateOne({ _id: existingParent._id }, {
+              $set:      { password: hash, isActive: true, updatedAt: now },
+              $addToSet: { studentIds: { $each: siblingIds }, guardianOf: { $each: siblingIds } },
+            });
+          } else {
+            const createdUser = await Users.create({
+              id: uuidv4(), schoolId, role: 'parent', name: parentName, email: parentEmail,
+              password: hash, studentIds: siblingIds, guardianOf: siblingIds,
+              isActive: true, mustChangePassword: false, createdAt: now, updatedAt: now, createdBy: userId,
+            });
+            try {
+              await provisionIdentityForUser(createdUser);
+            } catch (err) {
+              console.error('[students] bulk parent-account identity provisioning failed (will self-heal at next restart):', err.message);
+            }
+          }
+
+          await Students.updateMany(
+            { _id: { $in: siblings.map(s => s._id) } },
+            { $set: { hasParentAccount: true, updatedAt: now } }
+          );
+
+          emailUtil.sendWelcomeCredentials({
+            name: parentName, email: parentEmail, tempPassword,
+            schoolName: school.name, schoolEmail: school.systemEmail || '', role: 'Parent', slug: school.slug,
+          }).catch(err => console.error('[bulk-portal-accounts] parent email send failed:', err.message));
+
+          for (const stu of siblings) {
+            parentCredentials.push({
+              studentId:          stu.id || String(stu._id),
+              studentName:        `${stu.firstName} ${stu.lastName}`,
+              parentName,
+              parentEmail,
+              parentTempPassword: tempPassword,
+              parentAction:       existingParent ? 'reset' : 'created',
+            });
+          }
+          parentsCreated += siblings.length;
+        } catch (e) {
+          parentErrors.push({ parentEmail, message: e.message });
+          parentsSkipped += siblings.length;
+        }
+      }));
+    }
+
+    // Merge into one row per student — every student in this batch who got
+    // EITHER a student account, a parent account, or both, as one CSV-
+    // ready row (siblings repeat the same parentEmail/parentTempPassword,
+    // by design — it's the same account).
+    const rowsByStudent = new Map(credentials.map(c => [c.studentId, { ...c }]));
+    for (const p of parentCredentials) {
+      const row = rowsByStudent.get(p.studentId) || {
+        studentId: p.studentId, name: p.studentName, admissionNumber: '', username: '', tempPassword: '', action: '',
+      };
+      row.parentName          = p.parentName;
+      row.parentEmail         = p.parentEmail;
+      row.parentTempPassword  = p.parentTempPassword;
+      row.parentAction        = p.parentAction;
+      rowsByStudent.set(p.studentId, row);
+    }
+    const mergedCredentials = [...rowsByStudent.values()];
+
+    console.log(`[students] Bulk portal accounts: ${created} student created, ${skipped} skipped, ${errors.length} errors; ${parentsCreated} parent accounts created/reset, ${parentErrors.length} parent errors — by ${userId}`);
+    return ok(res, {
+      created, skipped, errors, eligible: docs.length,
+      parentsCreated, parentsSkipped, parentErrors, parentPortalAllowed,
+      credentials: mergedCredentials,
+    });
   } catch (err) {
     console.error('[students POST/bulk-portal-accounts]', err);
     return E.serverError(res);
