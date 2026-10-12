@@ -5,7 +5,7 @@
    - Teacher scoped to own classes/subjects via teaching_assignments
    - Schedule entries colour-coded active/upcoming/past
    ============================================================ */
-import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback, Fragment } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -1000,13 +1000,24 @@ function MarkbookTab({ years }) {
         }))
     ),
     onSuccess: () => { refetchSubmissions(); setToast({ msg: 'Submitted for review.', type: 'success' }); },
-    onError:   () => setToast({ msg: 'Could not submit for review — try again.', type: 'error' }),
+    // Previously discarded the real server reason (e.g. "2 students still have
+    // no mark recorded" with named students, or "Submit marks per stream —
+    // choose the stream you teach") behind a generic, unhelpful message —
+    // a teacher who WAS correctly assigned had no way to learn what was
+    // actually blocking them. See server/routes/mark-submissions.js POST /.
+    onError:   err => {
+      const names = err?.extra?.missingStudents?.map(s => s.name).filter(Boolean);
+      const msg = names?.length
+        ? `${err.message} (${names.join(', ')})`
+        : err?.message ?? 'Could not submit for review — try again.';
+      setToast({ msg, type: 'error' });
+    },
   });
 
   const { mutate: recallSubmission } = useMutation({
     mutationFn: (id) => markSubmissionsApi.recall(id),
     onSuccess: () => { refetchSubmissions(); setToast({ msg: 'Recalled to draft.', type: 'success' }); },
-    onError:   () => setToast({ msg: 'Could not recall — it may already be approved or locked.', type: 'error' }),
+    onError:   err => setToast({ msg: err?.message ?? 'Could not recall — it may already be approved or locked.', type: 'error' }),
   });
 
   // Approve/reject right from the Markbook itself — the exact same mark-submissions
@@ -1513,6 +1524,96 @@ const SUBMISSION_STATUS_META = {
   locked:    { label: 'Locked',    cls: 'text-slate-600 bg-slate-100 border-slate-200' },
 };
 
+/* ─── Submission detail — the actual marks/comments behind a queued
+   submission, expanded inline in the Review tab. Reviewers previously had
+   only Class/Subject/Assessment/Status + Approve/Reject — no way to see
+   what they were approving. Reuses the existing roster, marks and draft-
+   comment reads the Markbook itself already uses; no new backend. */
+function SubmissionDetail({ submission, subjectName }) {
+  const { data: marksData, isLoading: loadingMarks } = useQuery({
+    queryKey: ['mark-submissions', 'detail-marks', submission.id ?? submission._id],
+    queryFn: () => assessmentApi.getMarks({
+      classId:        submission.classId,
+      subjectId:      submission.subjectId,
+      termNumber:     submission.termNumber,
+      assessmentType: submission.assessmentType,
+      academicYearId: submission.academicYearId || undefined,
+    }),
+    staleTime: 15_000,
+  });
+  const { data: rosterData, isLoading: loadingRoster } = useQuery({
+    queryKey: ['classes', 'roster', 'review-detail', submission.classId, submission.streamId],
+    queryFn: () => submission.streamId
+      ? streamsApi.students(submission.streamId, { limit: 500, status: 'active' })
+      : classesApi.students(submission.classId, { limit: 500, status: 'active', assessmentScope: true }),
+    staleTime: 60_000,
+  });
+  const { data: commentsData } = useQuery({
+    queryKey: ['reportCards', 'draftComments', 'review-detail', submission.classId, submission.termNumber],
+    queryFn: () => reportCardsApi.draftComments.list({ classId: submission.classId, termNumber: Number(submission.termNumber) }),
+    staleTime: 15_000,
+  });
+
+  const marksByStudent = useMemo(() => {
+    const map = {};
+    for (const m of marksData?.data ?? []) {
+      if ((m.instance ?? 1) !== (submission.instance ?? 1)) continue;
+      map[m.studentId] = m;
+    }
+    return map;
+  }, [marksData, submission.instance]);
+
+  const commentByStudent = useMemo(() => Object.fromEntries(
+    (commentsData?.data ?? []).map(c => [c.studentId, c.subjectComments?.[submission.subjectId] ?? ''])
+  ), [commentsData, submission.subjectId]);
+
+  const roster = rosterData?.data ?? [];
+
+  if (loadingMarks || loadingRoster) {
+    return <p className="text-xs text-slate-400 py-2">Loading marks…</p>;
+  }
+
+  return (
+    <div className="border border-slate-200 rounded-lg overflow-hidden bg-white mt-1 max-h-80 overflow-y-auto">
+      <table className="w-full text-xs">
+        <thead className="sticky top-0">
+          <tr className="bg-slate-50 border-b border-slate-200">
+            <th className="text-left font-medium text-slate-500 px-3 py-1.5">Student</th>
+            <th className="text-left font-medium text-slate-500 px-3 py-1.5">
+              {subjectName} — {submission.assessmentType}{submission.instance > 1 ? ` ${submission.instance}` : ''}
+            </th>
+            <th className="text-left font-medium text-slate-500 px-3 py-1.5">Teacher's comment</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {roster.map(st => {
+            const sid = st.id ?? st._id;
+            const m = marksByStudent[sid];
+            return (
+              <tr key={sid}>
+                <td className="px-3 py-1.5 text-slate-700 whitespace-nowrap">{st.firstName} {st.lastName}</td>
+                <td className="px-3 py-1.5">
+                  {!m
+                    ? <span className="text-red-500">no mark recorded</span>
+                    : m.markState && m.markState !== 'present'
+                    ? <span className="text-amber-600">{m.markState}</span>
+                    : <span className="font-medium text-slate-800">{m.rawScore}</span>}
+                </td>
+                <td className="px-3 py-1.5 text-slate-500 max-w-[360px]">
+                  {commentByStudent[sid] || <span className="italic text-slate-300">no comment entered</span>}
+                </td>
+              </tr>
+            );
+          })}
+          {roster.length === 0 && (
+            <tr><td colSpan={3} className="px-3 py-3 text-center text-slate-400">No active roster found for this class/stream.</td></tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function ReviewTab({ years }) {
   const qc = useQueryClient();
   const [toast, setToast] = useState(null);
@@ -1520,6 +1621,11 @@ function ReviewTab({ years }) {
   const [unlockReason, setUnlockReason] = useState('');
   const [rejectingId, setRejectingId] = useState(null);
   const [rejectReason, setRejectReason] = useState('');
+  // Which submission's actual marks/comments are expanded inline — reviewers
+  // had Approve/Reject buttons but no way to see what they were approving
+  // (reported directly: "how can someone approve marks and comments they
+  // can't read?"). One at a time; collapses automatically on review.
+  const [expandedId, setExpandedId] = useState(null);
 
   const [filterYearId, setFilterYearId]     = useState('');
   const [filterClassId, setFilterClassId]   = useState('');
@@ -1566,7 +1672,7 @@ function ReviewTab({ years }) {
     mutationFn: ({ id, action, rejectionReason }) => markSubmissionsApi.review(id, { action, rejectionReason }),
     onSuccess: (_res, vars) => {
       invalidate();
-      setRejectingId(null); setRejectReason('');
+      setRejectingId(null); setRejectReason(''); setExpandedId(null);
       setToast({ msg: vars.action === 'approve' ? 'Submission approved.' : 'Submission rejected.', type: 'success' });
     },
     onError: err => setToast({ msg: err?.message ?? 'Failed to review submission.', type: 'error' }),
@@ -1649,10 +1755,20 @@ function ReviewTab({ years }) {
                 const sid = s.id ?? s._id;
                 const meta = SUBMISSION_STATUS_META[s.status];
                 return (
-                  <tr key={sid} className="hover:bg-slate-50 transition">
+                  <Fragment key={sid}>
+                  <tr className="hover:bg-slate-50 transition">
                     <td className="px-3 py-2.5">
-                      <div className="text-sm text-slate-800">{classNameById[s.classId] ?? s.classId}</div>
-                      <div className="text-xs text-slate-400">{subjectNameById[s.subjectId] ?? s.subjectId}</div>
+                      <button
+                        onClick={() => setExpandedId(expandedId === sid ? null : sid)}
+                        className="flex items-center gap-1.5 text-left"
+                        title={expandedId === sid ? 'Hide marks & comments' : 'View marks & comments before deciding'}
+                      >
+                        <ChevronRight size={13} className={`text-slate-400 shrink-0 transition-transform ${expandedId === sid ? 'rotate-90' : ''}`} />
+                        <span>
+                          <div className="text-sm text-slate-800">{classNameById[s.classId] ?? s.classId}</div>
+                          <div className="text-xs text-slate-400">{subjectNameById[s.subjectId] ?? s.subjectId}</div>
+                        </span>
+                      </button>
                     </td>
                     <td className="px-3 py-2.5 text-slate-600">
                       {s.assessmentType}{s.instance > 1 ? ` ${s.instance}` : ''} · Term {s.termNumber}
@@ -1729,6 +1845,14 @@ function ReviewTab({ years }) {
                       </div>
                     </td>
                   </tr>
+                  {expandedId === sid && (
+                    <tr>
+                      <td colSpan={4} className="px-3 pb-3 bg-slate-50/60">
+                        <SubmissionDetail submission={s} subjectName={subjectNameById[s.subjectId] ?? s.subjectId} />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 );
               })}
             </tbody>

@@ -46,6 +46,12 @@ export default function ReportCardsTab() {
   useEffect(() => { setStreamId(''); }, [classId]);
 
   const [publishError, setPublishError] = useState('');
+  // Set when a publish is blocked specifically by the moderation gate (RC9) —
+  // distinct from publishError because this case has a real way forward
+  // (skipModerationCheck + a documented reason) that the UI previously had
+  // no way to reach at all: the only escape hatch was a raw API call.
+  const [moderationBlock, setModerationBlock] = useState(null);
+  const [skipReason, setSkipReason] = useState('');
   const [downloadError, setDownloadError] = useState('');
   const [downloadingKey, setDownloadingKey] = useState(''); // 'class' | 'stream' | ''
 
@@ -186,12 +192,23 @@ export default function ReportCardsTab() {
   // has no studentId/streamId narrowing, so the stream filter below is a
   // view-only convenience and must never look like it scopes this.
   const { mutate: publishBatch, isPending: isPublishing } = useMutation({
-    mutationFn: () => reportCardsApi.publish({ classId, termNumber: Number(termNum), academicYearId: yearId || undefined }),
+    mutationFn: (override = {}) => reportCardsApi.publish({
+      classId, termNumber: Number(termNum), academicYearId: yearId || undefined,
+      ...override,
+    }),
     onSuccess: () => {
       setPublishError('');
+      setModerationBlock(null);
+      setSkipReason('');
       qc.invalidateQueries({ queryKey: ['reportCards', 'snapshots', { classId, termNum, yearId }] });
     },
-    onError: (err) => setPublishError(err?.message ?? 'Publish failed'),
+    onError: (err) => {
+      if (err?.code === 'MODERATION_INCOMPLETE') {
+        setModerationBlock({ message: err.message, exams: err?.extra?.unmoderatedExams ?? [] });
+      } else {
+        setPublishError(err?.message ?? 'Publish failed');
+      }
+    },
   });
 
   /* ── Bulk download — "can the system allow download per stream or
@@ -388,7 +405,7 @@ export default function ReportCardsTab() {
           {canQuery && ['admin', 'superadmin'].includes(role) && (
             <div className="flex flex-col gap-1 ml-auto">
               <button
-                onClick={() => { setPublishError(''); publishBatch(); }}
+                onClick={() => { setPublishError(''); setModerationBlock(null); publishBatch(); }}
                 disabled={isPublishing || !students.length}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
@@ -399,12 +416,46 @@ export default function ReportCardsTab() {
               {publishError && (
                 <p className="text-xs text-red-500">{publishError}</p>
               )}
-              {streamId && !publishError && (
+              {streamId && !publishError && !moderationBlock && (
                 <p className="text-xs text-slate-400">Publishes every stream in {className}, not just the one shown here.</p>
               )}
             </div>
           )}
         </div>
+        {moderationBlock && (
+          <div className="mx-6 mb-4 p-4 rounded-xl bg-amber-50 border border-amber-200 space-y-2.5">
+            <p className="text-sm font-semibold text-amber-800">Blocked by moderation</p>
+            <p className="text-xs text-amber-700">
+              These assessments have marks but were never submitted and approved through the Markbook's
+              Review tab. Approve them there — or document a reason to publish anyway (recorded in the audit log).
+            </p>
+            <ul className="text-xs text-amber-700 list-disc list-inside">
+              {moderationBlock.exams.map(e => (
+                <li key={e.id}>{e.title} — <span className="italic">{e.status.replace('_', ' ')}</span></li>
+              ))}
+            </ul>
+            <div className="flex items-center gap-2 pt-1">
+              <input
+                type="text" value={skipReason} onChange={e => setSkipReason(e.target.value)}
+                placeholder="Reason for publishing without moderation (required)"
+                className="flex-1 text-xs px-2.5 py-1.5 rounded-lg border border-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-400/30"
+              />
+              <button
+                onClick={() => publishBatch({ skipModerationCheck: true, skipReason: skipReason.trim() })}
+                disabled={isPublishing || !skipReason.trim()}
+                className="text-xs font-medium text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap"
+              >
+                Publish anyway
+              </button>
+              <button
+                onClick={() => { setModerationBlock(null); setSkipReason(''); }}
+                className="text-xs text-amber-600 hover:text-amber-800 px-1"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Content area */}

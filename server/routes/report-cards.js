@@ -35,7 +35,7 @@ const { scopeMiddleware } = require('../middleware/scopeMiddleware');
 const ScopeEngine        = require('../utils/scopeEngine');
 const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
-const { ok, created, paginate, parsePagination, E } = require('../utils/response');
+const { ok, created, paginate, parsePagination, E, fail } = require('../utils/response');
 const { rankStudents, mergeRankings, bestPerSubject, computeRankingScore } = require('../utils/ranking');
 const { mergeConfig, resolveGrade, resolveCurrentPeriod, OBSERVATION_RATING_VALUES, DEFAULT_GRADING_SCHEMA } = require('./academic-config');
 const { getConfig: _getAssessmentConfig } = require('./assessment');
@@ -655,11 +655,16 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
           unmoderatedExams: unmoderated.map(e => ({ id: e.id, title: e.title, status: e.status })),
           completedAt: now,
         });
-        return E.badRequest(res, [
+        // Carries the structured list as `unmoderatedExams` alongside the
+        // human-readable message — previously the client had no way to
+        // detect "this is the moderation gate" short of parsing the
+        // message text, so there was no UI path to the skipModerationCheck
+        // escape hatch this message itself instructs the caller to use.
+        return fail(res, 'MODERATION_INCOMPLETE', [
           `${unmoderated.length} exam(s) for this class/term are not yet approved:`,
           ...unmoderated.map(e => `  • "${e.title}" (${e.status})`),
           'Approve all exams first — or pass skipModerationCheck: true with a documented skipReason.'
-        ].join('\n'));
+        ].join('\n'), 400, { unmoderatedExams: unmoderated });
       }
     }
 
