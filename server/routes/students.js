@@ -23,6 +23,7 @@ const { ok, created, fail, paginate, parsePagination, E, strParam } = require('.
 const { applyOptimisticLock } = require('../utils/optimistic-lock');
 const AuditService            = require('../services/audit');
 const { provisionIdentityForUser } = require('../utils/provision-identities');
+const { revokeUserTokens, revokeIdentityTokens } = require('../utils/token-version');
 
 const router = express.Router();
 const PLAN   = planGate('students');
@@ -1196,7 +1197,9 @@ router.post('/bulk-portal-accounts', authMiddleware, PLAN, MODGATE, rbac('studen
           errors.push({ studentId: studentDocId, message: `${student.firstName} ${student.lastName}: no admission number — assign one first.` });
           return;
         }
-        const tempPassword = _genTempPassword();
+        // Student portal default password = admission number — see the
+        // single-account route's comment above for why.
+        const tempPassword = student.admissionNumber;
         const hash = await bcrypt.hash(tempPassword, 10);
         const username = student.admissionNumber.toLowerCase();
         const name     = `${student.firstName} ${student.lastName}`;
@@ -1363,6 +1366,281 @@ router.post('/bulk-portal-accounts', authMiddleware, PLAN, MODGATE, rbac('studen
   }
 });
 
+/* ── POST /api/students/bulk-reset-portal-passwords ──────────────
+   Reported directly: "Activate All Portals" (and bulk-portal-accounts
+   above) deliberately SKIPS anyone already active, so a school that
+   activated accounts over several runs has no way to get a fresh,
+   known password for everyone at once — and no way to scope that to
+   one class for handout. This is the explicit, opt-in companion for
+   exactly that: it resets EVERY active student's (and their parent's)
+   password in one class, regardless of current state — never the
+   default action, always scoped to a single class by design, to keep
+   the blast radius of a deliberately disruptive action (old password
+   stops working, session revoked) small and intentional.
+
+   Student passwords default to the admission number (2026-10, same
+   convention as portal-account creation above — mustChangePassword
+   stays true, so it is only ever the FIRST password after this reset,
+   never the one left standing). Parent passwords stay randomly
+   generated — there's no parent equivalent of an admission number.
+   Both get emailed their new password (to schoolEmail for a student
+   who has one; always to parentEmail) and have their existing session
+   revoked, same as Settings → Users → Reset Password.
+   ──────────────────────────────────────────────────────────────── */
+router.post('/bulk-reset-portal-passwords', authMiddleware, PLAN, MODGATE, rbac('students', 'update'), async (req, res) => {
+  try {
+    const { schoolId, userId, role } = req.jwtUser;
+    // Narrower than portal_accounts's floor (admin/superadmin/principal/
+    // deputy_principal) — SENSITIVE_FLOOR (admin/superadmin only),
+    // matching purge/duplicates/promote's severity rather than ordinary
+    // portal-account activation. See moduleRegistry.js's reset_passwords
+    // entry for the full reasoning.
+    if (!SENSITIVE_FLOOR.has(role) && !(await hasExplicitSubGrant(req, 'students', 'reset_passwords', 'update'))) {
+      return E.forbidden(res, 'Only admins, or roles explicitly granted this permission, can bulk-reset portal passwords.');
+    }
+
+    const { classId, dryRun } = req.body;
+    if (!classId) return E.badRequest(res, 'classId is required — this action is scoped to one class at a time by design.');
+
+    const Students = tenantModel('students', tenantContext(req));
+    const Users    = tenantModel('users', tenantContext(req));
+    const Schools  = _model('schools');
+    const school   = await Schools.findOne({ id: schoolId }).lean();
+
+    const classDocs = await Students.find({
+      schoolId, classId,
+      status: { $nin: ['withdrawn', 'graduated', 'transferred'] },
+    }).lean();
+    if (classDocs.length === 0) return E.badRequest(res, 'No active students found in this class.');
+    if (classDocs.length > 500) {
+      return E.badRequest(res, `${classDocs.length} students in this class — resetting is capped at 500 per request to keep this reliable. Filter by stream, or run it again for the rest.`);
+    }
+
+    const now = new Date().toISOString();
+    const emailUtil = require('../utils/email');
+    const studentPortalAllowed = _portalAllowed(school, 'student');
+    const parentPortalAllowed  = _portalAllowed(school, 'parent');
+
+    // ── Dry run: precount + sibling-overlap warning, no writes ──────
+    // The admin sees exactly what a real run would affect — including
+    // which parents in this class also have a child in a DIFFERENT
+    // class, whose password this run would NOT touch but a later run
+    // against that other class would, invalidating the one just issued
+    // here. Computed from the same eligibility rules as the real run
+    // below, not a separate re-derivation, so preview and execution can
+    // never silently drift apart.
+    if (dryRun) {
+      const studentEligible   = classDocs.filter(s => !!s.admissionNumber);
+      const studentIneligible = classDocs.filter(s => !s.admissionNumber);
+
+      const parentGroups = new Map(); // email -> students in THIS class
+      for (const stu of classDocs) {
+        if (!stu.parentEmail) continue;
+        const email = stu.parentEmail.toLowerCase().trim();
+        if (!email) continue;
+        if (!parentGroups.has(email)) parentGroups.set(email, []);
+        parentGroups.get(email).push(stu);
+      }
+
+      let siblingOverlap = [];
+      if (parentPortalAllowed && parentGroups.size > 0) {
+        const emails = [...parentGroups.keys()];
+        const otherStudents = await Students.find({
+          schoolId,
+          classId: { $ne: classId },
+          status: { $nin: ['withdrawn', 'graduated', 'transferred'] },
+          parentEmail: { $exists: true, $nin: [null, ''] },
+        }).select('classId parentEmail').lean();
+        const otherClassIdsByEmail = new Map();
+        for (const stu of otherStudents) {
+          const email = stu.parentEmail.toLowerCase().trim();
+          if (!emails.includes(email)) continue;
+          if (!otherClassIdsByEmail.has(email)) otherClassIdsByEmail.set(email, new Set());
+          otherClassIdsByEmail.get(email).add(stu.classId);
+        }
+        if (otherClassIdsByEmail.size > 0) {
+          const otherClassIds = [...new Set([...otherClassIdsByEmail.values()].flatMap(s => [...s]))];
+          const otherClassDocs = await tenantModel('classes', tenantContext(req))
+            .find({ schoolId, id: { $in: otherClassIds } }).select('id name').lean();
+          const classNameById = Object.fromEntries(otherClassDocs.map(c => [c.id, c.name]));
+          siblingOverlap = [...otherClassIdsByEmail.entries()].map(([email, classIdSet]) => {
+            const siblingsHere = parentGroups.get(email);
+            return {
+              parentEmail: email,
+              parentName:  siblingsHere[0].parentName || 'Parent',
+              otherClasses: [...classIdSet].map(cid => ({ classId: cid, className: classNameById[cid] || cid })),
+            };
+          });
+        }
+      }
+
+      return ok(res, {
+        dryRun: true,
+        studentCount:      studentEligible.length,
+        studentIneligible: studentIneligible.map(s => `${s.firstName} ${s.lastName}`),
+        parentCount:       parentPortalAllowed ? parentGroups.size : 0,
+        siblingOverlap,
+        studentPortalAllowed, parentPortalAllowed,
+      });
+    }
+
+    let studentsReset = 0;
+    const studentErrors = [];
+    const credentials = [];
+
+    if (studentPortalAllowed) {
+      await Promise.all(classDocs.map(async student => {
+        const studentDocId = student.id || String(student._id);
+        try {
+          if (!student.admissionNumber) {
+            studentErrors.push({ studentId: studentDocId, message: `${student.firstName} ${student.lastName}: no admission number — assign one first.` });
+            return;
+          }
+          const tempPassword = student.admissionNumber;
+          const hash = await bcrypt.hash(tempPassword, 12);
+          const username = student.admissionNumber.toLowerCase();
+          const name = `${student.firstName} ${student.lastName}`;
+
+          const existing = await Users.findOne({ schoolId, $or: [{ studentId: studentDocId }, { username }] }).lean();
+          if (existing) {
+            await Users.updateOne({ _id: existing._id }, {
+              $set: { password: hash, mustChangePassword: true, isActive: true, studentId: studentDocId, updatedAt: now, updatedBy: userId },
+            });
+            const existingId = existing.id || String(existing._id);
+            revokeUserTokens(existingId).catch(err => console.error('[bulk-reset-portal-passwords] student token revocation failed:', err.message));
+            if (existing.identityId) revokeIdentityTokens(existing.identityId).catch(err => console.error('[bulk-reset-portal-passwords] student identity revocation failed:', err.message));
+          } else {
+            const bulkDoc = {
+              id: uuidv4(), schoolId, role: 'student', name, username,
+              password: hash, studentId: studentDocId,
+              isActive: true, mustChangePassword: true,
+              createdAt: now, updatedAt: now, createdBy: userId,
+            };
+            if (student.schoolEmail) bulkDoc.email = student.schoolEmail.toLowerCase();
+            const createdUser = await Users.create(bulkDoc);
+            try {
+              await provisionIdentityForUser(createdUser);
+            } catch (err) {
+              console.error('[students] bulk-reset-portal-passwords identity provisioning failed (will self-heal at next restart):', err.message);
+            }
+          }
+
+          await Students.updateOne({ _id: student._id }, { $set: { hasPortalAccount: true, updatedAt: now } });
+
+          // Students log in by admission number, not email — only send
+          // when a schoolEmail happens to be on file (same posture as
+          // every other student-portal route in this file).
+          if (student.schoolEmail) {
+            emailUtil.sendWelcomeCredentials({
+              name, email: student.schoolEmail.toLowerCase(), tempPassword,
+              schoolName: school.name, schoolEmail: school.systemEmail || '', role: 'Student', slug: school.slug,
+            }).catch(err => console.error('[bulk-reset-portal-passwords] student email send failed:', err.message));
+          }
+
+          credentials.push({ studentId: studentDocId, name, admissionNumber: student.admissionNumber, username, tempPassword, action: 'reset' });
+          studentsReset++;
+        } catch (e) {
+          studentErrors.push({ studentId: studentDocId, message: e.message });
+        }
+      }));
+    }
+
+    let parentsReset = 0;
+    const parentErrors = [];
+    const parentCredentials = [];
+
+    if (parentPortalAllowed) {
+      const byEmail = new Map();
+      for (const stu of classDocs) {
+        if (!stu.parentEmail) continue;
+        const email = stu.parentEmail.toLowerCase().trim();
+        if (!email) continue;
+        if (!byEmail.has(email)) byEmail.set(email, []);
+        byEmail.get(email).push(stu);
+      }
+
+      await Promise.all([...byEmail.entries()].map(async ([parentEmail, siblings]) => {
+        try {
+          const parentName = siblings[0].parentName || 'Parent';
+          const siblingIds = siblings.map(s => s.id || String(s._id));
+          const tempPassword = _genTempPassword();
+          const hash = await bcrypt.hash(tempPassword, 12);
+
+          const existingParent = await Users.findOne({ email: parentEmail, schoolId, role: 'parent' }).lean();
+          if (existingParent) {
+            await Users.updateOne({ _id: existingParent._id }, {
+              $set:      { password: hash, isActive: true, updatedAt: now },
+              $addToSet: { studentIds: { $each: siblingIds }, guardianOf: { $each: siblingIds } },
+            });
+            const existingParentId = existingParent.id || String(existingParent._id);
+            revokeUserTokens(existingParentId).catch(err => console.error('[bulk-reset-portal-passwords] parent token revocation failed:', err.message));
+            if (existingParent.identityId) revokeIdentityTokens(existingParent.identityId).catch(err => console.error('[bulk-reset-portal-passwords] parent identity revocation failed:', err.message));
+          } else {
+            const createdUser = await Users.create({
+              id: uuidv4(), schoolId, role: 'parent', name: parentName, email: parentEmail,
+              password: hash, studentIds: siblingIds, guardianOf: siblingIds,
+              isActive: true, mustChangePassword: false, createdAt: now, updatedAt: now, createdBy: userId,
+            });
+            try {
+              await provisionIdentityForUser(createdUser);
+            } catch (err) {
+              console.error('[students] bulk-reset-portal-passwords parent identity provisioning failed (will self-heal at next restart):', err.message);
+            }
+          }
+
+          await Students.updateMany({ _id: { $in: siblings.map(s => s._id) } }, { $set: { hasParentAccount: true, updatedAt: now } });
+
+          emailUtil.sendWelcomeCredentials({
+            name: parentName, email: parentEmail, tempPassword,
+            schoolName: school.name, schoolEmail: school.systemEmail || '', role: 'Parent', slug: school.slug,
+          }).catch(err => console.error('[bulk-reset-portal-passwords] parent email send failed:', err.message));
+
+          for (const stu of siblings) {
+            parentCredentials.push({
+              studentId:          stu.id || String(stu._id),
+              studentName:        `${stu.firstName} ${stu.lastName}`,
+              parentName, parentEmail, parentTempPassword: tempPassword,
+            });
+          }
+          parentsReset += siblings.length;
+        } catch (e) {
+          parentErrors.push({ parentEmail, message: e.message });
+        }
+      }));
+    }
+
+    // Same merge-into-one-row-per-student shape as bulk-portal-accounts.
+    const rowsByStudent = new Map(credentials.map(c => [c.studentId, { ...c }]));
+    for (const p of parentCredentials) {
+      const row = rowsByStudent.get(p.studentId) || {
+        studentId: p.studentId, name: p.studentName, admissionNumber: '', username: '', tempPassword: '', action: '',
+      };
+      row.parentName         = p.parentName;
+      row.parentEmail        = p.parentEmail;
+      row.parentTempPassword = p.parentTempPassword;
+      rowsByStudent.set(p.studentId, row);
+    }
+    const mergedCredentials = [...rowsByStudent.values()];
+
+    AuditService.log({
+      action: 'student.bulk_password_reset', actor: req.jwtUser, schoolId,
+      target: { type: 'class', id: classId, label: `${studentsReset} student(s), ${parentsReset} parent(s)` },
+      details: { studentsReset, parentsReset, studentErrorCount: studentErrors.length, parentErrorCount: parentErrors.length },
+      req,
+    });
+
+    console.log(`[students] Bulk password reset (class ${classId}): ${studentsReset} students, ${parentsReset} parents reset — by ${userId}`);
+    return ok(res, {
+      studentsReset, parentsReset, studentErrors, parentErrors,
+      studentPortalAllowed, parentPortalAllowed,
+      credentials: mergedCredentials,
+    });
+  } catch (err) {
+    console.error('[students POST/bulk-reset-portal-passwords]', err);
+    return E.serverError(res);
+  }
+});
+
 /* ── Local temp-password generator (mirrors auth.js) ─────────── */
 function _genTempPassword() {
   const crypto = require('crypto');
@@ -1429,7 +1707,13 @@ router.post('/:id/portal-account', authMiddleware, PLAN, MODGATE, rbac('students
     }
 
     const studentDocId = student.id || String(student._id);
-    const tempPassword = _genTempPassword();
+    // Student portal default password = admission number (2026-10, explicit
+    // request) — not a random string, so parents/students don't need a
+    // separately-distributed secret on top of the ID already printed on
+    // report cards/ID cards. mustChangePassword stays true below either
+    // way, so this is only ever the FIRST password, never the one left
+    // standing after a real login.
+    const tempPassword = student.admissionNumber;
     const hash = await bcrypt.hash(tempPassword, 12);
 
     const username  = student.admissionNumber.toLowerCase();

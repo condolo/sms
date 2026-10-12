@@ -83,6 +83,19 @@ const MODULE_REGISTRY = [
     { key: 'portal_accounts', label: 'Activate / Manage Student & Parent Portal Accounts' },
     { key: 'duplicates',      label: 'Resolve Duplicate Student Records' },
     { key: 'purge',           label: 'Permanently Delete Students' },
+    // Separate from portal_accounts on purpose (2026-10) — that one gates
+    // routine, idempotent account activation (safe to re-run; never
+    // touches an already-active account); this gates a genuinely more
+    // disruptive action — regenerating EVERY active student's and
+    // parent's password in a class at once, logging them all out
+    // immediately. Someone trusted to activate missing accounts is not
+    // automatically trusted to mass-invalidate a whole class's working
+    // passwords. Enforced with hasExplicitSubGrant against
+    // students.js's SENSITIVE_FLOOR (admin/superadmin only unconditionally
+    // — narrower than portal_accounts's floor, which also includes
+    // principal/deputy_principal), matching purge/duplicates/promote's
+    // severity rather than portal_accounts's.
+    { key: 'reset_passwords', label: 'Bulk Reset Student & Parent Passwords (by Class)' },
   ]},
   { key: 'teachers', label: 'Teachers', section: 'Academic Management', icon: 'Users', navRoute: '/teachers', navOrder: 1, subs: [
     { key: 'list',   label: 'View Teacher List' },

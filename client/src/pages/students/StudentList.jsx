@@ -11,7 +11,7 @@ import {
   Search, X, Filter,
   GraduationCap, Users, AlertTriangle, Eye, Trash2,
   Loader2, CheckCircle2, Phone, Mail, Download,
-  ShieldAlert, UserMinus, KeyRound, ArrowUpCircle, ChevronsRight, Copy,
+  ShieldAlert, UserMinus, KeyRound, ArrowUpCircle, ChevronsRight, Copy, RotateCcw,
 } from 'lucide-react';
 import {
   students as studentsApi, classes as classesApi, streams as streamsApi, importExport,
@@ -150,6 +150,23 @@ export default function StudentList() {
   const [showPromote, setShowPromote] = useState(false);
   const [showDuplicates, setShowDuplicates] = useState(false);
   const [showActivateAllConfirm, setShowActivateAllConfirm] = useState(false);
+  // Deliberately separate from Activate All Portals — that action skips
+  // anyone already active to stay safe to re-run; this one resets
+  // regardless of current state, scoped to one class at a time, so its
+  // blast radius (old passwords stop working, everyone logged out) stays
+  // small and intentional. See bulkResetPortalPasswords below.
+  const [showResetPanel,    setShowResetPanel]    = useState(false);
+  const [resetClassId,      setResetClassId]      = useState('');
+  const [resetLoading,      setResetLoading]      = useState(false);
+  const [resetResult,       setResetResult]       = useState(null);
+  // Precount step — shows exactly who's affected (and any parent whose
+  // OTHER child, in a different class, will have this same password
+  // invalidated if that class is reset later) before the real,
+  // irreversible-in-effect reset runs. Cleared whenever the class
+  // selection changes, so a stale preview can never be confirmed against
+  // the wrong class.
+  const [resetPreview,        setResetPreview]        = useState(null);
+  const [resetPreviewLoading, setResetPreviewLoading] = useState(false);
 
   /* React to URL param changes */
   useEffect(() => {
@@ -341,6 +358,49 @@ export default function StudentList() {
     }
   }
 
+  /* Preview step — same eligibility logic the real reset uses server-side,
+     but read-only: shows exactly how many students/parents this would
+     touch, and flags any parent who also has a child in a DIFFERENT
+     class (resetting that class later would silently invalidate the
+     password just issued here). Must be re-run whenever the class
+     changes — see the class <select>'s onChange below. */
+  async function previewResetClassPasswords(classId) {
+    setResetPreviewLoading(true);
+    setResetPreview(null);
+    try {
+      const res  = await studentsApi.bulkResetPortalPasswords(classId, { dryRun: true });
+      const data = res.data ?? res;
+      setResetPreview(data);
+    } catch (err) {
+      toast.error(err?.message ?? 'Failed to preview this class.');
+    } finally {
+      setResetPreviewLoading(false);
+    }
+  }
+
+  /* Reset EVERY active student's + parent's password in one class, win or
+     lose their current one — the opt-in companion to activateAllEligiblePortal
+     above for "I need everyone's password again, filtered by class."
+     Always emails the new password (student: only if they have a
+     schoolEmail on file; parent: always) on top of the CSV download. */
+  async function bulkResetClassPasswords() {
+    if (!resetClassId) return;
+    setResetLoading(true);
+    setResetResult(null);
+    try {
+      const res  = await studentsApi.bulkResetPortalPasswords(resetClassId);
+      const data = res.data ?? res;
+      setResetResult(data);
+      setResetPreview(null);
+      if (data.credentials?.length > 0) downloadCredentialsCsv(data.credentials);
+      qc.invalidateQueries({ queryKey: ['students'] });
+    } catch (err) {
+      toast.error(err?.message ?? 'Failed to reset portal passwords.');
+    } finally {
+      setResetLoading(false);
+    }
+  }
+
   /* One-time credentials CSV — passwords are never retrievable again after
      this download, so it fires automatically and stays re-downloadable from
      the result banner until it's dismissed. */
@@ -495,6 +555,17 @@ export default function StudentList() {
               >
                 {bulkPortalLoading ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />}
                 Activate All Portals
+              </button>
+            )}
+            {canManagePortals && (
+              <button
+                onClick={() => setShowResetPanel(true)}
+                disabled={resetLoading}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-50 hover:border-amber-500 disabled:opacity-50 transition-colors"
+                title="Reset passwords for every student + parent in one class, regardless of current status"
+              >
+                {resetLoading ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+                Reset Passwords (by Class)
               </button>
             )}
             {canPromote && (
@@ -821,6 +892,132 @@ export default function StudentList() {
                 </button>
               )}
               <button onClick={() => setBulkPortalResult(null)} className="text-emerald-500 hover:text-emerald-800 transition">
+                <X size={13} />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Reset-passwords-by-class panel ──────────────── */}
+        {showResetPanel && (
+          <div className="flex flex-col gap-3 px-4 py-3 bg-amber-50 border border-amber-300 rounded-xl text-sm text-amber-900">
+            <div className="flex items-start gap-2">
+              <AlertTriangle size={15} className="shrink-0 mt-0.5 text-amber-600" />
+              <span>
+                Resets the password for <span className="font-semibold">every active student and their parent</span> in
+                the class you pick below — including accounts already active. Their current password stops working
+                immediately and they're signed out. Students reset to their admission number; parents get a new
+                random password. Everyone with an email on file is emailed their new password, and it also downloads
+                as a CSV.
+              </span>
+            </div>
+            <div className="flex items-center gap-3">
+              <select
+                value={resetClassId}
+                onChange={e => {
+                  // A stale preview for the PREVIOUS class must never be
+                  // confirmable against this new one.
+                  setResetClassId(e.target.value);
+                  setResetPreview(null);
+                }}
+                className="text-sm px-3 py-1.5 rounded-lg border border-amber-300 bg-white focus:outline-none focus:ring-2 focus:ring-amber-400/30"
+              >
+                <option value="">Select a class…</option>
+                {classList.map(c => (
+                  <option key={c.id ?? c._id} value={c.id ?? c._id}>{c.name}</option>
+                ))}
+              </select>
+              <button onClick={() => { setShowResetPanel(false); setResetClassId(''); setResetPreview(null); }} className="text-xs font-medium text-amber-700 hover:text-amber-900">
+                Cancel
+              </button>
+              {!resetPreview && (
+                <button
+                  onClick={() => previewResetClassPasswords(resetClassId)}
+                  disabled={!resetClassId || resetPreviewLoading}
+                  className="flex items-center gap-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
+                >
+                  {resetPreviewLoading ? <Loader2 size={12} className="animate-spin" /> : <Eye size={12} />}
+                  Preview This Class
+                </button>
+              )}
+            </div>
+
+            {resetPreview && (
+              <div className="flex flex-col gap-2.5 pt-1 border-t border-amber-200">
+                <p className="text-sm">
+                  This will reset <span className="font-semibold">{resetPreview.studentCount}</span> student password{resetPreview.studentCount !== 1 ? 's' : ''}
+                  {resetPreview.parentPortalAllowed && (
+                    <> and <span className="font-semibold">{resetPreview.parentCount}</span> parent password{resetPreview.parentCount !== 1 ? 's' : ''}</>
+                  )}.
+                </p>
+                {resetPreview.studentIneligible?.length > 0 && (
+                  <p className="text-xs text-amber-700">
+                    {resetPreview.studentIneligible.length} student{resetPreview.studentIneligible.length !== 1 ? 's' : ''} will be skipped (no admission number):{' '}
+                    {resetPreview.studentIneligible.join(', ')}
+                  </p>
+                )}
+                {resetPreview.siblingOverlap?.length > 0 && (
+                  <div className="flex items-start gap-2 p-2.5 rounded-lg bg-amber-100 border border-amber-300">
+                    <AlertTriangle size={13} className="shrink-0 mt-0.5 text-amber-700" />
+                    <span className="text-xs text-amber-800">
+                      <span className="font-semibold">{resetPreview.siblingOverlap.length} parent{resetPreview.siblingOverlap.length !== 1 ? 's' : ''}</span> here
+                      {resetPreview.siblingOverlap.length !== 1 ? ' also have' : ' also has'} a child in a different class — resetting that class later
+                      will issue a NEW password and invalidate the one from this run:{' '}
+                      {resetPreview.siblingOverlap.map((o, i) => (
+                        <span key={o.parentEmail}>
+                          {i > 0 && ', '}
+                          {o.parentName} ({o.otherClasses.map(c => c.className).join(', ')})
+                        </span>
+                      ))}
+                    </span>
+                  </div>
+                )}
+                <div className="flex items-center gap-3 pt-1">
+                  <button onClick={() => setResetPreview(null)} className="text-xs font-medium text-amber-700 hover:text-amber-900">
+                    Change class
+                  </button>
+                  <button
+                    onClick={bulkResetClassPasswords}
+                    disabled={resetLoading || (resetPreview.studentCount === 0 && resetPreview.parentCount === 0)}
+                    className="flex items-center gap-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
+                  >
+                    {resetLoading ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
+                    Confirm Reset
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Reset result banner ─────────────────────────── */}
+        {resetResult && (
+          <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-sm text-emerald-800">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 size={14} className="shrink-0 text-emerald-600" />
+              <span>
+                <span className="font-semibold">{resetResult.studentsReset}</span> student password{resetResult.studentsReset !== 1 ? 's' : ''} reset
+                {resetResult.studentErrors?.length > 0 && <span className="text-amber-700"> · {resetResult.studentErrors.length} failed</span>}
+                {typeof resetResult.parentsReset === 'number' && (
+                  <span> · <span className="font-semibold">{resetResult.parentsReset}</span> parent password{resetResult.parentsReset !== 1 ? 's' : ''} reset</span>
+                )}
+                {resetResult.parentErrors?.length > 0 && <span className="text-amber-700"> · {resetResult.parentErrors.length} parent resets failed</span>}
+                {resetResult.parentPortalAllowed === false && (
+                  <span className="text-emerald-600"> · parent portal requires the Family tier</span>
+                )}
+              </span>
+            </div>
+            <div className="flex items-center gap-3 shrink-0">
+              {resetResult.credentials?.length > 0 && (
+                <button
+                  onClick={() => downloadCredentialsCsv(resetResult.credentials)}
+                  className="text-xs font-semibold text-emerald-700 hover:text-emerald-900 underline underline-offset-2 transition"
+                  title="Passwords are shown once — save this file before dismissing"
+                >
+                  Download credentials (CSV)
+                </button>
+              )}
+              <button onClick={() => { setResetResult(null); setShowResetPanel(false); setResetClassId(''); }} className="text-emerald-500 hover:text-emerald-800 transition">
                 <X size={13} />
               </button>
             </div>
