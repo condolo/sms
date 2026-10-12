@@ -22,6 +22,8 @@ import {
   behaviour  as behaviourApi,
   assessment as assessmentApi,
   settings   as settingsApi,
+  classes    as classesApi,
+  streams    as streamsApi,
 } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 import { useToast } from '@/hooks/useToast.jsx';
@@ -506,6 +508,38 @@ function OverviewTab({ student, houses, houseName, editing, saving, onSave, onCa
   const [form, setForm] = useState({ ...student });
   function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
 
+  // Class/stream reassignment — reported directly: no way to move a
+  // student to a different class after enrollment (e.g. correcting a
+  // mistake made at admission). PUT /api/students/:id already accepts
+  // classId/streamId (the promotion route sets them the same way), this
+  // form just never exposed them. className/streamName are denormalized
+  // fields the backend does NOT derive from the id — resolved here from
+  // the picked option and sent alongside, the same convention the
+  // bulk-promote route already uses.
+  const { data: classesData } = useQuery({
+    queryKey: ['classes', 'all-active-for-reassign'],
+    queryFn:  () => classesApi.list({ limit: 200, status: 'active' }),
+    enabled:  editing,
+    staleTime: 5 * 60_000,
+  });
+  const classList = classesData?.data ?? [];
+  const { data: streamsData } = useQuery({
+    queryKey: ['streams', 'by-class-for-reassign', form.classId],
+    queryFn:  () => streamsApi.list({ classId: form.classId, status: 'active', limit: 50 }),
+    enabled:  editing && !!form.classId,
+    staleTime: 5 * 60_000,
+  });
+  const streamList = form.classId ? (streamsData?.data ?? []) : [];
+
+  function onClassChange(classId) {
+    const c = classList.find(cl => (cl.id ?? cl._id) === classId);
+    setForm(f => ({ ...f, classId, className: c?.name ?? '', streamId: null, streamName: null }));
+  }
+  function onStreamChange(streamId) {
+    const s = streamList.find(st => (st.id ?? st._id) === streamId);
+    setForm(f => ({ ...f, streamId: streamId || null, streamName: streamId ? (s?.name ?? '') : null }));
+  }
+
   /* ── View mode ── */
   if (!editing) {
     return (
@@ -529,6 +563,7 @@ function OverviewTab({ student, houses, houseName, editing, saving, onSave, onCa
         <InfoCard title="Academic" icon={<BookOpen size={14} />}>
           <InfoRow label="Admission No." value={student.admissionNumber} />
           <InfoRow label="Class"         value={student.className} />
+          {student.streamName && <InfoRow label="Stream" value={student.streamName} />}
           <InfoRow label="House"         value={houseName} />
           <InfoRow label="Status"        value={student.status} />
           <InfoRow label="Enrolled"      value={student.enrollmentDate ? new Date(student.enrollmentDate).toLocaleDateString('en-GB') : null} />
@@ -539,10 +574,20 @@ function OverviewTab({ student, houses, houseName, editing, saving, onSave, onCa
           <InfoRow label="Relationship" value={student.parentRelationship} />
           <InfoRow label="Phone"        value={student.parentPhone} />
           <InfoRow label="Email"        value={student.parentEmail} />
-          {(student.motherEmail || student.fatherEmail) && (
+          {(student.motherName || student.motherPhone || student.motherEmail || student.motherIdNumber) && (
             <>
+              <InfoRow label="Mother's name"  value={student.motherName} />
+              <InfoRow label="Mother's phone" value={student.motherPhone} />
               <InfoRow label="Mother's email" value={student.motherEmail} />
+              <InfoRow label="Mother's ID No." value={student.motherIdNumber} />
+            </>
+          )}
+          {(student.fatherName || student.fatherPhone || student.fatherEmail || student.fatherIdNumber) && (
+            <>
+              <InfoRow label="Father's name"  value={student.fatherName} />
+              <InfoRow label="Father's phone" value={student.fatherPhone} />
               <InfoRow label="Father's email" value={student.fatherEmail} />
+              <InfoRow label="Father's ID No." value={student.fatherIdNumber} />
             </>
           )}
         </InfoCard>
@@ -608,6 +653,24 @@ function OverviewTab({ student, houses, houseName, editing, saving, onSave, onCa
           <FField label="Admission No.">
             <input className={iCls()} value={form.admissionNumber ?? ''} onChange={e => set('admissionNumber', e.target.value)} />
           </FField>
+          <FField label="Class" hint="Reassigns this student to a different class — e.g. to correct an admission mistake">
+            <select className={iCls()} value={form.classId ?? ''} onChange={e => onClassChange(e.target.value)}>
+              <option value="">— Select class —</option>
+              {classList.map(c => (
+                <option key={c.id ?? c._id} value={c.id ?? c._id}>{c.name}</option>
+              ))}
+            </select>
+          </FField>
+          {form.classId && streamList.length > 0 && (
+            <FField label="Stream">
+              <select className={iCls()} value={form.streamId ?? ''} onChange={e => onStreamChange(e.target.value)}>
+                <option value="">No stream</option>
+                {streamList.map(s => (
+                  <option key={s.id ?? s._id} value={s.id ?? s._id}>{s.name}</option>
+                ))}
+              </select>
+            </FField>
+          )}
           <FField label="House">
             {houses.length > 0 ? (
               <select className={iCls()} value={form.houseId ?? form.house ?? ''} onChange={e => set('houseId', e.target.value)}>
@@ -679,11 +742,35 @@ function OverviewTab({ student, houses, houseName, editing, saving, onSave, onCa
               silently blocked saving ANY other Overview change too, since
               the stale bad value still failed the server's validation on
               every submit. */}
+          {/* Mother's/Father's name, phone and ID number — captured at
+              admission (AddSlideOver.jsx) but, until now, this was the
+              only place to correct any of it afterward, and it had no
+              fields for them at all: only the two emails were editable
+              post-enrollment. Reported directly: fields visible during
+              admission "hidden as soon as you save/enroll a student". */}
+          <FField label="Mother's name">
+            <input className={iCls()} value={form.motherName ?? ''} onChange={e => set('motherName', e.target.value)} />
+          </FField>
+          <FField label="Mother's phone">
+            <input className={iCls()} value={form.motherPhone ?? ''} onChange={e => set('motherPhone', e.target.value)} />
+          </FField>
           <FField label="Mother's email">
             <input type="email" className={iCls()} value={form.motherEmail ?? ''} onChange={e => set('motherEmail', e.target.value)} />
           </FField>
+          <FField label="Mother's ID / Passport No.">
+            <input className={iCls()} value={form.motherIdNumber ?? ''} onChange={e => set('motherIdNumber', e.target.value)} />
+          </FField>
+          <FField label="Father's name">
+            <input className={iCls()} value={form.fatherName ?? ''} onChange={e => set('fatherName', e.target.value)} />
+          </FField>
+          <FField label="Father's phone">
+            <input className={iCls()} value={form.fatherPhone ?? ''} onChange={e => set('fatherPhone', e.target.value)} />
+          </FField>
           <FField label="Father's email">
             <input type="email" className={iCls()} value={form.fatherEmail ?? ''} onChange={e => set('fatherEmail', e.target.value)} />
+          </FField>
+          <FField label="Father's ID / Passport No.">
+            <input className={iCls()} value={form.fatherIdNumber ?? ''} onChange={e => set('fatherIdNumber', e.target.value)} />
           </FField>
         </div>
       </div>
