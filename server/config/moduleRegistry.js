@@ -73,7 +73,14 @@ const MODULE_REGISTRY = [
     // these — same reasoning as report-card publishing / mark-submissions
     // review / the Attendance School-Wide Report earlier this session.
     { key: 'promote',         label: 'Promote Students to Next Class' },
-    { key: 'portal_accounts', label: 'Manage Student Portal Accounts' },
+    // Relabeled (2026-10) — reported directly as hard to find under its
+    // old name ("Manage Student Portal Accounts") when looking for the
+    // permission behind the "Activate All Portals" button. Also now
+    // covers bulk PARENT portal-account creation (students.js's
+    // bulk-portal-accounts route), not just the student side — the old
+    // label didn't mention parents at all. Key unchanged (already
+    // persisted for every school); only the label changed.
+    { key: 'portal_accounts', label: 'Activate / Manage Student & Parent Portal Accounts' },
     { key: 'duplicates',      label: 'Resolve Duplicate Student Records' },
     { key: 'purge',           label: 'Permanently Delete Students' },
   ]},

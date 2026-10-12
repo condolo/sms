@@ -3459,7 +3459,7 @@ const PERM_MODULES = [
     { key: 'export',  label: 'Export Students (CSV)' },
     { key: 'import',  label: 'Import Students (CSV)' },
     { key: 'promote',         label: 'Promote Students to Next Class' },
-    { key: 'portal_accounts', label: 'Manage Student Portal Accounts' },
+    { key: 'portal_accounts', label: 'Activate / Manage Student & Parent Portal Accounts' },
     { key: 'duplicates',      label: 'Resolve Duplicate Student Records' },
     { key: 'purge',           label: 'Permanently Delete Students' },
   ]},
