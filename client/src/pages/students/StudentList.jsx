@@ -2,7 +2,7 @@
    Students — Premium List with Stats, Charts & Add Slide-Over
    /platform-audit: RBAC-gated, correct API shapes, no raw emojis
    ============================================================ */
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -253,6 +253,13 @@ export default function StudentList() {
   const pagination = data?.pagination ?? {};
   const total      = pagination.total ?? 0;
   const totalPages = pagination.pages ?? 1;
+
+  // Carried via router state into StudentProfile so its Prev/Next
+  // navigator can move through exactly this page's rows without a round
+  // trip back here — reported directly: re-searching after every edit.
+  // Bounded to this one page deliberately, not the full filtered result
+  // set, since rows is all that's actually loaded client-side right now.
+  const studentListCtx = useMemo(() => ({ ids: rows.map(s => s.id ?? s._id) }), [rows]);
 
   /* Delete (soft) */
   const { mutate: removeStudent, variables: removingId } = useMutation({
@@ -1116,7 +1123,7 @@ export default function StudentList() {
                         />
                       </td>
                       <td className="py-3.5 px-5">
-                        <Link to={`/students/${id}`} className="flex items-center gap-3">
+                        <Link to={`/students/${id}`} state={{ studentListCtx }} className="flex items-center gap-3">
                           <div className={`w-9 h-9 rounded-full bg-gradient-to-br ${av} flex items-center justify-center text-white text-xs font-bold shrink-0`}>
                             {initials(s.firstName, s.lastName)}
                           </div>
@@ -1148,7 +1155,7 @@ export default function StudentList() {
                       </td>
                       <td className="py-3.5 px-4">
                         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition">
-                          <Link to={`/students/${id}`} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition" title="View profile">
+                          <Link to={`/students/${id}`} state={{ studentListCtx }} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition" title="View profile">
                             <Eye size={14} />
                           </Link>
                           {canDeactivate && (

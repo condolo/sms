@@ -6,6 +6,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.176.0] — 2026-10-13 — fix(students): House free-text fallback, Prev/Next profile navigation, guardian-name sync
+
+Three concrete, independent reports from the same pass:
+
+### Fixed
+- **Student Profile's House field silently fell back to free text** whenever the school had zero Houses configured yet (Behaviour → Houses) — an unhelpful state since a typed value could never resolve back to a real house later (the house-name lookup matches by id/name against the configured list). Now always a `<select>`, matching the Admissions form's existing pattern exactly: zero houses configured shows one clear placeholder option instead of inviting an unresolvable free-text value.
+- **Editing a guardian's name didn't reflect in their already-created parent portal account.** A parent account is created once, copying whatever name was on file at that moment (`POST /:id/parent-account`) — nothing re-synced it afterward. `PUT /api/students/:id` now updates the matching linked account's `name` (matched by email + `guardianOf`, never touching the login email itself) whenever `parentName`/`motherName`/`fatherName` actually changes.
+
+### Added
+- **Previous/Next navigation on Student Profile.** Reported directly: after saving an edit, getting to the next student meant going back to the list and re-searching. `StudentList.jsx` now passes its current page's ordered student ids via router state when opening a profile; `StudentProfile.jsx` shows a "`N of M`" indicator with Prev/Next arrows that hop through that same captured list, carrying the state forward on every hop — no round trip back to the list required. Scoped to the current page's rows (not the full filtered result set across pages), and gracefully absent when there's no captured list (e.g. a direct link or bookmark).
+
+### Tests
+- `students-guardian-name-sync.test.js` (5 tests) — syncs on a genuine name correction, leaves a sibling-guardian's account untouched, no-op when no account exists yet or the edit is unrelated, and only ever matches the account actually linked to this student via `guardianOf` (not merely a same-email coincidence).
+
+Full suite: 300/300 suites, 3118/3118 tests.
+
+---
+
 ## [v5.175.0] — 2026-10-13 — fix(portal): Parent Portal notifications pointed at the wrong data entirely
 
 Reported directly: "the message doesn't work for parent, see the notification but can't open." Two real, confirmed bugs, not a vague complaint:

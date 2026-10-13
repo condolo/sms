@@ -831,6 +831,34 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('students', 'update'), as
     if (conflict) return E.conflict(res, 'This student record was edited by someone else. Please refresh and try again.');
     if (!doc)     return E.notFound(res, 'Student not found');
 
+    // Reported directly: an admin corrected a guardian's name here, but
+    // the parent's own portal account kept showing the old one — this
+    // route only ever wrote the student document. A parent portal
+    // account is created once (POST /:id/activate-portal, 'guardian')
+    // from whichever of these three name/email pairs it was created
+    // for, and nothing has ever re-synced its `users.name` since.
+    // Matched by email (lowercased/trimmed the same way activation
+    // stores it), not by studentId alone, since one account can be
+    // shared across siblings — only the slot whose NAME this edit
+    // actually changed is touched, never the login email itself.
+    const guardianSlots = [
+      { nameField: 'parentName', emailField: 'parentEmail' },
+      { nameField: 'motherName', emailField: 'motherEmail' },
+      { nameField: 'fatherName', emailField: 'fatherEmail' },
+    ];
+    const studentDocId = existing.id || String(existing._id);
+    for (const { nameField, emailField } of guardianSlots) {
+      if (data[nameField] === undefined || data[nameField] === existing[nameField]) continue;
+      const email = (doc[emailField] || '').toLowerCase().trim();
+      if (!email) continue;
+      try {
+        await tenantModel('users', tenantContext(req)).updateOne(
+          { schoolId, role: 'parent', email, guardianOf: studentDocId },
+          { $set: { name: data[nameField], updatedAt: new Date().toISOString() } }
+        );
+      } catch (_) { /* non-fatal — the student edit itself already succeeded */ }
+    }
+
     if (consentChanged) {
       AuditService.log({
         action: 'student.medical_consent_recorded', actor: req.jwtUser, schoolId,

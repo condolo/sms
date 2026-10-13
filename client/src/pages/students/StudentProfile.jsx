@@ -3,13 +3,13 @@
    /platform-audit: 5 tabs, BPS stage/milestone, house assignment,
    lucide icons, no emoji, currency from session, correct API shapes
    ============================================================ */
-import { useState, useMemo, useRef, useCallback } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
+import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   User, Users, CalendarCheck, Receipt, Scale, GraduationCap,
-  ChevronLeft, Edit2, Save, X, Loader2, AlertTriangle,
+  ChevronLeft, ChevronRight, Edit2, Save, X, Loader2, AlertTriangle,
   Star, ShieldAlert, TrendingUp, TrendingDown, Award,
   Hash, Mail, Phone, MapPin, Shield, BookOpen, Home,
   CheckCircle2, Clock, XCircle, CheckCheck, Heart, Printer,
@@ -94,12 +94,35 @@ function Skeleton({ className = '' }) {
 /* ══════════════════════════════════════════════════════════════ */
 export default function StudentProfile() {
   const { studentId } = useParams();
+  const navigate       = useNavigate();
+  const location       = useLocation();
   const qc            = useQueryClient();
   const can           = useAuthStore(s => s.can.bind(s));
   const currency      = useAuthStore(s => s.session?.school?.currency ?? 'KES');
   const { toast }     = useToast();
   const [tab, setTab] = useState('overview');
   const [editing, setEditing] = useState(false);
+
+  // Reported directly: after saving/editing a student, going back to find
+  // the next one meant returning to the list and re-searching. StudentList
+  // now passes the current page's ordered id list (+ the filters that
+  // produced it) via router state when opening a profile; Prev/Next below
+  // navigates within that same captured list, carrying the state forward
+  // on every hop so the whole list stays reachable without a round trip.
+  const listCtx = location.state?.studentListCtx ?? null;
+  const listIds = listCtx?.ids ?? null;
+  const listPos = listIds ? listIds.indexOf(studentId) : -1;
+
+  function goToListIndex(i) {
+    if (!listIds || i < 0 || i >= listIds.length) return;
+    navigate(`/students/${listIds[i]}`, { state: { studentListCtx: listCtx } });
+  }
+
+  // This is the SAME route component across a Prev/Next hop (only the
+  // :studentId param changes, React Router doesn't remount it) — reset
+  // per-student local UI state explicitly rather than carrying stale
+  // edit-mode/tab state over onto the next student.
+  useEffect(() => { setEditing(false); setTab('overview'); }, [studentId]);
 
   /* ── Student ── */
   const { data: studentRes, isLoading, isError, error, refetch } = useQuery({
@@ -333,9 +356,34 @@ td:last-child{font-weight:500}
       {/* ── Profile header ─────────────────────────────────── */}
       <div className="bg-white border-b border-slate-200">
         <div className="max-w-4xl mx-auto px-6 py-5">
-          <Link to="/students" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 transition mb-4">
-            <ChevronLeft size={14} /> Students
-          </Link>
+          <div className="flex items-center justify-between mb-4 gap-3">
+            <Link to="/students" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 transition">
+              <ChevronLeft size={14} /> Students
+            </Link>
+            {listIds && listIds.length > 1 && (
+              <div className="flex items-center gap-1 text-xs text-slate-400 shrink-0">
+                <button
+                  onClick={() => goToListIndex(listPos - 1)}
+                  disabled={listPos <= 0}
+                  title="Previous student"
+                  className="p-1 rounded-md hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30 disabled:hover:bg-transparent transition"
+                >
+                  <ChevronLeft size={15} />
+                </button>
+                <span className="tabular-nums px-1">
+                  {listPos >= 0 ? `${listPos + 1} of ${listIds.length}` : `of ${listIds.length}`}
+                </span>
+                <button
+                  onClick={() => goToListIndex(listPos + 1)}
+                  disabled={listPos === -1 || listPos >= listIds.length - 1}
+                  title="Next student"
+                  className="p-1 rounded-md hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30 disabled:hover:bg-transparent transition"
+                >
+                  <ChevronRight size={15} />
+                </button>
+              </div>
+            )}
+          </div>
 
           <div className="flex items-start gap-4">
             {/* Avatar / Photo */}
@@ -672,18 +720,23 @@ function OverviewTab({ student, houses, houseName, editing, saving, onSave, onCa
             </FField>
           )}
           <FField label="House">
-            {houses.length > 0 ? (
-              <select className={iCls()} value={form.houseId ?? form.house ?? ''} onChange={e => set('houseId', e.target.value)}>
-                <option value="">No house assigned</option>
-                {houses.map(h => (
-                  <option key={h.id ?? h.name} value={h.id ?? h.name}>
-                    {h.name}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <input className={iCls()} value={form.houseId ?? form.house ?? ''} onChange={e => set('houseId', e.target.value)} placeholder="House name" />
-            )}
+            {/* Always a dropdown sourced from school.houses (Behaviour →
+               Houses), same as the Admissions form — never a free-text
+               fallback. A typed house name could never resolve back to a
+               real house later (houseName lookup above matches by id/name
+               against the configured list), so accepting arbitrary text
+               here just produced silently-orphaned data once houses WERE
+               configured. With zero houses configured, the single
+               placeholder option makes that reachable and clear instead
+               of inviting a value nothing will ever match. */}
+            <select className={iCls()} value={form.houseId ?? form.house ?? ''} onChange={e => set('houseId', e.target.value)}>
+              <option value="">{houses.length ? 'No house assigned' : 'No houses configured yet'}</option>
+              {houses.map(h => (
+                <option key={h.id ?? h.name} value={h.id ?? h.name}>
+                  {h.name}
+                </option>
+              ))}
+            </select>
           </FField>
           <FField label="Status">
             <select className={iCls()} value={form.status ?? 'active'} onChange={e => set('status', e.target.value)}>
