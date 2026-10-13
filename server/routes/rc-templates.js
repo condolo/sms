@@ -141,14 +141,20 @@ router.get('/', authMiddleware, rbac('assessment', 'read'), async (req, res) => 
 
 /* ══════════════════════════════════════════════════════════════
    GET /api/rc-templates/resolve?classId=  — which template (if any)
-   applies to this class. Gated by grades:read, not report_cards:read
-   — this is consumed by the Markbook (Exams module) to decide whether
-   a class/subject uses indicator-based entry, not by the Report Cards
-   template-building screen; a teacher with ordinary Markbook access
-   needs this without needing report_cards:read too. Registered above
-   GET /:id — same single-segment route-ordering rule documented
-   elsewhere in this codebase (students.js's /purge, report-cards.js's
-   /bulk-pdf) — otherwise Express would treat "resolve" as an :id.
+   applies to this class. Gated by grades:read, deliberately NOT the
+   assessment:{read,update} scope the template-EDITING screen uses
+   (see this file's header for that gate's own history) — this route
+   is a broad READ dependency consumed by every caller that just needs
+   to know "is this class/subject KG or numeric," never by someone
+   building a template: ExamsPage.jsx's Markbook (decides whether to
+   render IndicatorMarkbook) and ReportCardsTab.jsx's Generate &
+   Publish (decides which pipeline to run) both call it, and neither a
+   teacher with ordinary Markbook access nor an admin generating a
+   report card should need assessment:update just to read this.
+   Registered above GET /:id — same single-segment route-ordering rule
+   documented elsewhere in this codebase (students.js's /purge,
+   report-cards.js's /bulk-pdf) — otherwise Express would treat
+   "resolve" as an :id.
    ══════════════════════════════════════════════════════════════ */
 router.get('/resolve', authMiddleware, rbac('grades', 'read'), async (req, res) => {
   try {
