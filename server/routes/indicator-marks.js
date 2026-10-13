@@ -7,16 +7,27 @@
 
    Scope/RBAC mirrors assessment.js's /marks exactly: canWriteSubject/
    isElective (subject-teacher scoping, unconditional), year-archival
-   guard. Now wired to mark_submissions review-state (2026-10) — a
-   teacher can no longer keep editing indicator marks after "submitting"
-   them, the same guard the numeric Markbook already enforces, reusing
-   the SAME mark_submissions collection/state-machine via the reserved
+   guard. Wired to mark_submissions review-state (2026-10) — a teacher
+   can no longer keep editing indicator marks after "submitting" them,
+   the same guard the numeric Markbook already enforces, reusing the
+   SAME mark_submissions collection/state-machine via the reserved
    KG_INDICATORS_TYPE sentinel (indicator marks have no real
    assessmentType/instance of their own) rather than a second moderation
    system. Deliberately NOT wired to assessment_schedule locking — that
    is a separate, unrelated concern (the exam office's whole-window
    lock) nobody has asked for here yet.
-   ============================================================ */
+
+   There is no "classType: kindergarten" field anywhere in this
+   codebase, by design — see rc-template-scale.js's header comment.
+   This route (and every other KG-aware route) treats "does this class
+   use indicator entry?" as answered SOLELY by resolveRcTemplate's
+   explicit-classIds-or-section-default resolution, confirmed by a
+   full-codebase audit (2026-10-13). POST /bulk now RE-VERIFIES the
+   submitted templateId against resolveRcTemplate(schoolId, classId)
+   rather than trusting any templateId that merely exists somewhere in
+   the school — closes a real gap the audit found: a client could
+   previously submit marks against a template belonging to a different
+   class in the same school. */
 'use strict';
 
 const express  = require('express');
@@ -36,6 +47,7 @@ const ScopeEngine         = require('../utils/scopeEngine');
 const { restrictToTaught } = require('../utils/teaching-scope');
 const { scopeMiddleware } = require('../middleware/scopeMiddleware');
 const { KG_INDICATORS_TYPE } = require('./mark-submissions');
+const { resolveRcTemplate } = require('../utils/rc-template-scale');
 
 const router  = express.Router();
 const PLAN    = planGate('grades');
@@ -148,16 +160,31 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), as
       return E.forbidden(res, `You are not assigned to teach: ${denied.map(p => p.subjectId).join(', ')}`);
     }
 
+    // Guard: the submitted templateId must be the template actually
+    // ASSIGNED to this mark's class — resolved the exact same way the
+    // Markbook's own "does this class use indicator entry?" check does
+    // (rc-template-scale.js's resolveRcTemplate: explicit classIds, else
+    // the class's section default). Previously this route only checked
+    // that templateId existed SOMEWHERE in the school, not that it
+    // belonged to the class being written for — subject-teacher scoping
+    // above still gates WHO can write, but not which template a class's
+    // marks get attributed to; a client could otherwise submit marks
+    // against a template belonging to a different class in the same
+    // school. Resolved once per distinct classId in the batch.
+    const classIds = [...new Set(marks.map(d => d.classId))];
+    const resolvedByClass = {};
+    for (const classId of classIds) {
+      resolvedByClass[classId] = await resolveRcTemplate(schoolId, classId);
+    }
+
     // Validate every score against its OWN indicator's maxScore — not a
     // universal 10, confirmed per the schema's own header comment.
-    // Loads each distinct template referenced in the batch once, not
-    // per mark.
-    const templateIds = [...new Set(marks.map(d => d.templateId))];
-    const templates = await tenantModel('rc_templates', tenantContext(req))
-      .find({ schoolId, id: { $in: templateIds } }).lean();
-    const templateById = Object.fromEntries(templates.map(t => [t.id, t]));
     const maxScoreByIndicator = {};
-    for (const t of templates) {
+    const seenTemplateIds = new Set();
+    for (const classId of classIds) {
+      const t = resolvedByClass[classId];
+      if (!t || seenTemplateIds.has(t.id)) continue;
+      seenTemplateIds.add(t.id);
       for (const subj of t.subjects ?? []) {
         for (const ind of subj.indicators ?? []) {
           maxScoreByIndicator[`${t.id}::${ind.id}`] = ind.maxScore ?? 10;
@@ -165,8 +192,9 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), as
       }
     }
     for (const d of marks) {
-      if (!templateById[d.templateId]) {
-        return E.badRequest(res, `Unknown template "${d.templateId}".`);
+      const template = resolvedByClass[d.classId];
+      if (!template || template.id !== d.templateId) {
+        return E.badRequest(res, `Template "${d.templateId}" is not the assigned Kindergarten template for class "${d.classId}".`);
       }
       const maxScore = maxScoreByIndicator[`${d.templateId}::${d.indicatorId}`];
       if (maxScore === undefined) {

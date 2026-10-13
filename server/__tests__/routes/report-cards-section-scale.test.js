@@ -34,6 +34,12 @@ function makeCollection(seed = []) {
     find:    (filter) => chain(docs.filter(d => matches(d, filter))),
     findOne: (filter) => chain(docs.find(d => matches(d, filter)) || null),
     create:  async (doc) => { const d = { ...doc }; docs.push(d); return d; },
+    updateOne: async (filter, update) => {
+      const doc = docs.find(d => matches(d, filter));
+      if (doc && update.$set) Object.assign(doc, update.$set);
+      return { modifiedCount: doc ? 1 : 0 };
+    },
+    distinct: async (field, filter) => [...new Set(docs.filter(d => matches(d, filter)).map(d => d[field]))],
   };
 }
 
@@ -159,5 +165,28 @@ describe('POST /api/report-cards/generate — the class section\'s scale grades 
     const res = await supertest(buildApp()).post('/api/report-cards/generate').send({ classId: 'cls_kg', termNumber: 1 });
     expect(res.status).toBe(400);
     expect(JSON.stringify(res.body)).toMatch(/No grade scale is set for this class's section/);
+  });
+});
+
+// Found by a full-codebase audit (2026-10-13): report-card-templates.js's
+// layoutKey:'kindergarten' is now rejected at template create/update time
+// (see report-card-templates.test.js), but this is the belt-and-suspenders
+// check for a template that slipped through some other way (a pre-existing
+// one from before that fix, or any future gap) — the ordinary NUMERIC
+// /publish route must still refuse to snapshot under the kindergarten
+// layoutKey, since its data has no kgSubjects shape at all and the
+// kindergarten renderer would draw an empty/broken report.
+describe('POST /api/report-cards/publish — refuses a resolved template with layoutKey "kindergarten"', () => {
+  test('publish is blocked, with a clear message, instead of snapshotting a broken report', async () => {
+    seed({ scales: [
+      { id: 'sc_kg', schoolId: SCHOOL, name: 'KG', isDefault: true, sectionId: KG_SECTION, bands: STRICT },
+    ] });
+    mockStores.report_card_templates = makeCollection([
+      { id: 'tpl_bad', schoolId: SCHOOL, sectionId: KG_SECTION, isDefault: true, revision: 1, layoutKey: 'kindergarten' },
+    ]);
+    mockStores.publish_batches = makeCollection([]);
+    const res = await supertest(buildApp()).post('/api/report-cards/publish').send({ classId: 'cls_kg', termNumber: 1 });
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(res.body)).toMatch(/Kindergarten layout/);
   });
 });

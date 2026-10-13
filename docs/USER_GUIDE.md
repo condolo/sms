@@ -428,6 +428,20 @@ Term 3 Final = (Term 3 Total + avg(ET1, ET2, ET3)) / 2
 ```
 This rewards consistent end-term performance across the year.
 
+### Kindergarten / Competency-Band Classes *(new 2026-10)*
+
+Some classes — typically early-years ones — aren't graded with a single numeric mark per subject. Instead each subject has a short list of **indicators** ("Can identify primary colours"), each scored and matched to a **Performance Band** (Excellent / Good / Needs Support, etc.) rather than a percentage. If your class has been set up this way, the Markbook looks different: instead of the usual CA/HW/MT/ET grid, you'll see each student's subjects broken into their indicators.
+
+**How do I know if my class uses this?** You don't need to do anything to switch it on or off — it's entirely based on whether your school's admin has assigned a **Kindergarten Template** to your class (directly, or as the default for your Section, e.g. "Early Years"). If a template is assigned, the Markbook switches to indicator entry automatically the moment you select that class/subject; if not, you'll see the ordinary numeric grid, even for a class literally named "Kindergarten." Ask your admin (Report Cards → Kindergarten Templates) if you expected indicator entry but are seeing the numeric grid instead.
+
+**Entering scores:**
+1. Open a student from the class/subject list.
+2. For each indicator, either pick a **Performance Band** (this fills in the expected score for you, but you can still change it) or type a score directly — up to that indicator's own maximum (indicators don't all share the same maximum; check the number shown next to each one).
+3. Save. The subject's overall percentage is calculated as earned ÷ possible across all its indicators.
+4. When every student's scores are ready, **Submit for review** — same as the numeric Markbook, once submitted you can't keep editing; recall it first if you need to fix something before it's approved.
+
+Report cards for these classes are generated and published from the same **Report Cards → Generate & Publish** screen as every other class — just pick the class and term as usual; the screen detects the Kindergarten template automatically and shows the matching preview (indicator/band/score per subject, not the numeric table).
+
 ### Report Cards
 
 Go to **Grades & Assessment → 📊 Report Cards**. Filter by class, student, and term.
@@ -502,6 +516,8 @@ The **Timetable** tab shows all scheduled exams in a calendar view. Export as PD
 ---
 
 ## 9a. Report Cards *(new in v4.6)*
+
+> **Kindergarten / competency-band classes** use a separate report format (indicator/band/score per subject, no class ranking) and their own Generate & Publish flow — see **"Kindergarten / Competency-Band Classes"** under §8A. Everything below in this section describes the ordinary numeric (CA/HW/MT/ET) report cards.
 
 ### How Report Cards Are Generated
 Your school administrator generates report cards at the end of each term. The process:

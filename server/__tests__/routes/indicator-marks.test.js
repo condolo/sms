@@ -49,6 +49,11 @@ function mockMatches(doc, filter) {
       if ('$in' in cond && !cond.$in.includes(val)) return false;
       if ('$ne' in cond && val === cond.$ne) return false;
       if ('$exists' in cond && cond.$exists && val === undefined) return false;
+    } else if (Array.isArray(val)) {
+      // Mongo's implicit array-contains semantics for {field: scalar}
+      // against an array field (e.g. rc_templates.classIds) — a naive
+      // strict-equality check never matches an array against a scalar.
+      if (!val.includes(cond)) return false;
     } else if (val !== cond) {
       return false;
     }
@@ -105,6 +110,10 @@ const TEACHER_UNASSIGNED  = { userId: 'usr_t2', schoolId: SCHOOL_A, role: 'teach
 
 const TEMPLATE_A = {
   id: 'tmplA', schoolId: SCHOOL_A, status: 'active',
+  // Explicit classIds — the assignment resolveRcTemplate now requires
+  // POST /bulk to actually verify, not just that a template with this
+  // id exists somewhere in the school.
+  classIds: ['classA'],
   performanceBands: [{ id: 'bandGood', label: 'Good', defaultScore: 8, grade: 'B' }],
   subjects: [{
     id: 'subjTmplScience', subjectId: 'subj_science', name: 'Science',

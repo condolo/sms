@@ -780,7 +780,26 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
     const distinctSectionIds = [classSectionId];
     const templateBySection = {};
     for (const secId of distinctSectionIds) {
-      templateBySection[secId ?? '__none__'] = await resolveTemplate(tenantContext(req), schoolId, secId);
+      const resolved = await resolveTemplate(tenantContext(req), schoolId, secId);
+      // Defense in depth, same posture as /kg/generate and /kg/publish
+      // independently re-verifying their own template rather than
+      // trusting a caller: 'kindergarten' is reserved for the dedicated
+      // KG pipeline (rc_templates/resolveRcTemplate) and should be
+      // unreachable here since report-card-templates.js's TemplateSchema
+      // now rejects it at creation time — but a pre-existing template
+      // from before that fix, or any future gap in that enforcement,
+      // must still never silently snapshot a numeric class (whose
+      // `subjects` has no kgSubjects shape) under the kindergarten
+      // renderer. Found by a full-codebase audit (2026-10-13).
+      if (resolved.layoutKey === 'kindergarten') {
+        await Batches.updateOne({ id: batchId }, {
+          status: 'failed',
+          failureReason: 'This class\'s report template is set to the Kindergarten layout — use the Kindergarten Generate & Publish flow instead.',
+          completedAt: now,
+        });
+        return E.badRequest(res, 'This class\'s report template is set to the Kindergarten layout, which the ordinary numeric pipeline cannot render. Use the Kindergarten Generate & Publish flow for this class instead.');
+      }
+      templateBySection[secId ?? '__none__'] = resolved;
     }
 
     // ── Step 6b: Batch-load outstanding fee balances ─────────

@@ -196,6 +196,20 @@ describe('POST /api/report-card-templates', () => {
     const school = mockStore._docs().find(d => d.id === 'tpl_school');
     expect(school.isDefault).toBe(true);
   });
+
+  // Found by a full-codebase audit (2026-10-13): 'kindergarten' was
+  // "disabled" only in the client dropdown (SettingsPanel.jsx) — the
+  // server accepted it, and the ordinary numeric /publish route would
+  // then snapshot that layoutKey verbatim for a class whose data has no
+  // kgSubjects shape at all, producing a broken report. layoutKey is
+  // reserved for the dedicated rc_templates/resolveRcTemplate pipeline
+  // (report-cards.js's /kg/generate and /kg/publish) and must never be
+  // settable through this generic registry.
+  test('rejects layoutKey:"kindergarten" — reserved for the dedicated KG pipeline, not this registry', async () => {
+    const res = await supertest(buildApp()).post('/api/report-card-templates').send({ name: 'Sneaky KG', layoutKey: 'kindergarten' });
+    expect(res.status).toBe(422);
+    expect(mockStore._docs()).toHaveLength(0);
+  });
 });
 
 describe('PUT /api/report-card-templates/:id', () => {
@@ -223,6 +237,16 @@ describe('PUT /api/report-card-templates/:id', () => {
     expect(res.status).toBe(200);
     const other = mockStore._docs().find(d => d.id === 'tpl_2');
     expect(other.isDefault).toBe(false);
+  });
+
+  test('rejects updating layoutKey to "kindergarten" too — same server-side reservation as POST', async () => {
+    mockStore = makeStore([
+      { id: 'tpl_1', schoolId: SCHOOL, sectionId: null, isDefault: false, revision: 1, name: 'X', layoutKey: 'subject_paired' },
+    ]);
+    const res = await supertest(buildApp()).put('/api/report-card-templates/tpl_1').send({ layoutKey: 'kindergarten' });
+    expect(res.status).toBe(422);
+    const doc = mockStore._docs().find(d => d.id === 'tpl_1');
+    expect(doc.layoutKey).toBe('subject_paired');
   });
 });
 

@@ -20,7 +20,8 @@
 12. [Custom Email Sending (SMTP)](#12-custom-email-sending-smtp)
 13. [Data Export & Backup](#13-data-export--backup)
 14. [Demo School (Msingi)](#14-demo-school-msingi)
-15. [Getting Help](#15-getting-help)
+15. [Kindergarten / Competency-Band Report Cards](#15-kindergarten--competency-band-report-cards)
+16. [Getting Help](#16-getting-help)
 
 ---
 
@@ -509,7 +510,52 @@ Password for all demo accounts: **`Demo2025!`**
 
 ---
 
-## 15. Getting Help
+## 15. Kindergarten / Competency-Band Report Cards
+
+Early-years classes are usually assessed differently from the rest of the school: instead of one numeric mark out of 100 per subject, each subject has a short list of **indicators** ("Can identify primary colours", "Able to count to 20"), each scored and matched to a **Performance Band** (e.g. Excellent / Good / Needs Support) rather than a plain percentage. Msingi supports this as a complete, separate workflow alongside the ordinary numeric one — a school can run both at once, side by side, for different classes.
+
+### How the system decides which classes use this
+
+**There is no "this is a Kindergarten class" switch anywhere in Msingi** — not a class type, not a tick-box, not something the class's name triggers. A class named "Kindergarten" that has nothing configured for it below is graded the ordinary numeric way, exactly like every other class. The *only* thing that puts a class onto the competency-band workflow is whether a **Kindergarten Template** has been assigned to it — either:
+
+- **directly** to that specific class, or
+- as the **default template for its Section** (so every class in, say, your "Early Years" section picks it up automatically, with no need to configure each class one by one).
+
+Everywhere in the app that needs to know — the Markbook (does this class get indicator entry or the ordinary mark grid?) and Report Cards (does this class generate through the numeric pipeline or the Kindergarten one?) — asks this exact same question, so the two always agree. If you ever see a class behaving unexpectedly (e.g. the Markbook still shows the ordinary numeric grid for a class you expected to use indicators), the first thing to check is **which template is actually assigned to that class or its Section** — not the class's name.
+
+### 1. Configuration — build the template
+
+Go to **Report Cards → Kindergarten Templates** (a dedicated tab, not buried in general Settings — deliberately, so it lives with the rest of your report-card and exam setup).
+
+- Create a template, give it a name (e.g. "KG Competency Report 2026").
+- Add subjects, and under each subject add its indicators, with each indicator's own maximum score — indicators are **not** all worth the same amount; a real sample might have one indicator worth 10 and another worth 20 in the same subject, and the template lets you set that exactly.
+- Define your **Performance Bands** (label, the grade it maps to, a colour) — a subject can use the template's own bands, or you can override them for just that one subject if it genuinely needs different labels.
+- Decide how to assign it: either pick specific classes directly, or mark it as the **default for a Section** so it covers every class in that section automatically.
+
+A template is not reachable, and not selectable, from the ordinary numeric report-card template settings (Report Cards → Settings) — that screen's layout picker intentionally does not offer "Kindergarten" as an option, so a class can never be pointed at the wrong renderer by accident.
+
+### 2. Markbook — teachers enter scores
+
+Once a class has a template assigned, its Markbook automatically switches: instead of the usual mark grid, teachers see each student's subjects broken into their indicators, pick a Performance Band per indicator (which pre-fills the expected score, still overridable) or type a score directly, and save.
+
+- A subject's overall percentage is **earned ÷ possible** across its indicators — not assumed out of 100 — so a subject with a 20-point and a 10-point indicator is scored correctly rather than averaged incorrectly.
+- Like the ordinary Markbook, a teacher **submits marks for review**; once submitted or approved, the class teacher can no longer silently edit them — recall the submission first if a correction is needed. An admin/principal approves and (at publish time) locks the marks, with the same unlock-request flow as the numeric Markbook.
+
+### 3. Report Cards — generate and publish
+
+Go to **Report Cards → Generate & Publish**, pick the class and term exactly as you would for any other class. The screen itself detects whether the class has a Kindergarten template assigned and switches to the matching preview and Publish flow automatically — there is nothing separate to find or switch on here.
+
+The published report shows, per subject, every indicator with its band and score, a subject average, and an overall average/grade — rendered through its own dedicated layout (not reused from the numeric templates), available as PDF and HTML, with the same authenticity verification (QR code / reportId) every other Msingi report card has.
+
+### Things worth knowing
+
+- **A class can be moved between the two systems** by changing which template (if any) is assigned to it — but do this only between terms/report cycles, since marks already entered under one model don't convert to the other.
+- **Report Cards → Settings** (the general numeric template settings) and **Report Cards → Kindergarten Templates** are two separate, independent configuration screens — changes in one never affect the other.
+- If a class has a Kindergarten template assigned but a teacher opens the Markbook and still sees the ordinary numeric grid, the template assignment is the first thing to re-check (directly on the class, or on its Section's default) — the two are never supposed to disagree, but a template that was deleted or un-defaulted after the class was set up will fall back to the numeric Markbook until a new one is assigned.
+
+---
+
+## 16. Getting Help
 
 ### In-app Help Centre
 
@@ -537,4 +583,4 @@ Email support@msingi.io with:
 
 ---
 
-*Last reviewed: 2026-09-28 — §6's "Adding a staff member" gained "The other way round" subsection for the new HR → Staff → Activate Existing User action (gives an existing login account a real HR profile without retyping or risking a duplicate), checked directly against `server/routes/teachers.js` and `client/src/pages/hr/HRPage.jsx`. Earlier: 2026-09-11 — §7's "Student portal accounts" gained an "Onboarding a whole school at once" note for the new Activate All Portals action, checked directly against `server/routes/students.js` and `client/src/pages/students/StudentList.jsx`. Earlier the same day: §7's "Finding and resolving duplicate students" corrected: resolving a group now merges the removed record's attendance/exam/behaviour/finance history onto the kept one instead of only cleaning up invoices and payments, checked directly against `server/utils/student-merge.js` and `server/routes/students.js`. Earlier the same day: §7 gained an "Editing a student's details, including admission number" subsection — the field on the edit form had always been there but silently discarded any change, checked directly against `server/routes/students.js`. Earlier the same day: §7's "Finding and resolving duplicate students" updated for bulk selection: every group now opens pre-selected, with Select all/Deselect all and one shared confirm-and-remove bar instead of a per-group confirmation, checked directly against `server/routes/students.js` and `client/src/pages/students/StudentList.jsx`. Earlier the same day: §7 gained that subsection for the new Students-page Duplicates tool. Earlier: 2026-09-10 — §7's "Individual enrollment" gained a step for the new optional Admission Number field, and the Bulk import (CSV) paragraph's "can never collide" claim was made actually true (auto-generated numbers are now checked against every existing student, not just the counter's own position) — checked directly against `server/utils/counters.js` and `server/routes/students.js`. Earlier the same day: §8's "Renaming a role" wording ("shown throughout the app") re-verified after HR's staff list and a user's own Profile page were wired up to the same rename — previously only Settings itself reflected a rename, checked directly against `client/src/pages/hr/HRPage.jsx` and `client/src/pages/profile/ProfilePage.jsx`. Earlier the same day: §8 gained a "Renaming a role" subsection: built-in roles (Teacher, Finance, etc.) can now be renamed, not just custom ones, checked directly against `client/src/pages/settings/SettingsPage.jsx` and `server/routes/settings.js`. Earlier the same day: Bulk import (CSV) section updated: a duplicate admission number is now reported as "already exists" rather than silently creating a second student record, checked directly against `server/routes/import-export.js`. Earlier: 2026-09-07 — §7 updated for the new per-school Admission Requirements settings (Settings → School Profile). Also checked directly against the live server code (plan tiers, Admissions/Mother-Father fields, portal accounts), not carried forward from a prior draft. §2 and §6 corrected 2026-09-05 — staff creation via HR → Staff had been omitted entirely in favor of Settings → Users alone, and the Settings button name itself was wrong ("Add Staff" — the real button is "Invite User").*
+*Last reviewed: 2026-10-13 — new §15 "Kindergarten / Competency-Band Report Cards" added, covering the Configuration (Kindergarten Templates) → Markbook → Generate & Publish workflow and, explicitly, how the system decides which classes use it: solely by whether a Kindergarten Template is assigned to the class or its Section's default — there is no class-type flag — confirmed against `server/utils/rc-template-scale.js`'s `resolveRcTemplate`, `client/src/pages/exams/ExamsPage.jsx`'s Markbook switch, and `client/src/pages/grades/components/ReportCardsTab.jsx`'s pipeline switch, via a full-codebase audit that also found and fixed two real gaps in that guarantee (server/routes/indicator-marks.js now re-verifies a submitted templateId is actually assigned to the class, and server/routes/report-card-templates.js now rejects `layoutKey:"kindergarten"` server-side, not just in the UI dropdown). Earlier: 2026-09-28 — §6's "Adding a staff member" gained "The other way round" subsection for the new HR → Staff → Activate Existing User action (gives an existing login account a real HR profile without retyping or risking a duplicate), checked directly against `server/routes/teachers.js` and `client/src/pages/hr/HRPage.jsx`. Earlier: 2026-09-11 — §7's "Student portal accounts" gained an "Onboarding a whole school at once" note for the new Activate All Portals action, checked directly against `server/routes/students.js` and `client/src/pages/students/StudentList.jsx`. Earlier the same day: §7's "Finding and resolving duplicate students" corrected: resolving a group now merges the removed record's attendance/exam/behaviour/finance history onto the kept one instead of only cleaning up invoices and payments, checked directly against `server/utils/student-merge.js` and `server/routes/students.js`. Earlier the same day: §7 gained an "Editing a student's details, including admission number" subsection — the field on the edit form had always been there but silently discarded any change, checked directly against `server/routes/students.js`. Earlier the same day: §7's "Finding and resolving duplicate students" updated for bulk selection: every group now opens pre-selected, with Select all/Deselect all and one shared confirm-and-remove bar instead of a per-group confirmation, checked directly against `server/routes/students.js` and `client/src/pages/students/StudentList.jsx`. Earlier the same day: §7 gained that subsection for the new Students-page Duplicates tool. Earlier: 2026-09-10 — §7's "Individual enrollment" gained a step for the new optional Admission Number field, and the Bulk import (CSV) paragraph's "can never collide" claim was made actually true (auto-generated numbers are now checked against every existing student, not just the counter's own position) — checked directly against `server/utils/counters.js` and `server/routes/students.js`. Earlier the same day: §8's "Renaming a role" wording ("shown throughout the app") re-verified after HR's staff list and a user's own Profile page were wired up to the same rename — previously only Settings itself reflected a rename, checked directly against `client/src/pages/hr/HRPage.jsx` and `client/src/pages/profile/ProfilePage.jsx`. Earlier the same day: §8 gained a "Renaming a role" subsection: built-in roles (Teacher, Finance, etc.) can now be renamed, not just custom ones, checked directly against `client/src/pages/settings/SettingsPage.jsx` and `server/routes/settings.js`. Earlier the same day: Bulk import (CSV) section updated: a duplicate admission number is now reported as "already exists" rather than silently creating a second student record, checked directly against `server/routes/import-export.js`. Earlier: 2026-09-07 — §7 updated for the new per-school Admission Requirements settings (Settings → School Profile). Also checked directly against the live server code (plan tiers, Admissions/Mother-Father fields, portal accounts), not carried forward from a prior draft. §2 and §6 corrected 2026-09-05 — staff creation via HR → Staff had been omitted entirely in favor of Settings → Users alone, and the Settings button name itself was wrong ("Add Staff" — the real button is "Invite User").*

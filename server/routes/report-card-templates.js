@@ -53,8 +53,20 @@ const CURRICULUM_TAGS = ['kcse', 'cambridge', 'ib', 'cbc', 'american', 'custom']
    registry's ordinary resolveTemplate()/layoutKey picker, which an
    admin could otherwise point an ordinary NUMERIC class at by mistake,
    producing a snapshot with no kgSubjects for the kindergarten
-   renderer to draw. */
+   renderer to draw.
+
+   That exclusion was previously enforced ONLY client-side (the
+   SettingsPanel.jsx dropdown marks it disabled) — a direct API call
+   could still create/activate a template with layoutKey:'kindergarten'
+   here, which the ordinary numeric /publish route would then snapshot
+   verbatim, producing exactly the broken no-kgSubjects report this
+   comment warned about. Found by a full-codebase audit (2026-10-13).
+   LAYOUT_KEYS stays the full set (getLayout() still needs to resolve
+   'kindergarten' as a real renderer); SELECTABLE_LAYOUT_KEYS is what
+   TemplateSchema actually validates create/update against — the one
+   enforcement that matters, server-side, not just in the UI. */
 const LAYOUT_KEYS = ['legacy_tabular', 'subject_paired', 'marks_then_comments', 'kindergarten'];
+const SELECTABLE_LAYOUT_KEYS = LAYOUT_KEYS.filter(k => k !== 'kindergarten');
 const DEFAULT_LAYOUT_KEY = 'subject_paired';
 
 /* Always resolvable, always present, never a real document — the
@@ -69,7 +81,7 @@ const TemplateSchema = z.object({
   curriculumTag: z.enum(CURRICULUM_TAGS).optional().nullable(),
   sectionId:     z.string().optional().nullable(),
   isDefault:     z.boolean().optional().default(false),
-  layoutKey:     z.enum(LAYOUT_KEYS).optional().default(DEFAULT_LAYOUT_KEY),
+  layoutKey:     z.enum(SELECTABLE_LAYOUT_KEYS).optional().default(DEFAULT_LAYOUT_KEY),
 });
 
 /* ══════════════════════════════════════════════════════════════

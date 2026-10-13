@@ -6,6 +6,29 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.174.0] — 2026-10-13 — fix(report-cards): Kindergarten class-detection audit — two real gaps closed
+
+User asked directly: how does the system know a class IS "Kindergarten," and was there any assumption baked into the build? Ran a full-codebase audit rather than answering from memory. The design holds up: there is **no `classType`/`isKindergarten` field anywhere** — every KG-aware code path (Markbook entry switch, Report Cards pipeline switch, the layout renderer dispatch) asks the exact same single question, `resolveRcTemplate(schoolId, classId)` (`server/utils/rc-template-scale.js`) — explicit `classIds` on a template wins, else the class's Section's default template, else the class uses the ordinary numeric system. Confirmed across `rc-templates.js`, `ExamsPage.jsx`'s Markbook switch, `ReportCardsTab.jsx`'s pipeline switch, `report-cards.js`'s `/kg/generate`/`/kg/publish`, and a full grep for any other class-name/section-name/grade-level string-matching — none found.
+
+Two real gaps in that guarantee, found and fixed:
+
+### Fixed
+- **`server/routes/indicator-marks.js`'s `POST /bulk`** previously only checked that a submitted `templateId` existed *somewhere in the school* — not that it was actually the template *assigned* to the mark's `classId`. A client could submit indicator marks tagged with a template belonging to a different class. Now calls `resolveRcTemplate(schoolId, classId)` directly and rejects any mark whose `templateId` doesn't match what that class actually resolves to.
+- **`server/routes/report-card-templates.js`'s `layoutKey:'kindergarten'`** — reserved for the dedicated `rc_templates`/`resolveRcTemplate` pipeline — was previously only "disabled" in the client's Settings dropdown. The server's own `TemplateSchema` accepted it via direct API call. If such a template ever resolved as a class/section default, the ordinary **numeric** `/publish` route would snapshot it verbatim — producing a published, parent-visible report card with `layoutKey:'kindergarten'` but none of the `kgSubjects` data that layout expects, since numeric publish never computes that shape. Fixed two ways: `report-card-templates.js` now validates create/update against a `SELECTABLE_LAYOUT_KEYS` enum that excludes `'kindergarten'` (server-side, not just UI); `report-cards.js`'s numeric `/publish` additionally refuses outright, defense-in-depth, if the resolved template's `layoutKey` is ever `'kindergarten'` for any other reason (a pre-existing template from before this fix, etc.).
+
+### Tests
+- `report-card-templates.test.js` — 2 new tests: POST/PUT with `layoutKey:'kindergarten'` rejected (422).
+- `report-cards-section-scale.test.js` — 1 new test: numeric `/publish` refuses a resolved Kindergarten-layout template with a clear message, doesn't silently snapshot.
+- `indicator-marks.test.js` / `indicator-marks-submission-lock.test.js` — fixtures updated to use real `resolveRcTemplate` resolution (added `classIds` to the fixture template) instead of a direct by-id lookup; mock `$or`/array-contains matcher extended to support Mongo's implicit array-field-contains-scalar semantics (same fix class already applied elsewhere this session).
+
+### Docs
+- `docs/SCHOOL_ADMIN_GUIDE.md` — new §15 "Kindergarten / Competency-Band Report Cards": the full Configuration → Markbook → Generate & Publish workflow, and explicitly how class-detection works (template assignment, not a class-type flag).
+- `docs/USER_GUIDE.md` — §8A gained a teacher-facing "Kindergarten / Competency-Band Classes" subsection (how to tell if your class uses it, how to enter indicator scores); §9a cross-references it.
+
+Full suite: 300/300 suites, 3108/3108 tests.
+
+---
+
 ## [v5.173.0] — 2026-10-13 — fix(exams): Kindergarten indicator marks now lock via mark_submissions review-state
 
 A real, acknowledged gap flagged in indicator-marks.js's own header

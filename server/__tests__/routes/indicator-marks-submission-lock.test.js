@@ -43,6 +43,10 @@ function mockMatches(doc, filter) {
       if ('$in' in cond && !cond.$in.includes(val)) return false;
       if ('$ne' in cond && val === cond.$ne) return false;
       if ('$exists' in cond && cond.$exists && val === undefined) return false;
+    } else if (Array.isArray(val)) {
+      // Mongo's implicit array-contains semantics for {field: scalar}
+      // against an array field (e.g. rc_templates.classIds).
+      if (!val.includes(cond)) return false;
     } else if (val !== cond) {
       return false;
     }
@@ -99,6 +103,7 @@ const TEACHER_ASSIGNED = { userId: 'usr_t1', schoolId: SCHOOL_A, role: 'teacher'
 
 const TEMPLATE_A = {
   id: 'tmplA', schoolId: SCHOOL_A, status: 'active',
+  classIds: ['classA'],
   performanceBands: [{ id: 'bandGood', label: 'Good', defaultScore: 8, grade: 'B' }],
   subjects: [{
     id: 'subjTmplScience', subjectId: 'subj_science', name: 'Science',
