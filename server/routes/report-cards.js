@@ -439,15 +439,21 @@ function _validate(schema, data) {
    re-saved since this fix still carries academicYearId: null and won't
    match a resolved year filter; that's an accepted gap for untouched
    historical marks, not a live-write bug. */
-// Same helper, same precedent, as assessment.js's/academic-calc.js's/
-// mark-submissions.js's own _yearFilterPart — not imported (none of
-// those export it), duplicated locally per this codebase's established
-// convention for this one small helper. Used by the auto-lock step in
-// /publish and /kg/publish below.
-function _yearFilterPart(academicYearId) {
+// Same precedent as mark-submissions.js's own _lockYearFilterPart (see
+// its comment there) — not imported (that file doesn't export it),
+// duplicated locally. The auto-lock step below (Step 9b / /kg/publish)
+// is a narrowing, mutating action, not a list: when scope.academicYearId
+// is falsy (a school with no resolvable academic year), it must only
+// touch OTHER legacy-tagged marks/submissions, never silently fall
+// through to "every year sharing this natural key" the way a lenient
+// {} filter would — exactly the cross-year leak mark-submissions.js's
+// own /:id/lock route documents and guards against for the identical
+// operation. (This file's own helpers elsewhere, e.g. _resolveTermScope
+// above, don't need this distinction — they're read paths, not locks.)
+function _lockYearFilterPart(academicYearId) {
   return academicYearId
     ? { $or: [{ academicYearId }, { academicYearId: null }, { academicYearId: { $exists: false } }] }
-    : {};
+    : { $or: [{ academicYearId: null }, { academicYearId: { $exists: false } }] };
 }
 
 async function _resolveTermScope(schoolId, ctx, { academicYearId, termId, termNumber }) {
@@ -1008,7 +1014,7 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
     //    succeeded above; a lock failure here is logged, not surfaced
     //    as a publish failure.
     try {
-      const yearFilter = _yearFilterPart(scope.academicYearId);
+      const yearFilter = _lockYearFilterPart(scope.academicYearId);
       const Marks = tenantModel('assessment_marks', ctx);
       const lockFilter = { schoolId, classId, termNumber: termNum, ...yearFilter };
       const combos = await Marks.find(lockFilter).select('subjectId assessmentType instance streamId').lean();
@@ -1380,7 +1386,7 @@ router.post('/kg/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
     //    (indicator marks have no instance/assessmentType of their own).
     //    Non-fatal: the publish itself already succeeded above.
     try {
-      const yearFilter = _yearFilterPart(scope.academicYearId);
+      const yearFilter = _lockYearFilterPart(scope.academicYearId);
       const IndicatorMarks = tenantModel('indicator_marks', ctx);
       const lockFilter = { schoolId, classId, termNumber: termNum, ...yearFilter };
       const combos = await IndicatorMarks.find(lockFilter).select('subjectId streamId').lean();
