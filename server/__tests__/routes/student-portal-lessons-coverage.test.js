@@ -70,7 +70,7 @@ function mockCollection(seed = []) {
   };
 }
 
-let mockSchoolDoc, mockStudentDoc, mockCoverageDocs, mockTopicDocs, mockSubjectDocs, mockTimetableDocs;
+let mockSchoolDoc, mockStudentDoc, mockCoverageDocs, mockTopicDocs, mockSubjectDocs, mockTimetableDocs, mockAcademicYearDocs;
 
 jest.mock('../../utils/model', () => ({
   _model: jest.fn((c) => {
@@ -86,6 +86,9 @@ jest.mock('../../utils/tenant-model', () => ({
     if (collection === 'syllabus_topics')  return mockCollection(mockTopicDocs);
     if (collection === 'subjects')         return mockCollection(mockSubjectDocs);
     if (collection === 'timetable')        return mockCollection(mockTimetableDocs);
+    // Live-resolved current academic year (resolveCurrentPeriod), not the
+    // schools.academicYear cached field — see student-portal.js's fix.
+    if (collection === 'academic_years')   return mockCollection(mockAcademicYearDocs);
     return mockCollection([]);
   },
 }));
@@ -111,7 +114,8 @@ beforeEach(() => {
     id: STUDENT_1, schoolId: SCHOOL_A, firstName: 'Amara', lastName: 'Osei',
     admissionNumber: 'ADM001', classId: CLASS_ID, className: 'Year 2', streamId: DIAMOND, status: 'active',
   };
-  mockSchoolDoc = { name: 'Test School', academicYear: '2026', portalConfig: {}, timetableStatus: { published: true } };
+  mockSchoolDoc = { name: 'Test School', portalConfig: {}, timetableStatus: { published: true } };
+  mockAcademicYearDocs = [{ id: 'ay_2026', schoolId: SCHOOL_A, name: '2026', isCurrent: true, terms: [] }];
   mockSubjectDocs = [{ id: 'subj_eng', name: 'English', code: 'ENG' }];
   mockTopicDocs = [
     { id: 'topic_1', schoolId: SCHOOL_A, subjectId: 'subj_eng', academicYear: '2026', subtopics: [] },

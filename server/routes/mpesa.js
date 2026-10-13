@@ -702,3 +702,9 @@ router.get('/subscription/plans', (req, res) => {
 });
 
 module.exports = router;
+// Reused by parent-portal.js/student-portal.js to derive a client-safe
+// "has this school configured M-Pesa" boolean — the raw school.mpesa
+// object itself (consumerKey/consumerSecret/passkey) is never sent to
+// either portal's dashboard response, same exclusion as the main
+// session's own slimmed school shape (see store/auth.js's header).
+module.exports._getMpesaConfig = _getMpesaConfig;

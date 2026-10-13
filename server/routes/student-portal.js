@@ -13,6 +13,8 @@ const { authMiddleware } = require('../middleware/auth');
 const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { isTimetablePublished, publishedReader } = require('../utils/timetable-publish');
+const { resolveCurrentPeriod } = require('./academic-config');
+const { _getMpesaConfig } = require('./mpesa');
 const { ok, E }          = require('../utils/response');
 // Weekly Snapshot's read logic is shared with weekly-snapshots.js's own
 // staff-facing routes — see that file's _findAuthorizedStudent header
@@ -77,10 +79,18 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     if (!student) return E.notFound(res, 'Student record not found.');
 
     const school = await Schools.findOne({ id: schoolId })
-      .select('academicYear termsPerYear name emergencyOnlineMode portalConfig')
+      .select('termsPerYear name emergencyOnlineMode portalConfig mpesa')
       .lean();
 
-    const academicYear = school?.academicYear || '';
+    // Live-resolved, not the schools.academicYear cached field — see
+    // parent-portal.js's identical fix for the full reasoning (same
+    // staleness class report-cards.js's _resolveTermScope was written
+    // to fix; this dashboard had the old, unfixed version of it).
+    const academicYears = await tenantModel('academic_years', tenantContext(req)).find({ schoolId }).lean();
+    const { year: currentYearDoc, term: currentTermDoc, termNumber: currentTermNumber } = resolveCurrentPeriod(academicYears);
+    const academicYear = currentYearDoc?.name || '';
+    const currentTerm  = currentTermDoc?.name || (currentTermNumber ? `Term ${currentTermNumber}` : '');
+    const mpesaEnabled = !!_getMpesaConfig(school);
 
     // ── Attendance this term ─────────────────────────────────
     const attRecords = await Attendance.find({
@@ -318,8 +328,10 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
       school: {
         name: school?.name,
         academicYear,
+        currentTerm,
         emergencyOnlineMode: emergencyMode,
         portalConfig: school?.portalConfig || null,
+        mpesaEnabled,
       },
       attendance:       attSummary,
       // Security Baseline Register, CFG-09 — school.portalConfig.

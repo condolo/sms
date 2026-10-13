@@ -1,9 +1,27 @@
 /**
  * Parent Portal Dashboard
- * Layout: Sidebar + Main. Sidebar brand (name/logo/badge colour) inherits
- * the signed-in parent's own school via session.school + useSchoolTheme —
- * same pattern as the admin Sidebar.jsx, not hardcoded to any one school.
- * Sidebar becomes an off-canvas drawer below the lg breakpoint.
+ * Layout: Sidebar + Main, with real per-page navigation — each sidebar
+ * item renders its own focused page (not an anchor-scroll within one
+ * long page, which read as "nothing happens" when clicked). Overview is
+ * a condensed at-a-glance summary; every other item is the full section.
+ *
+ * Sidebar brand (name/logo/badge colour) and every avatar/button accent
+ * inherit the signed-in parent's own school via session.school +
+ * useSchoolTheme — same pattern as the admin Sidebar.jsx, not hardcoded
+ * to one school's colours. Semantic status colours (success/warning/
+ * error on fee/attendance/exam badges) are intentionally untouched —
+ * those encode meaning, not brand.
+ *
+ * Nav items are gated by the school's own moduleConfig (Settings →
+ * Modules) via buildModuleConfigMap, same source of truth the admin
+ * Sidebar.jsx reads — a module the school has turned off (or never
+ * enabled) simply doesn't show here either, instead of a fixed list
+ * every school sees regardless of what they've actually configured.
+ *
+ * Sidebar collapses to an icon rail on desktop (localStorage-persisted,
+ * same convention as AppShell.jsx's admin sidebar) and becomes an
+ * off-canvas drawer below the lg breakpoint.
+ *
  * Data: all fetched from /api/parent-portal/* (unchanged).
  */
 import { useState, useEffect, useRef } from 'react';
@@ -11,12 +29,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import useAuthStore from '@/store/auth.js';
 import { useSchoolTheme } from '@/hooks/useSchoolTheme.js';
+import { buildModuleConfigMap } from '@/config/moduleNav.js';
 import {
-  Activity, AlertCircle, Award, Bell, BookCheck, Calendar,
-  CheckCircle, Clock, Download, FileText, GraduationCap,
-  Lock, LogOut, MessageSquare, Receipt, Star, Wallet,
-  ChevronDown, MonitorPlay, MapPin, BookOpen, CalendarCheck,
-  Menu, X,
+  Activity, AlertCircle, Bell, BookCheck, Calendar,
+  CheckCircle, Download, FileText, GraduationCap,
+  Lock, LogOut, MessageSquare, Star, Wallet,
+  ChevronDown, ChevronLeft, ChevronRight, MonitorPlay, MapPin, BookOpen, CalendarCheck,
+  Menu, X, TrendingUp,
 } from 'lucide-react';
 import NotificationBell from '@/components/layout/NotificationBell.jsx';
 
@@ -83,17 +102,22 @@ function _initials(name = '') {
   return name.trim().split(/\s+/).map(w => w[0]?.toUpperCase() ?? '').join('').slice(0, 2) || '??';
 }
 
-/* ── Sidebar nav definitions ────────────────────────────────────── */
+/* ── Sidebar nav definitions — `module` keys into the school's own
+   moduleConfig (Settings → Modules). null = always shown (core, not a
+   toggleable feature). ── */
 const MY_CHILD_NAV = [
-  { id: 'section-overview',    label: 'Overview',         Icon: CheckCircle   },
-  { id: 'section-grades',      label: 'Grades & Reports', Icon: BookCheck     },
-  { id: 'section-attendance',  label: 'Attendance',       Icon: Activity      },
-  { id: 'section-fees',        label: 'Fee Statements',   Icon: Wallet        },
-  { id: 'section-messages',    label: 'Messages',         Icon: MessageSquare },
+  { id: 'overview',   label: 'Overview',         Icon: CheckCircle, module: null },
+  { id: 'grades',     label: 'Grades & Reports',  Icon: BookCheck,   module: 'grades' },
+  { id: 'attendance', label: 'Attendance',        Icon: Activity,    module: 'attendance' },
+  { id: 'fees',       label: 'Fee Statements',    Icon: Wallet,      module: 'finance' },
+  { id: 'timetable',  label: 'Timetable',         Icon: Calendar,    module: 'timetable' },
+  { id: 'library',    label: 'Library',           Icon: BookOpen,    module: 'library' },
 ];
 const SCHOOL_NAV = [
-  { id: 'section-calendar',      label: 'School Calendar', Icon: Calendar },
-  { id: 'section-announcements', label: 'Announcements',   Icon: Bell     },
+  { id: 'messages',      label: 'Messages',            Icon: MessageSquare, module: 'messages' },
+  { id: 'calendar',      label: 'School Calendar',     Icon: CalendarCheck, module: 'events' },
+  { id: 'behaviour',     label: 'Behaviour & Rewards',  Icon: Star,          module: 'behaviour' },
+  { id: 'announcements', label: 'Announcements',       Icon: Bell,          module: null },
 ];
 
 /* ── Grade progress bar ─────────────────────────────────────────── */
@@ -134,6 +158,44 @@ function BehaviourBadge({ level }) {
   );
 }
 
+/* ── Section card shell — every full page body is one or more of these ── */
+function Card({ id, children, className = '' }) {
+  return (
+    <div id={id} className={`bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden ${className}`}>
+      {children}
+    </div>
+  );
+}
+function CardHeader({ icon: Icon, iconClass, title, right }) {
+  return (
+    <div className="px-[18px] py-3.5 border-b border-slate-100 flex items-center justify-between gap-3">
+      <div className="flex items-center gap-2 min-w-0">
+        {Icon && <Icon size={14} className={`flex-shrink-0 ${iconClass ?? 'text-slate-400'}`} />}
+        <h2 className="text-[13px] font-bold text-slate-900 truncate">{title}</h2>
+      </div>
+      {right}
+    </div>
+  );
+}
+
+/* ── Overview quick-stat card — teaser into a full page ──────────── */
+function QuickStat({ icon: Icon, label, value, valueColor, onClick, iconBg, iconColor }) {
+  return (
+    <button
+      onClick={onClick}
+      className="bg-white rounded-[10px] border border-slate-200 shadow-sm p-[14px] text-left hover:border-slate-300 hover:shadow transition flex items-center gap-3"
+    >
+      <div className={`w-9 h-9 rounded-[9px] flex items-center justify-center flex-shrink-0 ${iconBg}`}>
+        <Icon size={16} className={iconColor} />
+      </div>
+      <div className="min-w-0">
+        <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.04em] truncate">{label}</div>
+        <div className={`text-[17px] font-extrabold leading-tight ${valueColor ?? 'text-slate-900'}`}>{value}</div>
+      </div>
+    </button>
+  );
+}
+
 /* ══════════════════════════════════════════════════════════════════
    MAIN COMPONENT
    ══════════════════════════════════════════════════════════════════ */
@@ -153,9 +215,12 @@ export default function ParentDashboard() {
   const [dlError,       setDlError]       = useState('');
   const [latestWeek,    setLatestWeek]    = useState(null); // most recent Weekly Snapshot for activeChildId, or undefined if none generated yet
   const [initError,     setInitError]     = useState('');
-  const [activeNav,     setActiveNav]     = useState('section-overview');
+  const [activePage,    setActivePage]    = useState('overview');
   const [childMenuOpen, setChildMenuOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [collapsed,     setCollapsed]     = useState(() => {
+    try { return localStorage.getItem('parent-sidebar-collapsed') === 'true'; } catch { return false; }
+  });
 
   const parentName = session?.user?.name ?? session?.user?.firstName ?? '';
 
@@ -165,6 +230,25 @@ export default function ParentDashboard() {
   const schoolBrandName = school?.name ?? 'Parent Portal';
   const schoolInitial   = schoolBrandName.trim().charAt(0).toUpperCase() || 'M';
   const schoolLogoUrl   = school?.logoUrl ?? null;
+  const avatarGradient  = `linear-gradient(135deg, ${primary}, ${accent})`;
+
+  /* ── Which nav items does this school actually have switched on?
+     Same moduleConfig/buildModuleConfigMap the admin Sidebar.jsx reads
+     — a module a school never enabled (or explicitly disabled) doesn't
+     get a Parent Portal section either, instead of every school seeing
+     a fixed list regardless of what they've configured. */
+  const moduleCfgMap = buildModuleConfigMap(school?.moduleConfig);
+  const isModuleEnabled = (key) => !key || (moduleCfgMap[key]?.enabled ?? true);
+  const myChildNav = MY_CHILD_NAV.filter(n => isModuleEnabled(n.module));
+  const schoolNav  = SCHOOL_NAV.filter(n => isModuleEnabled(n.module));
+
+  function toggleCollapsed() {
+    setCollapsed(c => {
+      const next = !c;
+      try { localStorage.setItem('parent-sidebar-collapsed', String(next)); } catch { /* ignore */ }
+      return next;
+    });
+  }
 
   /* ── Auth guard ── */
   useEffect(() => {
@@ -217,18 +301,14 @@ export default function ParentDashboard() {
 
   function handleLogout() { logout(); navigate('/login', { replace: true }); }
 
-  function scrollToSection(sectionId) {
-    setActiveNav(sectionId);
+  /* Real page switching, not an anchor-scroll within one long page —
+     reported directly: clicking a nav item "just moves slightly" on a
+     single scrolling page read as "nothing happened." Each item now
+     renders its own focused page. */
+  function goToPage(pageId) {
+    setActivePage(pageId);
     setMobileNavOpen(false);
-    // Section anchors sit inside an animated motion.div (framer-motion sets
-    // an inline `transform`, which makes it the CSS offsetParent for every
-    // anchor inside it) — offsetTop math against mainRef was measured from
-    // that wrapper, not from main, silently dropping everything rendered
-    // above it (greeting bar, child banner card). scrollIntoView finds the
-    // real scrollable ancestor itself, so it's correct regardless of any
-    // transformed ancestor in between.
-    const el = document.getElementById(sectionId);
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (mainRef.current) mainRef.current.scrollTo({ top: 0 });
   }
 
   /* ── Loading state ── */
@@ -259,6 +339,12 @@ export default function ParentDashboard() {
   const portalConfig  = d?.school?.portalConfig ?? {};
   const rcThreshold   = portalConfig.reportCardFeeThreshold ?? 100;
   const rcLocked      = rcThreshold > 0 && (d?.feeClearancePct ?? 100) < rcThreshold;
+  // Reported directly: "Pay Fees via M-Pesa should not appear if the
+  // school hasn't enabled this payment gateway" — was unconditional.
+  // Defaults to hidden (not shown) while d is still null/loading, so
+  // there's never a flash of a button that then disappears once the
+  // real flag arrives.
+  const mpesaEnabled  = d?.school?.mpesaEnabled === true;
 
   const childInitials = _initials(activeChild?.name ?? '');
   const nowMins       = _nowMins();
@@ -290,6 +376,607 @@ export default function ParentDashboard() {
     : d?.school?.academicYear ?? 'Current Term';
 
   /* ════════════════════════════════════════════════════════════════
+     PAGE BODIES — each is the full section for its nav item. Built as
+     closures over `d` etc. rather than extracted components, matching
+     this file's existing single-component convention.
+     ════════════════════════════════════════════════════════════════ */
+
+  function OverviewPage() {
+    return (
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <QuickStat
+            icon={Activity} label="Attendance" value={`${d.attendance?.percentage ?? 0}%`}
+            iconBg="bg-emerald-50" iconColor="text-emerald-600"
+            onClick={() => goToPage('attendance')}
+          />
+          <QuickStat
+            icon={BookCheck} label="Average" value={myAvg != null ? `${myAvg}%` : '—'}
+            iconBg="bg-indigo-50" iconColor="text-indigo-600"
+            onClick={() => goToPage('grades')}
+          />
+          <QuickStat
+            icon={Wallet} label="Fee Balance" value={feeDisplay} valueColor={feePaid ? 'text-emerald-600' : 'text-red-600'}
+            iconBg="bg-amber-50" iconColor="text-amber-600"
+            onClick={() => goToPage('fees')}
+          />
+          <QuickStat
+            icon={MessageSquare} label="Messages" value={unreadCount > 0 ? `${unreadCount} unread` : 'Up to date'}
+            valueColor={unreadCount > 0 ? 'text-amber-600' : 'text-slate-900'}
+            iconBg="bg-sky-50" iconColor="text-sky-600"
+            onClick={() => goToPage('messages')}
+          />
+        </div>
+
+        {isModuleEnabled('timetable') && d.timetableToday?.length > 0 && (
+          <Card id="section-timetable">
+            <CardHeader
+              icon={Calendar} iconClass="text-sky-500" title="Today's Timetable"
+              right={<span className="text-[11px] text-slate-400">{new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' })}</span>}
+            />
+            {d.school?.emergencyOnlineMode && (
+              <div id="emergency-online-banner" className="mx-4 mt-3 flex items-center gap-2 px-3 py-2 rounded-xl bg-sky-50 border border-sky-200">
+                <MonitorPlay size={12} className="text-sky-600 flex-shrink-0" />
+                <p className="text-[11px] font-semibold text-sky-700">Emergency Online Learning — all lessons are online today</p>
+              </div>
+            )}
+            <div id="timetable-slots" className="divide-y divide-slate-50">
+              {d.timetableToday.slice(0, 4).map((slot, i) => {
+                const start = _timeToMins(slot.startTime);
+                const end   = _timeToMins(slot.endTime);
+                const isNow  = start <= nowMins && nowMins < end;
+                const isNext = !activeSlot && slot === nextSlot;
+                return (
+                  <div key={`tt-${slot.id ?? i}`} className={`flex items-center gap-3 px-4 py-3 ${isNow ? 'bg-amber-50 border-l-[3px] border-l-amber-500' : isNext ? 'bg-slate-50' : ''}`}>
+                    <div className="text-center min-w-[60px] flex-shrink-0">
+                      {isNow ? <div className="text-[10px] font-bold text-amber-700 uppercase">NOW</div> : isNext ? <div className="text-[10px] font-bold text-slate-500 uppercase">NEXT</div> : null}
+                      <div className="text-[10px] text-slate-400">{slot.startTime}</div>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-[13px] font-bold truncate ${isNow ? 'text-slate-900' : 'text-slate-700'}`}>{slot.subjectName}</p>
+                      <p className="text-[11px] text-slate-400 truncate mt-0.5">{[slot.room, slot.teacherName].filter(Boolean).join(' · ')}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {d.timetableToday.length > 4 && (
+              <button onClick={() => goToPage('timetable')} className="w-full text-[11px] font-medium text-indigo-600 hover:text-indigo-700 py-2.5 border-t border-slate-100">
+                View full timetable →
+              </button>
+            )}
+          </Card>
+        )}
+
+        {latestWeek && (
+          <Card id="section-weekly-snapshot">
+            <CardHeader icon={CalendarCheck} iconClass="text-sky-500" title="This Week's Snapshot" />
+            <div className="px-[18px] py-4 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[12px] font-semibold text-slate-700">Week of {latestWeek.weekStart} – {latestWeek.weekEnd}</p>
+                <p className="text-[10px] text-slate-400">Topics, assignments, attendance, behaviour, and more</p>
+              </div>
+              <button
+                onClick={() => {
+                  setDlError('');
+                  setDownloading(`snap-${latestWeek.weekStart}`);
+                  _downloadSnapshot(activeChildId, latestWeek.weekStart, `${activeChild?.name ?? 'child'}-${latestWeek.weekStart}`)
+                    .catch(e => setDlError(e.message))
+                    .finally(() => setDownloading(null));
+                }}
+                disabled={downloading === `snap-${latestWeek.weekStart}`}
+                className="flex items-center gap-1 text-[10px] font-semibold text-sky-700 bg-sky-50 hover:bg-sky-100 border border-sky-200 px-2.5 py-1 rounded-full transition disabled:opacity-50 shrink-0"
+              >
+                {downloading === `snap-${latestWeek.weekStart}` ? <span className="w-3 h-3 border-2 border-sky-500 border-t-transparent rounded-full animate-spin" /> : <Download size={10} />}
+                {downloading === `snap-${latestWeek.weekStart}` ? 'Saving…' : 'PDF'}
+              </button>
+            </div>
+          </Card>
+        )}
+
+        {isModuleEnabled('grades') && d.upcomingExams?.length > 0 && (
+          <Card id="section-exams-teaser">
+            <CardHeader
+              icon={FileText} iconClass="text-rose-500" title="Upcoming Exams"
+              right={<span className="text-[11px] font-semibold text-rose-600 bg-rose-50 px-2.5 py-[5px] rounded-full">{d.upcomingExams.length} scheduled</span>}
+            />
+            <div className="divide-y divide-slate-50">
+              {d.upcomingExams.slice(0, 2).map((ex, i) => {
+                const days = _daysUntil(ex.date);
+                return (
+                  <div key={`exam-teaser-${ex.id ?? i}`} className="flex items-center gap-3 px-[18px] py-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[13px] font-semibold text-slate-800 truncate">{ex.subjectName}</p>
+                      <p className="text-[11px] text-slate-400">{_weekday(ex.date)}, {_fmtDate(ex.date)}</p>
+                    </div>
+                    <span className="text-[11px] text-slate-400 flex-shrink-0">{days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : `${days}d`}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <button onClick={() => goToPage('grades')} className="w-full text-[11px] font-medium text-indigo-600 hover:text-indigo-700 py-2.5 border-t border-slate-100">
+              View Grades & Reports →
+            </button>
+          </Card>
+        )}
+      </div>
+    );
+  }
+
+  function GradesPage() {
+    return (
+      <div className="space-y-4">
+        <Card id="section-grades">
+          <CardHeader
+            title={`${activeChild?.name?.split(' ')[0] ?? 'Child'}'s Grades — ${termLabel}`}
+            right={activeChild?.className && (
+              <span id="grades-class-badge" className="text-[11px] font-semibold text-blue-600 bg-blue-50 px-2.5 py-[5px] rounded-full shrink-0">{activeChild.className}</span>
+            )}
+          />
+          <div id="grades-list" className="px-[18px] py-3.5 space-y-3.5">
+            {!d.subjectMarks?.length ? (
+              <p id="grades-empty" className="text-[12px] text-slate-400 text-center py-4">No published report card yet</p>
+            ) : (
+              d.subjectMarks.map((sub, i) => (
+                <GradeBar key={`grade-${sub.subjectId ?? i}`} id={`grade-bar-${sub.subjectId ?? i}`} label={sub.grade ? `${sub.subjectName} · ${sub.grade}` : sub.subjectName} pct={sub.finalScore ?? 0} delay={i * 0.07} />
+              ))
+            )}
+            {myAvg != null && d.subjectMarks?.length > 0 && (
+              <div id="grades-avg-note" className="mt-2 text-[11px] text-slate-500 px-3 py-2 bg-slate-50 rounded-[7px]">
+                Overall average: <span className="font-bold text-indigo-600">{myAvg}%</span>
+              </div>
+            )}
+          </div>
+        </Card>
+
+        {/* Term-over-term trend — returned by the API (academicTrend) but
+            previously rendered nowhere at all. */}
+        {d.academicTrend?.length > 1 && (
+          <Card id="section-academic-trend">
+            <CardHeader icon={TrendingUp} iconClass="text-indigo-500" title="Term-over-Term Trend" />
+            <div className="px-[18px] py-3.5 flex items-end gap-2.5 overflow-x-auto">
+              {d.academicTrend.map((t, i) => (
+                <div key={`trend-${i}`} className="flex flex-col items-center gap-1.5 flex-shrink-0 w-14">
+                  <div className="h-20 w-full bg-slate-50 rounded-md flex items-end overflow-hidden">
+                    <div className="w-full bg-indigo-400 rounded-sm" style={{ height: `${Math.min(100, t.average ?? 0)}%` }} />
+                  </div>
+                  <span className="text-[11px] font-bold text-slate-700">{t.average}%</span>
+                  <span className="text-[9px] text-slate-400 text-center leading-tight">{t.label}</span>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
+
+        {d.reportCards?.length > 0 && (
+          <Card id="section-reports">
+            <CardHeader
+              icon={FileText} iconClass="text-violet-500" title="Report Cards"
+              right={rcLocked && <span className="text-[11px] font-semibold text-amber-600 bg-amber-50 px-2.5 py-[5px] rounded-full">Fee-locked</span>}
+            />
+            <div className="px-[18px] py-4">
+              {rcLocked && (
+                <div id="rc-locked-notice" className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-[11px] text-amber-800 mb-4">
+                  <Lock size={11} className="mt-0.5 flex-shrink-0 text-amber-500" />
+                  <span>Locked — <strong>{d.feeClearancePct}%</strong> fees cleared, minimum <strong>{rcThreshold}%</strong> required.</span>
+                </div>
+              )}
+              {dlError && <p id="dl-error-msg" className="text-[11px] text-red-600 mb-3">{dlError}</p>}
+              <div className="grid sm:grid-cols-2 gap-2.5">
+                {d.reportCards.map(rc => {
+                  const rcId = rc.id ?? rc._id?.toString();
+                  const lbl  = `${rc.academicYear}-T${rc.termNumber}`;
+                  const busy = downloading === rcId;
+                  return (
+                    <div key={`rc-${rcId}`} id={`report-card-${rcId}`} className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-slate-200 bg-slate-50">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${rcLocked ? 'bg-slate-100' : 'bg-violet-50'}`}>
+                        {rcLocked ? <Lock size={12} className="text-slate-400" /> : <GraduationCap size={12} className="text-violet-600" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[12px] font-semibold text-slate-700">{rc.academicYear} · Term {rc.termNumber}</p>
+                        {rc.averageScore != null && <p className="text-[10px] text-slate-400">Avg: {rc.averageScore}%</p>}
+                      </div>
+                      {rcLocked ? (
+                        <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">Locked</span>
+                      ) : (
+                        <button
+                          id={`download-rc-${rcId}`}
+                          onClick={() => { setDlError(''); setDownloading(rcId); _downloadRC(rcId, lbl).catch(e => setDlError(e.message)).finally(() => setDownloading(null)); }}
+                          disabled={busy}
+                          className="flex items-center gap-1 text-[10px] font-semibold text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 px-2.5 py-1 rounded-full transition disabled:opacity-50"
+                        >
+                          {busy ? <span className="w-3 h-3 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" /> : <Download size={10} />}
+                          {busy ? 'Saving…' : 'PDF'}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {d.upcomingExams?.length > 0 && (
+          <Card id="section-exams">
+            <CardHeader
+              icon={FileText} iconClass="text-rose-500" title="Upcoming Exams"
+              right={<span className="text-[11px] font-semibold text-rose-600 bg-rose-50 px-2.5 py-[5px] rounded-full">{d.upcomingExams.length} scheduled</span>}
+            />
+            <div id="exams-list" className="divide-y divide-slate-50">
+              {d.upcomingExams.map((ex, i) => {
+                const days = _daysUntil(ex.date);
+                const urg  = days === 0 ? 'text-red-600 bg-red-50' : days != null && days <= 3 ? 'text-amber-600 bg-amber-50' : 'text-slate-500 bg-slate-50';
+                return (
+                  <div key={`exam-${ex.id ?? i}`} id={`exam-item-${ex.id ?? i}`} className="flex items-center gap-3 px-[18px] py-3">
+                    <div className={`w-10 h-10 rounded-xl flex flex-col items-center justify-center text-center flex-shrink-0 ${urg}`}>
+                      <p className="text-sm font-bold leading-none">{days === 0 ? '!' : (days ?? '?')}</p>
+                      {days != null && days > 0 && <p className="text-[9px]">day{days !== 1 ? 's' : ''}</p>}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[13px] font-semibold text-slate-800 truncate">{ex.subjectName}</p>
+                      <p className="text-[11px] text-slate-400">{_weekday(ex.date)}, {_fmtDate(ex.date)}{ex.startTime ? ` · ${ex.startTime}` : ''}{ex.type ? ` · ${ex.type}` : ''}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        )}
+
+        {d.lessonsCoverage?.length > 0 && (
+          <Card id="section-curriculum">
+            <CardHeader icon={BookCheck} iconClass="text-indigo-500" title="Curriculum Coverage" />
+            <div id="curriculum-list" className="px-[18px] py-4 space-y-4">
+              {d.lessonsCoverage.map((sub, i) => (
+                <div key={`cov-${sub.subjectId ?? i}`} id={`coverage-subject-${sub.subjectId ?? i}`}>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div>
+                      <span className="text-[13px] font-medium text-slate-800">{sub.subjectName}</span>
+                      <span className="text-[10px] text-slate-400 ml-2">{sub.coveredTopics}/{sub.totalTopics} topics</span>
+                    </div>
+                    <span className={`text-[12px] font-bold ${sub.percentage >= 80 ? 'text-emerald-600' : sub.percentage >= 50 ? 'text-amber-600' : 'text-red-500'}`}>{sub.percentage}%</span>
+                  </div>
+                  <GradeBar id={`coverage-bar-${sub.subjectId ?? i}`} label="" pct={sub.percentage ?? 0} delay={i * 0.07} />
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
+      </div>
+    );
+  }
+
+  function AttendancePage() {
+    return (
+      <Card id="section-attendance">
+        <CardHeader
+          icon={Activity} iconClass="text-emerald-500" title="Attendance"
+          right={<span id="attendance-pct-badge" className={`text-[11px] font-semibold px-2.5 py-[5px] rounded-full ${(d.attendance?.percentage ?? 0) >= 80 ? 'text-emerald-700 bg-emerald-50' : 'text-amber-700 bg-amber-50'}`}>{d.attendance?.percentage ?? 0}% this term</span>}
+        />
+        <div className="px-[18px] py-4 grid grid-cols-2 sm:grid-cols-4 gap-4">
+          {[
+            { id: 'att-present', label: 'Present',    value: d.attendance?.present ?? 0, color: 'bg-emerald-500', text: 'text-emerald-600' },
+            { id: 'att-absent',  label: 'Absent',     value: d.attendance?.absent  ?? 0, color: 'bg-red-400',     text: 'text-red-600'     },
+            { id: 'att-late',    label: 'Late',       value: d.attendance?.late    ?? 0, color: 'bg-amber-400',   text: 'text-amber-600'   },
+            { id: 'att-total',   label: 'Total Days', value: d.attendance?.total   ?? 0, color: 'bg-slate-300',   text: 'text-slate-700'   },
+          ].map(({ id, label, value, color, text }) => (
+            <div key={id} id={id} className="text-center">
+              <div className={`text-[22px] font-extrabold ${text}`}>{value}</div>
+              <div className="text-[11px] text-slate-500 mt-0.5">{label}</div>
+              <div className="h-1.5 bg-slate-100 rounded-full mt-2 overflow-hidden">
+                <div className={`h-full rounded-full ${color}`} style={{ width: d.attendance?.total ? `${Math.round((value / d.attendance.total) * 100)}%` : '0%' }} />
+              </div>
+            </div>
+          ))}
+        </div>
+        {d.recentAttendance?.length > 0 && (
+          <div id="recent-attendance-list" className="px-[18px] pb-4 space-y-1.5 border-t border-slate-100 pt-3">
+            <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.04em] mb-2">Recent Records</p>
+            {d.recentAttendance.map((rec, i) => (
+              <div key={`att-rec-${rec.id ?? i}`} id={`att-rec-${rec.id ?? i}`} className="flex items-center justify-between">
+                <span className="text-[11px] text-slate-500">{rec.date ? new Date(rec.date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) : '—'}</span>
+                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full capitalize ${rec.status === 'present' ? 'bg-emerald-50 text-emerald-700' : rec.status === 'absent' ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'}`}>{rec.status}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    );
+  }
+
+  function FeesPage() {
+    return (
+      <Card id="section-fees">
+        <CardHeader
+          title={`Fee Statement — ${termLabel}`}
+          right={<span id="fee-status-badge" className={`text-[11px] font-semibold px-2.5 py-[5px] rounded-full ${feePaid ? 'text-emerald-700 bg-emerald-50 border border-emerald-200' : 'text-red-700 bg-red-50 border border-red-200'}`}>{feePaid ? 'Cleared' : 'Balance Due'}</span>}
+        />
+        <p className="px-[18px] pt-3.5 text-[11px] text-slate-400 -mb-1">{d.school?.name ?? 'School'} · {d.school?.academicYear ?? ''}</p>
+        <div className="px-[18px] py-3.5">
+          {d.feeBreakdown?.length > 0 ? (
+            <table className="w-full text-[12px] mb-4" id="fee-breakdown-table">
+              <thead>
+                <tr className="border-b border-slate-100">
+                  <th className="text-left py-2 text-[11px] font-semibold text-slate-400 uppercase tracking-[0.04em]">Item</th>
+                  <th className="text-right py-2 text-[11px] font-semibold text-slate-400 uppercase tracking-[0.04em]">Amount</th>
+                  <th className="text-right py-2 text-[11px] font-semibold text-slate-400 uppercase tracking-[0.04em]">Paid</th>
+                  <th className="text-right py-2 text-[11px] font-semibold text-slate-400 uppercase tracking-[0.04em]">Balance</th>
+                </tr>
+              </thead>
+              <tbody>
+                {d.feeBreakdown.map((item, i) => (
+                  <tr key={`fee-item-${item.id ?? i}`} id={`fee-item-${item.id ?? i}`} className="border-b border-slate-50 last:border-0">
+                    <td className="py-2.5 text-slate-700">{item.label ?? item.name}</td>
+                    <td className="py-2.5 text-right text-slate-700">KSh {(item.amount ?? 0).toLocaleString()}</td>
+                    <td className="py-2.5 text-right font-semibold text-emerald-600">KSh {(item.paid ?? item.amount ?? 0).toLocaleString()}</td>
+                    <td className="py-2.5 text-right font-semibold text-emerald-600">{(item.balance ?? 0) === 0 ? 'Nil' : `KSh ${item.balance.toLocaleString()}`}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div id="fee-summary-view" className="space-y-2 mb-4">
+              <div className="flex items-center justify-between py-2 border-b border-slate-50">
+                <span className="text-[12px] text-slate-600">Total Fees</span>
+                <span className="text-[12px] font-semibold text-slate-800">{d.termFeeTotal ? `KSh ${d.termFeeTotal.toLocaleString()}` : '—'}</span>
+              </div>
+              <div className="flex items-center justify-between py-2 border-b border-slate-50">
+                <span className="text-[12px] text-slate-600">Amount Paid</span>
+                <span className="text-[12px] font-semibold text-emerald-600">{d.termFeeTotal && d.feeBalance != null ? `KSh ${(d.termFeeTotal - d.feeBalance).toLocaleString()}` : '—'}</span>
+              </div>
+              <div className="flex items-center justify-between py-2">
+                <span className="text-[12px] text-slate-600">Outstanding Balance</span>
+                <span className={`text-[12px] font-bold ${feePaid ? 'text-emerald-600' : 'text-red-600'}`}>{feeDisplay}</span>
+              </div>
+            </div>
+          )}
+
+          {feePaid ? (
+            <div id="fee-cleared-notice" className="bg-emerald-50 rounded-[8px] px-3.5 py-2.5 border border-emerald-200">
+              <div className="text-[12px] font-bold text-emerald-700">✓ All fees paid for this term</div>
+              {d.recentPayments?.[0] && (
+                <div className="text-[11px] text-emerald-600 mt-1">
+                  Last payment: KSh {(d.recentPayments[0].amount ?? 0).toLocaleString()}
+                  {d.recentPayments[0].paidAt ? ` via M-Pesa on ${_fmtDate(d.recentPayments[0].paidAt)}` : ''}
+                  {d.recentPayments[0].mpesaCode ? ` · Ref: ${d.recentPayments[0].mpesaCode}` : ''}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div id="fee-balance-notice" className="bg-red-50 rounded-[8px] px-3.5 py-2.5 border border-red-200">
+              <div className="text-[12px] font-bold text-red-700">Outstanding: {feeDisplay}</div>
+              {d.nextFeeDueDate && <div className="text-[11px] text-red-600 mt-1">Due by {_fmtDate(d.nextFeeDueDate)}</div>}
+              {mpesaEnabled && <p className="text-[11px] text-red-600 mt-2">Use the "Pay Fees via M-Pesa" button above to clear this balance.</p>}
+            </div>
+          )}
+
+          {d.recentPayments?.length > 0 && (
+            <div id="recent-payments-list" className="mt-4 border-t border-slate-100 pt-3 space-y-2">
+              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.04em] mb-2">Recent Payments</p>
+              {d.recentPayments.map((p, i) => (
+                <div key={`payment-${p.id ?? i}`} id={`payment-item-${p.id ?? i}`} className="flex items-center justify-between">
+                  <div>
+                    <p className="text-[12px] font-semibold text-slate-800">KSh {(p.amount ?? 0).toLocaleString()}</p>
+                    {p.mpesaCode && <p className="text-[10px] text-slate-400 font-mono">{p.mpesaCode}</p>}
+                  </div>
+                  <span className="text-[11px] text-slate-400">{p.paidAt ? new Date(p.paidAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '—'}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </Card>
+    );
+  }
+
+  function TimetablePage() {
+    return (
+      <Card id="section-timetable-full">
+        <CardHeader
+          icon={Calendar} iconClass="text-sky-500" title="Today's Timetable"
+          right={<span className="text-[11px] text-slate-400">{new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' })}</span>}
+        />
+        {d.school?.emergencyOnlineMode && (
+          <div className="mx-4 mt-3 flex items-center gap-2 px-3 py-2 rounded-xl bg-sky-50 border border-sky-200">
+            <MonitorPlay size={12} className="text-sky-600 flex-shrink-0" />
+            <p className="text-[11px] font-semibold text-sky-700">Emergency Online Learning — all lessons are online today</p>
+          </div>
+        )}
+        {!d.timetableToday?.length ? (
+          <div className="flex flex-col items-center justify-center py-12 text-slate-400">
+            <Calendar size={22} className="mb-2 opacity-40" />
+            <p className="text-[12px]">No lessons scheduled today</p>
+          </div>
+        ) : (
+          <div id="timetable-slots-full" className="divide-y divide-slate-50">
+            {d.timetableToday.map((slot, i) => {
+              const start = _timeToMins(slot.startTime);
+              const end   = _timeToMins(slot.endTime);
+              const isNow  = start <= nowMins && nowMins < end;
+              const isNext = !activeSlot && slot === nextSlot;
+              return (
+                <div key={`tt-full-${slot.id ?? i}`} className={`flex items-center gap-3 px-4 py-3 ${isNow ? 'bg-amber-50 border-l-[3px] border-l-amber-500' : isNext ? 'bg-slate-50' : ''}`}>
+                  <div className="text-center min-w-[60px] flex-shrink-0">
+                    {isNow ? <div className="text-[10px] font-bold text-amber-700 uppercase">NOW</div> : isNext ? <div className="text-[10px] font-bold text-slate-500 uppercase">NEXT</div> : null}
+                    <div className="text-[10px] text-slate-400">{slot.startTime}</div>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-[13px] font-bold truncate ${isNow ? 'text-slate-900' : 'text-slate-700'}`}>{slot.subjectName}</p>
+                    <p className="text-[11px] text-slate-400 truncate mt-0.5 flex items-center gap-1">{slot.room && <><MapPin size={9} />{slot.room}</>}{slot.teacherName ? ` · ${slot.teacherName}` : ''}</p>
+                  </div>
+                  {isNow && <span className="text-[11px] font-semibold text-amber-600 bg-amber-100 px-2.5 py-[4px] rounded-full flex-shrink-0">In progress</span>}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
+    );
+  }
+
+  function LibraryPage() {
+    return (
+      <Card id="section-library">
+        <CardHeader
+          icon={BookOpen} iconClass="text-blue-500" title="Borrowed Books"
+          right={d.borrowedBooks?.length > 0 && <span className="text-[11px] font-semibold text-blue-600 bg-blue-50 px-2.5 py-[5px] rounded-full">{d.borrowedBooks.length} out</span>}
+        />
+        {!d.borrowedBooks?.length ? (
+          <p className="text-[12px] text-slate-400 text-center py-8">No books currently borrowed</p>
+        ) : (
+          <div id="library-loans-list" className="divide-y divide-slate-50">
+            {d.borrowedBooks.map((loan, i) => {
+              const days = _daysUntil(loan.dueDate);
+              const isLost = loan.status === 'lost';
+              const isOverdue = !isLost && days != null && days < 0;
+              const urg = isLost ? 'text-slate-600 bg-slate-100' : isOverdue ? 'text-red-600 bg-red-50' : days != null && days <= 3 ? 'text-amber-600 bg-amber-50' : 'text-emerald-600 bg-emerald-50';
+              return (
+                <div key={loan.id ?? i} className="flex items-center gap-3 px-[18px] py-3">
+                  <div className={`w-10 h-10 rounded-xl flex flex-col items-center justify-center text-center flex-shrink-0 ${urg}`}>
+                    <p className="text-sm font-bold leading-none">{isLost ? '!' : isOverdue ? '!' : (days ?? '?')}</p>
+                    {!isLost && days != null && days > 0 && <p className="text-[9px]">day{days !== 1 ? 's' : ''}</p>}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[13px] font-semibold text-slate-800 truncate">{loan.bookTitle}</p>
+                    <p className="text-[11px] text-slate-400">{isLost ? 'Reported lost — see the library for next steps' : isOverdue ? `Overdue by ${Math.abs(days)} day${Math.abs(days) === 1 ? '' : 's'}` : days === 0 ? 'Due today' : `Due ${_fmtDate(loan.dueDate)}`}</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
+    );
+  }
+
+  function MessagesPage() {
+    // NOTE: the API has no dedicated parent<->school message thread
+    // endpoint yet — this reads the same announcements feed the
+    // Announcements page shows, same as before this change. Flagged as
+    // a real product gap, not something this pass could invent data for.
+    return (
+      <Card id="section-messages">
+        <CardHeader
+          icon={MessageSquare} iconClass="text-sky-500" title="Messages from School"
+          right={unreadCount > 0 && <span id="messages-unread-badge" className="text-[11px] font-semibold text-amber-600 bg-amber-50 px-2.5 py-[5px] rounded-full">{unreadCount} unread</span>}
+        />
+        {!d.announcements?.length ? (
+          <p id="messages-empty" className="text-[12px] text-slate-400 text-center py-8">No messages yet</p>
+        ) : (
+          <div id="messages-list" className="divide-y divide-slate-50">
+            {d.announcements.map((ann, i) => {
+              const isFirst = i === 0;
+              return (
+                <div key={`ann-${ann.id ?? i}`} id={`announcement-${ann.id ?? i}`} className="flex items-start gap-3 px-[18px] py-3.5">
+                  <div className="w-2 h-2 rounded-full mt-[5px] flex-shrink-0" style={{ background: isFirst ? primary : '#22c55e' }} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[12px] font-semibold text-slate-800 leading-snug">{ann.title}</p>
+                    {ann.body && <p className="text-[11px] text-slate-500 mt-0.5">{ann.body}</p>}
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      {ann.createdAt ? new Date(ann.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
+                      {isFirst && unreadCount > 0 && <> · <span className="font-semibold text-amber-500">Unread</span></>}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
+    );
+  }
+
+  function CalendarPage() {
+    return (
+      <Card id="section-calendar">
+        <CardHeader icon={Calendar} iconClass="text-blue-500" title="School Calendar" />
+        {!d.upcomingEvents?.length ? (
+          <p className="text-[12px] text-slate-400 text-center py-8">No upcoming events</p>
+        ) : (
+          <div id="events-list" className="divide-y divide-slate-50">
+            {d.upcomingEvents.map((ev, i) => {
+              const days = _daysUntil(ev.date);
+              return (
+                <div key={`ev-${ev.id ?? i}`} id={`event-item-${ev.id ?? i}`} className="flex items-center gap-3 px-[18px] py-3">
+                  <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: ev.color ?? primary }} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[13px] font-medium text-slate-800 truncate">{ev.title}</p>
+                    <p className="text-[11px] text-slate-400">{_weekday(ev.date)}, {_fmtDate(ev.date)}</p>
+                  </div>
+                  <span className="text-[11px] text-slate-400 flex-shrink-0">{days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : `${days}d`}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
+    );
+  }
+
+  function BehaviourPage() {
+    return (
+      <Card id="section-behaviour">
+        <CardHeader icon={Star} iconClass="text-amber-500" title="Behaviour & Rewards" />
+        <div className="px-[18px] py-4 flex items-center gap-4">
+          <div className="w-14 h-14 rounded-xl bg-amber-50 border border-amber-100 flex items-center justify-center flex-shrink-0">
+            <span className="text-lg font-extrabold text-amber-600">+{totalPoints}</span>
+          </div>
+          <div className="flex-1">
+            <p className="text-[13px] font-semibold text-slate-800">Behaviour Points</p>
+            <BehaviourBadge level={badgeLevel} />
+            {latestReward && (
+              <div className="mt-2 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                <p className="text-[10px] font-semibold text-amber-600 uppercase tracking-wide">Latest Reward</p>
+                <p className="text-[12px] font-medium text-slate-800 mt-0.5">{latestReward.title || latestReward.category || 'Reward'}</p>
+              </div>
+            )}
+            {latestComment?.description && (
+              <div className="mt-2 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
+                <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Teacher Comment</p>
+                <p className="text-[11px] text-slate-700 italic mt-0.5">"{latestComment.description}"</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </Card>
+    );
+  }
+
+  function AnnouncementsPage() {
+    return (
+      <Card id="section-announcements">
+        <CardHeader icon={Bell} iconClass="text-amber-500" title="Announcements" />
+        {!d.announcements?.length ? (
+          <p className="text-[12px] text-slate-400 text-center py-8">No announcements yet</p>
+        ) : (
+          <div id="announcements-list" className="divide-y divide-slate-50">
+            {d.announcements.map((ann, i) => (
+              <div key={`full-ann-${ann.id ?? i}`} id={`full-announcement-${ann.id ?? i}`} className="px-[18px] py-3.5">
+                <p className="text-[13px] font-semibold text-slate-800 mb-0.5">{ann.title}</p>
+                {ann.body && <p className="text-[12px] text-slate-500 leading-relaxed">{ann.body}</p>}
+                <p className="text-[10px] text-slate-400 mt-1.5">{_fmtDate(ann.createdAt)}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    );
+  }
+
+  const PAGE_BODIES = {
+    overview: OverviewPage, grades: GradesPage, attendance: AttendancePage, fees: FeesPage,
+    timetable: TimetablePage, library: LibraryPage, messages: MessagesPage,
+    calendar: CalendarPage, behaviour: BehaviourPage, announcements: AnnouncementsPage,
+  };
+  // A page whose module got disabled mid-session (or a stale activePage
+  // from before this change) falls back to Overview rather than a blank
+  // screen — same fail-safe default as landing on an unknown route.
+  const ActivePageBody = PAGE_BODIES[activePage] ?? OverviewPage;
+  const activeNavItem  = [...myChildNav, ...schoolNav].find(n => n.id === activePage);
+  const activePageLabel = activeNavItem?.label ?? 'Overview';
+
+  /* ════════════════════════════════════════════════════════════════
      RENDER
      ════════════════════════════════════════════════════════════════ */
   return (
@@ -297,102 +984,90 @@ export default function ParentDashboard() {
 
       {/* ══ MOBILE SIDEBAR BACKDROP ══════════════════════════════ */}
       {mobileNavOpen && (
-        <div
-          id="parent-sidebar-backdrop"
-          className="fixed inset-0 bg-black/40 z-30 lg:hidden"
-          onClick={() => setMobileNavOpen(false)}
-        />
+        <div id="parent-sidebar-backdrop" className="fixed inset-0 bg-black/40 z-30 lg:hidden" onClick={() => setMobileNavOpen(false)} />
       )}
 
       {/* ══ SIDEBAR ══════════════════════════════════════════════ */}
       <aside
         id="parent-sidebar"
-        className={`fixed lg:static inset-y-0 left-0 z-40 w-[220px] flex flex-col flex-shrink-0 h-full transition-transform duration-200 lg:translate-x-0 ${mobileNavOpen ? 'translate-x-0' : '-translate-x-full'}`}
+        className={`fixed lg:static inset-y-0 left-0 z-40 w-[220px] ${collapsed ? 'lg:w-[72px]' : 'lg:w-[220px]'} flex flex-col flex-shrink-0 h-full transition-all duration-200 lg:translate-x-0 ${mobileNavOpen ? 'translate-x-0' : '-translate-x-full'}`}
         style={{ background: '#1c1917' }}
       >
 
         {/* Brand */}
-        <div id="sidebar-brand" className="px-4 py-5 border-b flex items-center justify-between" style={{ borderColor: '#292524' }}>
-          <div className="flex items-center gap-2.5 min-w-0">
+        <div id="sidebar-brand" className={`py-5 border-b flex items-center ${collapsed ? 'lg:justify-center lg:px-2' : 'justify-between px-4'}`} style={{ borderColor: '#292524' }}>
+          <div className={`flex items-center gap-2.5 min-w-0 ${collapsed ? 'lg:gap-0' : ''}`}>
             {schoolLogoUrl ? (
-              <img
-                src={schoolLogoUrl}
-                alt={schoolBrandName}
-                id="sidebar-logo-icon"
-                className="w-[34px] h-[34px] rounded-[8px] object-contain bg-white/10 p-0.5 flex-shrink-0"
-              />
+              <img src={schoolLogoUrl} alt={schoolBrandName} id="sidebar-logo-icon" className="w-[34px] h-[34px] rounded-[8px] object-contain bg-white/10 p-0.5 flex-shrink-0" />
             ) : (
-              <div
-                id="sidebar-logo-icon"
-                className="w-[34px] h-[34px] rounded-[8px] flex items-center justify-center text-white font-extrabold text-base flex-shrink-0"
-                style={{ background: `linear-gradient(135deg, ${primary}, ${accent})` }}
-              >
+              <div id="sidebar-logo-icon" className="w-[34px] h-[34px] rounded-[8px] flex items-center justify-center text-white font-extrabold text-base flex-shrink-0" style={{ background: avatarGradient }}>
                 {schoolInitial}
               </div>
             )}
-            <div className="min-w-0">
+            <div className={`min-w-0 ${collapsed ? 'lg:hidden' : ''}`}>
               <div id="sidebar-brand-name" className="text-white font-bold text-[15px] leading-tight truncate">{schoolBrandName}</div>
               <div className="text-[11px] mt-0.5" style={{ color: '#fcd34d' }}>Parent Portal</div>
             </div>
           </div>
-          <button
-            id="sidebar-mobile-close"
-            onClick={() => setMobileNavOpen(false)}
-            className="lg:hidden flex-shrink-0 p-1 text-slate-400 hover:text-white"
-            aria-label="Close menu"
-          >
+          <button id="sidebar-mobile-close" onClick={() => setMobileNavOpen(false)} className="lg:hidden flex-shrink-0 p-1 text-slate-400 hover:text-white" aria-label="Close menu">
             <X size={18} />
           </button>
         </div>
 
+        {/* Desktop collapse toggle */}
+        <button
+          id="sidebar-collapse-toggle"
+          onClick={toggleCollapsed}
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          className={`hidden lg:flex items-center gap-2 px-2.5 py-2 mx-2 mt-2 rounded-[7px] text-[11px] font-medium transition-colors hover:bg-white/5 ${collapsed ? 'justify-center' : ''}`}
+          style={{ color: '#a8a29e' }}
+        >
+          {collapsed ? <ChevronRight size={14} /> : <><ChevronLeft size={14} /> Collapse</>}
+        </button>
+
         {/* Navigation */}
         <nav id="sidebar-nav" className="flex-1 px-2 py-3 overflow-y-auto">
 
-          <p className="text-[10px] font-semibold uppercase tracking-[0.06em] px-2 py-2 mb-1" style={{ color: '#fcd34d' }}>
-            My Child
-          </p>
+          {!collapsed && (
+            <p className="text-[10px] font-semibold uppercase tracking-[0.06em] px-2 py-2 mb-1 hidden lg:block" style={{ color: '#fcd34d' }}>My Child</p>
+          )}
+          <p className="text-[10px] font-semibold uppercase tracking-[0.06em] px-2 py-2 mb-1 lg:hidden" style={{ color: '#fcd34d' }}>My Child</p>
 
-          {MY_CHILD_NAV.map(({ id, label, Icon }) => (
+          {myChildNav.map(({ id, label, Icon }) => (
             <button
               key={id}
-              id={`nav-btn-${id}`}
-              onClick={() => scrollToSection(id)}
-              className={`w-full flex items-center gap-2.5 px-2.5 py-[8px] rounded-[7px] mb-[1px] text-[13px] font-medium transition-colors text-left`}
-              style={activeNav === id
-                ? { background: '#292524', color: '#fff' }
-                : { color: '#fde68a' }
-              }
+              id={`nav-btn-section-${id}`}
+              onClick={() => goToPage(id)}
+              title={label}
+              className={`w-full flex items-center gap-2.5 px-2.5 py-[8px] rounded-[7px] mb-[1px] text-[13px] font-medium transition-colors text-left ${collapsed ? 'lg:justify-center' : ''}`}
+              style={activePage === id ? { background: '#292524', color: '#fff' } : { color: '#fde68a' }}
             >
               <Icon size={15} className="flex-shrink-0 opacity-85" />
-              <span className="flex-1">{label}</span>
-              {id === 'section-messages' && unreadCount > 0 && (
-                <span
-                  id="sidebar-messages-badge"
-                  className="bg-red-500 text-white text-[10px] font-bold px-[6px] py-[1px] rounded-full leading-snug"
-                >
+              <span className={`flex-1 ${collapsed ? 'lg:hidden' : ''}`}>{label}</span>
+              {id === 'messages' && unreadCount > 0 && (
+                <span id="sidebar-messages-badge" className={`bg-red-500 text-white text-[10px] font-bold px-[6px] py-[1px] rounded-full leading-snug ${collapsed ? 'lg:hidden' : ''}`}>
                   {unreadCount}
                 </span>
               )}
             </button>
           ))}
 
-          <p className="text-[10px] font-semibold uppercase tracking-[0.06em] px-2 py-2 mt-3 mb-1" style={{ color: '#fcd34d' }}>
-            School
-          </p>
+          {!collapsed && (
+            <p className="text-[10px] font-semibold uppercase tracking-[0.06em] px-2 py-2 mt-3 mb-1 hidden lg:block" style={{ color: '#fcd34d' }}>School</p>
+          )}
+          <p className="text-[10px] font-semibold uppercase tracking-[0.06em] px-2 py-2 mt-3 mb-1 lg:hidden" style={{ color: '#fcd34d' }}>School</p>
 
-          {SCHOOL_NAV.map(({ id, label, Icon }) => (
+          {schoolNav.map(({ id, label, Icon }) => (
             <button
               key={id}
-              id={`nav-btn-${id}`}
-              onClick={() => scrollToSection(id)}
-              className="w-full flex items-center gap-2.5 px-2.5 py-[8px] rounded-[7px] mb-[1px] text-[13px] font-medium transition-colors text-left"
-              style={activeNav === id
-                ? { background: '#292524', color: '#fff' }
-                : { color: '#fde68a' }
-              }
+              id={`nav-btn-section-${id}`}
+              onClick={() => goToPage(id)}
+              title={label}
+              className={`w-full flex items-center gap-2.5 px-2.5 py-[8px] rounded-[7px] mb-[1px] text-[13px] font-medium transition-colors text-left ${collapsed ? 'lg:justify-center' : ''}`}
+              style={activePage === id ? { background: '#292524', color: '#fff' } : { color: '#fde68a' }}
             >
               <Icon size={15} className="flex-shrink-0 opacity-85" />
-              <span>{label}</span>
+              <span className={collapsed ? 'lg:hidden' : ''}>{label}</span>
             </button>
           ))}
         </nav>
@@ -400,82 +1075,57 @@ export default function ParentDashboard() {
         {/* User footer */}
         <div id="sidebar-footer" className="px-2 py-3 border-t" style={{ borderColor: '#292524' }}>
           {/* Multi-child switcher */}
-          {children.length > 1 && (
-            <div className="relative mb-2">
-              <button
-                id="child-switcher-btn"
-                onClick={() => setChildMenuOpen(o => !o)}
-                className="w-full flex items-center gap-2 px-2.5 py-2 rounded-[7px] text-left transition-colors"
-                style={{ background: '#292524' }}
-              >
-                <div
-                  className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0"
-                  style={{ background: 'linear-gradient(135deg, #f59e0b, #d97706)' }}
-                >
+          {children.length > 1 && !collapsed && (
+            <div className="relative mb-2 lg:block hidden">
+              <button id="child-switcher-btn" onClick={() => setChildMenuOpen(o => !o)} className="w-full flex items-center gap-2 px-2.5 py-2 rounded-[7px] text-left transition-colors" style={{ background: '#292524' }}>
+                <div className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0" style={{ background: avatarGradient }}>
                   {_initials(activeChild?.name ?? '')}
                 </div>
-                <span className="flex-1 text-[11px] font-medium truncate" style={{ color: '#fde68a' }}>
-                  {activeChild?.name ?? 'Select child'}
-                </span>
+                <span className="flex-1 text-[11px] font-medium truncate" style={{ color: '#fde68a' }}>{activeChild?.name ?? 'Select child'}</span>
                 <ChevronDown size={12} style={{ color: '#fcd34d' }} />
               </button>
               {childMenuOpen && (
-                <div
-                  id="child-switcher-menu"
-                  className="absolute bottom-full left-0 right-0 mb-1 rounded-[8px] border overflow-hidden shadow-xl z-50"
-                  style={{ background: '#292524', borderColor: '#44403c' }}
-                >
+                <div id="child-switcher-menu" className="absolute bottom-full left-0 right-0 mb-1 rounded-[8px] border overflow-hidden shadow-xl z-50" style={{ background: '#292524', borderColor: '#44403c' }}>
                   {children.map(child => (
-                    <button
-                      key={child.id}
-                      id={`child-menu-item-${child.id}`}
-                      onClick={() => { setActiveChildId(child.id); setChildMenuOpen(false); }}
-                      className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-[#3c3835]"
-                    >
-                      <div
-                        className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0"
-                        style={{ background: 'linear-gradient(135deg, #f59e0b, #d97706)' }}
-                      >
+                    <button key={child.id} id={`child-menu-item-${child.id}`} onClick={() => { setActiveChildId(child.id); setChildMenuOpen(false); }} className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-[#3c3835]">
+                      <div className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0" style={{ background: avatarGradient }}>
                         {_initials(child.name)}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="text-[12px] font-semibold text-white truncate">{child.name}</div>
                         <div className="text-[10px] truncate" style={{ color: '#a8a29e' }}>{child.className}</div>
                       </div>
-                      {child.id === activeChildId && (
-                        <div className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
-                      )}
+                      {child.id === activeChildId && <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: primary }} />}
                     </button>
                   ))}
                 </div>
               )}
             </div>
           )}
+          {children.length > 1 && collapsed && (
+            <button
+              onClick={() => setActiveChildId(children[(children.findIndex(c => c.id === activeChildId) + 1) % children.length].id)}
+              title="Switch child"
+              className="hidden lg:flex w-full items-center justify-center mb-2 py-1.5 rounded-[7px] hover:bg-white/5"
+            >
+              <div className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold" style={{ background: avatarGradient }}>
+                {_initials(activeChild?.name ?? '')}
+              </div>
+            </button>
+          )}
 
           {/* Parent identity */}
-          <div className="flex items-center gap-2.5 px-2.5 py-2 rounded-[7px]">
-            <div
-              id="sidebar-parent-avatar"
-              className="w-[30px] h-[30px] rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
-              style={{ background: 'linear-gradient(135deg, #f59e0b, #d97706)' }}
-            >
+          <div className={`flex items-center gap-2.5 px-2.5 py-2 rounded-[7px] ${collapsed ? 'lg:justify-center lg:px-0' : ''}`}>
+            <div id="sidebar-parent-avatar" className="w-[30px] h-[30px] rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ background: avatarGradient }}>
               {_initials(parentName)}
             </div>
-            <div className="flex-1 min-w-0">
+            <div className={`flex-1 min-w-0 ${collapsed ? 'lg:hidden' : ''}`}>
               <div className="text-white text-[12px] font-semibold truncate">{parentName || 'Parent'}</div>
               <div className="text-[10px] truncate" style={{ color: '#fcd34d' }}>
-                {children.length === 1 && activeChild
-                  ? `Parent · ${activeChild.name?.split(' ')[0]}`
-                  : `${children.length} children`}
+                {children.length === 1 && activeChild ? `Parent · ${activeChild.name?.split(' ')[0]}` : `${children.length} children`}
               </div>
             </div>
-            <button
-              id="sidebar-logout-btn"
-              onClick={handleLogout}
-              title="Sign out"
-              className="flex-shrink-0 transition-colors hover:text-red-400"
-              style={{ color: '#a8a29e' }}
-            >
+            <button id="sidebar-logout-btn" onClick={handleLogout} title="Sign out" className={`flex-shrink-0 transition-colors hover:text-red-400 ${collapsed ? 'lg:hidden' : ''}`} style={{ color: '#a8a29e' }}>
               <LogOut size={14} />
             </button>
           </div>
@@ -487,34 +1137,29 @@ export default function ParentDashboard() {
 
         {/* Topbar */}
         <header id="parent-topbar" className="bg-white border-b border-slate-200 min-h-14 flex flex-wrap items-center px-3 sm:px-6 py-2 gap-2 sm:gap-4 flex-shrink-0">
-          <button
-            id="sidebar-mobile-open"
-            onClick={() => setMobileNavOpen(true)}
-            className="lg:hidden flex-shrink-0 p-1.5 -ml-1 text-slate-500 hover:text-slate-800 rounded-lg hover:bg-slate-100"
-            aria-label="Open menu"
-          >
+          <button id="sidebar-mobile-open" onClick={() => setMobileNavOpen(true)} className="lg:hidden flex-shrink-0 p-1.5 -ml-1 text-slate-500 hover:text-slate-800 rounded-lg hover:bg-slate-100" aria-label="Open menu">
             <Menu size={20} />
           </button>
           <h1 id="topbar-greeting" className="text-[14px] sm:text-[16px] font-bold text-slate-900 flex-1 min-w-0 truncate">
             {_greeting()}{parentName ? `, ${parentName.split(' ')[0]}` : ''} 👋
           </h1>
-          <span id="topbar-term-badge" className="hidden sm:inline text-[12px] font-medium text-slate-500 bg-slate-100 px-3 py-1 rounded-full whitespace-nowrap">
-            {termLabel}
-          </span>
-          <NotificationBell myUserId={session?.user?.id} onSelect={() => scrollToSection('section-messages')} />
+          <span id="topbar-term-badge" className="hidden sm:inline text-[12px] font-medium text-slate-500 bg-slate-100 px-3 py-1 rounded-full whitespace-nowrap">{termLabel}</span>
+          <NotificationBell myUserId={session?.user?.id} onSelect={() => goToPage('messages')} />
           <div className="flex items-center gap-2 w-full sm:w-auto order-last sm:order-none">
-            <button
-              id="btn-pay-fees"
-              onClick={() => scrollToSection('section-fees')}
-              className="flex-1 sm:flex-initial px-3 sm:px-3.5 py-[7px] rounded-[7px] bg-slate-100 text-slate-600 text-[11px] sm:text-[12px] font-semibold hover:bg-slate-200 transition whitespace-nowrap"
-            >
-              Pay Fees via M-Pesa
-            </button>
+            {mpesaEnabled && (
+              <button
+                id="btn-pay-fees"
+                onClick={() => goToPage('fees')}
+                className="flex-1 sm:flex-initial px-3 sm:px-3.5 py-[7px] rounded-[7px] bg-slate-100 text-slate-600 text-[11px] sm:text-[12px] font-semibold hover:bg-slate-200 transition whitespace-nowrap"
+              >
+                Pay Fees via M-Pesa
+              </button>
+            )}
             <button
               id="btn-message-school"
-              onClick={() => scrollToSection('section-messages')}
+              onClick={() => goToPage('messages')}
               className="flex-1 sm:flex-initial px-3 sm:px-3.5 py-[7px] rounded-[7px] text-white text-[11px] sm:text-[12px] font-semibold transition hover:opacity-90 whitespace-nowrap"
-              style={{ background: '#d97706' }}
+              style={{ background: accent }}
             >
               Message School
             </button>
@@ -522,34 +1167,21 @@ export default function ParentDashboard() {
         </header>
 
         {/* Scrollable content */}
-        <main
-          id="parent-main-content"
-          ref={mainRef}
-          className="flex-1 overflow-y-auto p-3 sm:p-5 space-y-4"
-          onClick={() => childMenuOpen && setChildMenuOpen(false)}
-        >
+        <main id="parent-main-content" ref={mainRef} className="flex-1 overflow-y-auto p-3 sm:p-5 space-y-4" onClick={() => childMenuOpen && setChildMenuOpen(false)}>
 
-          {/* ── Section anchor: Overview ── */}
-          <div id="section-overview" />
+          {/* Page title (not shown for Overview — its own greeting bar already orients) */}
+          {activePage !== 'overview' && (
+            <h2 id="active-page-title" className="text-base font-bold text-slate-800">{activePageLabel}</h2>
+          )}
 
-          {/* ── Child banner card ───────────────────────────────── */}
+          {/* Child banner — shown on every page, same identity strip */}
           {activeChild && (
-            <div
-              id="child-banner"
-              className="rounded-xl p-[18px] flex items-center gap-[18px] border"
-              style={{ background: 'linear-gradient(135deg, #1c1917, #292524)', borderColor: '#44403c' }}
-            >
-              <div
-                id="child-banner-avatar"
-                className="w-[52px] h-[52px] rounded-full flex items-center justify-center text-white text-xl font-bold flex-shrink-0"
-                style={{ background: 'linear-gradient(135deg, #f59e0b, #d97706)' }}
-              >
+            <div id="child-banner" className="rounded-xl p-[18px] flex items-center gap-[18px] border" style={{ background: 'linear-gradient(135deg, #1c1917, #292524)', borderColor: '#44403c' }}>
+              <div id="child-banner-avatar" className="w-[52px] h-[52px] rounded-full flex items-center justify-center text-white text-xl font-bold flex-shrink-0" style={{ background: avatarGradient }}>
                 {childInitials}
               </div>
               <div className="flex-1 min-w-0">
-                <div id="child-banner-name" className="text-white font-bold text-base leading-tight">
-                  {activeChild.name}
-                </div>
+                <div id="child-banner-name" className="text-white font-bold text-base leading-tight">{activeChild.name}</div>
                 <div id="child-banner-meta" className="text-[12px] mt-1" style={{ color: '#a8a29e' }}>
                   {activeChild.className}
                   {activeChild.admissionNumber ? ` · Adm. No. ${activeChild.admissionNumber}` : ''}
@@ -558,21 +1190,15 @@ export default function ParentDashboard() {
               </div>
               <div className="flex gap-5 flex-shrink-0">
                 <div id="child-banner-attendance" className="text-center">
-                  <div className="text-[20px] font-extrabold" style={{ color: '#f59e0b' }}>
-                    {d ? `${d.attendance?.percentage ?? 0}%` : '—'}
-                  </div>
+                  <div className="text-[20px] font-extrabold" style={{ color: primary }}>{d ? `${d.attendance?.percentage ?? 0}%` : '—'}</div>
                   <div className="text-[10px]" style={{ color: '#a8a29e' }}>Attendance</div>
                 </div>
                 <div id="child-banner-average" className="text-center">
-                  <div className="text-[20px] font-extrabold text-green-400">
-                    {myAvg != null ? `${myAvg}%` : '—'}
-                  </div>
+                  <div className="text-[20px] font-extrabold text-green-400">{myAvg != null ? `${myAvg}%` : '—'}</div>
                   <div className="text-[10px]" style={{ color: '#a8a29e' }}>Average</div>
                 </div>
                 <div id="child-banner-balance" className="text-center">
-                  <div className="text-[20px] font-extrabold" style={{ color: feePaid ? '#fb923c' : '#f87171' }}>
-                    {d ? feeDisplay : '—'}
-                  </div>
+                  <div className="text-[20px] font-extrabold" style={{ color: feePaid ? '#fb923c' : '#f87171' }}>{d ? feeDisplay : '—'}</div>
                   <div className="text-[10px]" style={{ color: '#a8a29e' }}>Balance</div>
                 </div>
               </div>
@@ -586,766 +1212,16 @@ export default function ParentDashboard() {
             </div>
           )}
 
-          {/* ── Main content (only when child data loaded) ──────── */}
+          {/* Active page body */}
           {d && !loadingChild && (
             <AnimatePresence mode="wait">
               <motion.div
-                key={`child-view-${activeChildId}`}
-                id={`child-view-${activeChildId}`}
+                key={`page-${activePage}-${activeChildId}`}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
-                className="space-y-4"
               >
-
-                {/* ── Two-column grid ─────────────────────────────── */}
-                <div className="grid grid-cols-1 lg:[grid-template-columns:1fr_380px] gap-3.5">
-
-                  {/* LEFT: Fee Statement */}
-                  <div id="section-fees" className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden">
-                    <div className="px-[18px] py-3.5 border-b border-slate-100 flex items-center justify-between">
-                      <div>
-                        <h2 className="text-[13px] font-bold text-slate-900">Fee Statement — {termLabel}</h2>
-                        <p className="text-[11px] text-slate-400 mt-0.5">
-                          {d.school?.name ?? 'School'} · {d.school?.academicYear ?? ''}
-                        </p>
-                      </div>
-                      <span
-                        id="fee-status-badge"
-                        className={`text-[11px] font-semibold px-2.5 py-[5px] rounded-full ${
-                          feePaid
-                            ? 'text-emerald-700 bg-emerald-50 border border-emerald-200'
-                            : 'text-red-700 bg-red-50 border border-red-200'
-                        }`}
-                      >
-                        {feePaid ? 'Cleared' : 'Balance Due'}
-                      </span>
-                    </div>
-
-                    {/* Fee breakdown table */}
-                    <div className="px-[18px] py-3.5">
-                      {d.feeBreakdown?.length > 0 ? (
-                        /* Structured breakdown if API provides it */
-                        <table className="w-full text-[12px] mb-4" id="fee-breakdown-table">
-                          <thead>
-                            <tr className="border-b border-slate-100">
-                              <th className="text-left py-2 text-[11px] font-semibold text-slate-400 uppercase tracking-[0.04em]">Item</th>
-                              <th className="text-right py-2 text-[11px] font-semibold text-slate-400 uppercase tracking-[0.04em]">Amount</th>
-                              <th className="text-right py-2 text-[11px] font-semibold text-slate-400 uppercase tracking-[0.04em]">Paid</th>
-                              <th className="text-right py-2 text-[11px] font-semibold text-slate-400 uppercase tracking-[0.04em]">Balance</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {d.feeBreakdown.map((item, i) => (
-                              <tr
-                                key={`fee-item-${item.id ?? i}`}
-                                id={`fee-item-${item.id ?? i}`}
-                                className="border-b border-slate-50 last:border-0"
-                              >
-                                <td className="py-2.5 text-slate-700">{item.label ?? item.name}</td>
-                                <td className="py-2.5 text-right text-slate-700">
-                                  KSh {(item.amount ?? 0).toLocaleString()}
-                                </td>
-                                <td className="py-2.5 text-right font-semibold text-emerald-600">
-                                  KSh {(item.paid ?? item.amount ?? 0).toLocaleString()}
-                                </td>
-                                <td className="py-2.5 text-right font-semibold text-emerald-600">
-                                  {(item.balance ?? 0) === 0 ? 'Nil' : `KSh ${item.balance.toLocaleString()}`}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      ) : (
-                        /* Summary view when no breakdown — show balance and payments */
-                        <div id="fee-summary-view" className="space-y-2 mb-4">
-                          <div className="flex items-center justify-between py-2 border-b border-slate-50">
-                            <span className="text-[12px] text-slate-600">Total Fees</span>
-                            <span className="text-[12px] font-semibold text-slate-800">
-                              {d.termFeeTotal
-                                ? `KSh ${d.termFeeTotal.toLocaleString()}`
-                                : '—'
-                              }
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between py-2 border-b border-slate-50">
-                            <span className="text-[12px] text-slate-600">Amount Paid</span>
-                            <span className="text-[12px] font-semibold text-emerald-600">
-                              {d.termFeeTotal && d.feeBalance != null
-                                ? `KSh ${(d.termFeeTotal - d.feeBalance).toLocaleString()}`
-                                : '—'
-                              }
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between py-2">
-                            <span className="text-[12px] text-slate-600">Outstanding Balance</span>
-                            <span className={`text-[12px] font-bold ${feePaid ? 'text-emerald-600' : 'text-red-600'}`}>
-                              {feeDisplay}
-                            </span>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Cleared / balance notice */}
-                      {feePaid ? (
-                        <div
-                          id="fee-cleared-notice"
-                          className="bg-emerald-50 rounded-[8px] px-3.5 py-2.5 border border-emerald-200"
-                        >
-                          <div className="text-[12px] font-bold text-emerald-700">✓ All fees paid for this term</div>
-                          {d.recentPayments?.[0] && (
-                            <div className="text-[11px] text-emerald-600 mt-1">
-                              Last payment: KSh {(d.recentPayments[0].amount ?? 0).toLocaleString()}
-                              {d.recentPayments[0].paidAt
-                                ? ` via M-Pesa on ${_fmtDate(d.recentPayments[0].paidAt)}`
-                                : ''}
-                              {d.recentPayments[0].mpesaCode
-                                ? ` · Ref: ${d.recentPayments[0].mpesaCode}`
-                                : ''}
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <div
-                          id="fee-balance-notice"
-                          className="bg-red-50 rounded-[8px] px-3.5 py-2.5 border border-red-200"
-                        >
-                          <div className="text-[12px] font-bold text-red-700">
-                            Outstanding: {feeDisplay}
-                          </div>
-                          {d.nextFeeDueDate && (
-                            <div className="text-[11px] text-red-600 mt-1">
-                              Due by {_fmtDate(d.nextFeeDueDate)}
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Recent payments list */}
-                      {d.recentPayments?.length > 0 && (
-                        <div id="recent-payments-list" className="mt-4 border-t border-slate-100 pt-3 space-y-2">
-                          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.04em] mb-2">
-                            Recent Payments
-                          </p>
-                          {d.recentPayments.map((p, i) => (
-                            <div
-                              key={`payment-${p.id ?? i}`}
-                              id={`payment-item-${p.id ?? i}`}
-                              className="flex items-center justify-between"
-                            >
-                              <div>
-                                <p className="text-[12px] font-semibold text-slate-800">
-                                  KSh {(p.amount ?? 0).toLocaleString()}
-                                </p>
-                                {p.mpesaCode && (
-                                  <p className="text-[10px] text-slate-400 font-mono">{p.mpesaCode}</p>
-                                )}
-                              </div>
-                              <span className="text-[11px] text-slate-400">
-                                {p.paidAt
-                                  ? new Date(p.paidAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
-                                  : '—'
-                                }
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* RIGHT column */}
-                  <div className="flex flex-col gap-3.5">
-
-                    {/* Grades */}
-                    <div id="section-grades" className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden">
-                      <div className="px-[18px] py-3.5 border-b border-slate-100 flex items-center justify-between">
-                        <h2 className="text-[13px] font-bold text-slate-900">
-                          {activeChild?.name?.split(' ')[0]}'s Grades — {termLabel}
-                        </h2>
-                        {activeChild?.className && (
-                          <span
-                            id="grades-class-badge"
-                            className="text-[11px] font-semibold text-blue-600 bg-blue-50 px-2.5 py-[5px] rounded-full"
-                          >
-                            {activeChild.className}
-                          </span>
-                        )}
-                      </div>
-                      <div id="grades-list" className="px-[18px] py-3.5 space-y-3.5">
-                        {/* d.subjectMarks — the child's real per-subject scores from
-                           their most recently PUBLISHED report card. Used to show
-                           curriculum coverage % here instead (mislabeled as grades)
-                           — that data is still shown, correctly labelled, in
-                           Curriculum Coverage below. */}
-                        {!d.subjectMarks?.length ? (
-                          <p id="grades-empty" className="text-[12px] text-slate-400 text-center py-4">
-                            No published report card yet
-                          </p>
-                        ) : (
-                          d.subjectMarks.map((sub, i) => (
-                            <GradeBar
-                              key={`grade-${sub.subjectId ?? i}`}
-                              id={`grade-bar-${sub.subjectId ?? i}`}
-                              label={sub.grade ? `${sub.subjectName} · ${sub.grade}` : sub.subjectName}
-                              pct={sub.finalScore ?? 0}
-                              delay={i * 0.07}
-                            />
-                          ))
-                        )}
-                        {myAvg != null && d.subjectMarks?.length > 0 && (
-                          <div
-                            id="grades-class-avg-note"
-                            className="mt-2 text-[11px] text-slate-500 px-3 py-2 bg-slate-50 rounded-[7px]"
-                          >
-                            Overall average: <span className="font-bold text-indigo-600">{myAvg}%</span>
-                            {d.classAverage != null && (
-                              <> · Class average: <span className="font-bold">{d.classAverage}%</span></>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Recent Messages / Announcements */}
-                    <div id="section-messages" className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden">
-                      <div className="px-[18px] py-3.5 border-b border-slate-100 flex items-center justify-between">
-                        <h2 className="text-[13px] font-bold text-slate-900">Recent School Messages</h2>
-                        {unreadCount > 0 && (
-                          <span
-                            id="messages-unread-badge"
-                            className="text-[11px] font-semibold text-amber-600 bg-amber-50 px-2.5 py-[5px] rounded-full"
-                          >
-                            {unreadCount} unread
-                          </span>
-                        )}
-                      </div>
-                      <div id="messages-list" className="px-[18px] py-3.5">
-                        {!d.announcements?.length ? (
-                          <p id="messages-empty" className="text-[12px] text-slate-400 text-center py-4">
-                            No messages yet
-                          </p>
-                        ) : (
-                          <div className="space-y-3.5">
-                            {d.announcements.map((ann, i) => {
-                              const isFirst = i === 0;
-                              return (
-                                <div
-                                  key={`ann-${ann.id ?? i}`}
-                                  id={`announcement-${ann.id ?? i}`}
-                                  className="flex items-start gap-3"
-                                >
-                                  <div
-                                    className="w-2 h-2 rounded-full mt-[5px] flex-shrink-0"
-                                    style={{ background: isFirst ? '#4f46e5' : '#22c55e' }}
-                                  />
-                                  <div className="flex-1 min-w-0">
-                                    <p className="text-[12px] font-semibold text-slate-800 leading-snug">
-                                      {ann.title}
-                                    </p>
-                                    {ann.body && (
-                                      <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">{ann.body}</p>
-                                    )}
-                                    <p className="text-[10px] text-slate-400 mt-1">
-                                      {ann.createdAt
-                                        ? new Date(ann.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
-                                        : '—'}
-                                      {isFirst && unreadCount > 0 && (
-                                        <> · <span className="font-semibold text-amber-500">Unread</span></>
-                                      )}
-                                    </p>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                  </div>
-                  {/* end RIGHT column */}
-                </div>
-                {/* end two-column grid */}
-
-                {/* ── Attendance detail ────────────────────────────── */}
-                <div id="section-attendance" className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden">
-                  <div className="px-[18px] py-3.5 border-b border-slate-100 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Activity size={14} className="text-emerald-500" />
-                      <h2 className="text-[13px] font-bold text-slate-900">Attendance</h2>
-                    </div>
-                    <span
-                      id="attendance-pct-badge"
-                      className={`text-[11px] font-semibold px-2.5 py-[5px] rounded-full ${
-                        (d.attendance?.percentage ?? 0) >= 80
-                          ? 'text-emerald-700 bg-emerald-50'
-                          : 'text-amber-700 bg-amber-50'
-                      }`}
-                    >
-                      {d.attendance?.percentage ?? 0}% this term
-                    </span>
-                  </div>
-                  <div className="px-[18px] py-4 grid grid-cols-2 sm:grid-cols-4 gap-4">
-                    {[
-                      { id: 'att-present',  label: 'Present',   value: d.attendance?.present  ?? 0, color: 'bg-emerald-500', text: 'text-emerald-600' },
-                      { id: 'att-absent',   label: 'Absent',    value: d.attendance?.absent   ?? 0, color: 'bg-red-400',     text: 'text-red-600'     },
-                      { id: 'att-late',     label: 'Late',      value: d.attendance?.late     ?? 0, color: 'bg-amber-400',   text: 'text-amber-600'   },
-                      { id: 'att-total',    label: 'Total Days', value: d.attendance?.total   ?? 0, color: 'bg-slate-300',   text: 'text-slate-700'   },
-                    ].map(({ id, label, value, color, text }) => (
-                      <div key={id} id={id} className="text-center">
-                        <div className={`text-[22px] font-extrabold ${text}`}>{value}</div>
-                        <div className="text-[11px] text-slate-500 mt-0.5">{label}</div>
-                        <div className="h-1.5 bg-slate-100 rounded-full mt-2 overflow-hidden">
-                          <div
-                            className={`h-full rounded-full ${color}`}
-                            style={{
-                              width: d.attendance?.total
-                                ? `${Math.round((value / d.attendance.total) * 100)}%`
-                                : '0%',
-                            }}
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  {/* Recent attendance records */}
-                  {d.recentAttendance?.length > 0 && (
-                    <div id="recent-attendance-list" className="px-[18px] pb-4 space-y-1.5 border-t border-slate-100 pt-3">
-                      <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.04em] mb-2">Recent Records</p>
-                      {d.recentAttendance.map((rec, i) => (
-                        <div
-                          key={`att-rec-${rec.id ?? i}`}
-                          id={`att-rec-${rec.id ?? i}`}
-                          className="flex items-center justify-between"
-                        >
-                          <span className="text-[11px] text-slate-500">
-                            {rec.date
-                              ? new Date(rec.date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
-                              : '—'
-                            }
-                          </span>
-                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full capitalize
-                            ${rec.status === 'present' ? 'bg-emerald-50 text-emerald-700'
-                            : rec.status === 'absent'  ? 'bg-red-50 text-red-700'
-                            : 'bg-amber-50 text-amber-700'}`}>
-                            {rec.status}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* ── Today's timetable ─────────────────────────────── */}
-                {d.timetableToday?.length > 0 && (
-                  <div id="section-timetable" className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden">
-                    <div className="px-[18px] py-3.5 border-b border-slate-100 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Calendar size={14} className="text-sky-500" />
-                        <h2 className="text-[13px] font-bold text-slate-900">Today's Timetable</h2>
-                      </div>
-                      <span className="text-[11px] text-slate-400">
-                        {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' })}
-                      </span>
-                    </div>
-                    {d.school?.emergencyOnlineMode && (
-                      <div id="emergency-online-banner" className="mx-4 mt-3 flex items-center gap-2 px-3 py-2 rounded-xl bg-sky-50 border border-sky-200">
-                        <MonitorPlay size={12} className="text-sky-600 flex-shrink-0" />
-                        <p className="text-[11px] font-semibold text-sky-700">Emergency Online Learning — all lessons are online today</p>
-                      </div>
-                    )}
-                    <div id="timetable-slots" className="divide-y divide-slate-50">
-                      {d.timetableToday.map((slot, i) => {
-                        const start = _timeToMins(slot.startTime);
-                        const end   = _timeToMins(slot.endTime);
-                        const isNow  = start <= nowMins && nowMins < end;
-                        const isNext = !activeSlot && slot === nextSlot;
-                        return (
-                          <div
-                            key={`tt-${slot.id ?? i}`}
-                            id={`timetable-slot-${slot.id ?? i}`}
-                            className={`flex items-center gap-3 px-4 py-3 transition-colors
-                              ${isNow  ? 'bg-amber-50 border-l-[3px] border-l-amber-500' : ''}
-                              ${isNext ? 'bg-slate-50' : ''}
-                            `}
-                          >
-                            <div className="text-center min-w-[60px] flex-shrink-0">
-                              {isNow
-                                ? <div className="text-[10px] font-bold text-amber-700 uppercase">NOW</div>
-                                : isNext
-                                ? <div className="text-[10px] font-bold text-slate-500 uppercase">NEXT</div>
-                                : null
-                              }
-                              <div className="text-[10px] text-slate-400">{slot.startTime}</div>
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className={`text-[13px] font-bold truncate ${isNow ? 'text-slate-900' : 'text-slate-700'}`}>
-                                {slot.subjectName}
-                              </p>
-                              <p className="text-[11px] text-slate-400 truncate mt-0.5">
-                                {[slot.room, slot.teacherName].filter(Boolean).join(' · ')}
-                              </p>
-                            </div>
-                            {isNow && (
-                              <span className="text-[11px] font-semibold text-amber-600 bg-amber-100 px-2.5 py-[4px] rounded-full flex-shrink-0">
-                                In progress
-                              </span>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {/* ── Curriculum coverage ──────────────────────────── */}
-                {d.lessonsCoverage?.length > 0 && (
-                  <div id="section-curriculum" className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden">
-                    <div className="px-[18px] py-3.5 border-b border-slate-100 flex items-center gap-2">
-                      <BookCheck size={14} className="text-indigo-500" />
-                      <h2 className="text-[13px] font-bold text-slate-900">Curriculum Coverage</h2>
-                    </div>
-                    <div id="curriculum-list" className="px-[18px] py-4 space-y-4">
-                      {d.lessonsCoverage.map((sub, i) => (
-                        <div key={`cov-${sub.subjectId ?? i}`} id={`coverage-subject-${sub.subjectId ?? i}`}>
-                          <div className="flex items-center justify-between mb-1.5">
-                            <div>
-                              <span className="text-[13px] font-medium text-slate-800">{sub.subjectName}</span>
-                              <span className="text-[10px] text-slate-400 ml-2">
-                                {sub.coveredTopics}/{sub.totalTopics} topics
-                              </span>
-                            </div>
-                            <span className={`text-[12px] font-bold ${
-                              sub.percentage >= 80 ? 'text-emerald-600' :
-                              sub.percentage >= 50 ? 'text-amber-600'   : 'text-red-500'
-                            }`}>
-                              {sub.percentage}%
-                            </span>
-                          </div>
-                          <GradeBar
-                            id={`coverage-bar-${sub.subjectId ?? i}`}
-                            label=""
-                            pct={sub.percentage ?? 0}
-                            delay={i * 0.07}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* ── This Week's Snapshot ────────────────────────────
-                   Auto-generated every Saturday — see weekly-snapshot-
-                   cron.js. `latestWeek === undefined` means "checked,
-                   none generated yet" (vs. `null` = "still loading"),
-                   so the card only ever appears once there's something
-                   real to show — no empty-state clutter here, the full
-                   history lives behind the eventual dedicated view. */}
-                {latestWeek && (
-                  <div id="section-weekly-snapshot" className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden">
-                    <div className="px-[18px] py-3.5 border-b border-slate-100 flex items-center gap-2">
-                      <CalendarCheck size={14} className="text-sky-500" />
-                      <h2 className="text-[13px] font-bold text-slate-900">This Week's Snapshot</h2>
-                    </div>
-                    <div className="px-[18px] py-4 flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-[12px] font-semibold text-slate-700">
-                          Week of {latestWeek.weekStart} – {latestWeek.weekEnd}
-                        </p>
-                        <p className="text-[10px] text-slate-400">
-                          Topics, assignments, attendance, behaviour, and more
-                        </p>
-                      </div>
-                      <button
-                        id="download-weekly-snapshot"
-                        onClick={() => {
-                          setDlError('');
-                          setDownloading(`snap-${latestWeek.weekStart}`);
-                          _downloadSnapshot(activeChildId, latestWeek.weekStart, `${activeChild?.name ?? 'child'}-${latestWeek.weekStart}`)
-                            .catch(e => setDlError(e.message))
-                            .finally(() => setDownloading(null));
-                        }}
-                        disabled={downloading === `snap-${latestWeek.weekStart}`}
-                        className="flex items-center gap-1 text-[10px] font-semibold text-sky-700 bg-sky-50 hover:bg-sky-100 border border-sky-200 px-2.5 py-1 rounded-full transition disabled:opacity-50 shrink-0"
-                      >
-                        {downloading === `snap-${latestWeek.weekStart}`
-                          ? <span className="w-3 h-3 border-2 border-sky-500 border-t-transparent rounded-full animate-spin" />
-                          : <Download size={10} />
-                        }
-                        {downloading === `snap-${latestWeek.weekStart}` ? 'Saving…' : 'PDF'}
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* ── Report cards ─────────────────────────────────── */}
-                {d.reportCards?.length > 0 && (
-                  <div id="section-reports" className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden">
-                    <div className="px-[18px] py-3.5 border-b border-slate-100 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <FileText size={14} className="text-violet-500" />
-                        <h2 className="text-[13px] font-bold text-slate-900">Report Cards</h2>
-                      </div>
-                      {rcLocked && (
-                        <span className="text-[11px] font-semibold text-amber-600 bg-amber-50 px-2.5 py-[5px] rounded-full">
-                          Fee-locked
-                        </span>
-                      )}
-                    </div>
-                    <div className="px-[18px] py-4">
-                      {rcLocked && (
-                        <div id="rc-locked-notice" className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-[11px] text-amber-800 mb-4">
-                          <Lock size={11} className="mt-0.5 flex-shrink-0 text-amber-500" />
-                          <span>
-                            Locked — <strong>{d.feeClearancePct}%</strong> fees cleared,{' '}
-                            minimum <strong>{rcThreshold}%</strong> required.
-                          </span>
-                        </div>
-                      )}
-                      {dlError && <p id="dl-error-msg" className="text-[11px] text-red-600 mb-3">{dlError}</p>}
-                      <div className="grid sm:grid-cols-2 gap-2.5">
-                        {d.reportCards.map(rc => {
-                          const rcId = rc.id ?? rc._id?.toString();
-                          const lbl  = `${rc.academicYear}-T${rc.termNumber}`;
-                          const busy = downloading === rcId;
-                          return (
-                            <div
-                              key={`rc-${rcId}`}
-                              id={`report-card-${rcId}`}
-                              className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-slate-200 bg-slate-50"
-                            >
-                              <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${rcLocked ? 'bg-slate-100' : 'bg-violet-50'}`}>
-                                {rcLocked
-                                  ? <Lock size={12} className="text-slate-400" />
-                                  : <GraduationCap size={12} className="text-violet-600" />
-                                }
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-[12px] font-semibold text-slate-700">
-                                  {rc.academicYear} · Term {rc.termNumber}
-                                </p>
-                                {rc.averageScore != null && (
-                                  <p className="text-[10px] text-slate-400">Avg: {rc.averageScore}%</p>
-                                )}
-                              </div>
-                              {rcLocked ? (
-                                <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
-                                  Locked
-                                </span>
-                              ) : (
-                                <button
-                                  id={`download-rc-${rcId}`}
-                                  onClick={() => {
-                                    setDlError('');
-                                    setDownloading(rcId);
-                                    _downloadRC(rcId, lbl)
-                                      .catch(e => setDlError(e.message))
-                                      .finally(() => setDownloading(null));
-                                  }}
-                                  disabled={busy}
-                                  className="flex items-center gap-1 text-[10px] font-semibold text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 px-2.5 py-1 rounded-full transition disabled:opacity-50"
-                                >
-                                  {busy
-                                    ? <span className="w-3 h-3 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
-                                    : <Download size={10} />
-                                  }
-                                  {busy ? 'Saving…' : 'PDF'}
-                                </button>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* ── Upcoming exams ────────────────────────────────── */}
-                {d.upcomingExams?.length > 0 && (
-                  <div id="section-exams" className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden">
-                    <div className="px-[18px] py-3.5 border-b border-slate-100 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <FileText size={14} className="text-rose-500" />
-                        <h2 className="text-[13px] font-bold text-slate-900">Upcoming Exams</h2>
-                      </div>
-                      <span className="text-[11px] font-semibold text-rose-600 bg-rose-50 px-2.5 py-[5px] rounded-full">
-                        {d.upcomingExams.length} scheduled
-                      </span>
-                    </div>
-                    <div id="exams-list" className="divide-y divide-slate-50">
-                      {d.upcomingExams.map((ex, i) => {
-                        const days = _daysUntil(ex.date);
-                        const urg  = days === 0 ? 'text-red-600 bg-red-50' : days != null && days <= 3 ? 'text-amber-600 bg-amber-50' : 'text-slate-500 bg-slate-50';
-                        return (
-                          <div
-                            key={`exam-${ex.id ?? i}`}
-                            id={`exam-item-${ex.id ?? i}`}
-                            className="flex items-center gap-3 px-[18px] py-3"
-                          >
-                            <div className={`w-10 h-10 rounded-xl flex flex-col items-center justify-center text-center flex-shrink-0 ${urg}`}>
-                              <p className="text-sm font-bold leading-none">
-                                {days === 0 ? '!' : (days ?? '?')}
-                              </p>
-                              {days != null && days > 0 && (
-                                <p className="text-[9px]">day{days !== 1 ? 's' : ''}</p>
-                              )}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-[13px] font-semibold text-slate-800 truncate">{ex.subjectName}</p>
-                              <p className="text-[11px] text-slate-400">
-                                {_weekday(ex.date)}, {_fmtDate(ex.date)}
-                                {ex.startTime ? ` · ${ex.startTime}` : ''}
-                                {ex.type ? ` · ${ex.type}` : ''}
-                              </p>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {/* ── Borrowed library books ────────────────────────── */}
-                {d.borrowedBooks?.length > 0 && (
-                  <div id="section-library" className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden">
-                    <div className="px-[18px] py-3.5 border-b border-slate-100 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <BookOpen size={14} className="text-blue-500" />
-                        <h2 className="text-[13px] font-bold text-slate-900">Borrowed Books</h2>
-                      </div>
-                      <span className="text-[11px] font-semibold text-blue-600 bg-blue-50 px-2.5 py-[5px] rounded-full">
-                        {d.borrowedBooks.length} out
-                      </span>
-                    </div>
-                    <div id="library-loans-list" className="divide-y divide-slate-50">
-                      {d.borrowedBooks.map((loan, i) => {
-                        const days = _daysUntil(loan.dueDate);
-                        const isLost = loan.status === 'lost';
-                        const isOverdue = !isLost && days != null && days < 0;
-                        const urg = isLost ? 'text-slate-600 bg-slate-100' : isOverdue ? 'text-red-600 bg-red-50' : days != null && days <= 3 ? 'text-amber-600 bg-amber-50' : 'text-emerald-600 bg-emerald-50';
-                        return (
-                          <div key={loan.id ?? i} className="flex items-center gap-3 px-[18px] py-3">
-                            <div className={`w-10 h-10 rounded-xl flex flex-col items-center justify-center text-center flex-shrink-0 ${urg}`}>
-                              <p className="text-sm font-bold leading-none">{isLost ? '!' : isOverdue ? '!' : (days ?? '?')}</p>
-                              {!isLost && days != null && days > 0 && <p className="text-[9px]">day{days !== 1 ? 's' : ''}</p>}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-[13px] font-semibold text-slate-800 truncate">{loan.bookTitle}</p>
-                              <p className="text-[11px] text-slate-400">
-                                {isLost
-                                  ? 'Reported lost — see the library for next steps'
-                                  : isOverdue
-                                  ? `Overdue by ${Math.abs(days)} day${Math.abs(days) === 1 ? '' : 's'}`
-                                  : days === 0
-                                  ? 'Due today'
-                                  : `Due ${_fmtDate(loan.dueDate)}`}
-                              </p>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {/* ── School events / calendar ──────────────────────── */}
-                {d.upcomingEvents?.length > 0 && (
-                  <div id="section-calendar" className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden">
-                    <div className="px-[18px] py-3.5 border-b border-slate-100 flex items-center gap-2">
-                      <Calendar size={14} className="text-blue-500" />
-                      <h2 className="text-[13px] font-bold text-slate-900">School Calendar</h2>
-                    </div>
-                    <div id="events-list" className="divide-y divide-slate-50">
-                      {d.upcomingEvents.map((ev, i) => {
-                        const days = _daysUntil(ev.date);
-                        return (
-                          <div
-                            key={`ev-${ev.id ?? i}`}
-                            id={`event-item-${ev.id ?? i}`}
-                            className="flex items-center gap-3 px-[18px] py-3"
-                          >
-                            <div
-                              className="w-2 h-2 rounded-full flex-shrink-0"
-                              style={{ background: ev.color ?? '#6366f1' }}
-                            />
-                            <div className="flex-1 min-w-0">
-                              <p className="text-[13px] font-medium text-slate-800 truncate">{ev.title}</p>
-                              <p className="text-[11px] text-slate-400">
-                                {_weekday(ev.date)}, {_fmtDate(ev.date)}
-                              </p>
-                            </div>
-                            <span className="text-[11px] text-slate-400 flex-shrink-0">
-                              {days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : `${days}d`}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {/* ── Behaviour & Rewards ──────────────────────────── */}
-                {d.behaviourSummary && (
-                  <div id="section-behaviour" className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden">
-                    <div className="px-[18px] py-3.5 border-b border-slate-100 flex items-center gap-2">
-                      <Star size={14} className="text-amber-500" />
-                      <h2 className="text-[13px] font-bold text-slate-900">Behaviour &amp; Rewards</h2>
-                    </div>
-                    <div className="px-[18px] py-4 flex items-center gap-4">
-                      <div className="w-14 h-14 rounded-xl bg-amber-50 border border-amber-100 flex items-center justify-center flex-shrink-0">
-                        <span className="text-lg font-extrabold text-amber-600">+{totalPoints}</span>
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-[13px] font-semibold text-slate-800">Behaviour Points</p>
-                        <BehaviourBadge level={badgeLevel} />
-                        {latestReward && (
-                          <div className="mt-2 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-                            <p className="text-[10px] font-semibold text-amber-600 uppercase tracking-wide">Latest Reward</p>
-                            <p className="text-[12px] font-medium text-slate-800 mt-0.5">
-                              {latestReward.title || latestReward.category || 'Reward'}
-                            </p>
-                          </div>
-                        )}
-                        {latestComment?.description && (
-                          <div className="mt-2 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
-                            <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Teacher Comment</p>
-                            <p className="text-[11px] text-slate-700 italic mt-0.5">"{latestComment.description}"</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* ── Full announcements ────────────────────────────── */}
-                {d.announcements?.length > 0 && (
-                  <div id="section-announcements" className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden">
-                    <div className="px-[18px] py-3.5 border-b border-slate-100 flex items-center gap-2">
-                      <Bell size={14} className="text-amber-500" />
-                      <h2 className="text-[13px] font-bold text-slate-900">Announcements</h2>
-                    </div>
-                    <div id="announcements-list" className="divide-y divide-slate-50">
-                      {d.announcements.map((ann, i) => (
-                        <div
-                          key={`full-ann-${ann.id ?? i}`}
-                          id={`full-announcement-${ann.id ?? i}`}
-                          className="px-[18px] py-3.5"
-                        >
-                          <p className="text-[13px] font-semibold text-slate-800 mb-0.5">{ann.title}</p>
-                          {ann.body && (
-                            <p className="text-[12px] text-slate-500 leading-relaxed">{ann.body}</p>
-                          )}
-                          <p className="text-[10px] text-slate-400 mt-1.5">{_fmtDate(ann.createdAt)}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Bottom spacer */}
-                <div className="h-4" />
-
+                <ActivePageBody />
               </motion.div>
             </AnimatePresence>
           )}

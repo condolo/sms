@@ -13,6 +13,8 @@ const { authMiddleware } = require('../middleware/auth');
 const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { isTimetablePublished, publishedReader } = require('../utils/timetable-publish');
+const { resolveCurrentPeriod } = require('./academic-config');
+const { _getMpesaConfig } = require('./mpesa');
 const { ok, E }          = require('../utils/response');
 // Weekly Snapshot's read logic is shared with weekly-snapshots.js's own
 // staff-facing routes — see that file's _findAuthorizedStudent header
@@ -169,8 +171,18 @@ router.get('/dashboard/:childId', authMiddleware, async (req, res) => {
       ? [{ streamId: student.streamId }, { streamId: { $exists: false } }]
       : [{ streamId: { $exists: false } }];
 
-    const school       = await Schools.findOne({ id: schoolId }).select('academicYear name portalConfig').lean();
-    const academicYear = school?.academicYear || '';
+    // Live-resolved, not the schools.academicYear cached field — that
+    // field is only ever written by academic-config.js's year-transition
+    // endpoint as a backward-compat sync and goes stale the moment that
+    // sync is skipped or a year's isCurrent flag changes any other way.
+    // Same staleness class report-cards.js's _resolveTermScope was
+    // written to fix; this dashboard had the old, unfixed version of it.
+    const school = await Schools.findOne({ id: schoolId }).select('name portalConfig mpesa').lean();
+    const academicYears = await tenantModel('academic_years', tenantContext(req)).find({ schoolId }).lean();
+    const { year: currentYearDoc, term: currentTermDoc, termNumber: currentTermNumber } = resolveCurrentPeriod(academicYears);
+    const academicYear = currentYearDoc?.name || '';
+    const currentTerm  = currentTermDoc?.name || (currentTermNumber ? `Term ${currentTermNumber}` : '');
+    const mpesaEnabled = !!_getMpesaConfig(school);
 
     // ── Attendance ───────────────────────────────────────────
     const attRecords = await Attendance.find({ schoolId, studentId: childId, academicYear })
@@ -363,7 +375,7 @@ router.get('/dashboard/:childId', authMiddleware, async (req, res) => {
         gender:          student.gender,
         status:          student.status,
       },
-      school:             { name: school?.name, academicYear, portalConfig: school?.portalConfig || null },
+      school:             { name: school?.name, academicYear, currentTerm, portalConfig: school?.portalConfig || null, mpesaEnabled },
       attendance:         attSummary,
       recentAttendance,
       feeBalance,
