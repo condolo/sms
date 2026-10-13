@@ -4,8 +4,8 @@
 
    Exported functions are used by:
      - server/routes/report-cards.js  (report generation)
-     - server/routes/grades.js        (gradebook aggregation)
-     - Future: analytics, student portal, dashboards
+     - server/routes/growth-profile.js, server/routes/analytics.js
+     - Future: student portal, dashboards
 
    DO NOT duplicate these calculations in individual routes.
    Drift between surfaces (PDF vs dashboard vs portal) is the

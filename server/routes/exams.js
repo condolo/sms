@@ -546,11 +546,4 @@ router.get('/:id/status-history', authMiddleware, PLAN, MODGATE, rbac('exams', '
   } catch (err) { console.error('[exams/:id/status-history]', err); return E.serverError(res); }
 });
 
-/* ══════════════════════════════════════════════════════════════
-   RESULTS  (scoped to one exam, or cross-exam query)
-   ══════════════════════════════════════════════════════════════ */
-
-/* GET /api/exams/:id/results */
-
-
 module.exports = router;

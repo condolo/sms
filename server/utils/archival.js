@@ -4,7 +4,7 @@
 
    Imported by any route that needs to guard write operations
    against archived academic years:
-     - server/routes/grades.js
+     - server/routes/assessment.js
      - server/routes/exams.js
      - server/routes/report-cards.js
 
