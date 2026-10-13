@@ -10,6 +10,7 @@ import {
   streams as streamsApi,
   subjects as subjectsApi,
   reportCards as reportCardsApi,
+  rcTemplates as rcTemplatesApi,
   behaviour as behaviourApi,
   academicConfig as academicConfigApi,
 } from '@/api/client.js';
@@ -17,6 +18,7 @@ import useAuthStore from '@/store/auth.js';
 import { TERM_NUMBERS, DEFAULT_CUSTOM_TYPES } from '../constants.js';
 import { Skeleton, SelField } from './GradesPrimitives.jsx';
 import StudentReportCard from './StudentReportCard.jsx';
+import KgStudentReportCard from './KgStudentReportCard.jsx';
 import { useCurrentAcademicPeriod } from '@/hooks/useCurrentAcademicPeriod.js';
 
 export default function ReportCardsTab() {
@@ -74,6 +76,20 @@ export default function ReportCardsTab() {
   });
   const classesList = classesData?.data ?? [];
 
+  // Does this class use the Kindergarten competency-band pipeline, or
+  // the ordinary numeric one? Deliberately separate endpoints/UI below —
+  // report-cards.js's /kg/generate and /kg/publish are built around
+  // concepts (indicators, performance bands) that don't fit the numeric
+  // CA/HW/MT/ET shape, same reason the server never branches one route
+  // on class type.
+  const { data: kgTemplateData } = useQuery({
+    queryKey: ['rc-templates', 'resolve', { classId }],
+    queryFn:  () => rcTemplatesApi.resolve(classId),
+    enabled:  !!classId,
+    staleTime: 60_000,
+  });
+  const isKgClass = !!kgTemplateData?.data;
+
   // Academic years — explicit override for the term selector, same
   // "server resolves 'now' when omitted, but reachable to pick a
   // different year" posture as AssessmentAnalyticsPage.jsx.
@@ -113,12 +129,13 @@ export default function ReportCardsTab() {
   });
 
   const canQuery   = !!(classId && termNum);
-  const prevTermNum = canQuery && Number(termNum) > 1 ? Number(termNum) - 1 : null;
+  const canQueryNumeric = canQuery && !isKgClass;
+  const prevTermNum = canQueryNumeric && Number(termNum) > 1 ? Number(termNum) - 1 : null;
 
   const { data: generateData, isLoading: isGenerating, isError, error, refetch } = useQuery({
     queryKey: ['reportCards', 'generate', { classId, termNum, yearId }],
     queryFn:  () => reportCardsApi.generate({ classId, termNumber: Number(termNum), academicYearId: yearId || undefined }),
-    enabled:  canQuery,
+    enabled:  canQueryNumeric,
     staleTime: 60_000,
   });
 
@@ -130,6 +147,14 @@ export default function ReportCardsTab() {
     staleTime: 5 * 60_000,
   });
 
+  // Kindergarten pipeline — same selector state, a different endpoint.
+  const { data: kgGenerateData, isLoading: isKgGenerating, isError: isKgError, error: kgError, refetch: refetchKg } = useQuery({
+    queryKey: ['reportCards', 'kg', 'generate', { classId, termNum, yearId }],
+    queryFn:  () => reportCardsApi.kg.generate({ classId, termNumber: Number(termNum), academicYearId: yearId || undefined }),
+    enabled:  canQuery && isKgClass,
+    staleTime: 60_000,
+  });
+
   // Per-instance raw marks indexed as [studentId][subjectId][`${type}_${instance}`]
   // academicYearId included — Academic Year & Term Dependency Map, finding
   // #2 — explicit yearId (now pickable above) wins over the live-resolved
@@ -139,7 +164,7 @@ export default function ReportCardsTab() {
   const { data: instanceMarksAll } = useQuery({
     queryKey: ['assessment', 'marks', { classId, termNum, academicYearId: effectiveYearId }],
     queryFn:  () => assessmentApi.getMarks({ classId, termNumber: Number(termNum), academicYearId: effectiveYearId || undefined }),
-    enabled:  canQuery,
+    enabled:  canQueryNumeric,
     staleTime: 60_000,
     select: (res) => {
       const idx = {};
@@ -192,7 +217,7 @@ export default function ReportCardsTab() {
   // has no studentId/streamId narrowing, so the stream filter below is a
   // view-only convenience and must never look like it scopes this.
   const { mutate: publishBatch, isPending: isPublishing } = useMutation({
-    mutationFn: (override = {}) => reportCardsApi.publish({
+    mutationFn: (override = {}) => (isKgClass ? reportCardsApi.kg.publish : reportCardsApi.publish)({
       classId, termNumber: Number(termNum), academicYearId: yearId || undefined,
       ...override,
     }),
@@ -278,6 +303,9 @@ export default function ReportCardsTab() {
   const gradeScale  = config.gradeScale ?? null;
   const students    = genPayload.students ?? [];
 
+  const kgGenPayload = kgGenerateData?.data ?? {};
+  const kgStudents   = kgGenPayload.students ?? [];
+
   const selectedClass = classesList.find(c => (c.id ?? c._id) === classId);
   const className     = selectedClass?.name ?? '';
 
@@ -301,6 +329,9 @@ export default function ReportCardsTab() {
   const visibleStudents = streamId
     ? students.filter(s => studentInfoMap[s.studentId]?.streamId === streamId)
     : students;
+  const visibleKgStudents = streamId
+    ? kgStudents.filter(s => studentInfoMap[s.studentId]?.streamId === streamId)
+    : kgStudents;
 
   // Download only makes sense once something has actually been
   // published — /bulk-pdf reads report_card_snapshots directly, not the
@@ -406,7 +437,7 @@ export default function ReportCardsTab() {
             <div className="flex flex-col gap-1 ml-auto">
               <button
                 onClick={() => { setPublishError(''); setModerationBlock(null); publishBatch(); }}
-                disabled={isPublishing || !students.length}
+                disabled={isPublishing || !(isKgClass ? kgStudents.length : students.length)}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {isPublishing
@@ -458,33 +489,62 @@ export default function ReportCardsTab() {
         )}
       </div>
 
-      {/* Content area */}
+      {/* Content area — Kindergarten classes render through their own
+          generate/publish pipeline (see isKgClass above); the loading/
+          error/empty states below branch on it, not a second copy of
+          this whole block. */}
       {!canQuery ? (
         <div className="bg-white border border-slate-200 rounded-xl p-10 flex flex-col items-center gap-2">
           <FileText size={24} className="text-slate-300" />
           <p className="text-sm text-slate-500">Select a class and term to generate report cards.</p>
         </div>
-      ) : isGenerating ? (
+      ) : (isKgClass ? isKgGenerating : isGenerating) ? (
         <div className="space-y-3">
           {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-64" />)}
         </div>
-      ) : isError ? (
+      ) : (isKgClass ? isKgError : isError) ? (
         <div className="bg-white border border-red-200 rounded-xl p-8 flex flex-col items-center gap-2">
           <AlertTriangle size={20} className="text-red-400" />
-          <p className="text-sm text-slate-600">{error?.message ?? 'Failed to generate report data.'}</p>
-          <button onClick={refetch} className="text-xs font-medium text-slate-700 underline mt-1">Retry</button>
+          <p className="text-sm text-slate-600">{(isKgClass ? kgError : error)?.message ?? 'Failed to generate report data.'}</p>
+          <button onClick={() => (isKgClass ? refetchKg() : refetch())} className="text-xs font-medium text-slate-700 underline mt-1">Retry</button>
         </div>
-      ) : students.length === 0 ? (
+      ) : (isKgClass ? kgStudents : students).length === 0 ? (
         <div className="bg-white border border-slate-200 rounded-xl p-10 flex flex-col items-center gap-2">
           <ClipboardList size={24} className="text-slate-300" />
-          <p className="text-sm font-medium text-slate-600">No assessment data found</p>
-          <p className="text-xs text-slate-400">Enter marks using the CA Marks tab first.</p>
+          <p className="text-sm font-medium text-slate-600">
+            {isKgClass ? 'No indicator marks found' : 'No assessment data found'}
+          </p>
+          <p className="text-xs text-slate-400">
+            {isKgClass
+              ? "Enter marks using the Markbook's Kindergarten view first."
+              : 'Enter marks using the CA Marks tab first.'}
+          </p>
         </div>
-      ) : visibleStudents.length === 0 ? (
+      ) : (isKgClass ? visibleKgStudents : visibleStudents).length === 0 ? (
         <div className="bg-white border border-slate-200 rounded-xl p-10 flex flex-col items-center gap-2">
           <ClipboardList size={24} className="text-slate-300" />
           <p className="text-sm font-medium text-slate-600">No students in the selected stream</p>
           <button onClick={() => setStreamId('')} className="text-xs font-medium text-slate-700 underline mt-1">Clear stream filter</button>
+        </div>
+      ) : isKgClass ? (
+        <div className="space-y-4">
+          <p className="text-xs text-slate-500">
+            {visibleKgStudents.length} student{visibleKgStudents.length !== 1 ? 's' : ''} · {className}
+            {streamId && ` · ${streamsList.find(st => (st.id ?? st._id) === streamId)?.name ?? 'Stream'}`}
+            {' '}· Term {termNum} {displayAcademicYear && `· ${displayAcademicYear}`}
+          </p>
+          {visibleKgStudents.map(student => (
+            <KgStudentReportCard
+              key={student.studentId}
+              student={student}
+              className={className}
+              termNum={Number(termNum)}
+              academicYear={displayAcademicYear}
+              draftComment={commentsMap?.[student.studentId]}
+              onSaveComment={(data) => saveComment({ studentId: student.studentId, data })}
+              snapshot={snapshotsMap?.[student.studentId] ?? null}
+            />
+          ))}
         </div>
       ) : (
         <div className="space-y-4">

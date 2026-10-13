@@ -1035,6 +1035,13 @@ export const markSubmissions = {
 export const reportCards = {
   generate: (data) => _post('/report-cards/generate', data),
   publish:  (data) => _post('/report-cards/publish', data),
+  // Kindergarten / competency-band pipeline — deliberately separate
+  // endpoints (ranking/deviation/moderation don't apply the same way
+  // to indicator-based marks), not a branch of generate/publish above.
+  kg: {
+    generate: (data) => _post('/report-cards/kg/generate', data),
+    publish:  (data) => _post('/report-cards/kg/publish', data),
+  },
   snapshots: {
     list:   (params) => _get('/report-cards', params),
     get:    (id)     => _get(`/report-cards/${id}`),
