@@ -27,9 +27,11 @@ import {
   markSubmissions as markSubmissionsApi,
   reportCards as reportCardsApi,
   classSubjects as classSubjectsApi,
+  rcTemplates as rcTemplatesApi,
 } from '@/api/client.js';
 import RemindersTab   from '../grades/components/RemindersTab.jsx';
 import CAConfigTab    from '../grades/components/ConfigTab.jsx';
+import IndicatorMarkbook from './components/IndicatorMarkbook.jsx';
 import { TypePill, Toast, Skeleton } from '../grades/components/GradesPrimitives.jsx';
 import { DEFAULT_CUSTOM_TYPES, _pct, _scoreColor } from '../grades/constants.js';
 import useAuthStore from '@/store/auth.js';
@@ -848,6 +850,21 @@ function MarkbookTab({ years }) {
 
   const canQuery = !!(classId && (!needsStreamSelection || streamId || isElectiveSubject) && subjectId && selectedEntry);
 
+  /* ── Kindergarten / competency-band indicator mode ──
+     A class resolves to AT MOST one rc_template (explicit classIds
+     override, else a section default — see rc-template-scale.js). If
+     this subject is one of that template's subjects, the Markbook
+     renders IndicatorMarkbook instead of the numeric grid below — the
+     class/subject/term pickers above stay exactly the same either way. */
+  const { data: rcTemplateData } = useQuery({
+    queryKey: ['rc-templates', 'resolve', classId],
+    queryFn:  () => rcTemplatesApi.resolve(classId),
+    enabled:  !!classId,
+    staleTime: 60_000,
+  });
+  const resolvedTemplate = rcTemplateData?.data ?? null;
+  const templateSubject  = resolvedTemplate?.subjects?.find(s => s.subjectId === subjectId) ?? null;
+
   /* ── Existing marks ──
      academicYearId included in both the fetch and the query key — Academic
      Year & Term Dependency Map, finding #2. Without it, switching the year
@@ -1353,6 +1370,20 @@ function MarkbookTab({ years }) {
           <Users2 size={28} className="text-slate-300" />
           <p className="text-sm text-slate-500">No active students in {selectedClassName || 'this class'}.</p>
         </div>
+      ) : templateSubject ? (
+        <IndicatorMarkbook
+          classId={classId}
+          subjectId={subjectId}
+          streamId={activeStreamId}
+          students={students}
+          template={resolvedTemplate}
+          templateSubject={templateSubject}
+          termNumber={selectedEntry.termNumber}
+          academicYearId={selectedEntry.academicYearId}
+          isLocked={selectedEntry?.isLocked ?? false}
+          className={selectedClassName}
+          subjectName={selectedSubjectName}
+        />
       ) : (
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
           {/* Locked banner */}

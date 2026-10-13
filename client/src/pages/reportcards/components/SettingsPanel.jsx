@@ -1,11 +1,10 @@
 /* ============================================================
    Report Cards — Settings panel (RCE5)
 
-   Five sub-tabs, each wrapping a server capability that already
+   Four sub-tabs, each wrapping a server capability that already
    existed (RCE1 toggles, RC7 subject-comments toggle, RC8 approval
-   chain, RC9 publication policy, RC11 template registry, the older
-   Kindergarten competency-band templates) but had no client UI here
-   until now:
+   chain, RC9 publication policy, RC11 template registry) but had no
+   client UI here until now:
      General            -> academicConfig (RCE1 report toggles)
      Comments            -> assessment_config.subjectTeacherCommentsEnabled
                              (RC7) + Comment Bank CRUD (moved from
@@ -16,13 +15,19 @@
                                 including per-SECTION defaults (the
                                 sectionId scoping resolveTemplate() already
                                 supported server-side but this screen never
-                                exposed), plus the older rc-templates
-                                (Kindergarten competency bands) folded in
-                                here as its own card — previously its own
-                                standalone "Kindergarten" tab, which read as
-                                if KG were itself a selectable layout
-                                (raised directly); it's a separate API, not
-                                merged data, just the same tab now.
+                                exposed).
+
+   Kindergarten competency-band templates (rc-templates) used to live in
+   this panel too — first as its own standalone tab, then folded into
+   Templates as a second card. Raised directly, again: "I don't want
+   this template to be in settings... all should be in Exam module and
+   Report card module" — moved out of Settings entirely (2026-10) to its
+   own top-level "Kindergarten Templates" tab in ReportCardsPage.jsx,
+   sibling to "Generate & Publish" and "Settings", not nested under
+   either. Its RBAC gate moved in the SAME change (rc-templates.js:
+   settings:{read,update} -> report_cards:{read,update}) — see that
+   file's own header comment for why that has to happen together, not
+   as a follow-up.
    ============================================================ */
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -43,18 +48,7 @@ import {
 import { Skeleton, Toast } from '../../grades/components/GradesPrimitives.jsx';
 import { AssetUploader } from '../../settings/SettingsPage.jsx';
 import { useSections } from '@/hooks/useSections.js';
-import RCTemplatesSection from './RCTemplatesSection.jsx';
 
-// Raised directly: "kindergarten template needs to be under templates and
-// removed" + "I didn't see section templates, its a default for whole
-// school" — a standalone "Kindergarten" tab sitting beside "Templates"
-// visually implied KG was a layout choice, when it was actually a second,
-// unrelated template system (rc-templates: competency bands, assigned per
-// class) with no connection to RC11's layoutKey registry at all. Folded
-// into the Templates tab below (still its own section, not merged data)
-// so there is exactly one place to manage report-card templates, and the
-// registry itself now exposes the section-scoping (KG/Primary/Secondary)
-// resolveTemplate() already supported server-side but had no UI for.
 const SUB_TABS = [
   { id: 'general',   label: 'General',            icon: SlidersHorizontal },
   { id: 'comments',  label: 'Comments',            icon: MessageSquare },
@@ -98,7 +92,6 @@ export default function SettingsPanel() {
       {subTab === 'templates' && (
         <div className="space-y-4">
           <TemplatesSection />
-          <RCTemplatesSection />
         </div>
       )}
     </div>
@@ -860,15 +853,16 @@ function PublicationPolicySection() {
    chain); kindergarten is shown disabled because no PDF/HTML renderer
    exists for it yet (per the Template Engine plan's explicit decision
    to ship the two data-only layouts first) — its band/subject/
-   indicator definitions already live in the Kindergarten card just
-   below (RCTemplatesSection, same tab), this disabled entry is only
-   about the missing rendering layout, not missing templates.
+   indicator definitions are managed in the Report Cards module's own
+   "Kindergarten Templates" tab (ReportCardsPage.jsx, not this Settings
+   panel), this disabled entry is only about the missing rendering
+   layout, not missing templates.
    ══════════════════════════════════════════════════════════════ */
 const LAYOUT_OPTIONS = [
   { key: 'legacy_tabular',       label: 'Legacy Tabular',                    disabled: true,  hint: 'Frozen — never offered for a new default.' },
   { key: 'subject_paired',       label: 'Subject + Comment Together',        disabled: false, hint: "Each subject's comment sits directly beneath its marks row." },
   { key: 'marks_then_comments',  label: 'Subjects First, Comments After',    disabled: false, hint: 'A clean marks grid, comments together afterward.' },
-  { key: 'kindergarten',         label: 'Kindergarten (competency bands)',   disabled: true,  hint: 'Templates are already managed in the Kindergarten card below — matching PDF/HTML rendering is still in development.' },
+  { key: 'kindergarten',         label: 'Kindergarten (competency bands)',   disabled: true,  hint: 'Managed in the Kindergarten Templates tab, not here — publishing uses its own dedicated flow, not this registry’s default picker.' },
 ];
 
 function TemplatesSection() {

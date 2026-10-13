@@ -43,6 +43,8 @@ const { resolveTemplate } = require('./report-card-templates');
 const { getLayout }       = require('../utils/report-layouts');
 const { sectionIdForClass, resolveGradeScale } = require('../utils/grade-scale');
 const { isYearArchived } = require('../utils/archival');
+const { resolveRcTemplate } = require('../utils/rc-template-scale');
+const { computeKgReport }   = require('../utils/kg-report');
 const AuditService       = require('../services/audit');
 const { sanitisePdfStr } = require('../utils/sanitisePdf');
 const { notifyGuardiansForStudents } = require('../utils/notify-students');
@@ -161,22 +163,42 @@ async function _nextReportId(schoolId, termNumber, academicYear) {
   return `RC-${_schoolReportCode(schoolId)}-${year}-${tn}-${seq}`;
 }
 
-/* ── SHA-256 hash of immutable snapshot content ─────────────── */
+/* ── SHA-256 hash of immutable snapshot content ───────────────
+   GET /verify/:reportId (below) always recomputes through THIS same
+   function and compares to the stored hash — so a kindergarten branch
+   has to live inside it, not as a separate hash function, or every KG
+   report would fail verification against a hash nothing ever computed
+   that way. The numeric branch's field list/order is byte-for-byte
+   identical to before this branch was added — changing it would
+   silently invalidate every already-published numeric report's hash. */
 function _hashSnapshot(snap) {
-  const payload = JSON.stringify({
-    studentId:   snap.studentId,
-    studentName: snap.studentName,
-    admissionNo: snap.admissionNo,
-    classId:     snap.classId,
-    termNumber:  snap.termNumber,
-    academicYear: snap.academicYear,
-    subjects:    snap.subjects,
-    totalScore:  snap.totalScore,
-    averageScore: snap.averageScore,
-    gpa:         snap.gpa,
-    rankings:    snap.rankings,
-    publishedAt: snap.publishedAt,
-  });
+  const payload = snap.layoutKey === 'kindergarten'
+    ? JSON.stringify({
+        studentId:     snap.studentId,
+        studentName:   snap.studentName,
+        admissionNo:   snap.admissionNo,
+        classId:       snap.classId,
+        termNumber:    snap.termNumber,
+        academicYear:  snap.academicYear,
+        kgSubjects:    snap.kgSubjects,
+        overallAvgPct: snap.overallAvgPct,
+        overallGrade:  snap.overallGrade,
+        publishedAt:   snap.publishedAt,
+      })
+    : JSON.stringify({
+        studentId:   snap.studentId,
+        studentName: snap.studentName,
+        admissionNo: snap.admissionNo,
+        classId:     snap.classId,
+        termNumber:  snap.termNumber,
+        academicYear: snap.academicYear,
+        subjects:    snap.subjects,
+        totalScore:  snap.totalScore,
+        averageScore: snap.averageScore,
+        gpa:         snap.gpa,
+        rankings:    snap.rankings,
+        publishedAt: snap.publishedAt,
+      });
   return crypto.createHash('sha256').update(payload).digest('hex');
 }
 
@@ -1004,6 +1026,318 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
       status: 'failed', failureReason: err.message, completedAt: new Date().toISOString()
     }).catch(() => {});
     console.error('[report-cards/publish]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   KINDERGARTEN / COMPETENCY-BAND REPORTS — deliberately SEPARATE from
+   /generate and /publish above, not a branch inside them (2026-10,
+   confirmed with the user before building). Those two routes are built
+   entirely around numeric concepts — class ranking, weighted-score-by-
+   assessment-type, deviation-from-class-average — that don't have an
+   agreed meaning for indicator-based marks. Forcing a branch in would
+   mean silently deciding unresolved design questions (does "rank" mean
+   anything across indicator scores?) rather than building only what's
+   been actually decided. Ranking and deviation are explicitly NOT
+   applicable here, not silently wrong.
+
+   What IS reused, because it's genuinely unrelated to the assessment
+   model: publish_batches (interrupt-safe anchor), archived-year guard,
+   snapshot versioning/supersede/hash (branched inside _hashSnapshot
+   above), report_card_draft_comments (class teacher/principal remarks
+   — the same collection, same shape, any class), the financial block
+   check, and _notifyReportCardsPublished (reads generic snap fields).
+
+   NOT wired: the moderation gate (aggregateUnmoderatedMarks only ever
+   reads assessment_marks/mark_submissions — meaningless for
+   indicator_marks, which isn't tied to mark_submissions yet — see
+   indicator-marks.js's own header comment for that acknowledged gap).
+   skipModerationCheck is accepted in the request body for payload-
+   shape compatibility with the numeric PublishSchema but has no effect
+   here — there is no gate to skip yet.
+   ══════════════════════════════════════════════════════════════ */
+
+/** Shared roster + cover-field resolution for one KG class — the parts
+ * of /generate's and /publish's student-loading logic that are NOT
+ * numeric-specific (ranking, deviations) are genuinely reusable, so
+ * this mirrors them rather than inventing a second resolution path. */
+async function _loadKgRoster(req, schoolId, classId) {
+  const ctx = tenantContext(req);
+  const Students = tenantModel('students', ctx);
+  const students = await Students.find({ schoolId, classId, status: 'active' })
+    .select('id firstName lastName admissionNumber photo streamId houseId').lean();
+  if (students.length === 0) return { students: [], streamNameById: {}, houseNameById: {}, classTeacherByStream: {} };
+
+  const streamIds = [...new Set(students.map(s => s.streamId).filter(Boolean))];
+  const Streams = tenantModel('streams', ctx);
+  const streamDocs = streamIds.length
+    ? await Streams.find({ schoolId, id: { $in: streamIds } }).select('id name formTeacherId').lean()
+    : [];
+  const streamNameById = Object.fromEntries(streamDocs.map(d => [d.id, d.name]));
+  const teacherIds = [...new Set(streamDocs.map(d => d.formTeacherId).filter(Boolean))];
+  const Teachers = tenantModel('teachers', ctx);
+  const teacherDocs = teacherIds.length
+    ? await Teachers.find({ schoolId, id: { $in: teacherIds } }).select('id title firstName lastName').lean()
+    : [];
+  const teacherNameById = Object.fromEntries(teacherDocs.map(t => [t.id, [t.title, t.firstName, t.lastName].filter(Boolean).join(' ')]));
+  const classTeacherByStream = Object.fromEntries(streamDocs.map(d => [d.id, d.formTeacherId ? (teacherNameById[d.formTeacherId] ?? null) : null]));
+
+  const school = await _model('schools').findOne({ id: schoolId }).select('houses').lean();
+  const houseNameById = Object.fromEntries(
+    (Array.isArray(school?.houses) ? school.houses : []).map(h => [h.id ?? h.name, h.name]).filter(([id]) => id)
+  );
+
+  return { students, streamNameById, houseNameById, classTeacherByStream };
+}
+
+/* ── POST /report-cards/kg/generate — live preview, not persisted ── */
+router.post('/kg/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const { data, error } = _validate(GenerateSchema, req.body);
+    if (error) return E.validation(res, error);
+    const { classId, termId, termNumber: termNum, academicYearId, studentId } = data;
+    const ctx = tenantContext(req);
+    const scope = await _resolveTermScope(schoolId, ctx, { academicYearId, termId, termNumber: termNum });
+
+    const template = await resolveRcTemplate(schoolId, classId);
+    if (!template) {
+      return E.badRequest(res, 'This class has no Kindergarten template assigned — use the ordinary Generate & Publish instead.');
+    }
+    if (!termNum) return E.badRequest(res, 'termNumber is required.');
+
+    const reportSectionId = await sectionIdForClass(schoolId, classId);
+    const scale = await resolveGradeScale(schoolId, reportSectionId, null);
+    if (!scale) return E.badRequest(res, _noScaleMessage(classId));
+
+    const { students, streamNameById, houseNameById, classTeacherByStream } = await _loadKgRoster(req, schoolId, classId);
+    const targets = studentId ? students.filter(s => s.id === studentId) : students;
+
+    const reports = await Promise.all(targets.map(async stu => {
+      const kg = await computeKgReport(ctx, schoolId, classId, stu.id, termNum, scope.academicYearId, scale);
+      return {
+        studentId:        stu.id,
+        studentName:       `${stu.firstName} ${stu.lastName}`.trim(),
+        admissionNo:       stu.admissionNumber || '',
+        streamName:        stu.streamId ? (streamNameById[stu.streamId] || '') : '',
+        houseName:         stu.houseId  ? (houseNameById[stu.houseId]   || '') : '',
+        classTeacherName:  stu.streamId ? (classTeacherByStream[stu.streamId] || '') : '',
+        templateName:      kg?.templateName ?? template.name,
+        subjects:          kg?.subjects ?? [],
+        overallAvgPct:     kg?.overallAvgPct ?? null,
+        overallGrade:      kg?.overallGrade ?? null,
+        display:           kg?.display ?? template.display ?? {},
+      };
+    }));
+
+    return ok(res, { generated: reports.length, templateId: template.id, templateName: template.name, students: reports });
+  } catch (err) {
+    console.error('[report-cards/kg/generate]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ── POST /report-cards/kg/publish — versioned batch snapshot ─────── */
+router.post('/kg/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), async (req, res) => {
+  const { schoolId, userId, role } = req.jwtUser;
+  // Same floor as the numeric /publish — admin/superadmin unconditional,
+  // or an explicit students-style sub-grant. Reuses the SAME grant key
+  // (report_generate) rather than inventing a second one for a second
+  // kind of report card — publishing is publishing.
+  const isAdminLevel = ['admin', 'superadmin'].includes(role);
+  if (!isAdminLevel && !(await hasExplicitSubGrant(req, 'grades', 'report_generate', 'create'))) {
+    return E.forbidden(res, 'You do not have permission to publish report cards.');
+  }
+
+  const { data, error } = _validate(PublishSchema, req.body);
+  if (error) return E.validation(res, error);
+  const { classId, termId, termNumber: termNum, academicYearId, className, termName, academicYear, schoolName } = data;
+  const now     = new Date().toISOString();
+  const batchId = uuidv4();
+  const ctx     = tenantContext(req);
+  const scope   = await _resolveTermScope(schoolId, ctx, { academicYearId, termId, termNumber: termNum });
+
+  const Batches = tenantModel('publish_batches', ctx);
+  await Batches.create({
+    id: batchId, schoolId, classId,
+    termId: scope.termId, academicYearId: scope.academicYearId,
+    status: 'running', startedBy: userId, startedAt: now,
+    studentCount: 0, successCount: 0, failedStudents: [],
+    layoutKey: 'kindergarten',
+  });
+
+  try {
+    if (scope.academicYearId && await isYearArchived(schoolId, scope.academicYearId)) {
+      await Batches.updateOne({ id: batchId }, {
+        status: 'failed',
+        failureReason: `Academic year "${scope.academicYearId}" is archived — publishing is not permitted for closed years.`,
+        completedAt: now,
+      });
+      return E.badRequest(res, `Academic year "${scope.academicYearId}" has been archived — report card publishing is not permitted for closed years.`);
+    }
+
+    const template = await resolveRcTemplate(schoolId, classId);
+    if (!template) {
+      await Batches.updateOne({ id: batchId }, { status: 'failed', failureReason: 'No Kindergarten template for this class', completedAt: now });
+      return E.badRequest(res, 'This class has no Kindergarten template assigned — use the ordinary Generate & Publish instead.');
+    }
+    if (!termNum) {
+      await Batches.updateOne({ id: batchId }, { status: 'failed', failureReason: 'termNumber is required', completedAt: now });
+      return E.badRequest(res, 'termNumber is required.');
+    }
+
+    const reportSectionId = await sectionIdForClass(schoolId, classId);
+    const scale = await resolveGradeScale(schoolId, reportSectionId, null);
+    if (!scale) {
+      await Batches.updateOne({ id: batchId }, { status: 'failed', failureReason: 'No grade scale for this section', completedAt: now });
+      return E.badRequest(res, _noScaleMessage(classId));
+    }
+
+    const { students, streamNameById, houseNameById, classTeacherByStream } = await _loadKgRoster(req, schoolId, classId);
+    if (students.length === 0) {
+      await Batches.updateOne({ id: batchId }, { status: 'failed', failureReason: 'No active students found', completedAt: now });
+      return E.badRequest(res, 'No active students found for this class/term — nothing to publish');
+    }
+
+    const studentIds = students.map(s => s.id);
+    const existingSnaps = await tenantModel('report_card_snapshots', ctx).find({
+      schoolId, classId, termId: scope.termId, academicYearId: scope.academicYearId, superseded: { $ne: true },
+    }).lean();
+    const existingMap = Object.fromEntries(existingSnaps.map(s => [s.studentId, s]));
+
+    const draftDocs = await tenantModel('report_card_draft_comments', ctx)
+      .find({ schoolId, studentId: { $in: studentIds }, termNumber: termNum }).lean();
+    const draftByStudent = Object.fromEntries(draftDocs.map(d => [d.studentId, d]));
+
+    let blockedStudentIds = new Set();
+    try {
+      const unpaidIds = await tenantModel('invoices', ctx).distinct('studentId', { schoolId, studentId: { $in: studentIds }, balance: { $gt: 0 } });
+      blockedStudentIds = new Set(unpaidIds);
+    } catch (_) { /* non-fatal — invoice collection may not exist */ }
+
+    const school = await _model('schools').findOne({ id: schoolId }).select('principalSignatureUrl schoolStampUrl principalName').lean();
+    const principalSignatureUrl = school?.principalSignatureUrl || null;
+    const schoolStampUrl        = school?.schoolStampUrl        || null;
+    const schoolPrincipalName   = school?.principalName          || null;
+
+    const newSnaps = [];
+    const supersedeOps = [];
+    const partialFails = [];
+
+    for (const stu of students) {
+      try {
+        const kg = await computeKgReport(ctx, schoolId, classId, stu.id, termNum, scope.academicYearId, scale);
+        const prev = existingMap[stu.id];
+        const draft = draftByStudent[stu.id];
+        const newId = uuidv4();
+
+        const snap = {
+          id: newId,
+          version: prev ? (prev.version || 1) + 1 : 1,
+          supersedesId: prev?.id || null,
+          schoolId,
+          studentId:   stu.id,
+          studentName: `${stu.firstName} ${stu.lastName}`.trim() || stu.id,
+          admissionNo: stu.admissionNumber || '',
+          studentPhotoUrl: stu.photo || null,
+          streamId:   stu.streamId || null,
+          streamName: stu.streamId ? (streamNameById[stu.streamId] || '') : '',
+          houseName:  stu.houseId  ? (houseNameById[stu.houseId]   || '') : '',
+          classId, className: className || '',
+          termId: scope.termId, termName: termName || '',
+          termNumber: termNum,
+          academicYearId: scope.academicYearId, academicYear: academicYear || '',
+          schoolName: schoolName || '',
+
+          gradingSchema: scale.bands,
+          gradeScaleId:  scale.id,
+          gradeScaleSource: scale.source,
+
+          // KG-specific content — frozen at publish time, same discipline
+          // numeric snapshots already follow for gradingSchema/weights:
+          // a school editing the template later must never retroactively
+          // change what an already-published report shows.
+          templateId:   template.id,
+          templateName: template.name,
+          kgSubjects:   kg?.subjects ?? [],
+          overallAvgPct: kg?.overallAvgPct ?? null,
+          overallGrade:  kg?.overallGrade ?? null,
+          kgDisplay:     template.display ?? {},
+
+          comments: _resolveSnapComments(prev, draft),
+
+          principalSignatureUrl, schoolStampUrl, schoolPrincipalName,
+          financialBlock: blockedStudentIds.has(stu.id),
+
+          templateVersion: null,
+          layoutKey: 'kindergarten',
+          status: 'published',
+          publishedAt: now, publishedBy: userId,
+          batchId, superseded: false,
+          updatedAt: now, updatedBy: userId,
+        };
+
+        snap.reportId   = await _nextReportId(schoolId, termNum, academicYear);
+        snap.sha256Hash = _hashSnapshot(snap);
+        newSnaps.push(snap);
+
+        if (prev) {
+          supersedeOps.push({
+            updateOne: { filter: { id: prev.id }, update: { $set: { superseded: true, supersededAt: now, supersededBy: newId } } },
+          });
+        }
+      } catch (snapErr) {
+        partialFails.push({ studentId: stu.id, error: snapErr.message });
+      }
+    }
+
+    const Snaps = tenantModel('report_card_snapshots', ctx);
+    const insertOps = newSnaps.map(s => ({ insertOne: { document: s } }));
+    let session = null;
+    try {
+      session = await mongoose.startSession();
+      await session.withTransaction(async () => {
+        await Snaps.bulkWrite(insertOps, { ordered: false, session });
+        if (supersedeOps.length) await Snaps.bulkWrite(supersedeOps, { ordered: false, session });
+      });
+    } catch (txErr) {
+      if (txErr.code === 20 || txErr.codeName === 'IllegalOperation' || txErr.message?.includes('Transaction')) {
+        await Snaps.bulkWrite(insertOps, { ordered: false });
+        if (supersedeOps.length) await Snaps.bulkWrite(supersedeOps, { ordered: false });
+      } else {
+        throw txErr;
+      }
+    } finally {
+      if (session) await session.endSession().catch(() => {});
+    }
+
+    const finalStatus = partialFails.length > 0 ? 'partial' : 'completed';
+    await Batches.updateOne({ id: batchId }, {
+      status: finalStatus, completedAt: now,
+      studentCount: newSnaps.length + partialFails.length,
+      successCount: newSnaps.length, failedStudents: partialFails,
+      newVersions: newSnaps.map(s => ({ snapshotId: s.id, studentId: s.studentId, version: s.version })),
+    });
+
+    console.log(`[REPORT-CARDS] KG batch ${batchId}: ${newSnaps.length} published (${finalStatus}) by ${userId}`);
+    AuditService.log({ action: 'report_card.publish', actor: req.jwtUser, schoolId, target: { type: 'class', id: classId, label: className }, details: { batchId, termId: scope.termId, studentCount: newSnaps.length, status: finalStatus, layoutKey: 'kindergarten' }, req });
+
+    _notifyReportCardsPublished(req, newSnaps).catch(err => console.error('[report-cards/kg/publish notify]', err));
+
+    const response = {
+      batchId, status: finalStatus, published: newSnaps.length, versioned: supersedeOps.length,
+      failed: partialFails.length, classId, termId: scope.termId, publishedAt: now,
+    };
+    if (partialFails.length) {
+      response.warnings = [`${partialFails.length} student(s) failed to snapshot — check publish-batches/${batchId} for details`];
+    }
+    return ok(res, response, null, 201);
+  } catch (err) {
+    await tenantModel('publish_batches', ctx).updateOne({ id: batchId }, {
+      status: 'failed', failureReason: err.message, completedAt: new Date().toISOString(),
+    }).catch(() => {});
+    console.error('[report-cards/kg/publish]', err);
     return E.serverError(res);
   }
 });
@@ -1880,15 +2214,101 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
 }
 
 
+/* Kindergarten / competency-band IR — the KG sibling of
+   _computeReportSections above. Separate function, not a branch inside
+   it: that function's whole shape (resultsTable rows, ranking,
+   deviations) is built around numeric concepts this snapshot doesn't
+   have. Lives here (report-cards.js), not report-layouts.js, so it can
+   reuse _normalizeGradeScaleBands and the rest of this file's private
+   helpers directly — report-layouts.js requiring back into this file
+   would be circular (this file already requires getLayout from there). */
+function _computeKgReportSections(snap, config, extra = {}) {
+  const { school = null } = extra;
+  const isDraft = snap.status !== 'published' || snap.superseded;
+  const resolvedPrincipalName = snap.schoolPrincipalName || school?.principalName || '';
+
+  const gradeBands = _normalizeGradeScaleBands(snap.gradingSchema).sort((a, b) => b.min - a.min);
+  const display = snap.kgDisplay || {};
+
+  return {
+    isDraft,
+    watermarkText: isDraft ? (snap.superseded ? 'SUPERSEDED' : 'DRAFT') : null,
+    cover: {
+      logoUrl: school?.logoUrl || null,
+      tagline: school?.tagline || '',
+      title: 'KINDERGARTEN REPORT',
+      schoolName:   snap.schoolName  || '',
+      studentName:  snap.studentName || '—',
+      admissionNo:  snap.admissionNo || '—',
+      className:    snap.className   || '—',
+      streamName:   snap.streamName  || '',
+      houseName:    snap.houseName   || '',
+      academicYear: snap.academicYear || '',
+      termNumber:   snap.termNumber  ?? null,
+      schoolAddress: school?.address || '',
+      schoolPhone:   school?.phone   || '',
+      schoolEmail:   school?.email   || '',
+      schoolWebsite: school?.website || '',
+      classTeacherName: snap.comments?.classTeacherName || '',
+      principalName:    resolvedPrincipalName,
+      studentPhotoUrl:  snap.studentPhotoUrl || null,
+    },
+    templateName: snap.templateName || '',
+    display: {
+      showScore:      display.showScore      !== false,
+      showGrade:       display.showGrade      !== false,
+      showSubjectAvg:  display.showSubjectAvg !== false,
+      showOverallAvg:  display.showOverallAvg !== false,
+    },
+    kgSubjects: snap.kgSubjects || [],
+    overall: {
+      avgPct: snap.overallAvgPct,
+      grade:  snap.overallGrade,
+    },
+    gradingKey: gradeBands.map((b, i) => ({
+      grade:  b.grade,
+      range:  `${b.min}–${i === 0 ? 100 : gradeBands[i - 1].min - 1}%`,
+      points: b.points ?? '—',
+      label:  b.label  ?? '',
+    })),
+    comments: {
+      classTeacherRemark: snap.comments?.classTeacherRemark || '',
+      principalRemark:    snap.comments?.principalRemark    || '',
+    },
+    signatures: {
+      classTeacherLabel: config.classTeacherSignatureLabel || 'Class Teacher',
+      principalLabel:    config.principalSignatureLabel    || 'Principal',
+    },
+    footer: {
+      footerNote: config.footerNote || 'This report card is computer-generated.',
+      genLine:    `Generated: ${_formatInSchoolTz(new Date(), school?.timezone)}  |  v${snap.version || 1}  |  Batch: ${snap.batchId || '—'}`,
+      reportId:   snap.reportId || null,
+      signDate: _formatDateInSchoolTz(snap.publishedAt ? new Date(snap.publishedAt) : new Date(), school?.timezone),
+    },
+  };
+}
+
 /* RCE2 — dispatches on the SNAPSHOT'S OWN frozen layoutKey, never the
    school's current default. A published report_card_snapshots doc must
    render identically forever regardless of what a school configures
    later (same immutability guarantee _hashSnapshot's fixed field list
    already protects) — snapshots published before this engine existed
    simply have no layoutKey, which getLayout() maps to 'legacy_tabular',
-   today's exact pre-existing output. */
+   today's exact pre-existing output.
+
+   Branches to the KG sections builder for a kindergarten-layout
+   snapshot — every OTHER call site below goes through this one
+   function (or the sibling _buildReportSections used by the HTML
+   routes), so there is exactly one place that decides which IR a
+   layoutKey gets, never a copy-pasted ternary per route. */
+function _buildReportSections(snap, config, attendance, extra) {
+  return snap.layoutKey === 'kindergarten'
+    ? _computeKgReportSections(snap, config, extra)
+    : _computeReportSections(snap, config, attendance, extra);
+}
+
 function _buildPDFPage(doc, snap, config, attendance, isFirstPage, images = {}, extra = {}) {
-  const sections = _computeReportSections(snap, config, attendance, extra);
+  const sections = _buildReportSections(snap, config, attendance, extra);
   getLayout(snap.layoutKey).renderPdf(doc, sections, images, isFirstPage);
 }
 
@@ -2098,7 +2518,7 @@ router.get('/:id/html', authMiddleware, PLAN, MODGATE, _pdfAccess, scopeMiddlewa
     const config = await _loadConfig(schoolId);
     const extra  = await _loadRenderExtras(req, schoolId, snap);
 
-    const sections = _computeReportSections(snap, config, attData, extra);
+    const sections = _buildReportSections(snap, config, attData, extra);
     // RCE2 — dispatch on the SNAPSHOT'S OWN frozen layoutKey, same
     // immutability guarantee as _buildPDFPage's PDF path.
     const html = getLayout(snap.layoutKey).renderHtml(sections);
@@ -2265,7 +2685,7 @@ router.post('/preview-html', authMiddleware, PLAN, MODGATE, rbac('grades', 'read
     // live lookup rather than trusting whatever the client happened to send.
     const subjectTeacherCommentsLive = (await _getAssessmentConfig(schoolId, null).catch(() => null))?.subjectTeacherCommentsEnabled;
 
-    const sections = _computeReportSections(snap, config, null, {
+    const sections = _buildReportSections(snap, config, null, {
       school: schoolWithSignOff, behaviour: beh ?? null, deviations: studentDeviations ?? null,
       subjectTeacherCommentsEnabled: subjectTeacherCommentsLive !== false,
       subjectNames, subjectTeacherNames,

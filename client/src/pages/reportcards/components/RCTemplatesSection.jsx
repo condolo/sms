@@ -1,17 +1,24 @@
 /* ============================================================
    RCTemplatesSection — competency-based report card templates for
    Kindergarten / early-childhood classes. Admin-only. Accessed from
-   Report Cards → Settings → Templates, as its own card beneath the
-   RC11 layout-template registry (TemplatesSection, same file's
-   SettingsPanel.jsx) — folded in from a separate standalone
-   "Kindergarten" tab per direct feedback that a tab sitting beside
-   "Templates" implied KG was itself a selectable layout, when it's
-   really a second, unrelated template system (bands/subjects/
-   indicators, assigned per class — nothing to do with RC11's
-   layoutKey). Still its own API/data model, not merged — see the
-   Report Card Template Engine plan's explicit decision to defer a
-   real Kindergarten renderer/scoring UI; this pre-existing screen is
-   otherwise untouched).
+   Report Cards' own top-level "Kindergarten Templates" tab
+   (ReportCardsPage.jsx) — moved out of Settings entirely (2026-10),
+   after an earlier move had only gotten it as far as a Settings
+   sub-tab. Still its own API/data model (`/rc-templates`), not merged
+   with RC11's layoutKey registry — see the Report Card Template
+   Engine plan's explicit decision to defer a real Kindergarten
+   renderer/scoring UI.
+
+   Schema extensions (2026-10, same milestone), confirmed against real
+   competency-band report samples rather than assumed: per-indicator
+   `maxScore` (IndicatorRow — not universally 10), an optional
+   per-subject `performanceBands` override (SubjectEditor's toggle —
+   the same band label can be worth a different score in a different
+   subject), and `sectionId`/`isDefault` section-scoping (the "Default
+   for a whole section" picker below "Assign to Classes") — mirrors
+   grade-scale.js's resolveGradeScale convention via
+   server/utils/rc-template-scale.js's resolveRcTemplate, rather than
+   a third scoping pattern.
    ============================================================ */
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -21,7 +28,8 @@ import {
   ChevronDown, ChevronUp, LayoutTemplate, Pencil, GripVertical,
   BookOpen, Tag, ToggleLeft, ToggleRight, Info, Eye,
 } from 'lucide-react';
-import { rcTemplates as api, classes as classesApi } from '@/api/client.js';
+import { rcTemplates as api, classes as classesApi, subjects as subjectsApi } from '@/api/client.js';
+import { useSections } from '@/hooks/useSections.js';
 
 /* ── Tiny helpers ────────────────────────────────────────────── */
 const uid = () => Math.random().toString(36).slice(2, 11);
@@ -63,6 +71,8 @@ function emptyTemplate() {
     description: '',
     status: 'draft',
     classIds: [],
+    sectionId: null,
+    isDefault: false,
     performanceBands: [
       { _uid: uid(), label: 'Excellent',   defaultScore: 10, grade: 'A', color: 'emerald' },
       { _uid: uid(), label: 'Good',        defaultScore: 8,  grade: 'B', color: 'blue'    },
@@ -159,6 +169,19 @@ function IndicatorRow({ indicator, onChange, onRemove }) {
         maxLength={400}
         className="flex-1 text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
       />
+      {/* Confirmed against real samples (2026-10) — NOT always 10; one
+          school's ICT indicators scored up to 18. A subject's % is
+          (scores earned) / (sum of each indicator's own maxScore) * 100,
+          so this needs to be settable per indicator, not assumed. */}
+      <div className="relative shrink-0" title="Maximum possible score for this indicator">
+        <input
+          type="number" min="1" max="1000" step="1"
+          value={indicator.maxScore ?? 10}
+          onChange={e => onChange({ ...indicator, maxScore: Number(e.target.value) })}
+          className="w-16 text-sm text-right border border-slate-200 rounded-lg pl-2 pr-6 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+        />
+        <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 text-[10px] pointer-events-none">max</span>
+      </div>
       <button
         type="button" onClick={onRemove}
         className="mt-1.5 p-1 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded transition shrink-0"
@@ -171,13 +194,22 @@ function IndicatorRow({ indicator, onChange, onRemove }) {
 }
 
 /* ── SubjectEditor ───────────────────────────────────────────── */
-function SubjectEditor({ subject, onChange, onRemove }) {
+function SubjectEditor({ subject, templateBands, subjectOptions, onChange, onRemove }) {
   const [expanded, setExpanded] = useState(true);
+  const hasOverride = Array.isArray(subject.performanceBands);
+
+  // Linked to a real subjects-collection record (required, 2026-10) —
+  // without this there is no teaching_assignments row to check, so
+  // nothing could scope WHO may enter marks for this template subject.
+  function selectSubject(subjectId) {
+    const s = subjectOptions.find(o => (o.id ?? o._id) === subjectId);
+    onChange({ ...subject, subjectId, name: s?.name ?? '' });
+  }
 
   function addIndicator() {
     onChange({
       ...subject,
-      indicators: [...subject.indicators, { _uid: uid(), text: '', order: subject.indicators.length }],
+      indicators: [...subject.indicators, { _uid: uid(), text: '', order: subject.indicators.length, maxScore: 10 }],
     });
   }
 
@@ -189,19 +221,51 @@ function SubjectEditor({ subject, onChange, onRemove }) {
     onChange({ ...subject, indicators: subject.indicators.filter(i => i._uid !== uId) });
   }
 
+  // Confirmed against a real sample (2026-10) — the same band label can
+  // be worth a different score in different subjects (e.g. Science's
+  // "Excellent" ≠ Literacy's "Excellent" in the same report). Off by
+  // default (undefined, not an empty array — the server treats those
+  // differently: undefined means "use the template's bands," an empty
+  // array would mean "this subject has zero bands").
+  function toggleOverride() {
+    if (hasOverride) {
+      onChange({ ...subject, performanceBands: undefined });
+    } else {
+      onChange({
+        ...subject,
+        performanceBands: templateBands.map(b => ({ ...b, _uid: uid(), id: undefined })),
+      });
+    }
+  }
+  function addBand() {
+    onChange({
+      ...subject,
+      performanceBands: [...subject.performanceBands, { _uid: uid(), label: '', defaultScore: 5, grade: '', color: 'slate' }],
+    });
+  }
+  function updateBand(uId, updated) {
+    onChange({ ...subject, performanceBands: subject.performanceBands.map(b => b._uid === uId ? updated : b) });
+  }
+  function removeBand(uId) {
+    onChange({ ...subject, performanceBands: subject.performanceBands.filter(b => b._uid !== uId) });
+  }
+
   return (
     <div className="border border-slate-200 rounded-xl overflow-hidden">
       {/* Subject header */}
       <div className="flex items-center gap-2 px-3 py-2.5 bg-slate-50">
         <BookOpen size={13} className="text-slate-400 shrink-0" />
-        <input
-          type="text"
-          value={subject.name}
-          onChange={e => onChange({ ...subject, name: e.target.value })}
-          placeholder="Subject name e.g. Science"
-          maxLength={100}
-          className="flex-1 text-sm font-medium bg-transparent border-0 focus:outline-none text-slate-800 placeholder:text-slate-400"
-        />
+        <select
+          value={subject.subjectId ?? ''}
+          onChange={e => selectSubject(e.target.value)}
+          className="flex-1 text-sm font-medium bg-transparent border-0 focus:outline-none text-slate-800"
+        >
+          <option value="" disabled>Select a subject…</option>
+          {subjectOptions.map(s => {
+            const sId = s.id ?? s._id;
+            return <option key={sId} value={sId}>{s.name}</option>;
+          })}
+        </select>
         <span className="text-[10px] text-slate-400">{subject.indicators.length} indicator{subject.indicators.length !== 1 ? 's' : ''}</span>
         <button
           type="button" onClick={() => setExpanded(e => !e)}
@@ -239,6 +303,40 @@ function SubjectEditor({ subject, onChange, onRemove }) {
           >
             <Plus size={11} /> Add indicator
           </button>
+
+          {/* Per-subject band override */}
+          <div className="mt-3 pt-3 border-t border-slate-100">
+            <label className="flex items-center justify-between cursor-pointer group">
+              <span className="text-xs text-slate-500 group-hover:text-slate-700 transition">
+                Use different performance bands for {subject.name || 'this subject'}
+              </span>
+              <button
+                type="button"
+                onClick={toggleOverride}
+                className={`relative inline-flex h-4.5 w-8 items-center rounded-full transition-colors shrink-0 ${
+                  hasOverride ? 'bg-indigo-600' : 'bg-slate-200'
+                }`}
+              >
+                <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${
+                  hasOverride ? 'translate-x-4' : 'translate-x-0.5'
+                }`} />
+              </button>
+            </label>
+
+            {hasOverride && (
+              <div className="mt-2 space-y-1.5">
+                {subject.performanceBands.map(band => (
+                  <BandRow key={band._uid} band={band} onChange={updated => updateBand(band._uid, updated)} onRemove={() => removeBand(band._uid)} />
+                ))}
+                <button
+                  type="button" onClick={addBand}
+                  className="flex items-center gap-1.5 text-[11px] text-slate-600 hover:text-slate-900 hover:bg-slate-100 px-2 py-1 rounded-lg border border-slate-200 transition"
+                >
+                  <Plus size={10} /> Add band for this subject
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -287,8 +385,9 @@ function ToggleSwitch({ label, checked, onChange }) {
 }
 
 /* ── TemplateSlideOver ───────────────────────────────────────── */
-function TemplateSlideOver({ initial, classes, onSave, onClose, saving }) {
+function TemplateSlideOver({ initial, classes, subjectOptions, onSave, onClose, saving }) {
   const isNew = !initial?.id;
+  const { sections } = useSections();
   const [form, setForm] = useState(() => {
     if (!initial) return emptyTemplate();
     // Normalize bands and subjects from DB (add _uid for React key)
@@ -299,6 +398,12 @@ function TemplateSlideOver({ initial, classes, onSave, onClose, saving }) {
         ...s,
         _uid: s.id || uid(),
         indicators: (s.indicators ?? []).map(i => ({ ...i, _uid: i.id || uid() })),
+        // Keep as undefined when the subject has no override — distinct
+        // from an empty array, which the server reads as "zero bands,"
+        // not "use the template's."
+        performanceBands: s.performanceBands?.length
+          ? s.performanceBands.map(b => ({ ...b, _uid: b.id || uid() }))
+          : undefined,
       })),
     };
   });
@@ -324,7 +429,7 @@ function TemplateSlideOver({ initial, classes, onSave, onClose, saving }) {
   function addSubject() {
     setForm(f => ({
       ...f,
-      subjects: [...f.subjects, { _uid: uid(), name: '', order: f.subjects.length, indicators: [] }],
+      subjects: [...f.subjects, { _uid: uid(), subjectId: '', name: '', order: f.subjects.length, indicators: [] }],
     }));
   }
   function updateSubject(uId, updated) {
@@ -352,6 +457,8 @@ function TemplateSlideOver({ initial, classes, onSave, onClose, saving }) {
     e.preventDefault();
     if (!form.name.trim())              return;
     if (form.performanceBands.length === 0) return;
+    if (form.isDefault && !form.sectionId) return; // same guard as the server
+    if (form.subjects.some(s => !s.subjectId)) return; // every subject must be linked to a real one
 
     // Strip _uid before sending to server
     const payload = {
@@ -360,6 +467,7 @@ function TemplateSlideOver({ initial, classes, onSave, onClose, saving }) {
       subjects: form.subjects.map(({ _uid, ...s }) => ({
         ...s,
         indicators: s.indicators.map(({ _uid: _i, ...i }) => i),
+        performanceBands: s.performanceBands?.map(({ _uid: _b, ...b }) => b),
       })),
     };
     onSave(payload);
@@ -512,6 +620,8 @@ function TemplateSlideOver({ initial, classes, onSave, onClose, saving }) {
                 <SubjectEditor
                   key={subj._uid}
                   subject={subj}
+                  templateBands={form.performanceBands}
+                  subjectOptions={subjectOptions}
                   onChange={updated => updateSubject(subj._uid, updated)}
                   onRemove={() => removeSubject(subj._uid)}
                 />
@@ -533,8 +643,48 @@ function TemplateSlideOver({ initial, classes, onSave, onClose, saving }) {
 
           {/* ── Assign to Classes ── */}
           <Section title="Assign to Classes" icon={LayoutTemplate} defaultOpen={false}>
+            {/* Section default — resolves for EVERY class in the section
+                that isn't explicitly listed below, same convention the
+                RC11 layout-template registry already uses (section
+                default → explicit override wins). Mirrors grade scales:
+                set once for "Kindergarten," new KG classes pick it up
+                automatically, no need to remember to add them below. */}
+            <div className="mb-4 pb-4 border-b border-slate-100 space-y-2">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Default for a whole section (optional)</label>
+                <select
+                  value={form.sectionId ?? ''}
+                  onChange={e => setForm(f => ({ ...f, sectionId: e.target.value || null, isDefault: e.target.value ? f.isDefault : false }))}
+                  className={iCls()}
+                >
+                  <option value="">No section default — assign to specific classes only</option>
+                  {sections.map(s => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+              {form.sectionId && (
+                <label className="flex items-center justify-between py-1 cursor-pointer group">
+                  <span className="text-xs text-slate-500 group-hover:text-slate-700 transition">
+                    Make this the default — applies to every class in this section, except classes listed below in another template
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setForm(f => ({ ...f, isDefault: !f.isDefault }))}
+                    className={`relative inline-flex h-4.5 w-8 items-center rounded-full transition-colors shrink-0 ${
+                      form.isDefault ? 'bg-indigo-600' : 'bg-slate-200'
+                    }`}
+                  >
+                    <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${
+                      form.isDefault ? 'translate-x-4' : 'translate-x-0.5'
+                    }`} />
+                  </button>
+                </label>
+              )}
+            </div>
+
             <p className="text-xs text-slate-400 -mt-1 mb-3">
-              Select which classes will use this template. A class can only have one active template.
+              Select which SPECIFIC classes will use this template — these win over any section default above. A class can only have one active template.
             </p>
             {classes.length === 0 ? (
               <p className="text-xs text-slate-400 italic">No classes found — create classes first.</p>
@@ -597,7 +747,7 @@ function TemplateSlideOver({ initial, classes, onSave, onClose, saving }) {
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={saving || !form.name.trim() || form.performanceBands.length === 0}
+            disabled={saving || !form.name.trim() || form.performanceBands.length === 0 || (form.isDefault && !form.sectionId) || form.subjects.some(s => !s.subjectId)}
             className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-sm font-medium px-5 py-2 rounded-lg transition"
           >
             {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
@@ -610,10 +760,11 @@ function TemplateSlideOver({ initial, classes, onSave, onClose, saving }) {
 }
 
 /* ── TemplateCard ────────────────────────────────────────────── */
-function TemplateCard({ template, onEdit, onDelete, deleting }) {
+function TemplateCard({ template, sectionMap, onEdit, onDelete, deleting }) {
   const subjectCount   = template.subjects?.length ?? 0;
   const indicatorCount = (template.subjects ?? []).reduce((s, sub) => s + (sub.indicators?.length ?? 0), 0);
   const classCount     = template.classIds?.length ?? 0;
+  const sectionName    = template.sectionId ? Object.values(sectionMap ?? {}).find(s => s.id === template.sectionId)?.name : null;
 
   return (
     <div className={`rounded-xl border transition ${
@@ -630,6 +781,11 @@ function TemplateCard({ template, onEdit, onDelete, deleting }) {
             }`}>
               {template.status === 'active' ? 'Active' : 'Draft'}
             </span>
+            {template.isDefault && sectionName && (
+              <span className="inline-flex items-center text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded border text-indigo-700 bg-indigo-50 border-indigo-200">
+                Default for {sectionName}
+              </span>
+            )}
           </div>
           {template.description && (
             <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">{template.description}</p>
@@ -682,6 +838,7 @@ function TemplateCard({ template, onEdit, onDelete, deleting }) {
    ══════════════════════════════════════════════════════════════ */
 export default function RCTemplatesSection() {
   const qc = useQueryClient();
+  const { sectionMap } = useSections();
   const [toast,      setToast]      = useState(null);
   const [editTarget, setEditTarget] = useState(undefined); // undefined = closed, null = new, obj = edit
   const [deletingId, setDeletingId] = useState(null);
@@ -700,6 +857,13 @@ export default function RCTemplatesSection() {
     staleTime: 5 * 60_000,
   });
   const classes = (clsData?.data ?? []).map(c => ({ ...c, id: c.id || c._id?.toString() }));
+
+  const { data: subjData } = useQuery({
+    queryKey:  ['subjects', { limit: 500 }],
+    queryFn:   () => subjectsApi.list({ limit: 500 }),
+    staleTime: 5 * 60_000,
+  });
+  const subjectOptions = (subjData?.data ?? []).map(s => ({ ...s, id: s.id || s._id?.toString() }));
 
   /* ── Mutations ── */
   const { mutate: createTmpl, isPending: creating } = useMutation({
@@ -805,6 +969,7 @@ export default function RCTemplatesSection() {
                 <TemplateCard
                   key={t.id}
                   template={t}
+                  sectionMap={sectionMap}
                   onEdit={tmpl => setEditTarget(tmpl)}
                   onDelete={handleDelete}
                   deleting={deletingId === t.id}
@@ -821,6 +986,7 @@ export default function RCTemplatesSection() {
           <TemplateSlideOver
             initial={editTarget}
             classes={classes}
+            subjectOptions={subjectOptions}
             onSave={handleSave}
             onClose={() => setEditTarget(undefined)}
             saving={saving}

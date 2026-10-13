@@ -1740,6 +1740,265 @@ ${commentsHtml}
 </body></html>`;
 }
 
+/* ── kindergarten (2026-10): competency-band report — Indicator / Band /
+   Score / Grade per subject, confirmed against two real samples rather
+   than assumed (see rc-templates.js's own header comments for what
+   those samples proved: maxScore is NOT universally 10, and the same
+   band label can be worth a different score in a different subject —
+   both already handled upstream, in kg-report.js's computation, not
+   here; this renderer just draws whatever it's given). Shares the cover
+   (_drawCoverPdf/_renderCoverHtml) and sign-off (_measureSignOffPdf/
+   _drawSignOffPdf) components with subject_paired/marks_then_comments —
+   same premium institutional palette/fonts, not a third visual system.
+   No ranking, no deviation, no attendance/behaviour sections — not
+   applicable to indicator-based marks (confirmed with the user before
+   building this layout), not omitted by oversight. ── */
+function _renderKindergartenPdf(doc, s, images, isFirstPage) {
+  _registerReportFonts(doc);
+  if (!isFirstPage) doc.addPage();
+
+  const X = 40;
+  const PAGE_WIDTH = doc.page.width - 80;
+  const BOTTOM = doc.page.height - 55;
+
+  let rowY = _drawCoverPdf(doc, s, images);
+
+  const showScore = s.display.showScore;
+  const showGrade = s.display.showGrade;
+  const W_BAND  = 110;
+  const W_SCORE = showScore ? 55 : 0;
+  const W_GRADE = showGrade ? 48 : 0;
+  const W_INDICATOR = PAGE_WIDTH - W_BAND - W_SCORE - W_GRADE - 12;
+  const colDefs = [
+    { key: 'indicator', label: 'INDICATOR', width: W_INDICATOR },
+    { key: 'band',      label: 'PERFORMANCE BAND', width: W_BAND },
+    ...(showScore ? [{ key: 'score', label: 'SCORE', width: W_SCORE }] : []),
+    ...(showGrade ? [{ key: 'grade', label: 'GRADE', width: W_GRADE }] : []),
+  ];
+  const colX = []; let cx = X;
+  for (const c of colDefs) { colX.push(cx); cx += c.width + 3; }
+
+  function drawColumnHeader(y) {
+    doc.rect(X, y, PAGE_WIDTH, 16).fill(BRAND);
+    doc.fillColor('white').font(FONTS.sansSemibold).fontSize(7);
+    colDefs.forEach((c, i) => {
+      const align = c.key === 'indicator' ? 'left' : 'center';
+      doc.text(c.label, colX[i] + (align === 'left' ? 4 : 0), y + 4.5, { width: c.width - (align === 'left' ? 4 : 0), align });
+    });
+    return y + 16;
+  }
+  function drawContinuationHeader() {
+    doc.fillColor(INK_FAINT).font(FONTS.sansRegular).fontSize(8)
+       .text(`${s.cover.studentName}  ·  ${s.cover.className}`, X, 40, { width: PAGE_WIDTH });
+    doc.lineWidth(0.75).moveTo(X, 54).lineTo(X + PAGE_WIDTH, 54).stroke(RULE_SOFT);
+    return drawColumnHeader(64) + 2;
+  }
+  function ensureSpace(h) {
+    if (rowY + h > BOTTOM) { doc.addPage(); rowY = drawContinuationHeader(); }
+  }
+
+  const indicatorColWidth = colDefs[0].width - 8;
+
+  s.kgSubjects.forEach(subj => {
+    // Subject banner + its own column-header repeat — measured together
+    // (atomic: a subject's header never lands alone at the bottom of a
+    // page with its first indicator row on the next).
+    ensureSpace(18 + 2 + 16 + 2 + 18);
+    doc.rect(X, rowY, PAGE_WIDTH, 18).fill(BRAND_WASH);
+    doc.fillColor(BRAND).font(FONTS.serifSemibold).fontSize(10).text(subj.name, X + 6, rowY + 4, { width: PAGE_WIDTH - 12 });
+    rowY += 18 + 2;
+    rowY = drawColumnHeader(rowY) + 2;
+
+    if (subj.indicators.length === 0) {
+      doc.fillColor(INK_FAINT).font(FONTS.sansItalic).fontSize(8.5).text('No indicators defined for this subject.', X + 4, rowY + 4, { width: PAGE_WIDTH - 8 });
+      rowY += 18;
+    }
+
+    subj.indicators.forEach(ind => {
+      doc.font(FONTS.sansRegular).fontSize(8.5);
+      const textH = doc.heightOfString(ind.text, { width: indicatorColWidth });
+      const rowH = Math.max(18, textH + 8);
+      ensureSpace(rowH);
+
+      doc.rect(X, rowY, PAGE_WIDTH, rowH).fill(SURFACE);
+      doc.fillColor(INK).font(FONTS.sansRegular).fontSize(8.5)
+         .text(ind.text, colX[0] + 4, rowY + 4, { width: indicatorColWidth });
+
+      let ci = 1;
+      doc.fillColor(ind.bandLabel ? INK : INK_FAINT).font(FONTS.sansMedium).fontSize(8.5)
+         .text(ind.bandLabel || '—', colX[ci] + 2, rowY + Math.max(4, rowH / 2 - 5), { width: colDefs[ci].width - 4, align: 'center' });
+      ci++;
+      if (showScore) {
+        doc.fillColor(INK_SOFT).font(FONTS.monoRegular).fontSize(8.5)
+           .text(ind.score != null ? `${ind.score}/${ind.maxScore}` : '—', colX[ci] + 2, rowY + Math.max(4, rowH / 2 - 5), { width: colDefs[ci].width - 4, align: 'center' });
+        ci++;
+      }
+      if (showGrade) {
+        doc.fillColor(ind.bandGrade ? INK : INK_FAINT).font(FONTS.serifBold).fontSize(9.5)
+           .text(ind.bandGrade || '—', colX[ci] + 2, rowY + Math.max(4, rowH / 2 - 5.5), { width: colDefs[ci].width - 4, align: 'center' });
+      }
+      rowY += rowH;
+    });
+
+    if (s.display.showSubjectAvg) {
+      ensureSpace(20);
+      doc.rect(X, rowY, PAGE_WIDTH, 20).fill(BRAND_WASH);
+      const avgText = subj.subjectAvgPct != null ? `${subj.subjectAvgPct.toFixed(1)}%` : '—';
+      const gradeText = subj.subjectGrade ? `   —   Grade ${subj.subjectGrade}` : '';
+      doc.fillColor(BRAND).font(FONTS.sansBold).fontSize(8.5).text('SUBJECT AVERAGE', X + 8, rowY + 6, { width: PAGE_WIDTH / 2 });
+      doc.fillColor(ACCENT).font(FONTS.serifBold).fontSize(10).text(avgText + gradeText, X, rowY + 5, { width: PAGE_WIDTH - 8, align: 'right' });
+      rowY += 20;
+    }
+    rowY += 8;
+  });
+
+  function drawBareContinuationHeader() {
+    doc.fillColor(INK_FAINT).font(FONTS.sansRegular).fontSize(8)
+       .text(`${s.cover.studentName}  ·  ${s.cover.className}`, X, 40, { width: PAGE_WIDTH });
+    doc.lineWidth(0.75).moveTo(X, 54).lineTo(X + PAGE_WIDTH, 54).stroke(RULE_SOFT);
+    return 64;
+  }
+  function ensureSpaceAfterResults(h) {
+    if (rowY + h > BOTTOM) { doc.addPage(); rowY = drawBareContinuationHeader(); }
+  }
+
+  /* OVERALL AVERAGE + grading key — one atomic block, same convention
+     as subject_paired's _measureOverallPerformancePdf/_drawOverallPerformancePdf,
+     just a simpler box (no rank/GPA — not applicable here). */
+  if (s.display.showOverallAvg) {
+    const BOX_H = 56;
+    let keyH = 0;
+    if (s.gradingKey.length) {
+      const strip = s.gradingKey.map(b => `${b.grade} ${b.range}`).join('     ');
+      doc.font(FONTS.monoRegular).fontSize(9);
+      keyH = 12 + doc.heightOfString(strip, { width: PAGE_WIDTH }) + 4;
+    }
+    ensureSpaceAfterResults(BOX_H + 14 + keyH);
+    doc.roundedRect(X, rowY, PAGE_WIDTH, BOX_H, 4).fill(BRAND_WASH);
+    doc.fillColor(ACCENT).font(FONTS.sansSemibold).fontSize(9).text('OVERALL AVERAGE', X + 18, rowY + 12);
+    const headline = s.overall.avgPct != null ? `${s.overall.avgPct.toFixed(1)}%` : '—';
+    doc.fillColor(INK).font(FONTS.serifBold).fontSize(26)
+       .text(headline + (s.overall.grade ? `  ${s.overall.grade}` : ''), X + 18, rowY + 24);
+    rowY += BOX_H + 14;
+    if (s.gradingKey.length) {
+      doc.fillColor(INK_SOFT).font(FONTS.sansSemibold).fontSize(8).text('GRADING SCALE', X, rowY);
+      rowY += 12;
+      const strip = s.gradingKey.map(b => `${b.grade} ${b.range}`).join('     ');
+      doc.fillColor(INK_FAINT).font(FONTS.monoRegular).fontSize(9).text(strip, X, rowY, { width: PAGE_WIDTH });
+      rowY += doc.heightOfString(strip, { width: PAGE_WIDTH }) + 4;
+    }
+  }
+
+  /* SIGN-OFFS — same shared component subject_paired uses. */
+  if (s.comments.classTeacherRemark) {
+    ensureSpaceAfterResults(_measureSignOffPdf(doc, PAGE_WIDTH, s.comments.classTeacherRemark));
+    rowY = _drawSignOffPdf(doc, X, rowY, PAGE_WIDTH, {
+      roleLabel: s.signatures.classTeacherLabel, personName: s.cover.classTeacherName,
+      remarkText: s.comments.classTeacherRemark, signatureImg: null, stampImg: null,
+      signDate: s.footer.signDate,
+    }) + 10;
+  }
+  if (s.comments.principalRemark) {
+    ensureSpaceAfterResults(_measureSignOffPdf(doc, PAGE_WIDTH, s.comments.principalRemark));
+    rowY = _drawSignOffPdf(doc, X, rowY, PAGE_WIDTH, {
+      roleLabel: s.signatures.principalLabel, personName: s.cover.principalName,
+      remarkText: s.comments.principalRemark, signatureImg: images.principalSignature || null,
+      stampImg: images.schoolStamp || null, signDate: s.footer.signDate,
+    }) + 10;
+  }
+
+  const footerY = doc.page.height - 56;
+  doc.fillColor(INK_FAINT).font(FONTS.sansRegular).fontSize(7.5)
+     .text(s.footer.footerNote, X, footerY, { width: PAGE_WIDTH, align: 'center' });
+  if (s.footer.reportId) {
+    doc.fillColor(INK_FAINT).font(FONTS.monoRegular).fontSize(6.5)
+       .text(`Report ID: ${s.footer.reportId}  |  ${s.footer.genLine}`, X, footerY + 12, { width: PAGE_WIDTH, align: 'center' });
+  }
+}
+
+function _renderKindergartenHtml(s) {
+  const watermarkHtml = s.watermarkText
+    ? `<div style="position:fixed;top:45%;left:50%;transform:translate(-50%,-50%) rotate(-30deg);font-size:90px;font-weight:900;color:#cc0000;opacity:0.08;pointer-events:none;white-space:nowrap;z-index:999">${_esc(s.watermarkText)}</div>`
+    : '';
+  const coverHtml = _renderCoverHtml(s);
+  const showScore = s.display.showScore, showGrade = s.display.showGrade;
+
+  const subjectsHtml = s.kgSubjects.map(subj => `
+    <div style="margin-bottom:14px">
+      <div style="background:#eef1f4;color:#1f2d3d;font-weight:700;font-size:13px;padding:8px 10px;border-radius:4px 4px 0 0">${_esc(subj.name)}</div>
+      <table style="width:100%;border-collapse:collapse;font-size:11px">
+        <thead><tr style="background:#1f2d3d;color:#fff">
+          <th style="text-align:left;padding:6px 8px;font-size:9px">INDICATOR</th>
+          <th style="text-align:center;padding:6px 8px;font-size:9px">PERFORMANCE BAND</th>
+          ${showScore ? '<th style="text-align:center;padding:6px 8px;font-size:9px">SCORE</th>' : ''}
+          ${showGrade ? '<th style="text-align:center;padding:6px 8px;font-size:9px">GRADE</th>' : ''}
+        </tr></thead>
+        <tbody>
+          ${(subj.indicators.length ? subj.indicators : [null]).map(ind => ind ? `
+            <tr style="background:#f4f3f0;border-bottom:1px solid #e8e6e1">
+              <td style="padding:6px 8px">${_esc(ind.text)}</td>
+              <td style="text-align:center;padding:6px 8px;${ind.bandLabel ? '' : 'color:#9195a0'}">${_esc(ind.bandLabel || '—')}</td>
+              ${showScore ? `<td style="text-align:center;padding:6px 8px;font-family:monospace">${ind.score != null ? _esc(`${ind.score}/${ind.maxScore}`) : '—'}</td>` : ''}
+              ${showGrade ? `<td style="text-align:center;padding:6px 8px;font-weight:700;${ind.bandGrade ? '' : 'color:#9195a0'}">${_esc(ind.bandGrade || '—')}</td>` : ''}
+            </tr>` : `
+            <tr><td colspan="4" style="padding:10px;text-align:center;color:#9195a0;font-style:italic">No indicators defined for this subject.</td></tr>`
+          ).join('')}
+        </tbody>
+      </table>
+      ${s.display.showSubjectAvg ? `
+        <div style="background:#eef1f4;display:flex;justify-content:space-between;padding:7px 10px;font-size:11px">
+          <span style="font-weight:700;color:#1f2d3d">SUBJECT AVERAGE</span>
+          <span style="font-weight:700;color:#8a5a2b">${subj.subjectAvgPct != null ? _esc(subj.subjectAvgPct.toFixed(1)) + '%' : '—'}${subj.subjectGrade ? ` — Grade ${_esc(subj.subjectGrade)}` : ''}</span>
+        </div>` : ''}
+    </div>`).join('');
+
+  const overallHtml = s.display.showOverallAvg ? `
+    <div style="background:#eef1f4;border-radius:6px;padding:16px 18px;margin-bottom:14px">
+      <div style="color:#8a5a2b;font-weight:700;font-size:10px;letter-spacing:0.05em">OVERALL AVERAGE</div>
+      <div style="font-size:26px;font-weight:700;color:#15171c;margin-top:4px">
+        ${s.overall.avgPct != null ? _esc(s.overall.avgPct.toFixed(1)) + '%' : '—'}${s.overall.grade ? `  ${_esc(s.overall.grade)}` : ''}
+      </div>
+      ${s.gradingKey.length ? `
+        <div style="margin-top:10px;font-size:9px;color:#5b5f68;text-transform:uppercase;letter-spacing:0.05em">Grading Scale</div>
+        <div style="font-family:monospace;font-size:10px;color:#9195a0;margin-top:3px">${s.gradingKey.map(b => `${_esc(b.grade)} ${_esc(b.range)}`).join('&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;')}</div>
+      ` : ''}
+    </div>` : '';
+
+  const remarkBlock = (roleLabel, personName, remarkText, signDate) => !remarkText ? '' : `
+    <div style="border:1px solid #d8d6d0;border-radius:5px;margin-bottom:12px;overflow:hidden">
+      <div style="background:#1f2d3d;color:#fff;font-weight:600;font-size:10px;text-align:center;padding:7px;text-transform:uppercase">${_esc(roleLabel)}'s General Comment</div>
+      <div style="padding:12px 16px;font-size:11px;color:#5b5f68">${_esc(remarkText)}</div>
+      <div style="display:flex;justify-content:space-between;padding:0 16px 12px;font-size:10px;color:#5b5f68">
+        <span>${_esc(personName || '—')}<br/><span style="font-size:8.5px;color:#9195a0">${_esc(roleLabel)}</span></span>
+        <span style="color:#9195a0">Date: ${_esc(signDate)}</span>
+      </div>
+    </div>`;
+  const remarksHtml =
+    remarkBlock(s.signatures.classTeacherLabel, s.cover.classTeacherName, s.comments.classTeacherRemark, s.footer.signDate) +
+    remarkBlock(s.signatures.principalLabel, s.cover.principalName, s.comments.principalRemark, s.footer.signDate);
+
+  const footerHtml = `
+    <div style="text-align:center;font-size:9px;color:#9195a0;margin-top:14px">
+      <div>${_esc(s.footer.footerNote)}</div>
+      ${s.footer.reportId ? `<div style="font-family:monospace;margin-top:2px">Report ID: ${_esc(s.footer.reportId)} | ${_esc(s.footer.genLine)}</div>` : ''}
+    </div>`;
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8" />
+<style>
+  body{font-family:'Helvetica Neue',Arial,sans-serif;color:#15171c;max-width:800px;margin:0 auto;padding:24px}
+  @page{margin:1.5cm;size:A4}
+  @media print{button{display:none!important}}
+</style>
+</head><body>
+${watermarkHtml}
+${coverHtml}
+${subjectsHtml}
+${overallHtml}
+${remarksHtml}
+${footerHtml}
+</body></html>`;
+}
+
 const LAYOUTS = {
   legacy_tabular: {
     label: 'Legacy Tabular',
@@ -1755,6 +2014,11 @@ const LAYOUTS = {
     label: 'Subjects First, Comments After',
     renderPdf:  _renderMarksThenCommentsPdf,
     renderHtml: _renderMarksThenCommentsHtml,
+  },
+  kindergarten: {
+    label: 'Kindergarten (Competency Bands)',
+    renderPdf:  _renderKindergartenPdf,
+    renderHtml: _renderKindergartenHtml,
   },
 };
 

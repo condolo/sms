@@ -1086,6 +1086,16 @@ export const rcTemplates = {
   create: (data)       => _post('/rc-templates', data),
   update: (id, data)   => _put(`/rc-templates/${id}`, data),
   remove: (id)         => _delete(`/rc-templates/${id}`),
+  // Which template (if any) applies to this class — null means the
+  // class uses the ordinary numeric Markbook, not an error.
+  resolve: (classId)   => _get('/rc-templates/resolve', { classId }),
+};
+
+// Competency-band indicator scores (Kindergarten) — parallel to
+// `assessment.marks`/`assessment.bulkMarks` for ordinary numeric marks.
+export const indicatorMarks = {
+  list:     (params) => _get('/indicator-marks', params),
+  bulkSave: (marks)   => _post('/indicator-marks/bulk', { marks }),
 };
 
 // RC11 — Report Card Template Engine registry (/api/report-card-templates):

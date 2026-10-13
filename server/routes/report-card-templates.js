@@ -45,10 +45,15 @@ const router = express.Router();
 const CURRICULUM_TAGS = ['kcse', 'cambridge', 'ib', 'cbc', 'american', 'custom'];
 
 /* RCE2 — which built-in renderer (server/utils/report-layouts.js)
-   this template resolves to. 'kindergarten' is reserved but not yet
-   built (no rendering entry exists for it, and it is never selectable
-   as a new default) — see the Report Card Template Engine plan's
-   explicit decision to ship the two data-only layouts first. */
+   this template resolves to. 'kindergarten' now HAS a real renderer
+   (2026-10) but stays disabled/unselectable as a new default here on
+   purpose — it's reached through its own dedicated pipeline
+   (report-cards.js's POST /kg/generate and /kg/publish, scored against
+   rc-templates.js's indicator templates), never through this
+   registry's ordinary resolveTemplate()/layoutKey picker, which an
+   admin could otherwise point an ordinary NUMERIC class at by mistake,
+   producing a snapshot with no kgSubjects for the kindergarten
+   renderer to draw. */
 const LAYOUT_KEYS = ['legacy_tabular', 'subject_paired', 'marks_then_comments', 'kindergarten'];
 const DEFAULT_LAYOUT_KEY = 'subject_paired';
 

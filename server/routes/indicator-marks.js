@@ -1,0 +1,215 @@
+/* ============================================================
+   Msingi — /api/indicator-marks
+   Competency-band indicator scores (Kindergarten / early-childhood),
+   parallel to assessment.js's /marks for ordinary numeric CA/HW/MT/ET
+   marks — a different shape (many indicators per subject, not one
+   number), so not forced into assessment_marks.
+
+   Scope/RBAC mirrors assessment.js's /marks exactly: canWriteSubject/
+   isElective (subject-teacher scoping, unconditional), year-archival
+   guard. Deliberately NOT yet wired to assessment_schedule locking or
+   mark_submissions review-state (2026-10) — flagged as a real,
+   acknowledged gap, not an oversight: a teacher can currently keep
+   editing indicator marks after "submitting" them, the same gap the
+   numeric Markbook closed for CA/HW/MT/ET marks. Add before treating
+   this as equivalent to the numeric Markbook's moderation guarantees.
+   ============================================================ */
+'use strict';
+
+const express  = require('express');
+const { z }    = require('zod');
+const { v4: uuidv4 } = require('uuid');
+
+const { authMiddleware } = require('../middleware/auth');
+const { moduleGate }     = require('../middleware/module-gate');
+const { rbac }           = require('../middleware/rbac');
+const { planGate }       = require('../middleware/plan');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
+const { ok, E }           = require('../utils/response');
+const { canWriteSubject, unassignedPairs } = require('../utils/subject-scope');
+const { isElective, electiveMarkProblem }  = require('../utils/elective-scope');
+const { isYearArchived } = require('../utils/archival');
+const ScopeEngine         = require('../utils/scopeEngine');
+const { restrictToTaught } = require('../utils/teaching-scope');
+const { scopeMiddleware } = require('../middleware/scopeMiddleware');
+
+const router  = express.Router();
+const PLAN    = planGate('grades');
+const MODGATE = moduleGate('grades');
+
+/* Mirrors academic-calc.js's _yearFilterPart exactly — a requested
+   academicYearId must also match a record stored with no year at all,
+   same backward-compat posture used everywhere else marks are read. */
+function _yearFilterPart(academicYearId) {
+  return academicYearId
+    ? { $or: [{ academicYearId }, { academicYearId: null }, { academicYearId: { $exists: false } }] }
+    : {};
+}
+
+const IndicatorMarkSchema = z.object({
+  studentId:      z.string().min(1),
+  classId:        z.string().min(1),
+  subjectId:      z.string().min(1),
+  templateId:     z.string().min(1),
+  indicatorId:    z.string().min(1),
+  bandId:         z.string().nullish(),
+  score:          z.number().min(0),
+  termNumber:     z.number().int().min(1).max(3),
+  academicYearId: z.string().nullish(),
+  isPublished:    z.boolean().default(true),
+});
+
+const BulkIndicatorMarkSchema = z.object({
+  marks: z.array(IndicatorMarkSchema).min(1).max(500),
+});
+
+/**
+ * GET /api/indicator-marks
+ * List indicator marks. Query: studentId, classId, subjectId, templateId, termNumber, academicYearId.
+ */
+router.get('/', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), scopeMiddleware, async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const filter = { schoolId };
+    if (req.query.studentId)  filter.studentId  = req.query.studentId;
+    if (req.query.classId)    filter.classId    = req.query.classId;
+    if (req.query.subjectId)  filter.subjectId  = req.query.subjectId;
+    if (req.query.templateId) filter.templateId = req.query.templateId;
+    if (req.query.termNumber) filter.termNumber = Number(req.query.termNumber);
+    Object.assign(filter, _yearFilterPart(req.query.academicYearId));
+
+    // Same data-scope posture as assessment.js's GET /marks — a plain
+    // grades:read holder is narrowed to their own class/stream scope and
+    // the subjects they actually teach, not every mark in the school.
+    ScopeEngine.applyToFilter(req, 'assessment', filter);
+    await restrictToTaught(req, filter);
+
+    const docs = await tenantModel('indicator_marks', tenantContext(req)).find(filter)
+      .sort({ subjectId: 1, indicatorId: 1 }).limit(5000).lean();
+    return ok(res, docs);
+  } catch (err) {
+    console.error('[indicator-marks GET]', err);
+    return E.serverError(res);
+  }
+});
+
+/**
+ * POST /api/indicator-marks/bulk
+ * Upsert many indicator marks at once — the Markbook's per-student save
+ * (one subject's full set of indicators for one student in a single
+ * request). Natural key: studentId+subjectId+indicatorId+termNumber
+ * (+academicYearId, _yearFilterPart-tolerant like everywhere else).
+ */
+router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const parsed = BulkIndicatorMarkSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return E.validation(res, parsed.error.issues.map(i => ({ field: i.path.join('.'), message: i.message })));
+    }
+    const { marks } = parsed.data;
+
+    // Guard: reject writes to archived academic years — same check every
+    // other mark-writing route in this codebase uses.
+    const yearIds = [...new Set(marks.map(d => d.academicYearId).filter(Boolean))];
+    for (const yId of yearIds) {
+      if (await isYearArchived(schoolId, yId)) {
+        return E.badRequest(res, 'This academic year is locked — marks cannot be added or modified.');
+      }
+    }
+
+    // Guard: subject-teacher scoping (RC6) — unconditional, same as
+    // assessment.js's /marks/bulk. Resolve each student's stream first
+    // (a teacher scoped to one stream of a class must not write marks
+    // for a different stream's student).
+    const studentIds = [...new Set(marks.map(d => d.studentId))];
+    const studentDocs = await tenantModel('students', tenantContext(req))
+      .find({ schoolId, id: { $in: studentIds } }).select('id streamId').lean();
+    const streamByStudent = Object.fromEntries(studentDocs.map(s => [s.id, s.streamId ?? null]));
+
+    const distinctPairs = [...new Map(
+      marks.map(d => {
+        const streamId = streamByStudent[d.studentId] ?? null;
+        return [`${d.classId}::${d.subjectId}::${streamId}`, { classId: d.classId, subjectId: d.subjectId, streamId }];
+      })
+    ).values()];
+    const electiveKeys = new Set();
+    for (const p of distinctPairs) {
+      if (await isElective(req, p.classId, p.subjectId)) electiveKeys.add(`${p.classId}::${p.subjectId}`);
+    }
+    const electiveProblem = await electiveMarkProblem(req, marks);
+    if (electiveProblem) return E.forbidden(res, electiveProblem);
+    const denied = await unassignedPairs(req, distinctPairs.filter(p => !electiveKeys.has(`${p.classId}::${p.subjectId}`)));
+    if (denied.length > 0) {
+      return E.forbidden(res, `You are not assigned to teach: ${denied.map(p => p.subjectId).join(', ')}`);
+    }
+
+    // Validate every score against its OWN indicator's maxScore — not a
+    // universal 10, confirmed per the schema's own header comment.
+    // Loads each distinct template referenced in the batch once, not
+    // per mark.
+    const templateIds = [...new Set(marks.map(d => d.templateId))];
+    const templates = await tenantModel('rc_templates', tenantContext(req))
+      .find({ schoolId, id: { $in: templateIds } }).lean();
+    const templateById = Object.fromEntries(templates.map(t => [t.id, t]));
+    const maxScoreByIndicator = {};
+    for (const t of templates) {
+      for (const subj of t.subjects ?? []) {
+        for (const ind of subj.indicators ?? []) {
+          maxScoreByIndicator[`${t.id}::${ind.id}`] = ind.maxScore ?? 10;
+        }
+      }
+    }
+    for (const d of marks) {
+      if (!templateById[d.templateId]) {
+        return E.badRequest(res, `Unknown template "${d.templateId}".`);
+      }
+      const maxScore = maxScoreByIndicator[`${d.templateId}::${d.indicatorId}`];
+      if (maxScore === undefined) {
+        return E.badRequest(res, `Unknown indicator "${d.indicatorId}" for this template.`);
+      }
+      if (d.score > maxScore) {
+        return E.badRequest(res, `Score ${d.score} exceeds this indicator's maximum of ${maxScore}.`);
+      }
+    }
+
+    const now = new Date().toISOString();
+    const Marks = tenantModel('indicator_marks', tenantContext(req));
+    const results = [];
+    for (const d of marks) {
+      const filter = {
+        schoolId, studentId: d.studentId, subjectId: d.subjectId, indicatorId: d.indicatorId,
+        termNumber: d.termNumber, ..._yearFilterPart(d.academicYearId || null),
+      };
+      const existing = await Marks.findOne(filter).lean();
+      const streamId = streamByStudent[d.studentId] ?? null;
+      if (existing) {
+        await Marks.updateOne({ _id: existing._id }, {
+          $set: {
+            score: d.score, bandId: d.bandId ?? null, classId: d.classId, templateId: d.templateId,
+            streamId, academicYearId: d.academicYearId || null, isPublished: d.isPublished,
+            updatedAt: now, updatedBy: userId,
+          },
+        });
+        results.push({ id: existing.id, action: 'updated' });
+      } else {
+        const doc = {
+          id: uuidv4(), schoolId, studentId: d.studentId, classId: d.classId, streamId,
+          subjectId: d.subjectId, templateId: d.templateId, indicatorId: d.indicatorId,
+          bandId: d.bandId ?? null, score: d.score, termNumber: d.termNumber,
+          academicYearId: d.academicYearId || null, isPublished: d.isPublished,
+          createdAt: now, updatedAt: now, createdBy: userId, updatedBy: userId,
+        };
+        await Marks.create(doc);
+        results.push({ id: doc.id, action: 'created' });
+      }
+    }
+
+    return ok(res, { saved: results.length, results });
+  } catch (err) {
+    console.error('[indicator-marks POST/bulk]', err);
+    return E.serverError(res);
+  }
+});
+
+module.exports = router;

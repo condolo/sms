@@ -6,6 +6,221 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.171.0] — 2026-10-12 — fix(report-cards): Kindergarten Templates moved out of Settings; RBAC gate moved with it
+
+Raised directly, a second time: Kindergarten competency-band template
+building (`rc-templates.js`) had already moved out of the generic
+Settings page once (v5.24.1), into a "Kindergarten" sub-tab of Report
+Cards' own `SettingsPanel.jsx`. Still read as "this is a settings
+screen" — *"I don't want this template to be in settings... all should
+be in Exam module and Report card module."*
+
+### Changed
+- `client/src/pages/reportcards/components/RCTemplatesSection.jsx` is
+  now rendered from a new top-level **Kindergarten Templates** tab in
+  `ReportCardsPage.jsx`, sibling to Generate & Publish and Settings —
+  not nested under either. Removed entirely from `SettingsPanel.jsx`'s
+  Templates sub-tab, no redirect left behind.
+- `server/routes/rc-templates.js`'s RBAC gate moved **in the same
+  change**, not a follow-up: `rbac('settings', 'read'|'update')` →
+  `rbac('report_cards', 'read'|'update')`, matching where the UI now
+  actually lives. A role granted Settings access but not Report Cards
+  loses this screen; a role granted Report Cards but not generic
+  Settings gains it. Grant `report_cards:update` explicitly for whoever
+  builds KG templates going forward.
+- `docs/DEVELOPER_GUIDE.md` updated to match (three top-level Report
+  Cards tabs, the RBAC-gate-moved-with-the-UI note).
+
+### Why the gate had to move with the UI, not after
+A UI relocation and its permission gate drifting apart — even briefly
+across two deploys — produces exactly the confusing-access-mismatch
+bug class this session already found once in `students.js` (the
+"Deactivate Student" permission that doesn't actually gate the live
+deactivate route). Same API (`/rc-templates`), same data, same
+collection name (`rc_templates`) — label and location only.
+
+### Added — schema groundwork for real Kindergarten scoring (same milestone)
+Confirmed directly against two real competency-band report samples
+before writing any of this — not assumed:
+- `IndicatorSchema` gains `maxScore` (default 10, **not** a universal
+  constant — one real sample's ICT indicators scored up to 18). A
+  subject's % is `(scores earned) / (sum of each indicator's own
+  maxScore) * 100` — no "must add up to 100" problem, and no ambiguity
+  about whether an 8 means 8/10 or 8/20.
+- `SubjectSchema` gains an optional `performanceBands` override — confirmed
+  the same band label can be worth a different score per subject in a
+  real sample (Science's "Excellent" ≠ Literacy's "Excellent" in the
+  same report). Undefined means "use the template's own bands," never
+  a partial merge.
+- `TemplateSchema` gains `sectionId` + `isDefault`, resolved by the new
+  `server/utils/rc-template-scale.js`'s `resolveRcTemplate(schoolId, classId)`
+  — mirrors `grade-scale.js`'s `resolveGradeScale` exactly (explicit
+  `classIds` wins outright; otherwise a section's `isDefault` template
+  applies) rather than inventing a second scoping convention. No
+  school-wide fallback tier, unlike grade scales — a class with neither
+  match simply isn't using this assessment model, which is correct for
+  most classes, not a missing-config error.
+- `isDefault:true` without a `sectionId` is rejected outright (it would
+  never resolve for any class); setting one clears any other default in
+  the same section, same convention `report-card-templates.js` already
+  uses; deleting a section's current default is refused until another
+  is set, same guard that file already has.
+- The overall subject grade (not just per-indicator) will resolve
+  through the existing `grade_boundaries` system for consistency with
+  every other subject's grading, rather than a third, parallel grading
+  concept — confirmed as the direction, not yet wired (needs the actual
+  score-aggregation work, a later phase).
+
+### Added — RCTemplatesSection.jsx now exposes all of the above
+Same milestone, follow-up within the day: the template builder form
+gained a per-indicator `maxScore` input (defaults to 10, shown inline
+next to the indicator text), a per-subject "use different performance
+bands for this subject" toggle revealing its own mini band editor
+(reusing the existing `BandRow`), and a "Default for a whole section"
+picker + default toggle above the per-class assignment grid — mirroring
+the exact section→explicit-override resolution order `resolveRcTemplate`
+implements server-side, so the form can't express a state the resolver
+wouldn't also understand. A template that's a section default now shows
+an "Default for {Section}" badge on its card.
+
+### Added — template subjects now link to real Subjects (correctness fix, caught before building on top of it)
+`SubjectSchema.subjectId` is now **required** — a template subject used
+to be a free-floating name with no link to the school's real `subjects`
+collection, which meant there was no `teaching_assignments` row to
+check and therefore no way to scope WHO may enter marks for it.
+`RCTemplatesSection.jsx`'s subject field is now a dropdown of real
+subjects (was free text). Caught during the Markbook work below, before
+any scoring screen was built on a gap that would have had to be fixed
+twice.
+
+### Added — the Markbook entry screen + storage (Phase 2)
+- New `indicator_marks` collection + `server/routes/indicator-marks.js`
+  (`GET /`, `POST /bulk`) — parallel to `assessment.js`'s `/marks` for
+  ordinary numeric marks, not forced into that shape (many indicators
+  per subject, not one number). Enforces the same non-negotiables as
+  every other mark-writing route in this codebase: subject-teacher
+  scoping (`canWriteSubject`/`isElective`, unconditional), per-indicator
+  `maxScore` validation (confirmed NOT universally 10), and the
+  year-archival guard.
+- `GET /api/rc-templates/resolve?classId=` — the Markbook-facing
+  question "does this class use indicator-based entry?", gated by
+  `grades:read` (not `report_cards:read` — a teacher needs this without
+  needing report-card-config access).
+- `client/src/pages/exams/components/IndicatorMarkbook.jsx` — renders
+  in `MarkbookTab` INSTEAD of the numeric grid whenever the selected
+  class/subject resolves to a template subject. Per-student slide-over:
+  pick a Band (prefills the score, overridable) or type a score
+  directly per indicator, save a student's whole subject in one
+  request. The class/subject/term pickers above are unchanged either
+  way — only the grid itself swaps.
+
+### Explicitly NOT done, flagged so it isn't mistaken for finished
+Not yet wired to `assessment_schedule` locking or `mark_submissions`
+review-state — a teacher can currently keep editing indicator marks
+after "submitting" them, the same gap the numeric Markbook closed for
+CA/HW/MT/ET marks years ago. No `kindergarten` render layout yet (the
+actual PDF/HTML report output) — entry and storage are complete;
+nothing renders them into a report card yet.
+
+### Tests
+- `server/__tests__/routes/rc-templates-rbac.test.js` (4 tests) —
+  verifies the OLD scope (`settings:read`) no longer grants access and
+  the NEW scope (`report_cards:{read,update}`) does, using the real
+  `rbac.js` middleware.
+- `server/__tests__/routes/rc-templates-schema.test.js` (11 tests) —
+  `maxScore` default/override, per-subject band override (not merged),
+  `isDefault` section-scoping/clearing/delete-guard, and
+  `resolveRcTemplate`'s explicit-classIds-beats-section-default order,
+  against an in-memory store with real filter matching, not a static
+  stub.
+
+- `server/__tests__/routes/indicator-marks.test.js` (8 tests) —
+  subject-teacher scoping (an unassigned teacher is forbidden), per-
+  indicator `maxScore` validation (including a 20-point ceiling, not
+  just the common 10), unknown indicator/template rejection, upsert
+  (saving the same student/indicator twice updates, never duplicates),
+  and the year-archival guard.
+- `rc-templates-schema.test.js` extended: 2 new tests for `GET /resolve`.
+
+Full suite: 296/296 suites, 3080/3080 tests. `vite build` clean.
+
+### Added — the rendering layout (Phase 3, same milestone): publish + a real kindergarten PDF/HTML renderer
+Confirmed with the user before building, not assumed: **deliberately
+separate** `POST /report-cards/kg/generate` and `POST /report-cards/kg/publish`
+endpoints, not a branch inside the numeric `/generate`/`/publish` —
+those are built entirely around concepts (class ranking, weighted-
+score-by-assessment-type, deviation-from-class-average) that don't
+have an agreed meaning for indicator-based marks. Ranking and
+deviation are explicitly **not applicable** to Kindergarten reports,
+not silently wrong.
+
+What IS reused, because it's genuinely unrelated to the assessment
+model: `publish_batches` (interrupt-safe anchor), the archived-year
+guard, snapshot versioning/supersede, `report_card_draft_comments`
+(class teacher/principal remarks — same collection, same shape, any
+class), the financial block check, and guardian-notify on publish.
+
+- `server/utils/kg-report.js` — one student's KG report: resolves the
+  class's template, pulls `indicator_marks`, computes each subject's %
+  as earned ÷ possible (never assumed-out-of-10), then resolves BOTH
+  the subject and overall grade through the same `grade_boundaries`
+  system every other subject's grade comes from — confirmed as the
+  direction in the prior milestone, now actually wired.
+- **`_hashSnapshot` (report-cards.js) now branches internally on
+  `layoutKey`** — `GET /verify/:reportId` always recomputes through
+  this one function and compares to the stored hash, so a kindergarten
+  branch had to live inside it, not as a second hash function nobody
+  else calls. The numeric branch's field list and order is byte-for-
+  byte identical to before (confirmed via the existing hash/verify test
+  suite, unchanged) — a published numeric report's hash is unaffected.
+- `_computeKgReportSections` (report-cards.js, sibling to
+  `_computeReportSections`) builds the IR; `_buildReportSections` is
+  the one place that decides which IR a `layoutKey` gets — every PDF
+  and HTML render call site goes through it, not a copy-pasted ternary
+  per route.
+- `server/utils/report-layouts.js`'s `LAYOUTS.kindergarten` — a real
+  PDF (native PDFKit, not HTML-to-PDF) and HTML renderer. Shares the
+  cover (`_drawCoverPdf`/`_renderCoverHtml`) and sign-off
+  (`_measureSignOffPdf`/`_drawSignOffPdf`) components with
+  `subject_paired`/`marks_then_comments` — same premium institutional
+  palette and embedded fonts, not a third visual system. Per subject:
+  Indicator / Performance Band / Score / Grade columns (Score/Grade
+  columns hidden entirely when the template's display settings turn
+  them off) and a Subject Average row; after all subjects, an Overall
+  Average block and the resolved grading-scale key.
+- `report-card-templates.js`'s `LAYOUT_KEYS` comment and
+  `SettingsPanel.jsx`'s disabled-entry hint corrected — both previously
+  said no renderer existed; one now does, reached through the
+  dedicated KG pipeline above, which is also why it stays disabled in
+  the ordinary numeric layout picker (pointing an ordinary class at it
+  by mistake would produce a snapshot with no `kgSubjects` to draw).
+
+### Verification
+- `server/__tests__/routes/report-cards-kg.test.js` (7 tests) — no-
+  template guard, subject average computed as earned/possible (not a
+  hardcoded assumption), a subject with zero marks has a null average
+  (never a false zero), the archived-year guard, snapshot versioning/
+  supersede on republish, and — the one most likely to silently break —
+  that `GET /verify/:reportId`'s hash recomputation actually matches
+  what `/kg/publish` stored.
+- Actually rendered a sample report from synthetic data (not just "it
+  compiles") and visually inspected the output: the HTML renderer was
+  screenshotted and reviewed directly — cover, subject tables with
+  varying `maxScore` (10 in one subject, 20 in another, both rendering
+  correctly as `score/maxScore`), the null-average "—" display for an
+  unscored subject, the Overall Average block, and both sign-off
+  blocks all render correctly. The native PDF renderer generated
+  without error (36KB, non-empty) through the exact same shared
+  components already proven in production by the numeric layouts, but
+  could not be visually screenshotted here — no PDF-to-image tool was
+  available in this environment (checked: no `pdftoppm`, no
+  ImageMagick, no `pdf-poppler`/`pdf2pic`). Flagged rather than
+  claimed — worth a real visual check once reachable.
+
+Full suite: 297/297 suites, 3087/3087 tests. `vite build` clean.
+
+---
+
 ## [v5.170.3] — 2026-10-11 — feat(exams): Review tab — the mark-submissions moderation queue, relocated and filterable
 
 The mark_submissions moderation queue (approve/reject/lock/unlock) existed
