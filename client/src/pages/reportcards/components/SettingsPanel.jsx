@@ -791,11 +791,14 @@ function WorkflowSection() {
 
 /* ══════════════════════════════════════════════════════════════
    Publication Policy — RC9's 3-checkbox completeness gate on
-   POST /publish.
+   POST /publish. Numeric (CA/HW/MT/ET) report cards only — neither
+   toggle is read by /kg/publish, which has no completeness gate at
+   all (Kindergarten report cards have no per-subject comment
+   concept in the first place; see comment-scope.js's header).
    ══════════════════════════════════════════════════════════════ */
 const POLICY_FIELDS = [
-  { key: 'require_subject_comments_complete', label: 'Require subject comments to be complete',  description: 'Block publishing until every subject on the report has a teacher comment (only enforced when Subject Teacher Comments is enabled).' },
-  { key: 'require_report_remarks_complete',   label: 'Require report-level remarks to be complete', description: "Block publishing until the Class Teacher's Remark and Principal's Comment (or the approval chain, if configured) are filled in." },
+  { key: 'require_subject_comments_complete', label: 'Require subject comments to be complete',  description: 'Numeric report cards only. Block publishing until every subject on the report has a teacher comment (only enforced when Subject Teacher Comments is enabled).' },
+  { key: 'require_report_remarks_complete',   label: 'Require report-level remarks to be complete', description: "Numeric report cards only. Block publishing until the Class Teacher's Remark and Principal's Comment (or the approval chain, if configured) are filled in." },
 ];
 
 function PublicationPolicySection() {

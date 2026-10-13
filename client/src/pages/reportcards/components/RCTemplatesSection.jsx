@@ -28,7 +28,7 @@ import {
   ChevronDown, ChevronUp, LayoutTemplate, Pencil, GripVertical,
   BookOpen, Tag, ToggleLeft, ToggleRight, Info, Eye,
 } from 'lucide-react';
-import { rcTemplates as api, classes as classesApi, subjects as subjectsApi } from '@/api/client.js';
+import { rcTemplates as api, classes as classesApi, subjects as subjectsApi, classSubjects as classSubjectsApi } from '@/api/client.js';
 import { useSections } from '@/hooks/useSections.js';
 
 /* ── Tiny helpers ────────────────────────────────────────────── */
@@ -439,6 +439,50 @@ function TemplateSlideOver({ initial, classes, subjectOptions, onSave, onClose, 
     setForm(f => ({ ...f, subjects: f.subjects.filter(s => s._uid !== uId) }));
   }
 
+  /* ── Load subjects from curriculum (class_subjects) — the class(es)
+     already assigned below (Assign to Classes) have a real curriculum;
+     this is a one-time "starting point" pull, not an ongoing sync, so a
+     subject later removed from curriculum never silently deletes
+     indicators an admin already configured here. Only ADDS subjects not
+     already present (matched by subjectId) — never removes or
+     overwrites. Needs at least one specific classId (not just a section
+     default) since that's what class_subjects is keyed on. */
+  const [loadingCurriculum, setLoadingCurriculum] = useState(false);
+  const [curriculumMsg, setCurriculumMsg] = useState('');
+  async function loadFromCurriculum() {
+    if (form.classIds.length === 0 || loadingCurriculum) return;
+    setLoadingCurriculum(true);
+    setCurriculumMsg('');
+    try {
+      const results = await Promise.all(form.classIds.map(id => classSubjectsApi.list({ classId: id })));
+      const bySubjectId = new Map();
+      for (const res of results) {
+        for (const link of res?.data ?? []) {
+          if (link.subject?.id && !bySubjectId.has(link.subject.id)) bySubjectId.set(link.subject.id, link.subject);
+        }
+      }
+      let added = 0;
+      setForm(f => {
+        const existingIds = new Set(f.subjects.map(s => s.subjectId));
+        const toAdd = [...bySubjectId.values()].filter(s => !existingIds.has(s.id));
+        added = toAdd.length;
+        if (toAdd.length === 0) return f;
+        return {
+          ...f,
+          subjects: [
+            ...f.subjects,
+            ...toAdd.map((s, i) => ({ _uid: uid(), subjectId: s.id, name: s.name, order: f.subjects.length + i, indicators: [] })),
+          ],
+        };
+      });
+      setCurriculumMsg(added > 0 ? `Added ${added} subject${added === 1 ? '' : 's'} from curriculum.` : 'Every curriculum subject is already listed below.');
+    } catch {
+      setCurriculumMsg('Could not load curriculum — try again.');
+    } finally {
+      setLoadingCurriculum(false);
+    }
+  }
+
   /* ── Class toggle ── */
   function toggleClass(classId) {
     setForm(f => {
@@ -614,6 +658,7 @@ function TemplateSlideOver({ initial, classes, subjectOptions, onSave, onClose, 
           <Section title="Subjects & Learning Indicators" icon={BookOpen} defaultOpen>
             <p className="text-xs text-slate-400 -mt-1 mb-3">
               Add subjects and the specific "Able to…" competencies assessed under each.
+              {form.classIds.length === 0 && ' Assign a class below (Assign to Classes) to load its subjects automatically, or add them manually here.'}
             </p>
             <div className="space-y-2">
               {form.subjects.map(subj => (
@@ -633,12 +678,23 @@ function TemplateSlideOver({ initial, classes, subjectOptions, onSave, onClose, 
                 <p className="text-xs text-slate-400">No subjects yet — add your first subject below</p>
               </div>
             )}
-            <button
-              type="button" onClick={addSubject}
-              className="mt-2 flex items-center gap-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 px-3 py-1.5 rounded-lg border border-indigo-200 transition"
-            >
-              <Plus size={12} /> Add subject
-            </button>
+            <div className="flex items-center gap-2 mt-2 flex-wrap">
+              <button
+                type="button" onClick={addSubject}
+                className="flex items-center gap-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 px-3 py-1.5 rounded-lg border border-indigo-200 transition"
+              >
+                <Plus size={12} /> Add subject
+              </button>
+              <button
+                type="button" onClick={loadFromCurriculum}
+                disabled={loadingCurriculum || form.classIds.length === 0}
+                title={form.classIds.length === 0 ? 'Assign at least one class below first' : "Add every subject in the assigned classes' curriculum that isn't already listed here"}
+                className="flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200 transition disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+              >
+                {loadingCurriculum ? <Loader2 size={12} className="animate-spin" /> : <BookOpen size={12} />} Load from curriculum
+              </button>
+              {curriculumMsg && <span className="text-xs text-slate-400">{curriculumMsg}</span>}
+            </div>
           </Section>
 
           {/* ── Assign to Classes ── */}

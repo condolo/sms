@@ -44,6 +44,11 @@ function matches(doc, filter) {
       if ('$exists' in v) return (val !== undefined) === v.$exists;
     }
     if (v === null) return val == null;
+    // Mongo's implicit array-contains-scalar: a doc field that's an array
+    // matches a scalar filter value when the array contains it — needed
+    // for resolveRcTemplate's `classIds: classId` lookup (classIds is an
+    // array field, queried with the single classId to check).
+    if (Array.isArray(val)) return val.includes(v);
     return val === v;
   });
 }
@@ -137,6 +142,30 @@ describe('subject comment — same rights as marks', () => {
   test('a comment over 500 characters is refused', async () => {
     const res = await supertest(buildApp()).put(subjectUrl('stu1', 'bio')).send({ termNumber: 3, comment: 'x'.repeat(501) });
     expect(res.status).toBe(400);
+  });
+});
+
+describe('subject comment — rejected outright for a Kindergarten class (2026-10-13)', () => {
+  test('a class with an active rc_template assigned to it refuses a subject comment, even from a teacher who otherwise has the write right', async () => {
+    mockDb.rc_templates = [
+      { schoolId: SCHOOL, id: 'tpl1', classIds: ['c8a'], status: 'active' },
+    ];
+    const res = await supertest(buildApp()).put(subjectUrl('stu1', 'bio')).send({ termNumber: 3, comment: 'Excellent work.' });
+    expect(res.status).toBe(403);
+    expect(res.body.error.message).toMatch(/Kindergarten/i);
+    // Never written — the doc's subjectComments.bio stays exactly what it was seeded with.
+    const doc = mockDb.report_card_draft_comments.find(d => d.studentId === 'stu1');
+    expect(doc.subjectComments.bio).toBe('Strong bio');
+  });
+
+  test('the class teacher remark route is unaffected by the same rc_template', async () => {
+    mockDb.rc_templates = [
+      { schoolId: SCHOOL, id: 'tpl1', classIds: ['c8a'], status: 'active' },
+    ];
+    const res = await supertest(buildApp())
+      .put(`/api/report-cards/draft-comments/stu1`)
+      .send({ termNumber: 3, classTeacherRemark: 'Updated remark' });
+    expect(res.status).toBe(200);
   });
 });
 

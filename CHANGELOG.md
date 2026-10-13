@@ -6,6 +6,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.178.0] — 2026-10-13 — feat(report-cards): Kindergarten templates load subjects from curriculum; comments restricted to the class teacher
+
+Raised directly from a screenshot of the Kindergarten Template builder: why re-pick subjects on the template when the school already has a real curriculum (`class_subjects`) and real teaching assignments? A report card should read existing configuration, not duplicate it.
+
+### Added
+- **"Load from curriculum" button** on the Kindergarten Templates screen — once at least one class is assigned, pulls in that class's (or, for several classes, the union of their) existing curriculum subjects as a starting point. Only adds subjects not already listed; never removes or alters one that's there, and isn't an ongoing sync (a subject later dropped from curriculum doesn't silently delete indicators already configured for it).
+
+### Changed
+- **KG report comments are now explicitly class-teacher only, enforced server-side.** Every UI already agreed on this (no comment field in the indicator Markbook, no per-subject input on the KG report preview), but the subject-comment API route itself didn't refuse a Kindergarten class — fixed by rejecting outright rather than leaving it reachable by direct API call. Nothing a user could previously see changes.
+- Publication Policy's two remaining toggles (subject-comments-complete, report-remarks-complete) are documented as numeric-report-card-only in Settings — wording fix, they were already never read by KG publishing.
+
+### Fixed
+- `docs/SCHOOL_ADMIN_GUIDE.md` §15 still described the already-removed "submit marks for review" workflow for Kindergarten (missed by v5.177.0's own doc pass, due to a grep-pattern mismatch) — corrected to the real autonomous-entry/lock-at-publish behavior.
+
+### Tests
+- `report-card-comment-rights.test.js` — 2 new tests (KG subject-comment refused with a clear message; the class-teacher remark route unaffected by the same template).
+
+Full suite: green.
+
+---
+
 ## [v5.177.0] — 2026-10-13 — feat(report-cards): Mark-submission workflow redesign — autonomous entry, automatic lock at publish
 
 Reported directly, alongside a screenshot: a student added to a class roster after the rest of the class had already gone through submit-for-review/approve had no way to enter marks — the whole column was read-only for the entire class, new student or not. The user's own diagnosis, given directly: remove submit-for-review; let teachers edit freely until the report card is published; lock marks automatically at publish instead of via a manual step; warn before publish that it locks marks and makes the report visible to students and parents.

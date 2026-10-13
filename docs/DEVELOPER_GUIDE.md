@@ -6220,6 +6220,37 @@ A student added to a class roster after the rest of the class had already been t
 ### Verified
 Full suite run before touching any test: 8 failures, all in the two submission-lock test files, zero unrelated regressions (confirms the server-side write-guard change was correctly scoped). After rewriting those two files and the term-scope file: 301/301 suites, 3114/3114 tests. Both edited client files confirmed to compile via a dev-server dynamic import; no live-browser walkthrough was possible in this environment (no MongoDB).
 
+## 109. Kindergarten Template: Curriculum-Sourced Subjects, Comments Restricted to the Class Teacher (v5.178.0)
+
+### Reported problem
+Raised directly, from a screenshot of the "New Kindergarten Template" screen's "Subjects & Learning Indicators" panel: why does building a template mean re-picking subjects from scratch, when the school already has a real curriculum (`class_subjects` — which subjects a class offers) and real teaching assignments? A report card should be an output engine reading existing configuration, not a second place to re-enter it.
+
+### What was already correct (confirmed before changing anything)
+- A template's `subjects[].subjectId` was already a **required link** to the real `subjects` collection (`server/routes/rc-templates.js`'s `SubjectSchema`) — `name` is a denormalized display cache, not a second identity. Nothing was duplicating subject *identity*.
+- Who may actually enter marks for a template subject was already driven entirely by real `teaching_assignments` (`canWriteSubject`/`canTeachElective`), not anything set on the template.
+- So the only real gap was the *subject-selection step* itself: the template asked an admin to manually re-pick which subjects apply, instead of starting from the class's own curriculum.
+
+### What changed
+- **"Load from curriculum" button** (`RCTemplatesSection.jsx`): once at least one class is assigned to the template (Assign to Classes), a button fetches that class's (or, with several classes, the union of all their) `class_subjects` curriculum via the existing `/api/class-subjects?classId=` endpoint and adds any subject not already listed — matched by `subjectId`, never removing or altering an existing entry. Deliberately a one-time pull, not an ongoing sync: a subject later dropped from curriculum never silently deletes indicators an admin already configured for it. No server change needed — `class_subjects` and its route already existed (3-tier subject model: `subjects` catalog → `class_subjects` curriculum → `student_subjects` enrollment).
+- **KG report comments restricted to the class teacher, server-side.** Investigation found this was already true in every UI: `IndicatorMarkbook.jsx` has no comment field at all, and `KgStudentReportCard.jsx` only renders `classTeacherRemark`/`principalRemark` — no per-subject input anywhere. `_computeKgReportSections` (report-cards.js) never reads `comments.subjectComments`, so even a stray write would be invisible on the actual report. The one gap: `PUT /draft-comments/:studentId/subject/:subjectId` didn't actually refuse a KG class at the API level — only the UI's absence prevented it. Fixed by rejecting outright (`resolveRcTemplate(schoolId, classId)` truthy → 403) rather than leaving it reachable by direct API call. `comment-scope.js`'s header (the canonical "who can write what" doc) updated to state the exclusion explicitly.
+- **Settings documentation fix**: the Publication Policy's two remaining toggles (`require_subject_comments_complete`, `require_report_remarks_complete`) are numeric-report-card-only — neither is read by `/kg/publish`. `SettingsPanel.jsx`'s toggle descriptions now say so; this is a wording fix, not a behavior change (confirmed: `/kg/generate`/`/kg/publish` never called `_loadPublicationPolicy` in the first place).
+- **Stale doc found and fixed in passing**: `docs/SCHOOL_ADMIN_GUIDE.md` §15 still described the 2026-10-13-removed "teacher submits marks for review" workflow for Kindergarten — missed by that redesign's own doc pass because its phrasing ("submits marks for review") didn't match the grep pattern used at the time ("submit for review"). Corrected to the real autonomous-entry/lock-at-publish behavior.
+
+### Deliberately out of scope
+- No ongoing auto-sync between a template's subject list and the class's curriculum — a deliberate choice (see "What changed" above) to avoid silently deleting configured indicators when a curriculum changes.
+- The button requires at least one specific `classId` assigned; a section-wide default with no explicit classes selected doesn't trigger it (disabled with a hint) — `class_subjects` is keyed on `classId`, not section, and adding multi-class curriculum resolution for the section-default case wasn't asked for.
+
+### Files
+- `client/src/pages/reportcards/components/RCTemplatesSection.jsx` — "Load from curriculum" button and handler.
+- `server/routes/report-cards.js` — KG guard on the subject-comment route.
+- `server/utils/comment-scope.js` — header comment updated to state the KG exclusion.
+- `client/src/pages/reportcards/components/SettingsPanel.jsx` — Publication Policy toggle descriptions clarify numeric-only.
+- `docs/SCHOOL_ADMIN_GUIDE.md` — §15 corrected and extended.
+- `server/__tests__/routes/report-card-comment-rights.test.js` — 2 new tests (KG subject-comment refused; class-teacher remark route unaffected); its hand-rolled mock's `matches()` gained array-contains-scalar support (needed for `resolveRcTemplate`'s `classIds: classId` query), the same recurring gap fixed in several other test files this session.
+
+### Verified
+Both edited client files confirmed to compile via a dev-server dynamic import. Full suite green after the new tests were added.
+
 ## Term billing: transport and extra-curricular on the invoice (v5.169.0)
 
 **Status before this change:** a route's `feePerTerm` was stored but no code read it for billing. `transport_assignments` was read by nothing in finance. Activities had no model. Invoices came only from fee structures.

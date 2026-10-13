@@ -2922,6 +2922,19 @@ router.put('/draft-comments/:studentId/subject/:subjectId', authMiddleware, PLAN
     if (!placement || !placement.classId) return E.notFound(res, 'Student not found');
     const classId = placement.classId;
     if (req.body.classId && req.body.classId !== classId) return E.badRequest(res, 'classId does not match this student');
+
+    // Kindergarten/competency-band classes don't use subject-level
+    // comments at all (decided 2026-10-13) — _computeKgReportSections
+    // only ever reads comments.classTeacherRemark/principalRemark, never
+    // subjectComments, so a write here would just be invisible, orphaned
+    // data. No UI exposes this for a KG class either way (IndicatorMarkbook.jsx
+    // has no comment field; KgStudentReportCard.jsx only renders the two
+    // report-level remarks) — this is a server-side guard for consistency,
+    // not a behavior change to anything a user could previously see.
+    if (await resolveRcTemplate(schoolId, classId)) {
+      return E.forbidden(res, "This is a Kindergarten class — it doesn't use per-subject comments. Only the class teacher's remark applies.");
+    }
+
     if (await isElective(req, classId, subjectId)) {
       if (!(await canTeachElective(req, classId, subjectId))) {
         return E.forbidden(res, 'You are not assigned to teach this elective in this class.');

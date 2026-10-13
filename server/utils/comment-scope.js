@@ -6,7 +6,14 @@
    • Subject teacher comment (per student, per subject, per term):
      same rights as marks — the caller needs a teaching_assignments row
      for {class, subject, stream} (canWriteSubject). Management roles keep
-     the bypass they have for marks.
+     the bypass they have for marks. Does NOT apply to a Kindergarten/
+     competency-band class (resolveRcTemplate(schoolId, classId) truthy) —
+     decided 2026-10-13: KG report cards show only the class teacher's
+     remark, never a per-subject one (_computeKgReportSections in
+     report-cards.js never reads subjectComments), so the write route
+     (PUT /draft-comments/:studentId/subject/:subjectId) rejects it
+     outright for a KG class rather than accepting data nothing ever
+     displays.
 
    • Class teacher remark (per student, per term):
      only the stream's form teacher (streams.formTeacherId), and only for
