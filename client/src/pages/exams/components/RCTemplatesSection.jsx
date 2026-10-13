@@ -1,13 +1,20 @@
 /* ============================================================
    RCTemplatesSection — competency-based report card templates for
    Kindergarten / early-childhood classes. Admin-only. Accessed from
-   Report Cards' own top-level "Kindergarten Templates" tab
-   (ReportCardsPage.jsx) — moved out of Settings entirely (2026-10),
-   after an earlier move had only gotten it as far as a Settings
-   sub-tab. Still its own API/data model (`/rc-templates`), not merged
-   with RC11's layoutKey registry — see the Report Card Template
+   Exams' own top-level "Kindergarten Templates" tab (ExamsPage.jsx),
+   alongside Configuration — moved there from Report Cards (2026-10-13),
+   raised directly: the template defines the Markbook's indicator-entry
+   structure (performance bands, subjects, indicators), so it belongs
+   with the rest of assessment configuration, not with report-card
+   generation — Report Cards only ever CONSUMES a template via
+   resolveRcTemplate, it never configured one. (Before that it had
+   already moved out of Settings entirely, after an earlier move had
+   only gotten it as far as a Settings sub-tab — see git history for
+   that step.) Still its own API/data model (`/rc-templates`), not
+   merged with RC11's layoutKey registry — see the Report Card Template
    Engine plan's explicit decision to defer a real Kindergarten
-   renderer/scoring UI.
+   renderer/scoring UI (that deferral was about the RENDERER, not
+   about where this config screen lives).
 
    Schema extensions (2026-10, same milestone), confirmed against real
    competency-band report samples rather than assumed: per-indicator

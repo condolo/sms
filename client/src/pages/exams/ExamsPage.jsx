@@ -14,7 +14,7 @@ import {
   Search, Save, Check, PenLine, Bell,
   Users2, GraduationCap, Filter, Percent, Settings,
   Tag, Layers, Info, ClipboardPaste, Lock,
-  BookMarked, LockOpen, Send, XCircle,
+  BookMarked, LockOpen, Send, XCircle, Baby,
 } from 'lucide-react';
 import {
   exams as examsApi,
@@ -32,6 +32,7 @@ import {
 import RemindersTab   from '../grades/components/RemindersTab.jsx';
 import CAConfigTab    from '../grades/components/ConfigTab.jsx';
 import IndicatorMarkbook from './components/IndicatorMarkbook.jsx';
+import RCTemplatesSection from './components/RCTemplatesSection.jsx';
 import { TypePill, Toast, Skeleton } from '../grades/components/GradesPrimitives.jsx';
 import { DEFAULT_CUSTOM_TYPES, _pct, _scoreColor } from '../grades/constants.js';
 import useAuthStore from '@/store/auth.js';
@@ -46,11 +47,12 @@ export default function ExamsPage() {
   const canCreate = ['admin', 'superadmin', 'deputy_principal', 'exams_officer'].includes(role);
 
   const TABS = [
-    { id: 'exams',     label: 'Exams',         icon: FileText,    adminOnly: false },
-    { id: 'markbook',  label: 'Markbook',       icon: BookMarked,  adminOnly: false },
-    { id: 'review',    label: 'Review',         icon: Send,        adminOnly: true  },
-    { id: 'reminders', label: 'Reminders',      icon: Bell,        adminOnly: false },
-    { id: 'config',    label: 'Configuration',  icon: Settings,    adminOnly: true  },
+    { id: 'exams',        label: 'Exams',                  icon: FileText,    adminOnly: false },
+    { id: 'markbook',     label: 'Markbook',                icon: BookMarked,  adminOnly: false },
+    { id: 'review',       label: 'Review',                  icon: Send,        adminOnly: true  },
+    { id: 'reminders',    label: 'Reminders',                icon: Bell,        adminOnly: false },
+    { id: 'kg-templates', label: 'Kindergarten Templates',  icon: Baby,        adminOnly: true  },
+    { id: 'config',       label: 'Configuration',           icon: Settings,    adminOnly: true  },
   ].filter(t => !t.adminOnly || canCreate);
 
   /* ── Shared data loaded once at page level ── */
@@ -154,6 +156,11 @@ export default function ExamsPage() {
           {tab === 'reminders' && (
             <motion.div key="reminders" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
               <RemindersTab />
+            </motion.div>
+          )}
+          {tab === 'kg-templates' && canCreate && (
+            <motion.div key="kg-templates" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
+              <RCTemplatesSection />
             </motion.div>
           )}
           {tab === 'config' && canCreate && (

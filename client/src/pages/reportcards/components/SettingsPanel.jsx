@@ -19,13 +19,15 @@
 
    Kindergarten competency-band templates (rc-templates) used to live in
    this panel too — first as its own standalone tab, then folded into
-   Templates as a second card. Raised directly, again: "I don't want
-   this template to be in settings... all should be in Exam module and
-   Report card module" — moved out of Settings entirely (2026-10) to its
-   own top-level "Kindergarten Templates" tab in ReportCardsPage.jsx,
-   sibling to "Generate & Publish" and "Settings", not nested under
-   either. Its RBAC gate moved in the SAME change (rc-templates.js:
-   settings:{read,update} -> report_cards:{read,update}) — see that
+   Templates as a second card, then (2026-10) moved out of Settings
+   entirely to its own top-level tab in ReportCardsPage.jsx. Moved AGAIN
+   (2026-10-13), out of Report Cards entirely this time, to ExamsPage.jsx's
+   own top-level tab alongside Configuration — raised directly: the
+   template defines the Markbook's indicator-entry structure, so it
+   belongs with assessment configuration, not report-card generation;
+   Report Cards only ever consumed it (resolveRcTemplate), never
+   configured it. Each move carried its RBAC gate in the same change
+   (rc-templates.js's own header has the full history) — see that
    file's own header comment for why that has to happen together, not
    as a follow-up.
    ============================================================ */

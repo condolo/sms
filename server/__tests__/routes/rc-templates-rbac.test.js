@@ -1,12 +1,13 @@
 /* ============================================================
-   server/routes/rc-templates.js — RBAC relocation (2026-10).
+   server/routes/rc-templates.js — RBAC relocation (2026-10-13).
 
-   The Kindergarten Templates UI moved out of the generic Settings
-   page's RBAC scope (settings:{read,update}) to the Report Cards
-   module's own scope (report_cards:{read,update}), in the SAME change
-   that moved the UI out of Settings entirely. This verifies the gate
-   actually moved — not just widened to accept both — using the REAL
-   rbac.js (only its own DB read is mocked).
+   The Kindergarten Templates UI moved out of the Report Cards module's
+   RBAC scope (report_cards:{read,update}) to Exams' own assessment-
+   configuration scope (assessment:{read,update}), in the SAME change
+   that moved the UI out of Report Cards entirely into ExamsPage.jsx's
+   own top-level tab. This verifies the gate actually moved — not just
+   widened to accept both — using the REAL rbac.js (only its own DB
+   read is mocked).
    ============================================================ */
 
 const SCHOOL_A = 'school_A';
@@ -55,28 +56,28 @@ beforeEach(() => {
 
 const NON_FLOOR = { userId: 'usr_t', schoolId: SCHOOL_A, role: 'teacher', roles: ['teacher'] };
 
-test('holding settings:read alone (the OLD scope) no longer grants access', async () => {
-  mockRolePerms = { settings: ['read', 'update'] }; // old scope, deliberately not report_cards
+test('holding report_cards:read alone (the OLD scope) no longer grants access', async () => {
+  mockRolePerms = { report_cards: ['read', 'update'] }; // old scope, deliberately not assessment
   const res = await supertest(buildApp(NON_FLOOR)).get('/api/rc-templates');
   expect(res.status).toBe(403);
 });
 
-test('report_cards:read (the NEW scope) grants list access', async () => {
-  mockRolePerms = { report_cards: ['read', 'update'] };
+test('assessment:read (the NEW scope) grants list access', async () => {
+  mockRolePerms = { assessment: ['read', 'update'] };
   const res = await supertest(buildApp(NON_FLOOR)).get('/api/rc-templates');
   expect(res.status).toBe(200);
 });
 
-test('report_cards:update grants create access', async () => {
-  mockRolePerms = { report_cards: ['read', 'create', 'update'] };
+test('assessment:update grants create access', async () => {
+  mockRolePerms = { assessment: ['read', 'create', 'update'] };
   const res = await supertest(buildApp(NON_FLOOR)).post('/api/rc-templates').send({
     name: 'KG Competency Bands', performanceBands: [{ label: 'Good', grade: 'B' }],
   });
   expect(res.status).toBe(201);
 });
 
-test('report_cards:read alone (no update) is forbidden from creating', async () => {
-  mockRolePerms = { report_cards: ['read'] };
+test('assessment:read alone (no update) is forbidden from creating', async () => {
+  mockRolePerms = { assessment: ['read'] };
   const res = await supertest(buildApp(NON_FLOOR)).post('/api/rc-templates').send({
     name: 'KG Competency Bands', performanceBands: [{ label: 'Good', grade: 'B' }],
   });

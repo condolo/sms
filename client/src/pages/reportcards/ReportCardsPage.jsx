@@ -7,20 +7,23 @@
    - Settings: General / Comments / Workflow / Publication Policy /
      Templates — the RCE1/RC7/RC8/RC9/RC11 server capabilities this
      engine has had since earlier milestones but never had a client UI.
-   - Kindergarten Templates (2026-10): competency-band template
-     building (rc-templates) — moved out of the Settings sub-tab, and
-     before that the generic Settings page, into its own top-level tab
-     here, sibling to Settings rather than nested under it. Raised
-     directly: "I don't want this template to be in settings... all
-     should be in Exam module and Report card module." Its RBAC gate
-     moved in the same change (rc-templates.js: settings -> report_cards).
+
+   Kindergarten Templates moved OUT of this page entirely (2026-10-13,
+   to ExamsPage.jsx's own top-level tab, alongside Configuration) —
+   raised directly: the template defines the Markbook's indicator-entry
+   structure, so configuring it belongs with the rest of assessment
+   setup, not with report-card generation. This page only ever
+   CONSUMED a template (resolveRcTemplate, in Generate & Publish's own
+   pipeline switch) — it never configured one, and still doesn't; this
+   split makes that boundary explicit rather than incidental. Its RBAC
+   gate moved in the same change (rc-templates.js: report_cards ->
+   assessment, matching Configuration's own gate).
    ============================================================ */
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FileBarChart2, Settings as SettingsIcon, GraduationCap, Baby } from 'lucide-react';
+import { FileBarChart2, Settings as SettingsIcon, GraduationCap } from 'lucide-react';
 import ReportCardsTab from '../grades/components/ReportCardsTab.jsx';
 import SettingsPanel from './components/SettingsPanel.jsx';
-import RCTemplatesSection from './components/RCTemplatesSection.jsx';
 import useAuthStore from '@/store/auth.js';
 
 export default function ReportCardsPage() {
@@ -29,9 +32,8 @@ export default function ReportCardsPage() {
   const canConfigure = ['admin', 'superadmin'].includes(role);
 
   const TABS = [
-    { id: 'generate',     label: 'Generate & Publish',     icon: FileBarChart2, adminOnly: false },
-    { id: 'kg-templates', label: 'Kindergarten Templates', icon: Baby,          adminOnly: true  },
-    { id: 'settings',     label: 'Settings',               icon: SettingsIcon, adminOnly: true  },
+    { id: 'generate', label: 'Generate & Publish', icon: FileBarChart2, adminOnly: false },
+    { id: 'settings', label: 'Settings',            icon: SettingsIcon, adminOnly: true  },
   ].filter(t => !t.adminOnly || canConfigure);
 
   return (
@@ -83,11 +85,6 @@ export default function ReportCardsPage() {
           {tab === 'generate' && (
             <motion.div key="generate" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
               <ReportCardsTab />
-            </motion.div>
-          )}
-          {tab === 'kg-templates' && canConfigure && (
-            <motion.div key="kg-templates" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
-              <RCTemplatesSection />
             </motion.div>
           )}
           {tab === 'settings' && canConfigure && (

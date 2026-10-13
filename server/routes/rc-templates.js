@@ -4,15 +4,16 @@
    Admin-only CRUD. Each template defines performance bands,
    subjects, and learning indicators for a class group (e.g. KG).
 
-   RBAC moved from settings:{read,update} to report_cards:{read,update}
-   (2026-10) — the UI this gates moved out of the generic Settings page
-   (and out of Report Cards' own "Settings" sub-tab) into its own
-   top-level "Kindergarten Templates" tab in the Report Cards module;
-   the permission gate moved in the SAME change, not a follow-up, so a
-   role granted Report Cards access but not generic Settings access
-   was never briefly unable to reach a screen that's no longer under
-   Settings at all — and vice versa, nobody kept settings:update access
-   to this after it left Settings.
+   RBAC history: settings:{read,update} -> report_cards:{read,update}
+   (2026-10, when the UI moved out of generic Settings into Report
+   Cards' own top-level tab) -> assessment:{read,update} (2026-10-13,
+   when the UI moved again, out of Report Cards entirely into Exams'
+   own top-level tab, alongside Configuration — GET/PATCH /config in
+   assessment.js uses this exact gate already). Each UI move carried
+   its RBAC gate in the SAME change, not a follow-up, so a role granted
+   access to wherever the screen currently lives is never briefly
+   unable to reach it, and nobody keeps a stale grant to wherever it
+   used to live.
    ============================================================ */
 'use strict';
 
@@ -121,7 +122,7 @@ function _stampSubjects(subjects) {
 /* ══════════════════════════════════════════════════════════════
    GET /api/rc-templates  — list all school templates
    ══════════════════════════════════════════════════════════════ */
-router.get('/', authMiddleware, rbac('report_cards', 'read'), async (req, res) => {
+router.get('/', authMiddleware, rbac('assessment', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const filter = { schoolId };
@@ -165,7 +166,7 @@ router.get('/resolve', authMiddleware, rbac('grades', 'read'), async (req, res) 
 /* ══════════════════════════════════════════════════════════════
    GET /api/rc-templates/:id
    ══════════════════════════════════════════════════════════════ */
-router.get('/:id', authMiddleware, rbac('report_cards', 'read'), async (req, res) => {
+router.get('/:id', authMiddleware, rbac('assessment', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const doc = await tenantModel('rc_templates', tenantContext(req))
@@ -183,7 +184,7 @@ router.get('/:id', authMiddleware, rbac('report_cards', 'read'), async (req, res
 /* ══════════════════════════════════════════════════════════════
    POST /api/rc-templates  — create
    ══════════════════════════════════════════════════════════════ */
-router.post('/', authMiddleware, rbac('report_cards', 'update'), async (req, res) => {
+router.post('/', authMiddleware, rbac('assessment', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
 
@@ -227,7 +228,7 @@ router.post('/', authMiddleware, rbac('report_cards', 'update'), async (req, res
 /* ══════════════════════════════════════════════════════════════
    PUT /api/rc-templates/:id  — update
    ══════════════════════════════════════════════════════════════ */
-router.put('/:id', authMiddleware, rbac('report_cards', 'update'), async (req, res) => {
+router.put('/:id', authMiddleware, rbac('assessment', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
 
@@ -276,7 +277,7 @@ router.put('/:id', authMiddleware, rbac('report_cards', 'update'), async (req, r
 /* ══════════════════════════════════════════════════════════════
    DELETE /api/rc-templates/:id
    ══════════════════════════════════════════════════════════════ */
-router.delete('/:id', authMiddleware, rbac('report_cards', 'update'), async (req, res) => {
+router.delete('/:id', authMiddleware, rbac('assessment', 'update'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const Templates = tenantModel('rc_templates', tenantContext(req));

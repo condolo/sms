@@ -6,6 +6,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.181.0] — 2026-10-13 — refactor(exams): Kindergarten Templates moved out of Report Cards entirely, into Exams
+
+Raised directly, looking at the Grading Scales screen: why isn't Kindergarten's performance-bands/indicators configuration done there, or at least under Exams, instead of a separate tab under Report Cards? Research confirmed the architecture had no documented reason to keep it in Report Cards — only a renderer-build sequencing decision was ever on record, never a config-location one — so this is a pure relocation.
+
+### Changed
+- "Kindergarten Templates" is no longer a Report Cards tab — it's now its own top-level tab in **Exams**, alongside Configuration, since it's the screen that defines the Markbook's indicator-entry structure. Report Cards keeps exactly two tabs (Generate & Publish, Settings) and, as before, only ever *reads* a template (`resolveRcTemplate`) to switch its own pipeline — it never configured one.
+- `rc-templates.js`'s RBAC gate moved with it: `report_cards:{read,update}` → `assessment:{read,update}`, the same gate the sibling Configuration screen already uses.
+
+### Not changed (confirmed deliberately, after investigation)
+- **Grading Scales** (`grade_boundaries`, percentage-threshold) and the KG Template's own **Performance Bands** (categorical, per-indicator max score) stay two separate systems — both print on a KG report, and `grade_boundaries`'s schema can't represent a per-indicator non-100 max, so they can't be merged.
+- The Markbook's selection order (year → term → class → subject → stream-if-needed → assessment instance) and the required Assessment-instance step are unchanged — confirmed as intentional, not something this relocation should also redesign.
+
+### Tests
+- `rc-templates-rbac.test.js` rewritten for the `assessment` scope (4 tests).
+
+Full suite: unaffected elsewhere — only RBAC gate and tab location moved, no data-model or resolution-logic change.
+
+---
+
 ## [v5.180.0] — 2026-10-13 — fix(settings): finance sub-permission backfill was one-time only and could permanently miss a role
 
 Follow-up to v5.179.0: after that fix, the same "Apply & Save" error still occurred — now listing only the 2 real actions per key instead of 4, confirming the clamp worked, but showing the actor's own role genuinely holds none of `finance__term_billing`/`early_payment`/`activities` in the database at all.
