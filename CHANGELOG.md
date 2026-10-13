@@ -6,6 +6,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.175.0] — 2026-10-13 — fix(portal): Parent Portal notifications pointed at the wrong data entirely
+
+Reported directly: "the message doesn't work for parent, see the notification but can't open." Two real, confirmed bugs, not a vague complaint:
+
+### Fixed
+- **`ParentDashboard.jsx`'s Messages page showed the announcements feed**, not the real `/api/messages` inbox the notification bell's own badge count is about — a different collection entirely. Clicking a notification took you to a page with unrelated content, which is exactly "can't open" from the parent's side. Now fetches and renders the real inbox (`messages.list({tab:'inbox'})`), marks a message read on click (syncing the bell's badge via the existing `messages:read` window event), and shows a genuine unread count sourced from the same data the bell uses.
+- **`server/routes/parent-portal.js`'s `GET /family-summary`** (the sidebar nav badge + Overview quick-stat's `unreadMessages` count) queried `{recipientId: userId, readAt: null}` — fields the `messages` collection has **never actually had**. The real shape, confirmed against `messages.js`'s own `_inboxQuery`, is `recipients` (a string: `'all'`, a role group, or a specific userId) + `isRead: {[userId]: true}`. This count was silently always 0, regardless of how many messages were actually unread, disagreeing with the bell's own (correct) count the whole time. Fixed by exporting and reusing `messages.js`'s exact `_inboxQuery` rather than a second, independently-drifted definition of "unread."
+
+### Added
+- `messages.js` now exports `_inboxQuery` for reuse — same inbox-membership rule everywhere, never a second copy that can drift.
+
+### Tests
+- `portal-academic-year-live.test.js` — 5 new tests for `GET /family-summary`'s unread count: counts a message addressed to "all" or to the "parents" group, excludes an already-read message, excludes a message addressed to a different group (e.g. teachers only), and resolves to 0 (not an error) with no messages at all.
+
+Full suite: 300/300 suites, 3113/3113 tests.
+
+---
+
 ## [v5.174.0] — 2026-10-13 — fix(report-cards): Kindergarten class-detection audit — two real gaps closed
 
 User asked directly: how does the system know a class IS "Kindergarten," and was there any assumption baked into the build? Ran a full-codebase audit rather than answering from memory. The design holds up: there is **no `classType`/`isKindergarten` field anywhere** — every KG-aware code path (Markbook entry switch, Report Cards pipeline switch, the layout renderer dispatch) asks the exact same single question, `resolveRcTemplate(schoolId, classId)` (`server/utils/rc-template-scale.js`) — explicit `classIds` on a template wins, else the class's Section's default template, else the class uses the ordinary numeric system. Confirmed across `rc-templates.js`, `ExamsPage.jsx`'s Markbook switch, `ReportCardsTab.jsx`'s pipeline switch, `report-cards.js`'s `/kg/generate`/`/kg/publish`, and a full grep for any other class-name/section-name/grade-level string-matching — none found.

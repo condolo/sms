@@ -275,3 +275,9 @@ router.delete('/:id', rbac('messages', 'delete'), async (req, res) => {
 });
 
 module.exports = router;
+// Reused by parent-portal.js's family-summary unread count — same
+// inbox-membership definition, not a second one that can drift from
+// this one (see that file's own fix note, 2026-10-13: it previously
+// queried recipientId/readAt, fields this collection has never had —
+// messages actually use `recipients` + `isRead.${userId}`).
+module.exports._inboxQuery = _inboxQuery;

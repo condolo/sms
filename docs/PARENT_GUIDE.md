@@ -110,7 +110,9 @@ Books your child currently has borrowed, with due dates. A book that's overdue o
 
 ## 10. Messages
 
-Updates and notices sent out by your child's school. Msingi doesn't yet support writing directly back to an individual teacher from this screen — for anything needing a reply, use **Message School** in the top bar, or contact the school office directly.
+Your real inbox — direct messages sent to you personally, messages sent to all parents, and school-wide announcements, most recent first. This is the same inbox the notification bell's badge count is about: an unread count there means an unread message here, and opening a message here marks it read everywhere, including that badge.
+
+Clicking a message marks it read. Msingi doesn't yet support writing directly back from this screen — for anything needing a reply, use **Message School** in the top bar, or contact the school office directly.
 
 ---
 

@@ -38,6 +38,7 @@ import {
   Menu, X, TrendingUp,
 } from 'lucide-react';
 import NotificationBell from '@/components/layout/NotificationBell.jsx';
+import { messages as messagesApi } from '@/api/client.js';
 
 /* ── API helpers ────────────────────────────────────────────────── */
 const API_BASE = import.meta.env.VITE_API_BASE || '';
@@ -214,6 +215,8 @@ export default function ParentDashboard() {
   const [downloading,   setDownloading]   = useState(null);
   const [dlError,       setDlError]       = useState('');
   const [latestWeek,    setLatestWeek]    = useState(null); // most recent Weekly Snapshot for activeChildId, or undefined if none generated yet
+  const [inboxMessages, setInboxMessages] = useState(null); // real /api/messages inbox — per parent, not per child
+  const [inboxLoading,  setInboxLoading]  = useState(false);
   const [initError,     setInitError]     = useState('');
   const [activePage,    setActivePage]    = useState('overview');
   const [childMenuOpen, setChildMenuOpen] = useState(false);
@@ -299,6 +302,32 @@ export default function ParentDashboard() {
       .catch(() => setLatestWeek(undefined)); // no snapshot yet, or transient error — card simply hides
   }, [activeChildId]);
 
+  /* ── Real messages inbox (/api/messages) — reported directly: the
+     bell shows a notification but it "can't open." The Messages page
+     was previously showing the school's announcements feed instead of
+     the actual messages the bell/badge count are about — different
+     collection, different question entirely. Loaded once per parent
+     (not per child, a parent has one inbox regardless of which child
+     is selected) the first time the Messages page is opened. */
+  function loadInbox() {
+    setInboxLoading(true);
+    messagesApi.list({ tab: 'inbox', limit: 50 })
+      .then(r => setInboxMessages(r?.data ?? []))
+      .catch(() => setInboxMessages([]))
+      .finally(() => setInboxLoading(false));
+  }
+  function markMessageRead(m) {
+    if (m.isRead?.[session?.user?.id]) return;
+    setInboxMessages(prev => prev?.map(x => (x.id === m.id ? { ...x, isRead: { ...x.isRead, [session?.user?.id]: true } } : x)) ?? prev);
+    // Keep the sidebar/Overview badge (familySummary.unreadMessages) in
+    // step too — it's fetched once at mount, not re-derived from
+    // inboxMessages, so it would otherwise stay stale until a reload.
+    setFamilySummary(prev => prev ? { ...prev, unreadMessages: Math.max(0, (prev.unreadMessages ?? 0) - 1) } : prev);
+    messagesApi.markRead(m.id)
+      .then(() => window.dispatchEvent(new Event('messages:read')))
+      .catch(() => {});
+  }
+
   function handleLogout() { logout(); navigate('/login', { replace: true }); }
 
   /* Real page switching, not an anchor-scroll within one long page —
@@ -309,6 +338,7 @@ export default function ParentDashboard() {
     setActivePage(pageId);
     setMobileNavOpen(false);
     if (mainRef.current) mainRef.current.scrollTo({ top: 0 });
+    if (pageId === 'messages' && inboxMessages === null) loadInbox();
   }
 
   /* ── Loading state ── */
@@ -851,34 +881,44 @@ export default function ParentDashboard() {
   }
 
   function MessagesPage() {
-    // NOTE: the API has no dedicated parent<->school message thread
-    // endpoint yet — this reads the same announcements feed the
-    // Announcements page shows, same as before this change. Flagged as
-    // a real product gap, not something this pass could invent data for.
+    // Real /api/messages inbox — previously this page showed the
+    // announcements feed instead, a different collection entirely from
+    // what the bell/notification badge actually counts. Reported
+    // directly: "see the notification but can't open" — clicking the
+    // bell's notification landed here, which showed something else.
+    const myUserId = session?.user?.id;
+    const inboxUnread = inboxMessages?.filter(m => !m.isRead?.[myUserId]).length ?? 0;
     return (
       <Card id="section-messages">
         <CardHeader
-          icon={MessageSquare} iconClass="text-sky-500" title="Messages from School"
-          right={unreadCount > 0 && <span id="messages-unread-badge" className="text-[11px] font-semibold text-amber-600 bg-amber-50 px-2.5 py-[5px] rounded-full">{unreadCount} unread</span>}
+          icon={MessageSquare} iconClass="text-sky-500" title="Messages"
+          right={inboxUnread > 0 && <span id="messages-unread-badge" className="text-[11px] font-semibold text-amber-600 bg-amber-50 px-2.5 py-[5px] rounded-full">{inboxUnread} unread</span>}
         />
-        {!d.announcements?.length ? (
+        {inboxLoading || inboxMessages === null ? (
+          <div className="p-5 space-y-2">{[...Array(3)].map((_, i) => <div key={i} className="h-12 rounded-lg bg-slate-100 animate-pulse" />)}</div>
+        ) : inboxMessages.length === 0 ? (
           <p id="messages-empty" className="text-[12px] text-slate-400 text-center py-8">No messages yet</p>
         ) : (
           <div id="messages-list" className="divide-y divide-slate-50">
-            {d.announcements.map((ann, i) => {
-              const isFirst = i === 0;
+            {inboxMessages.map(m => {
+              const unread = !m.isRead?.[myUserId];
               return (
-                <div key={`ann-${ann.id ?? i}`} id={`announcement-${ann.id ?? i}`} className="flex items-start gap-3 px-[18px] py-3.5">
-                  <div className="w-2 h-2 rounded-full mt-[5px] flex-shrink-0" style={{ background: isFirst ? primary : '#22c55e' }} />
+                <button
+                  key={m.id}
+                  id={`inbox-message-${m.id}`}
+                  onClick={() => markMessageRead(m)}
+                  className="w-full text-left flex items-start gap-3 px-[18px] py-3.5 hover:bg-slate-50 transition"
+                >
+                  <div className="w-2 h-2 rounded-full mt-[5px] flex-shrink-0" style={{ background: unread ? primary : 'transparent' }} />
                   <div className="flex-1 min-w-0">
-                    <p className="text-[12px] font-semibold text-slate-800 leading-snug">{ann.title}</p>
-                    {ann.body && <p className="text-[11px] text-slate-500 mt-0.5">{ann.body}</p>}
-                    <p className="text-[10px] text-slate-400 mt-1">
-                      {ann.createdAt ? new Date(ann.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
-                      {isFirst && unreadCount > 0 && <> · <span className="font-semibold text-amber-500">Unread</span></>}
-                    </p>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className={`text-[12px] leading-snug ${unread ? 'font-semibold text-slate-800' : 'font-medium text-slate-600'}`}>{m.senderName || 'School'}</p>
+                      <span className="text-[10px] text-slate-400 shrink-0">{m.createdAt ? new Date(m.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '—'}</span>
+                    </div>
+                    <p className="text-[12px] text-slate-700 font-medium mt-0.5">{m.subject}</p>
+                    {m.body && <p className="text-[11px] text-slate-500 mt-0.5">{m.body}</p>}
                   </div>
-                </div>
+                </button>
               );
             })}
           </div>

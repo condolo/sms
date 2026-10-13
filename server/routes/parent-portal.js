@@ -15,6 +15,7 @@ const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { isTimetablePublished, publishedReader } = require('../utils/timetable-publish');
 const { resolveCurrentPeriod } = require('./academic-config');
 const { _getMpesaConfig } = require('./mpesa');
+const { _inboxQuery } = require('./messages');
 const { ok, E }          = require('../utils/response');
 // Weekly Snapshot's read logic is shared with weekly-snapshots.js's own
 // staff-facing routes — see that file's _findAuthorizedStudent header
@@ -40,7 +41,7 @@ function _requireParent(req, res) {
 router.get('/family-summary', authMiddleware, async (req, res) => {
   if (!_requireParent(req, res)) return;
   try {
-    const { schoolId, studentIds = [], guardianOf = [], userId } = req.jwtUser;
+    const { schoolId, studentIds = [], guardianOf = [], userId, role } = req.jwtUser;
     const ids     = [...new Set([...studentIds, ...guardianOf])];
     const todayISO = new Date().toISOString().slice(0, 10);
 
@@ -53,12 +54,22 @@ router.get('/family-summary', authMiddleware, async (req, res) => {
     const Messages    = tenantModel('messages', tenantContext(req));
     const Events      = tenantModel('events', tenantContext(req));
 
+    // Same inbox-membership + unread definition the bell/Messages page
+    // itself uses (messages.js's _inboxQuery + isRead.${userId}) — this
+    // previously queried recipientId/readAt, fields the messages
+    // collection has never actually had (real shape: `recipients` +
+    // `isRead: {[userId]: true}`), so this count was always 0 regardless
+    // of real unread messages, silently disagreeing with the bell's own
+    // (correct) count.
     const [invoices, todayAtt, unreadMsgs, eventCount] = await Promise.all([
       FeeInvoices.find({ schoolId, studentId: { $in: ids }, balance: { $gt: 0 } })
         .select('studentId balance').lean().catch(() => []),
       Attendance.find({ schoolId, studentId: { $in: ids }, date: todayISO })
         .select('studentId status').lean().catch(() => []),
-      Messages.countDocuments({ schoolId, recipientId: userId, readAt: null }).catch(() => 0),
+      Messages.countDocuments({
+        ..._inboxQuery({ schoolId, userId, role }),
+        [`isRead.${userId}`]: { $ne: true },
+      }).catch(() => 0),
       Events.countDocuments({ schoolId, date: { $gte: todayISO } }).catch(() => 0),
     ]);
 

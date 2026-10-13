@@ -48,7 +48,30 @@ function mockCollection(seed = []) {
   };
 }
 
-let mockSchoolDoc, mockStudentDoc, mockAcademicYearDocs;
+// Real filter matching (unlike mockCollection's countDocuments above,
+// which ignores its filter entirely) — needed so the family-summary
+// tests below actually discriminate a correct messages._inboxQuery
+// filter from a wrong one, rather than passing regardless.
+function mockMatches(doc, filter) {
+  return Object.entries(filter || {}).every(([k, cond]) => {
+    if (k === '$or') return cond.some(sub => mockMatches(doc, sub));
+    const val = k.includes('.') ? k.split('.').reduce((o, p) => o?.[p], doc) : doc[k];
+    if (cond && typeof cond === 'object' && !Array.isArray(cond)) {
+      if ('$in' in cond) return cond.$in.includes(val);
+      if ('$ne' in cond) return val !== cond.$ne;
+      return true;
+    }
+    return val === cond;
+  });
+}
+function mockMessagesCollection(seed = []) {
+  return {
+    ...mockCollection(seed),
+    countDocuments: jest.fn((filter) => Promise.resolve(seed.filter(d => mockMatches(d, filter)).length)),
+  };
+}
+
+let mockSchoolDoc, mockStudentDoc, mockAcademicYearDocs, mockMessageDocs;
 
 jest.mock('../../utils/model', () => ({
   _model: jest.fn((c) => {
@@ -61,9 +84,21 @@ jest.mock('../../utils/tenant-model', () => ({
   tenantModel: (collection) => {
     if (collection === 'students')       return { findOne: jest.fn(() => mockChain(mockStudentDoc)) };
     if (collection === 'academic_years') return mockCollection(mockAcademicYearDocs);
+    if (collection === 'messages')       return mockMessagesCollection(mockMessageDocs);
     return mockCollection([]);
   },
 }));
+// messages.js's OWN middleware chain (router.use(authMiddleware, tenantMiddleware,
+// moduleGate('messages'))) never runs here — parent-portal.js only imports its
+// exported _inboxQuery function, not the router — but messages.js still
+// requires these at module-load time, so they need to resolve without a
+// live DB/SMTP config.
+jest.mock('../../middleware/tenant', () => ({ tenantMiddleware: (_req, _res, next) => next() }));
+jest.mock('../../middleware/module-gate', () => ({ moduleGate: () => (_req, _res, next) => next() }));
+jest.mock('../../utils/email', () => ({}));
+jest.mock('../../utils/notif-settings', () => ({}));
+jest.mock('../../utils/email-queue', () => ({ enqueueBatch: jest.fn() }));
+jest.mock('../../utils/school-url', () => ({ schoolLoginUrl: jest.fn() }));
 
 const express   = require('express');
 const supertest = require('supertest');
@@ -82,6 +117,7 @@ beforeEach(() => {
     id: CHILD_1, schoolId: SCHOOL_A, firstName: 'Amara', lastName: 'Osei',
     admissionNumber: 'ADM001', classId: null, className: 'Year 2', streamId: null, status: 'active',
   };
+  mockMessageDocs = [];
 });
 
 describe('Parent Portal — GET /dashboard/:childId', () => {
@@ -139,6 +175,65 @@ describe('Parent Portal — GET /dashboard/:childId', () => {
     expect(res.body.data.school.mpesaEnabled).toBe(false);
     expect(res.body.data.school.mpesa).toBeUndefined();
     expect(JSON.stringify(res.body)).not.toMatch(/consumerKey|consumerSecret|passkey/);
+  });
+});
+
+// Reported directly: the Parent Portal's notification bell showed an
+// unread count, but the sidebar/Overview badge (sourced from
+// GET /family-summary's unreadMessages, a SEPARATE query from the
+// bell's own messages.js endpoints) never agreed with it — always 0.
+// Root cause: this query filtered by recipientId/readAt, fields the
+// messages collection has never actually had (real shape: `recipients`
+// + `isRead: {[userId]: true}`, same as messages.js's own _inboxQuery).
+// Fixed to reuse that exact exported function rather than a second,
+// drifted definition of "unread."
+describe('Parent Portal — GET /family-summary — unread count', () => {
+  const parentPortalRouter = require('../../routes/parent-portal');
+  const PARENT_USER = { userId: 'usr_parent', schoolId: SCHOOL_A, role: 'parent', studentIds: [CHILD_1], guardianOf: [] };
+
+  test('counts a message addressed to "all", unread by this user', async () => {
+    mockMessageDocs = [
+      { id: 'm1', schoolId: SCHOOL_A, recipients: 'all', isRead: {} },
+    ];
+    const res = await supertest(buildApp(parentPortalRouter, '/api/parent-portal', PARENT_USER))
+      .get('/api/parent-portal/family-summary');
+    expect(res.status).toBe(200);
+    expect(res.body.data.unreadMessages).toBe(1);
+  });
+
+  test('counts a message addressed to the "parents" role group', async () => {
+    mockMessageDocs = [
+      { id: 'm1', schoolId: SCHOOL_A, recipients: 'parents', isRead: {} },
+    ];
+    const res = await supertest(buildApp(parentPortalRouter, '/api/parent-portal', PARENT_USER))
+      .get('/api/parent-portal/family-summary');
+    expect(res.body.data.unreadMessages).toBe(1);
+  });
+
+  test('does NOT count a message already read by this user', async () => {
+    mockMessageDocs = [
+      { id: 'm1', schoolId: SCHOOL_A, recipients: 'all', isRead: { usr_parent: true } },
+    ];
+    const res = await supertest(buildApp(parentPortalRouter, '/api/parent-portal', PARENT_USER))
+      .get('/api/parent-portal/family-summary');
+    expect(res.body.data.unreadMessages).toBe(0);
+  });
+
+  test('does NOT count a message addressed to a different group (e.g. teachers only)', async () => {
+    mockMessageDocs = [
+      { id: 'm1', schoolId: SCHOOL_A, recipients: 'teachers', isRead: {} },
+    ];
+    const res = await supertest(buildApp(parentPortalRouter, '/api/parent-portal', PARENT_USER))
+      .get('/api/parent-portal/family-summary');
+    expect(res.body.data.unreadMessages).toBe(0);
+  });
+
+  test('no messages at all → 0, not an error', async () => {
+    mockMessageDocs = [];
+    const res = await supertest(buildApp(parentPortalRouter, '/api/parent-portal', PARENT_USER))
+      .get('/api/parent-portal/family-summary');
+    expect(res.status).toBe(200);
+    expect(res.body.data.unreadMessages).toBe(0);
   });
 });
 
