@@ -2827,6 +2827,8 @@ A separate, small registry router (`server/routes/report-card-templates.js`, mou
 
 Verified by actually rendering a sample (synthetic data, not DB-dependent) and visually inspecting the HTML output — confirmed varying `maxScore` renders correctly (10 in one subject, 20 in another), a zero-mark subject shows "—" not a false 0%, and both sign-off blocks render correctly. The PDF renderer generated without error through the same proven shared components but could not be screenshotted in this environment (no PDF-to-image tool available) — a real visual check is still worth doing once reachable.
 
+**Generate & Publish UI wired up (2026-10-13):** the pipeline above existed server-side with no way to reach it — `ReportCardsTab.jsx`'s "Generate & Publish" tab only ever called the numeric `/generate`/`/publish`. It now calls `GET /rc-templates/resolve` (the same check the Markbook uses) for the selected class and, when a template resolves, branches its generate query, publish mutation, loading/error/empty states, and student preview to `reportCards.kg.generate`/`reportCards.kg.publish` — same selector bar, same layout-agnostic bits (draft comments, published-snapshot lookup, bulk PDF download), not a duplicated tab. The KG preview itself is a new `KgStudentReportCard.jsx` (indicator/band/score/grade table per subject, overall average, class-teacher/principal remarks) rather than reusing `StudentReportCard.jsx`, since the data shape doesn't fit that component's numeric columns — mirrors the backend's own decision to keep the two pipelines separate.
+
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | GET | `/api/report-card-templates` | settings:read | List templates for the school (optional `?sectionId=`) |

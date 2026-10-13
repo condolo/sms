@@ -6,6 +6,44 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.172.0] — 2026-10-13 — feat(report-cards): Generate & Publish UI for Kindergarten classes
+
+The previous milestone (v5.171.0) built the full KG rendering pipeline —
+`POST /report-cards/kg/generate`, `POST /report-cards/kg/publish`, the
+native PDF/HTML renderer — and tested it (32 tests), but nothing in the
+client could reach it: Report Cards' "Generate & Publish" tab only ever
+called the numeric `/generate`/`/publish` endpoints. A KG class's report
+cards were complete server-side and entirely unreachable from the product.
+
+### Added
+- `ReportCardsTab.jsx` resolves whether the selected class has a
+  Kindergarten template via `GET /rc-templates/resolve` (already used by
+  the Markbook) and branches: a KG class's preview, loading/error/empty
+  states, and the Publish button now go through
+  `reportCards.kg.generate`/`reportCards.kg.publish` instead of the
+  numeric pair — same class/stream/term/year selector, same
+  layout-agnostic pieces (draft comments, published-snapshot lookup,
+  bulk PDF download), not a duplicated tab.
+- `client/src/pages/grades/components/KgStudentReportCard.jsx` — a
+  dedicated preview card (indicator / performance band / score / grade
+  per subject, overall average, class-teacher/principal remarks).
+  Separate from `StudentReportCard.jsx` because the data shape
+  (indicators and bands, no CA/HW/MT/ET breakdown, no ranking/deviation)
+  doesn't fit the numeric card — mirrors the backend's own decision to
+  keep the two pipelines separate rather than branch one component on
+  class type.
+- `client/src/api/client.js`'s `reportCards.kg.{generate,publish}`.
+
+### Still open (flagged, not done here)
+Indicator marks are still not wired to `mark_submissions` review-state
+(a teacher can keep editing after "submitting"), the native PDF
+renderer has only been confirmed non-empty, not visually inspected (no
+PDF-to-image tool in this environment), and the original Markbook
+roster report (a KG1-assigned student not appearing for a configured
+MT exam) is still unconfirmed.
+
+---
+
 ## [v5.171.0] — 2026-10-12 — fix(report-cards): Kindergarten Templates moved out of Settings; RBAC gate moved with it
 
 Raised directly, a second time: Kindergarten competency-band template
