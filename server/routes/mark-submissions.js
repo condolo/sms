@@ -39,6 +39,45 @@ const MARKS_UNLOCK_WORKFLOW_KEY = 'marks_unlock';
 const MARKS_REVIEW_WORKFLOW_KEY = 'marks_review';
 const RELOCK_DELAY_MS = 24 * 60 * 60 * 1000; // 24h — Governance Spec §3
 
+// Kindergarten indicator marks (indicator-marks.js) have no real
+// assessmentType/instance concept — reusing this collection/state-machine
+// for them (rather than a second moderation system) needs ONE reserved
+// sentinel value so the lock/unlock propagation below knows to touch
+// indicator_marks instead of assessment_marks. Exported so
+// indicator-marks.js's own write guard uses the exact same string, never
+// a second copy of it.
+const KG_INDICATORS_TYPE = 'kg_indicators';
+
+// The numeric branch of every markFilter below is byte-for-byte what this
+// route already built inline before this helper existed — only the KG
+// branch is new. indicator_marks has no instance field (one template per
+// class/subject, not per-sitting), so that key segment is simply dropped.
+function _markCollectionAndFilter(sub, extra = {}) {
+  if (sub.assessmentType === KG_INDICATORS_TYPE) {
+    return {
+      collection: 'indicator_marks',
+      filter: {
+        schoolId: sub.schoolId, classId: sub.classId, subjectId: sub.subjectId, termNumber: sub.termNumber,
+        ...(sub.streamId ? { streamId: sub.streamId } : {}),
+        ...extra,
+      },
+    };
+  }
+  return {
+    collection: 'assessment_marks',
+    filter: {
+      schoolId:       sub.schoolId,
+      classId:        sub.classId,
+      subjectId:      sub.subjectId,
+      termNumber:     sub.termNumber,
+      assessmentType: sub.assessmentType,
+      instance:       sub.instance,
+      ...(sub.streamId ? { streamId: sub.streamId } : {}),
+      ...extra,
+    },
+  };
+}
+
 // Same helper, same precedent, as assessment.js's/academic-calc.js's own
 // _yearFilterPart — matches the given year OR a legacy null-tagged row,
 // never a DIFFERENT explicitly-tagged year. Needed here (not imported —
@@ -167,18 +206,16 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), async 
       if (!wholeClass) return E.forbidden(res, 'Submit marks per stream — choose the stream you teach.');
     }
 
-    // Snapshot current marks for audit trail
-    const markFilter = {
-      schoolId,
-      classId:        data.classId,
-      subjectId:      data.subjectId,
-      termNumber:     data.termNumber,
-      assessmentType: data.assessmentType,
-      instance:       data.instance,
-    };
-    if (data.academicYearId) markFilter.academicYearId = data.academicYearId;
-    if (data.streamId) markFilter.streamId = data.streamId;
-    const marks = await tenantModel('assessment_marks', tenantContext(req)).find(markFilter).select('studentId rawScore').lean();
+    // Snapshot current marks for audit trail — Kindergarten indicator
+    // marks live in a different collection/shape (see
+    // _markCollectionAndFilter above), same natural-key convention.
+    const isKg = data.assessmentType === KG_INDICATORS_TYPE;
+    const { collection: markCollection, filter: markFilter } = _markCollectionAndFilter(
+      { ...data, schoolId },
+      data.academicYearId ? { academicYearId: data.academicYearId } : {},
+    );
+    const marks = await tenantModel(markCollection, tenantContext(req))
+      .find(markFilter).select(isKg ? 'studentId indicatorId score bandId' : 'studentId rawScore').lean();
 
     // Completeness check — reported directly: a teacher could submit for
     // review with a student still missing a mark entirely, with no
@@ -214,7 +251,8 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), async 
       tenantModel('subjects', tenantContext(req)).findOne({ id: data.subjectId, schoolId }).select('name').lean(),
     ]);
     const notifyLabel = `${subjectDoc?.name ?? data.subjectId} — ${classDoc?.name ?? data.classId}`;
-    const notifyBody  = `${data.assessmentType} marks for Term ${data.termNumber} have been submitted for review.`;
+    const typeLabel   = isKg ? 'Kindergarten indicator' : data.assessmentType;
+    const notifyBody  = `${typeLabel} marks for Term ${data.termNumber} have been submitted for review.`;
 
     if (existing) {
       if (existing.status === 'locked') {
@@ -416,12 +454,8 @@ async function _autoRelock(payload) {
     { id: submissionId, schoolId },
     { $set: { status: 'locked', lockedBy: 'system_auto_relock', lockedAt: now, updatedAt: now, unlockRequestStatus: null } },
   );
-  const markFilter = {
-    schoolId, classId: sub.classId, subjectId: sub.subjectId,
-    termNumber: sub.termNumber, assessmentType: sub.assessmentType, instance: sub.instance,
-    ...(sub.streamId ? { streamId: sub.streamId } : {}),
-  };
-  await _model('assessment_marks').updateMany(markFilter, { $set: { isLocked: true, lockedAt: now, lockedBySubmissionId: sub.id } });
+  const { collection: markCollection, filter: markFilter } = _markCollectionAndFilter({ ...sub, schoolId });
+  await _model(markCollection).updateMany(markFilter, { $set: { isLocked: true, lockedAt: now, lockedBySubmissionId: sub.id } });
   await AuditService.log({
     action: 'marks.auto_relocked', actor: { userId: 'system', role: 'system', email: null }, schoolId,
     target: { type: 'mark_submission', id: sub.id }, details: {},
@@ -531,17 +565,10 @@ router.post('/:id/lock', authMiddleware, PLAN, MODGATE, rbac('grades', 'update')
     // CA1 submission would also re-lock last year's already-settled Term
     // 2 CA1 marks, and vice versa were a historical submission ever
     // (re-)locked after a new year's matching window opened.
-    const markFilter = {
-      schoolId,
-      classId:        sub.classId,
-      subjectId:      sub.subjectId,
-      termNumber:     sub.termNumber,
-      assessmentType: sub.assessmentType,
-      instance:       sub.instance,
-      ...(sub.streamId ? { streamId: sub.streamId } : {}),
-      ..._lockYearFilterPart(sub.academicYearId || null),
-    };
-    await tenantModel('assessment_marks', tenantContext(req)).updateMany(markFilter, {
+    const { collection: markCollection, filter: markFilter } = _markCollectionAndFilter(
+      { ...sub, schoolId }, _lockYearFilterPart(sub.academicYearId || null),
+    );
+    await tenantModel(markCollection, tenantContext(req)).updateMany(markFilter, {
       $set: { isLocked: true, lockedAt: new Date().toISOString(), lockedBySubmissionId: sub.id },
     });
 
@@ -598,16 +625,8 @@ router.post('/:id/unlock', authMiddleware, PLAN, MODGATE, rbac('grades', 'update
     ).lean();
 
     // Unlock the underlying marks
-    const markFilter = {
-      schoolId,
-      classId:        sub.classId,
-      subjectId:      sub.subjectId,
-      termNumber:     sub.termNumber,
-      assessmentType: sub.assessmentType,
-      instance:       sub.instance,
-      ...(sub.streamId ? { streamId: sub.streamId } : {}),
-    };
-    await tenantModel('assessment_marks', ctx).updateMany(markFilter, {
+    const { collection: markCollection, filter: markFilter } = _markCollectionAndFilter({ ...sub, schoolId });
+    await tenantModel(markCollection, ctx).updateMany(markFilter, {
       $set: { isLocked: false, unlockedAt: now },
     });
 
@@ -627,3 +646,4 @@ router.post('/:id/unlock', authMiddleware, PLAN, MODGATE, rbac('grades', 'update
 });
 
 module.exports = router;
+module.exports.KG_INDICATORS_TYPE = KG_INDICATORS_TYPE;

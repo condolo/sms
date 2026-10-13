@@ -6,6 +6,61 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.173.0] — 2026-10-13 — fix(exams): Kindergarten indicator marks now lock via mark_submissions review-state
+
+A real, acknowledged gap flagged in indicator-marks.js's own header
+comment since it was first built: a teacher could keep editing a
+subject's Kindergarten indicator marks forever, even after "submitting"
+them for review — the same gap the numeric Markbook closed for
+CA/HW/MT/ET marks. Closed the same way, reusing the existing
+`mark_submissions` collection/state-machine rather than building a
+second moderation system.
+
+### Added
+- `server/routes/mark-submissions.js`'s `KG_INDICATORS_TYPE` ('kg_indicators')
+  — a reserved sentinel `assessmentType` value. Indicator marks have no
+  real assessmentType/instance of their own; this is how a KG
+  submission keys into the same collection, scoped by
+  `classId + subjectId + termNumber (+ streamId, + academicYearId)`
+  instead of the numeric `+ assessmentType + instance`.
+- `_markCollectionAndFilter(sub, extra)` — the one place that decides
+  whether a submission's lock/unlock propagation and completeness
+  check touch `assessment_marks` (numeric, byte-for-byte the same
+  filter this route already built inline) or `indicator_marks` (new,
+  KG). Used by `POST /` (submit), `POST /:id/lock`, `POST /:id/unlock`,
+  and the 24h auto-relock job — the only four places that ever reached
+  into a marks collection by name.
+- `server/routes/indicator-marks.js`'s `POST /bulk` gained the same two
+  guards `assessment.js`'s `/marks/bulk` already has: rejects a write
+  when the target mark is `isLocked`, and rejects a write when the
+  matching `mark_submissions` record is `submitted` or `approved`
+  ("recall the submission first"). Both now exist for indicator marks
+  for the first time.
+- `client/src/pages/exams/components/IndicatorMarkbook.jsx` — status
+  chip (Submitted/Approved/Rejected/Locked), "Submit for review",
+  Recall, and inline Approve/Reject (same floor as the numeric
+  Markbook's reviewer check — any non-teacher role, server-side
+  authorization unchanged and unaffected by this). Self-contained:
+  queries its own `mark_submissions` state rather than `ExamsPage.jsx`
+  passing anything new down.
+
+### Verification
+- Zero behavior change for the numeric Markbook: `_markCollectionAndFilter`'s
+  numeric branch reproduces the exact filter shape each of the four
+  call sites already built — confirmed by re-running the full existing
+  mark-submissions suite (42 tests) unchanged before and after.
+- New: `mark-submissions-kg-routing.test.js` (5 tests) — a KG submission's
+  lock/unlock/submit-completeness-check reads/writes `indicator_marks`
+  only, a decoy `assessment_marks` doc with the same natural key stays
+  untouched, and vice versa for an ordinary numeric submission.
+- New: `indicator-marks-submission-lock.test.js` (7 tests) — submitted/
+  approved blocks edits, draft/rejected/a-different-subject does not,
+  a locked indicator mark rejects further edits without being
+  silently overwritten.
+- Full suite: 299/299 suites, 3099/3099 tests.
+
+---
+
 ## [v5.172.0] — 2026-10-13 — feat(report-cards): Generate & Publish UI for Kindergarten classes
 
 The previous milestone (v5.171.0) built the full KG rendering pipeline —

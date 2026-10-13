@@ -7,12 +7,15 @@
 
    Scope/RBAC mirrors assessment.js's /marks exactly: canWriteSubject/
    isElective (subject-teacher scoping, unconditional), year-archival
-   guard. Deliberately NOT yet wired to assessment_schedule locking or
-   mark_submissions review-state (2026-10) — flagged as a real,
-   acknowledged gap, not an oversight: a teacher can currently keep
-   editing indicator marks after "submitting" them, the same gap the
-   numeric Markbook closed for CA/HW/MT/ET marks. Add before treating
-   this as equivalent to the numeric Markbook's moderation guarantees.
+   guard. Now wired to mark_submissions review-state (2026-10) — a
+   teacher can no longer keep editing indicator marks after "submitting"
+   them, the same guard the numeric Markbook already enforces, reusing
+   the SAME mark_submissions collection/state-machine via the reserved
+   KG_INDICATORS_TYPE sentinel (indicator marks have no real
+   assessmentType/instance of their own) rather than a second moderation
+   system. Deliberately NOT wired to assessment_schedule locking — that
+   is a separate, unrelated concern (the exam office's whole-window
+   lock) nobody has asked for here yet.
    ============================================================ */
 'use strict';
 
@@ -32,6 +35,7 @@ const { isYearArchived } = require('../utils/archival');
 const ScopeEngine         = require('../utils/scopeEngine');
 const { restrictToTaught } = require('../utils/teaching-scope');
 const { scopeMiddleware } = require('../middleware/scopeMiddleware');
+const { KG_INDICATORS_TYPE } = require('./mark-submissions');
 
 const router  = express.Router();
 const PLAN    = planGate('grades');
@@ -171,6 +175,51 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), as
       if (d.score > maxScore) {
         return E.badRequest(res, `Score ${d.score} exceeds this indicator's maximum of ${maxScore}.`);
       }
+    }
+
+    // Guard: reject if any target mark is locked (post-approval lock) —
+    // same mechanism assessment.js's /marks/bulk uses, mark-submissions.js's
+    // own /lock route sets isLocked on indicator_marks too whenever the
+    // submission's assessmentType is the KG sentinel below.
+    const lockedSample = await tenantModel('indicator_marks', tenantContext(req)).findOne({
+      schoolId,
+      isLocked: true,
+      $or: marks.map(d => ({
+        studentId:      d.studentId,
+        subjectId:      d.subjectId,
+        indicatorId:    d.indicatorId,
+        termNumber:     d.termNumber,
+        academicYearId: d.academicYearId || null,
+      })),
+    }).lean();
+    if (lockedSample) {
+      return E.forbidden(res, 'This mark is locked — it has been approved and locked for this term. Contact an administrator to unlock it.');
+    }
+
+    // Guard: reject if the relevant mark_submissions record is under
+    // review (submitted or already approved) — closes the exact gap this
+    // file's own header comment flagged: a teacher could submit a
+    // subject's indicator marks for review and keep silently editing them.
+    // Same KG_INDICATORS_TYPE sentinel mark-submissions.js uses to route
+    // its own lock/unlock propagation at indicator_marks instead of
+    // assessment_marks — not a second moderation system, the same one.
+    const subOr = [...new Set(marks.map(d => `${d.classId}::${d.subjectId}::${d.termNumber}::${streamByStudent[d.studentId] ?? ''}::${d.academicYearId || ''}`))]
+      .map(k => {
+        const [classId, subjectId, termNumber, sid, academicYearId] = k.split('::');
+        return {
+          classId, subjectId, termNumber: Number(termNumber),
+          streamId: { $in: [sid || null, null] },
+          ..._yearFilterPart(academicYearId || null),
+        };
+      });
+    const underReview = await tenantModel('mark_submissions', tenantContext(req)).findOne({
+      schoolId,
+      status: { $in: ['submitted', 'approved'] },
+      assessmentType: KG_INDICATORS_TYPE,
+      $or: subOr,
+    }).lean();
+    if (underReview) {
+      return E.forbidden(res, `These marks are ${underReview.status} for review and cannot be edited — recall the submission first.`);
     }
 
     const now = new Date().toISOString();
