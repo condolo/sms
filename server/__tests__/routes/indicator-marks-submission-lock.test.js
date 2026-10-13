@@ -1,14 +1,11 @@
 /* ============================================================
-   server/routes/indicator-marks.js — POST /bulk is now blocked while
-   the matching mark_submissions record is "submitted"/"approved"
-   (under review) or the target indicator_marks doc is isLocked.
+   server/routes/indicator-marks.js — POST /bulk
 
-   Closes the exact gap this file's own header comment used to flag:
-   a teacher could submit a subject's indicator marks for review and
-   keep silently editing them. Reuses the SAME mark_submissions
-   collection/state-machine the numeric Markbook already has, via the
-   reserved KG_INDICATORS_TYPE sentinel (see mark-submissions.js) — not
-   a second moderation system.
+   Workflow redesign (2026-10-13): submitted/approved mark_submissions
+   status no longer blocks editing — same change as assessment.js's
+   /marks/bulk (see assessment-marks-submission-lock.test.js's header).
+   Only the terminal isLocked state (set automatically at /kg/publish
+   time) blocks a write now.
 
    Uses the REAL canWriteSubject/isElective/unassignedPairs (only their
    own DB reads are mocked), same discipline as indicator-marks.test.js.
@@ -128,30 +125,11 @@ function validMark(overrides = {}) {
   };
 }
 
-describe('mark_submissions under-review guard', () => {
-  test.each(['submitted', 'approved'])('a %s KG submission blocks editing this class/subject/term', async (status) => {
+describe('submitted/approved no longer block editing', () => {
+  test.each(['draft', 'submitted', 'approved', 'rejected'])('a %s KG submission does NOT block editing — only isLocked (set at publish) does', async (status) => {
     mockMarkSubmissions = [{
       schoolId: SCHOOL_A, classId: 'classA', subjectId: 'subj_science', termNumber: 2,
       assessmentType: KG_INDICATORS_TYPE, status, streamId: null,
-    }];
-    const res = await supertest(buildApp(TEACHER_ASSIGNED)).post('/api/indicator-marks/bulk').send({ marks: [validMark()] });
-    expect(res.status).toBe(403);
-    expect(mockIndicatorMarks).toHaveLength(0);
-  });
-
-  test('a draft KG submission does NOT block editing', async () => {
-    mockMarkSubmissions = [{
-      schoolId: SCHOOL_A, classId: 'classA', subjectId: 'subj_science', termNumber: 2,
-      assessmentType: KG_INDICATORS_TYPE, status: 'draft', streamId: null,
-    }];
-    const res = await supertest(buildApp(TEACHER_ASSIGNED)).post('/api/indicator-marks/bulk').send({ marks: [validMark()] });
-    expect(res.status).toBe(200);
-  });
-
-  test('a submission for a DIFFERENT subject does not block this one', async () => {
-    mockMarkSubmissions = [{
-      schoolId: SCHOOL_A, classId: 'classA', subjectId: 'subj_other', termNumber: 2,
-      assessmentType: KG_INDICATORS_TYPE, status: 'submitted', streamId: null,
     }];
     const res = await supertest(buildApp(TEACHER_ASSIGNED)).post('/api/indicator-marks/bulk').send({ marks: [validMark()] });
     expect(res.status).toBe(200);

@@ -2898,31 +2898,16 @@ Created before any publish work begins. Updated on completion or failure.
   startedBy, startedAt, completedAt,
   studentCount, successCount, failedStudents,
   failureReason,              // set on failure
-  unmoderatedExams,           // set when moderation guard fires
+  moderationBypassed, moderationBypassReason,  // vestigial — see "Moderation Guard" below
   newVersions: [{ snapshotId, studentId, version }]
 }
 ```
 
 **Recovery**: if a publish run is stuck in `running` after the server restarts, query `publish_batches` by `status: running` and investigate. The interrupted snapshots will be the ones pointing to that `batchId`.
 
-### Moderation Guard
+### Moderation Guard (removed 2026-10-13 — see §108)
 
-Before publishing, the engine checks that all exams for the class/term are in an approved state:
-
-```
-approved | locked | published | archived  → OK
-scheduled | in_progress | completed | moderated  → BLOCKED
-```
-
-Response when blocked:
-```json
-{
-  "error": "2 exam(s) for this class/term are not yet approved:\n  • \"End of Term Maths\" (completed)\n  • \"English Essay\" (moderated)",
-  "unmoderatedExams": [...]
-}
-```
-
-Override: `POST /publish` with `{ skipModerationCheck: true }` — logged in the batch record.
+There is no more pre-publish moderation gate. This section described two superseded designs in turn — first an exam-status check (`approved | locked | published | archived` required), then a `mark_submissions`-based one keying off `aggregateUnmoderatedMarks` — both removed by §108's mark-submission workflow redesign: `/publish` now locks marks automatically instead of requiring anything to already be submitted/approved/manually-locked beforehand. `skipModerationCheck`/`skipReason` are still accepted on the request and recorded on the batch (`moderationBypassed`/`moderationBypassReason`) for backward API compatibility, but there is nothing left to bypass.
 
 ### Versioning
 
@@ -6160,12 +6145,12 @@ Read the full existing `computeFinalScores` describe block in `academic-calc.tes
 ### Architecture contract
 - **Markbook** owns every assessment mark: `assessment_marks`, with mark states (present, ABS, MIS, EXM, INC). Its windows are `assessment_schedule` and its moderation is `mark_submissions`.
 - **Exams** own the sitting only: `exams`, with date, room, invigilator, duration, class, subject, and a four-state status (scheduled, in_progress, completed, cancelled). Creating an exam links it to its Markbook window via `scheduleEntryId`.
-- **Report cards** read `assessment_marks` only. `aggregateUnmoderatedMarks` (academic-calc.js) gives the provisional state from `mark_submissions`. Retired: `exam_results`, the legacy `grades` collection, `aggregateExamResults`, and `aggregateGrades`.
+- **Report cards** read `assessment_marks` only. Retired: `exam_results`, the legacy `grades` collection, `aggregateExamResults`, and `aggregateGrades`. `aggregateUnmoderatedMarks` (academic-calc.js) still exists but is unused by `/generate`/`/publish` as of §108's redesign — there is no more pre-publish provisional/moderation state to compute.
 
 ### Data model
 - `assessment_marks`: `markState` (present, ABS, MIS, EXM, INC). A non-present mark carries no `rawScore`. `rawScore` is a 0–100 percentage. `migratedFromExamResultId` and `gcCourseWorkId` are provenance fields.
 - `assessment_schedule`: defaults `academicYearId` to the current year. Legacy rows with a null year still match via `_yearFilterPart`.
-- `mark_submissions`: draft, submitted, approved, rejected, locked. Writes to a submitted or approved key are rejected by `POST /assessment/marks` and `/marks/bulk`.
+- `mark_submissions`: draft, submitted, approved, rejected, locked. As of §108 (2026-10-13), only `locked` blocks a write (`POST /assessment/marks`, `/marks/bulk`, `/indicator-marks/bulk`) — `submitted`/`approved` no longer do. Nothing creates a `submitted`/`approved` doc anymore; `locked` docs are created automatically, in bulk, by `/publish`/`/kg/publish`.
 
 ### Migration (exam_results to assessment_marks)
 `server/scripts/migrate-exam-results-to-markbook.js`. Dry run by default; `--apply` writes. Rules:
@@ -6203,6 +6188,37 @@ A subject's final score is the weighted average over the assessment types that h
 - **Assessment weights:** one configuration per school and academic year, not per section.
 - **Trinitas:** four sections (KG, Primary, Secondary, A-Level). Each section can have its own scale, created under Grade Scales → "Applies to". Templates are still not set up.
 - **Trinity:** one section (KG). Until a scale is created for it (or a school default), report generation refuses with the explicit message. Previously it crashed inside `computeFinalScores` on an empty schema.
+
+## 108. Mark-Submission Workflow Redesign — Autonomous Entry Pre-Publish, Automatic Lock at Publish (v5.177.0)
+
+### Reported problem
+A student added to a class roster after the rest of the class had already been through submit-for-review/approve had no way to enter marks: the grid cell for that student was blank with an error icon, because the Markbook column itself was read-only once the matching `mark_submissions` doc reached `submitted`/`approved` — a state that blocked ALL students in that column, newly added or not. The user's own diagnosis, given directly: remove submit-for-review entirely; let a teacher edit freely pre-publish; lock automatically at publish instead of via a separate manual step; warn before publish that it locks marks and makes the report visible to students/parents.
+
+### What changed
+- **The `submitted`/`approved` states no longer block writes.** `POST /assessment/marks`, `/marks/bulk`, and `/indicator-marks/bulk` now check only `isLocked` on the mark document itself — the `mark_submissions` status is no longer consulted at write time at all. A newly-added student's cell is editable the moment they're on the roster, with no dependency on where the rest of the class's submission happens to be.
+- **`/publish` and `/kg/publish` lock marks automatically.** Right after a batch completes (same step that already marks `publish_batches` complete), both routes now bulk-`$set isLocked: true` on every `assessment_marks`/`indicator_marks` document in scope, and upsert a `locked` `mark_submissions` doc for every distinct subject+type+instance(+stream) combination found — so the Review tab's existing lock-based UI and the unlock-request flow both still have a real doc to act on, without a teacher or admin ever having clicked "Lock". Wrapped in try/catch and non-fatal: a failure here logs but does not fail the publish itself, since the report card is already correctly generated and saved at that point.
+- **The pre-publish moderation gate is gone, not just relaxed.** `/publish`'s old hard block (`policy.require_moderation_complete`, checking exam status and later `mark_submissions` via `aggregateUnmoderatedMarks` — see the "Moderation Guard" section above, which covers both superseded designs) is removed outright. `/generate`'s preview no longer computes or returns `provisional`/`unmoderatedExams` either. `skipModerationCheck`/`skipReason` stay on the request schema and get recorded on the batch for backward API compatibility, but bypass nothing now.
+- **The rare post-publish correction path is unchanged.** Unlock-request → admin-approve-unlock → 24h auto-relock (`mark-submissions.js`) still works exactly as before — it's just reached by the publish-time auto-lock now instead of a manual admin "Lock" click. A correction after unlock is picked up the ordinary way: the teacher/admin edits the mark, then an admin re-publishes, which versions the snapshot forward (existing behavior, unchanged) — there is no separate auto-republish trigger.
+- **Publish now shows an explicit confirmation before it runs** (`ReportCardsTab.jsx`): "Publishing will lock every mark entry in the Markbook for [class] — teachers will no longer be able to edit them, and these report cards become visible to students and parents immediately. Only an admin can unlock marks afterward for a correction," with Cancel / "Lock & Publish".
+- **The submit/recall/review-request UI is removed from both Markbook grids** (`ExamsPage.jsx`'s numeric grid and `IndicatorMarkbook.jsx`'s Kindergarten competency-band entry) — no more "Submit for review" button, submission status badge, or inline approve/reject controls. Both now show a plain "Locked" pill once `mark_submissions` reaches `locked`, and a banner naming the one remaining reason entry is closed (report published; or, for `IndicatorMarkbook.jsx`, the admin-set whole-window `isLocked` from `assessment_schedule`). `ExamsPage.jsx`'s separate `ReviewTab` component (listing pending submissions to approve, plus its own independent lock/unlock controls) is left in place for the unlock-request flow; its "pending submissions" list now always renders empty since nothing creates a `submitted` doc anymore — left as dead-but-harmless rather than rewritten, since the unlock/lock parts of that same tab are still load-bearing.
+- **The RC9 "Require moderation to be complete" Publication Policy toggle is now a no-op.** `/publish` never reads `policy.require_moderation_complete`. The key is kept in `PUBLICATION_POLICY_DEFAULTS` and the GET/PATCH routes only so existing saved `academic_config` documents and any external caller of the policy API don't break; it's been removed from the Settings UI (`SettingsPanel.jsx`) since toggling it has no effect. The other two completeness rules (`require_subject_comments_complete`, `require_report_remarks_complete`) are unaffected and still enforced.
+
+### Deliberately out of scope
+- The user's own follow-up framing — students/parents seeing scheduled-assessment results live, before publish, when a teacher has scheduled that assessment — is a distinct, larger feature and was not started here. Today a parent/student still sees nothing until publish, full stop.
+- `mark-submissions.js`'s `submit`/`review`/`recall` routes are unused by any client now but were deliberately not deleted — they're tested and working, and deleting them carries more risk than leaving them unreachable.
+
+### Files
+- `server/routes/assessment.js`, `server/routes/indicator-marks.js` — write guards now check `isLocked` only.
+- `server/routes/report-cards.js` — `/publish`/`/kg/publish` auto-lock step; moderation guard removed from `/publish`; `aggregateUnmoderatedMarks` dropped from `/generate`.
+- `server/routes/mark-submissions.js` — header comment only; routes unchanged.
+- `client/src/pages/exams/ExamsPage.jsx`, `client/src/pages/exams/components/IndicatorMarkbook.jsx` — submit/recall/review UI removed from the Markbook grids; "Locked" pill replaces the submission badge.
+- `client/src/pages/grades/components/ReportCardsTab.jsx` — publish confirmation panel; provisional/unmoderated banner removed.
+- `client/src/pages/reportcards/components/SettingsPanel.jsx` — dead moderation toggle removed from the Publication Policy UI.
+- `server/__tests__/routes/assessment-marks-submission-lock.test.js`, `indicator-marks-submission-lock.test.js` — rewritten for the new guard; the under-review-blocks-writes tests they used to cover were deleted (that behavior no longer exists).
+- `server/__tests__/routes/report-cards-term-scope.test.js` — the `provisional`/`unmoderatedExams` describe block (3 tests) deleted along with the fields.
+
+### Verified
+Full suite run before touching any test: 8 failures, all in the two submission-lock test files, zero unrelated regressions (confirms the server-side write-guard change was correctly scoped). After rewriting those two files and the term-scope file: 301/301 suites, 3114/3114 tests. Both edited client files confirmed to compile via a dev-server dynamic import; no live-browser walkthrough was possible in this environment (no MongoDB).
 
 ## Term billing: transport and extra-curricular on the invoice (v5.169.0)
 

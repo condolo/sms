@@ -7,15 +7,17 @@
 
    Scope/RBAC mirrors assessment.js's /marks exactly: canWriteSubject/
    isElective (subject-teacher scoping, unconditional), year-archival
-   guard. Wired to mark_submissions review-state (2026-10) — a teacher
-   can no longer keep editing indicator marks after "submitting" them,
-   the same guard the numeric Markbook already enforces, reusing the
-   SAME mark_submissions collection/state-machine via the reserved
-   KG_INDICATORS_TYPE sentinel (indicator marks have no real
-   assessmentType/instance of their own) rather than a second moderation
-   system. Deliberately NOT wired to assessment_schedule locking — that
-   is a separate, unrelated concern (the exam office's whole-window
-   lock) nobody has asked for here yet.
+   guard, isLocked. Submit-for-review was wired here on 2026-10-13 and
+   REMOVED the same day as part of a deliberate workflow redesign — a
+   teacher has full autonomy over indicator marks until the report card
+   is actually published; isLocked is now set automatically AT PUBLISH
+   time (report-cards.js's /kg/publish), reusing the KG_INDICATORS_TYPE
+   sentinel on the mark_submissions doc it creates directly in 'locked'
+   state, so the pre-existing unlock-request/approve/24h-auto-relock
+   machinery (mark-submissions.js) still works for a rare post-publish
+   correction — see that file's own header. Deliberately NOT wired to
+   assessment_schedule locking — that is a separate, unrelated concern
+   (the exam office's whole-window lock) nobody has asked for here.
 
    There is no "classType: kindergarten" field anywhere in this
    codebase, by design — see rc-template-scale.js's header comment.
@@ -46,7 +48,6 @@ const { isYearArchived } = require('../utils/archival');
 const ScopeEngine         = require('../utils/scopeEngine');
 const { restrictToTaught } = require('../utils/teaching-scope');
 const { scopeMiddleware } = require('../middleware/scopeMiddleware');
-const { KG_INDICATORS_TYPE } = require('./mark-submissions');
 const { resolveRcTemplate } = require('../utils/rc-template-scale');
 
 const router  = express.Router();
@@ -206,9 +207,11 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), as
     }
 
     // Guard: reject if any target mark is locked (post-approval lock) —
-    // same mechanism assessment.js's /marks/bulk uses, mark-submissions.js's
-    // own /lock route sets isLocked on indicator_marks too whenever the
-    // submission's assessmentType is the KG sentinel below.
+    // same mechanism assessment.js's /marks/bulk uses. Submit-for-review
+    // no longer blocks editing (2026-10-13 workflow redesign) — isLocked
+    // is now set automatically AT PUBLISH time (report-cards.js's
+    // /kg/publish), not by a review step; this is the only pre-publish
+    // gate that still applies.
     const lockedSample = await tenantModel('indicator_marks', tenantContext(req)).findOne({
       schoolId,
       isLocked: true,
@@ -221,33 +224,7 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), as
       })),
     }).lean();
     if (lockedSample) {
-      return E.forbidden(res, 'This mark is locked — it has been approved and locked for this term. Contact an administrator to unlock it.');
-    }
-
-    // Guard: reject if the relevant mark_submissions record is under
-    // review (submitted or already approved) — closes the exact gap this
-    // file's own header comment flagged: a teacher could submit a
-    // subject's indicator marks for review and keep silently editing them.
-    // Same KG_INDICATORS_TYPE sentinel mark-submissions.js uses to route
-    // its own lock/unlock propagation at indicator_marks instead of
-    // assessment_marks — not a second moderation system, the same one.
-    const subOr = [...new Set(marks.map(d => `${d.classId}::${d.subjectId}::${d.termNumber}::${streamByStudent[d.studentId] ?? ''}::${d.academicYearId || ''}`))]
-      .map(k => {
-        const [classId, subjectId, termNumber, sid, academicYearId] = k.split('::');
-        return {
-          classId, subjectId, termNumber: Number(termNumber),
-          streamId: { $in: [sid || null, null] },
-          ..._yearFilterPart(academicYearId || null),
-        };
-      });
-    const underReview = await tenantModel('mark_submissions', tenantContext(req)).findOne({
-      schoolId,
-      status: { $in: ['submitted', 'approved'] },
-      assessmentType: KG_INDICATORS_TYPE,
-      $or: subOr,
-    }).lean();
-    if (underReview) {
-      return E.forbidden(res, `These marks are ${underReview.status} for review and cannot be edited — recall the submission first.`);
+      return E.forbidden(res, 'This mark is locked — the report card for this term has been published. Ask an administrator to unlock it for a correction.');
     }
 
     const now = new Date().toISOString();

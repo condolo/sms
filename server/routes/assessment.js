@@ -1045,19 +1045,14 @@ router.post('/marks', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), a
       instance:       d.instance,
     };
 
+    // Submit-for-review no longer blocks editing (2026-10-13 workflow
+    // redesign) — a teacher has full autonomy over marks/comments until
+    // the report card is actually published. isLocked below is set
+    // automatically AT PUBLISH time (report-cards.js), not by a review
+    // step; this is the only gate that still applies pre-publish.
     const lockedExisting = await Marks.findOne({ ...naturalKey, isLocked: true, ..._yearFilterPart(d.academicYearId || null) }).lean();
     if (lockedExisting) {
-      return _err(res, 'This mark is locked. Submit an unlock request via the approval workflow.', 403);
-    }
-    // Per stream: only a submission for this student's stream (or a legacy whole-class one) locks this mark.
-    const underReview = await tenantModel('mark_submissions', tenantContext(req)).findOne({
-      schoolId, classId: d.classId, subjectId: d.subjectId, termNumber: d.termNumber,
-      assessmentType: d.assessmentType, instance: d.instance, status: { $in: ['submitted', 'approved'] },
-      streamId: { $in: [markStudent?.streamId ?? null, null] },
-      ..._yearFilterPart(d.academicYearId || null),
-    }).lean();
-    if (underReview) {
-      return _err(res, `These marks are ${underReview.status} for review and cannot be edited — recall the submission first.`, 403);
+      return _err(res, 'This mark is locked — the report card for this term has been published. Ask an admin to unlock it for a correction.', 403);
     }
 
     // Which existing document (if any) this save should land on. Every mark
@@ -1229,41 +1224,12 @@ router.post('/marks/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
         academicYearId: d.academicYearId || null,
       })),
     }).lean();
-    // Guard: reject if the relevant mark_submissions record is under review
-    // (submitted or already approved, but not yet locked — the terminal
-    // 'locked' state is already caught above via assessment_marks.isLocked,
-    // which mark-submissions.js's own lock route sets). Closes a real gap:
-    // before this, a teacher could submit a class/subject's marks for
-    // review and then keep silently editing them right up until an admin
-    // got around to locking — defeating the entire point of "submitted".
-    // academicYearId now included (via _yearFilterPart) — previously
-    // matched on the key alone, with no year at all, meaning a submitted
-    // or approved record from a PRIOR year blocked mark entry for the
-    // CURRENT year's same class/subject/term/type/instance/stream, the
-    // same cross-year false-block as the schedule-lock check above (the
-    // Markbook UI does send academicYearId on submit — see
-    // ExamsPage.jsx's markSubmissionsApi.submit call — so this was a real,
-    // reachable gap, not a hypothetical one).
-    const subOr = [...new Set(marks.map(d => `${d.classId}::${d.subjectId}::${d.termNumber}::${d.assessmentType}::${d.instance}::${streamByStudent[d.studentId] ?? ''}::${d.academicYearId || ''}`))]
-      .map(k => {
-        const [classId, subjectId, termNumber, assessmentType, instance, sid, academicYearId] = k.split('::');
-        return {
-          classId, subjectId, termNumber: Number(termNumber), assessmentType, instance: Number(instance),
-          streamId: { $in: [sid || null, null] },
-          ..._yearFilterPart(academicYearId || null),
-        };
-      });
-    const underReview = await tenantModel('mark_submissions', tenantContext(req)).findOne({
-      schoolId,
-      status: { $in: ['submitted', 'approved'] },
-      $or: subOr,
-    }).lean();
-    if (underReview) {
-      return _err(res, `These marks are ${underReview.status} for review and cannot be edited — recall the submission first.`, 403);
-    }
-
+    // Submit-for-review no longer blocks editing (2026-10-13 workflow
+    // redesign) — see the single-mark route's identical comment.
+    // isLocked (checked just above) is now set automatically AT PUBLISH
+    // time, not by a review step; it remains the only pre-publish gate.
     if (lockedSample) {
-      return _err(res, 'Some marks in this batch are locked. Submit an unlock request via the approval workflow.', 403);
+      return _err(res, 'Some marks in this batch are locked — the report card for this term has been published. Ask an admin to unlock it for a correction.', 403);
     }
 
     // Optimistic concurrency (mirrors exams.js's POST /:id/results — same

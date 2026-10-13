@@ -14,8 +14,13 @@
    Two academic years exist for the same class/subject, each with its
    own mark for the same student. A request with no explicit year/term
    must resolve to the isCurrent-flagged year and include ONLY that
-   year's mark. Moderation (provisional flag) is sourced from
-   mark_submissions — approved/locked clears it, anything else does not.
+   year's mark.
+
+   The provisional/unmoderatedExams fields this file used to also cover
+   were removed from /generate in the 2026-10-13 mark-submission
+   workflow redesign (there is no more pre-publish moderation step to
+   flag as incomplete — see server/routes/report-cards.js's /generate
+   and /publish) — those tests were deleted along with the fields.
 
    All DB calls are mocked — no MongoDB required. Only utils/model is
    mocked; the real tenantModel() wrapper and the real
@@ -172,41 +177,5 @@ describe('POST /api/report-cards/generate — year/term scope resolution', () =>
   });
 });
 
-describe('POST /api/report-cards/generate — provisional flag (Markbook moderation)', () => {
-  const SUB_KEY = 'sub_math|ET|1';
-
-  test('every relevant mark approved → provisional is false', async () => {
-    mockStores.mark_submissions = makeCollection([
-      { id: 'sub_1', schoolId: SCHOOL, classId: CLASS, subjectId: 'sub_math', termNumber: 1, assessmentType: 'ET', instance: 1, academicYearId: 'ay_cur', status: 'approved' },
-    ]);
-    const res = await supertest(buildApp())
-      .post('/api/report-cards/generate')
-      .send({ classId: CLASS, termNumber: 1 });
-    expect(res.status).toBe(200);
-    expect(res.body.data.provisional).toBe(false);
-    expect(res.body.data.unmoderatedExams).toEqual([]);
-  });
-
-  test('a mark with no submission at all → provisional is true, named in unmoderatedExams', async () => {
-    const res = await supertest(buildApp())
-      .post('/api/report-cards/generate')
-      .send({ classId: CLASS, termNumber: 1 });
-    expect(res.status).toBe(200);
-    expect(res.body.data.provisional).toBe(true);
-    expect(res.body.data.unmoderatedExams).toEqual([
-      { id: SUB_KEY, title: 'sub_math — ET', status: 'not_submitted' },
-    ]);
-  });
-
-  test('a submitted but not yet approved mark still counts as provisional', async () => {
-    mockStores.mark_submissions = makeCollection([
-      { id: 'sub_1', schoolId: SCHOOL, classId: CLASS, subjectId: 'sub_math', termNumber: 1, assessmentType: 'ET', instance: 1, academicYearId: 'ay_cur', status: 'submitted' },
-    ]);
-    const res = await supertest(buildApp())
-      .post('/api/report-cards/generate')
-      .send({ classId: CLASS, termNumber: 1 });
-    expect(res.status).toBe(200);
-    expect(res.body.data.provisional).toBe(true);
-    expect(res.body.data.unmoderatedExams[0].status).toBe('submitted');
-  });
-});
+// The former "provisional flag (Markbook moderation)" describe block
+// (3 tests) was deleted here — see the file header comment above.

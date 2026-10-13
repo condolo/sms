@@ -438,7 +438,7 @@ Some classes — typically early-years ones — aren't graded with a single nume
 1. Open a student from the class/subject list.
 2. For each indicator, either pick a **Performance Band** (this fills in the expected score for you, but you can still change it) or type a score directly — up to that indicator's own maximum (indicators don't all share the same maximum; check the number shown next to each one).
 3. Save. The subject's overall percentage is calculated as earned ÷ possible across all its indicators.
-4. When every student's scores are ready, **Submit for review** — same as the numeric Markbook, once submitted you can't keep editing; recall it first if you need to fix something before it's approved.
+4. There's no submit step — scores stay editable for every student until the class/term's report cards are published. Publishing locks them automatically (see §9 below); an admin can unlock a specific subject afterward for a rare correction.
 
 Report cards for these classes are generated and published from the same **Report Cards → Generate & Publish** screen as every other class — just pick the class and term as usual; the screen detects the Kindergarten template automatically and shows the matching preview (indicator/band/score per subject, not the numeric table).
 
@@ -498,14 +498,14 @@ Scheduled → In Progress → Completed
 | **Completed** | Teacher, Admin | The sitting is over |
 | **Cancelled** | Admin | Exam will not take place |
 
-### Entering and Moderating Marks (Markbook)
+### Entering Marks (Markbook) *(updated 2026-10-13 — see §9a for what happens at publish)*
 1. Go to the **Markbook** tab and filter by class, subject, term, and assessment type.
 2. Enter each student's score, or use the mark-state options for Absent / Missing / Exempt / Incomplete.
-3. Click **Submit for review** once the class is complete.
-4. An admin, principal, or section head — or anyone your school has explicitly granted reviewer rights to in Settings — approves or rejects the submission from the **Review** tab, which can be filtered by year, class, and stream. A rejection carries a reason and reopens the grid for that teacher; a note can be left for the teacher there (internal, never printed on the report card).
-5. An approved submission can be locked. A locked submission can be unlocked on request with a reason; it automatically re-locks 24 hours later unless an admin acts again first.
+3. There's no submit-for-review step — marks stay freely editable for every student, including one added to the roster after the rest of the class, right up until the report card for that class/term is published. A student added mid-term is immediately editable like everyone else, with no separate action needed.
+4. Publishing the report card (§9a) locks every mark entry for that class/term automatically — the grid shows a plain **Locked** pill and can no longer be edited by the teacher.
+5. If a mark needs correcting after publishing, ask an admin to unlock it from the **Review** tab (a reason is required). The unlock is temporary — it automatically re-locks 24 hours later unless an admin acts again first. After correcting the mark, an admin re-publishes to update the report card.
 
-> **Note**: Subject comments are never blocked by any of this — see §9a below. A teacher can submit marks and write the comment in either order.
+> **Note**: Subject comments are never blocked by any of this — see §9a below. A teacher can write the comment and enter marks in either order, before or after publishing.
 
 ### Status History
 Every status change is logged. Open an exam and click **Status History** to see a full audit trail: who changed it, when, and why.
@@ -519,14 +519,14 @@ The **Timetable** tab shows all scheduled exams in a calendar view. Export as PD
 
 > **Kindergarten / competency-band classes** use a separate report format (indicator/band/score per subject, no class ranking) and their own Generate & Publish flow — see **"Kindergarten / Competency-Band Classes"** under §8A. Everything below in this section describes the ordinary numeric (CA/HW/MT/ET) report cards.
 
-### How Report Cards Are Generated
+### How Report Cards Are Generated *(updated 2026-10-13)*
 Your school administrator generates report cards at the end of each term. The process:
 
-1. A preview can be generated at any time, but it's flagged **provisional** until every subject's marks for that class/term have been approved in the Markbook's Review queue (§9) — publishing is blocked while any subject is still unmoderated, unless an admin explicitly records a reason to bypass it
-2. Admin clicks **Publish Report Cards** for the class and term
+1. A preview can be generated at any time — there's no moderation gate blocking it
+2. Admin clicks **Publish Report Cards** for the class and term, and confirms a warning explaining that publishing locks every mark entry in the Markbook for that class/term (teachers can no longer edit them) and makes the report cards visible to students and parents immediately
 3. The system combines the Markbook's marks (CA/HW/MT/ET) using the school's configured weights
 4. Final scores are calculated, grades assigned, and class rankings computed
-5. A **permanent, versioned snapshot** is created for each student
+5. A **permanent, versioned snapshot** is created for each student, and every mark entry that fed it is locked in the Markbook (§9)
 
 > **Comments are never locked by marks.** A subject teacher can write or edit their comment before marks are submitted, after they're approved or locked, or anywhere in between — submitting marks never blocks the comment, and writing the comment never blocks submitting marks.
 

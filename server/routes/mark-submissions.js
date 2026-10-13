@@ -1,13 +1,26 @@
 /* ============================================================
    Msingi — /api/mark-submissions
-   Multi-step CA mark approval workflow.
 
-   Status machine:
-     draft → submitted (teacher) → approved (section head / admin)
-           → rejected (back to draft with reason)
-           → locked   (post-publish, system)
+   Workflow redesign (2026-10-13): the draft → submitted → approved
+   pre-publish review step is REMOVED — a teacher now has full
+   autonomy over marks/comments until the report card is actually
+   published. POST / (submit), POST /:id/recall, and POST /:id/review
+   below are kept (nothing calls them from the client anymore, but
+   deleting working, tested routes outright over a UI change carries
+   more risk than leaving them unused) — the state machine that
+   matters now is just:
 
-   Unlock requires an explicit request + admin approval.
+     (no submission doc / implicit draft) → locked (AUTOMATIC, at
+       report-cards.js's /publish or /kg/publish — assessment.js and
+       indicator-marks.js's own write guards check assessment_marks.
+       isLocked / indicator_marks.isLocked directly, set in bulk at
+       that moment, not derived from a per-subject review state).
+
+   Unlock (a RARE post-publish correction, admin-only) still goes
+   through request-unlock → admin approves → 24h auto-relock exactly
+   as before — that part of this file is unchanged and still load-
+   bearing, just reached without ever passing through submitted/
+   approved first.
 
    Plan: standard  |  RBAC: grades:{read,create,update}
    ============================================================ */

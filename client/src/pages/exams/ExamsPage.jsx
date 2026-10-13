@@ -14,7 +14,7 @@ import {
   Search, Save, Check, PenLine, Bell,
   Users2, GraduationCap, Filter, Percent, Settings,
   Tag, Layers, Info, ClipboardPaste, Lock,
-  BookMarked, LockOpen, Send, XCircle, RotateCcw,
+  BookMarked, LockOpen, Send, XCircle,
 } from 'lucide-react';
 import {
   exams as examsApi,
@@ -442,77 +442,10 @@ const MARKBOOK_STATE_OPTIONS = [
   { value: 'INC',      label: 'INC', title: 'Incomplete — blocks report approval' },
 ];
 
-/* ─── Submission status badge (mark_submissions) ───────────────
-   draft/no-submission renders nothing (the ordinary, most common state —
-   a badge for "not yet submitted" on every column would just be noise). */
-const SUBMISSION_BADGE = {
-  submitted: { label: 'Submitted', cls: 'text-amber-700 bg-amber-50 border-amber-200' },
-  approved:  { label: 'Approved',  cls: 'text-emerald-700 bg-emerald-50 border-emerald-200' },
-  rejected:  { label: 'Rejected',  cls: 'text-red-700 bg-red-50 border-red-200' },
-  locked:    { label: 'Locked',    cls: 'text-slate-600 bg-slate-100 border-slate-200' },
-};
-function SubmissionBadge({ submission, onRecall, canReview, reviewing, onReview }) {
-  const [rejecting, setRejecting] = useState(false);
-  const [reason, setReason] = useState('');
-  if (!submission || submission.status === 'draft') return null;
-  const meta = SUBMISSION_BADGE[submission.status];
-  if (!meta) return null;
-  return (
-    <div className="flex flex-col items-center gap-0.5 mt-1">
-      <span className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full border ${meta.cls}`}>
-        {submission.status === 'approved' && <CheckCircle2 size={9} />}
-        {submission.status === 'rejected' && <XCircle size={9} />}
-        {submission.status === 'locked'   && <Lock size={9} />}
-        {meta.label}
-      </span>
-      {submission.status === 'submitted' && onRecall && (
-        <button onClick={onRecall} className="flex items-center gap-0.5 text-[10px] text-slate-400 hover:text-slate-600" title="Recall to draft">
-          <RotateCcw size={9} /> Recall
-        </button>
-      )}
-      {/* Reviewing right here, not only from Configuration → Moderation — same
-          markSubmissionsApi.review() call either queue uses, just a second place
-          to reach it, for whoever is already looking at this exact subject. */}
-      {submission.status === 'submitted' && canReview && !rejecting && (
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={() => onReview('approve')} disabled={reviewing} title="Approve this submission"
-            className="text-emerald-600 hover:text-emerald-700 disabled:opacity-40"
-          >
-            <CheckCircle2 size={12} />
-          </button>
-          <button
-            onClick={() => setRejecting(true)} disabled={reviewing} title="Reject this submission"
-            className="text-red-500 hover:text-red-700 disabled:opacity-40"
-          >
-            <XCircle size={12} />
-          </button>
-        </div>
-      )}
-      {submission.status === 'submitted' && canReview && rejecting && (
-        <div className="flex flex-col items-center gap-1 w-full">
-          <input
-            type="text" value={reason} onChange={e => setReason(e.target.value)} autoFocus
-            placeholder="Reason" className="w-full text-[10px] px-1 py-0.5 rounded border border-red-300 focus:outline-none focus:ring-1 focus:ring-red-400/30"
-          />
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => { onReview('reject', reason); setRejecting(false); setReason(''); }}
-              disabled={!reason.trim() || reviewing}
-              className="text-[10px] font-medium text-white bg-red-600 hover:bg-red-700 disabled:opacity-40 px-1.5 py-0.5 rounded"
-            >
-              Confirm
-            </button>
-            <button onClick={() => setRejecting(false)} className="text-[10px] text-slate-400 hover:text-slate-600">Cancel</button>
-          </div>
-        </div>
-      )}
-      {submission.status === 'rejected' && submission.rejectionReason && (
-        <span className="text-[10px] text-red-500 max-w-[100px] truncate" title={submission.rejectionReason}>{submission.rejectionReason}</span>
-      )}
-    </div>
-  );
-}
+/* SubmissionBadge (submit/approve/reject UI) REMOVED 2026-10-13 —
+   workflow redesign, see mark-submissions.js's header comment. The
+   Markbook grid now shows a plain "Locked" pill (see MarkbookTab's
+   column header) instead of the full submit/review badge. */
 
 /* ─── Grid cell ─────────────────────────────────────────────── */
 function GridCell({ value, markState = 'present', rowIdx, colIdx, isLocked, hasConflict, saved, onChange, onStateChange, onNavigate, cellRef }) {
@@ -969,8 +902,11 @@ function MarkbookTab({ years }) {
     for (const s of submissionsData?.data ?? []) map[s.instance] = s;
     return map;
   }, [submissionsData]);
+  // Submit-for-review no longer blocks editing (2026-10-13 workflow
+  // redesign) — only 'locked' (set automatically at report-card publish
+  // time) makes an instance read-only now.
   const isInstanceReadOnly = useCallback(
-    (instance) => ['submitted', 'approved', 'locked'].includes(submissionByInstance[instance]?.status),
+    (instance) => submissionByInstance[instance]?.status === 'locked',
     [submissionByInstance]
   );
 
@@ -1004,54 +940,12 @@ function MarkbookTab({ years }) {
   // later, in either order. Nothing about marks status, submission
   // state, or the assessment-schedule lock disables this field any more.
 
-  const { mutate: submitForReview, isPending: submitting } = useMutation({
-    mutationFn: () => Promise.all(
-      cols
-        .filter(c => !isInstanceReadOnly(c.instance))
-        .map(c => markSubmissionsApi.submit({
-          classId, subjectId, termNumber: selectedEntry.termNumber,
-          // A submission is per stream: the teacher submits the stream they have selected.
-          streamId: activeStreamId || null,
-          academicYearId: selectedEntry.academicYearId || undefined,
-          assessmentType: c.typeKey, instance: c.instance,
-        }))
-    ),
-    onSuccess: () => { refetchSubmissions(); setToast({ msg: 'Submitted for review.', type: 'success' }); },
-    // Previously discarded the real server reason (e.g. "2 students still have
-    // no mark recorded" with named students, or "Submit marks per stream —
-    // choose the stream you teach") behind a generic, unhelpful message —
-    // a teacher who WAS correctly assigned had no way to learn what was
-    // actually blocking them. See server/routes/mark-submissions.js POST /.
-    onError:   err => {
-      const names = err?.extra?.missingStudents?.map(s => s.name).filter(Boolean);
-      const msg = names?.length
-        ? `${err.message} (${names.join(', ')})`
-        : err?.message ?? 'Could not submit for review — try again.';
-      setToast({ msg, type: 'error' });
-    },
-  });
-
-  const { mutate: recallSubmission } = useMutation({
-    mutationFn: (id) => markSubmissionsApi.recall(id),
-    onSuccess: () => { refetchSubmissions(); setToast({ msg: 'Recalled to draft.', type: 'success' }); },
-    onError:   err => setToast({ msg: err?.message ?? 'Could not recall — it may already be approved or locked.', type: 'error' }),
-  });
-
-  // Approve/reject right from the Markbook itself — the exact same mark-submissions
-  // review endpoint the Configuration → Moderation queue already uses, just reachable
-  // without leaving the subject you're already looking at. The server's own floor-role/
-  // explicit-grant check (admin/principal/section_head, or an explicit grant) is the
-  // real gate; offering the control to anyone who isn't the submitting teacher just
-  // means someone without that right sees the same 403 toast they'd get from the queue.
-  const canReviewHere = !isTeacher;
-  const { mutate: reviewSubmission, isPending: reviewingSubmission } = useMutation({
-    mutationFn: ({ id, action, rejectionReason }) => markSubmissionsApi.review(id, { action, rejectionReason }),
-    onSuccess: (_res, vars) => {
-      refetchSubmissions();
-      setToast({ msg: vars.action === 'approve' ? 'Submission approved.' : 'Submission rejected.', type: 'success' });
-    },
-    onError: err => setToast({ msg: err?.message ?? 'Could not review this submission.', type: 'error' }),
-  });
+  // Submit-for-review / approve / reject — REMOVED 2026-10-13 (workflow
+  // redesign): a teacher now has full autonomy over marks until the
+  // report card is published, which locks automatically. See
+  // mark-submissions.js's header comment for the full rationale. Only
+  // the request-unlock path (for a rare post-publish correction) is
+  // still reachable, from the Review tab below.
 
   /* ── Clipboard paste (TSV from Excel/Sheets) ── */
   const handlePaste = useCallback((e) => {
@@ -1423,17 +1317,6 @@ function MarkbookTab({ years }) {
                 {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
                 {saving ? 'Saving…' : dirty ? 'Save marks' : 'Saved'}
               </button>
-              {!selectedEntry?.isLocked && cols.some(c => !isInstanceReadOnly(c.instance)) && (
-                <button
-                  onClick={() => submitForReview()}
-                  disabled={submitting || dirty}
-                  title={dirty ? 'Save your changes before submitting for review' : 'Submit for review'}
-                  className="flex items-center gap-1.5 bg-white border border-slate-300 hover:bg-slate-50 disabled:opacity-40 text-slate-700 text-sm font-medium px-4 py-2 rounded-lg transition"
-                >
-                  {submitting ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
-                  {submitting ? 'Submitting…' : 'Submit for review'}
-                </button>
-              )}
             </div>
           </div>
 
@@ -1447,13 +1330,17 @@ function MarkbookTab({ years }) {
                   {cols.map(col => (
                     <th key={col.colId} className="text-center text-xs font-medium text-slate-500 px-2 py-2.5 min-w-[118px]">
                       <TypePill type={col.colLabel} color={col.color} />
-                      <SubmissionBadge
-                        submission={submissionByInstance[col.instance]}
-                        onRecall={() => recallSubmission(submissionByInstance[col.instance].id)}
-                        canReview={canReviewHere}
-                        reviewing={reviewingSubmission}
-                        onReview={(action, rejectionReason) => reviewSubmission({ id: submissionByInstance[col.instance].id, action, rejectionReason })}
-                      />
+                      {/* 'Locked' is the only status left that matters here —
+                          set automatically at report-card publish time, not
+                          by a review step. Ask an admin for an unlock (Review
+                          tab) if a correction is needed. */}
+                      {isInstanceReadOnly(col.instance) && (
+                        <div className="flex justify-center mt-1">
+                          <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full border text-slate-600 bg-slate-100 border-slate-200">
+                            <Lock size={9} /> Locked
+                          </span>
+                        </div>
+                      )}
                     </th>
                   ))}
                   {commentsOn && <th className="text-left text-xs font-medium text-slate-500 px-2 py-2.5 min-w-[220px]">Comment</th>}
@@ -1729,9 +1616,11 @@ function ReviewTab({ years }) {
     <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
       {toast && <Toast {...toast} onClose={() => setToast(null)} />}
       <div className="bg-white border border-slate-200 rounded-xl p-5">
-        <h3 className="text-sm font-semibold text-slate-800 mb-1">Submitted for Review</h3>
+        <h3 className="text-sm font-semibold text-slate-800 mb-1">Locked Marks</h3>
         <p className="text-xs text-slate-400 mb-4">
-          Review marks teachers have submitted, approve or reject them, and lock a class/subject's marks once finalised.
+          Marks lock automatically once a class's report card is published — teachers have full
+          autonomy to edit before that. This list is for the rare post-publish correction: review
+          an unlock request, or unlock directly, then lock it again once the correction is saved.
         </p>
 
         <div className="flex flex-wrap gap-2 mb-4">

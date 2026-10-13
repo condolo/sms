@@ -11,14 +11,18 @@
    or type a score directly, save all of that student's indicators for
    this subject in one request (POST /indicator-marks/bulk).
 
-   Now wired to mark_submissions review-state (2026-10) — submit for
-   review, recall, approve/reject, all through the SAME collection/
-   state-machine the numeric Markbook already uses (server/routes/
-   mark-submissions.js), keyed by the reserved 'kg_indicators'
-   assessmentType sentinel (indicator marks have no real
-   assessmentType/instance of their own). Self-contained: queries its
-   own submission status rather than ExamsPage.jsx passing anything
-   extra down, since nothing else on that page needs it.
+   Reads mark_submissions for its lock state (2026-10-13 workflow
+   redesign) — the submit-for-review/recall/approve/reject UI was
+   removed; a teacher can freely edit until the report card is
+   published, which locks the matching mark_submissions doc
+   automatically (server/routes/report-cards.js's /kg/publish), keyed
+   by the reserved 'kg_indicators' assessmentType sentinel (indicator
+   marks have no real assessmentType/instance of their own). The rare
+   post-publish correction path (unlock-request → admin-approve →
+   24h auto-relock) is unchanged and still lives in mark-submissions.js
+   — just with no UI here, same as the numeric Markbook. Self-contained:
+   queries its own submission status rather than ExamsPage.jsx passing
+   anything extra down, since nothing else on that page needs it.
 
    `isLocked` (prop) is still the assessment_schedule ENTRY's own
    admin-set lock flag, unrelated to and independent from the review
@@ -28,9 +32,8 @@
 import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { X, Save, Loader2, CheckCircle2, XCircle, RotateCcw, Send, AlertTriangle, Lock, ChevronRight } from 'lucide-react';
+import { X, Save, Loader2, CheckCircle2, AlertTriangle, Lock, ChevronRight } from 'lucide-react';
 import { indicatorMarks as api, markSubmissions as markSubmissionsApi } from '@/api/client.js';
-import useAuthStore from '@/store/auth.js';
 
 // Reserved sentinel — must match server/routes/mark-submissions.js's
 // KG_INDICATORS_TYPE exactly. Indicator marks have no real
@@ -38,13 +41,6 @@ import useAuthStore from '@/store/auth.js';
 // same mark_submissions collection/state-machine the numeric Markbook
 // already uses, without inventing a second moderation system.
 const KG_INDICATORS_TYPE = 'kg_indicators';
-
-const SUBMISSION_BADGE = {
-  submitted: { label: 'Submitted', cls: 'text-amber-700 bg-amber-50 border-amber-200' },
-  approved:  { label: 'Approved',  cls: 'text-emerald-700 bg-emerald-50 border-emerald-200' },
-  rejected:  { label: 'Rejected',  cls: 'text-red-700 bg-red-50 border-red-200' },
-  locked:    { label: 'Locked',    cls: 'text-slate-600 bg-slate-100 border-slate-200' },
-};
 
 const BAND_PILL = {
   emerald: 'bg-emerald-50 text-emerald-700 border-emerald-200',
@@ -213,11 +209,6 @@ export default function IndicatorMarkbook({
   const qc = useQueryClient();
   const [toast, setToast] = useState(null);
   const [openStudentId, setOpenStudentId] = useState(null);
-  const [rejecting, setRejecting] = useState(false);
-  const [rejectReason, setRejectReason] = useState('');
-
-  const role = useAuthStore(s => s.session?.user?.role ?? '');
-  const canReview = role !== 'teacher';
 
   const bands = effectiveBands(template, templateSubject);
   const indicators = useMemo(
@@ -253,40 +244,12 @@ export default function IndicatorMarkbook({
     staleTime: 15_000,
   });
   const submission = submissionData?.data?.[0] ?? null;
-  const underReview = ['submitted', 'approved'].includes(submission?.status);
+  // Submit-for-review no longer blocks editing (2026-10-13 workflow
+  // redesign) — isLocked (schedule-level) and reviewLocked (set
+  // automatically at report-card publish) are the only two reasons
+  // entry can be closed now.
   const reviewLocked = submission?.status === 'locked';
-  // Schedule-level lock (prop, admin-set, whole CA window) and review-
-  // level lock (this one subject's marks, via mark_submissions) are
-  // independent reasons entry can be closed — either one disables it.
-  const entryClosed = isLocked || underReview || reviewLocked;
-
-  const { mutate: submitForReview, isPending: submitting } = useMutation({
-    mutationFn: () => markSubmissionsApi.submit({
-      classId, subjectId, streamId: streamId || undefined, termNumber,
-      assessmentType: KG_INDICATORS_TYPE, academicYearId: academicYearId || undefined,
-    }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['markSubmissions', 'kg'] });
-      setToast({ msg: 'Submitted for review.', type: 'success' });
-    },
-    onError: err => setToast({ msg: err?.message ?? 'Failed to submit for review.', type: 'error' }),
-  });
-
-  const { mutate: recallSubmission, isPending: recalling } = useMutation({
-    mutationFn: () => markSubmissionsApi.recall(submission.id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['markSubmissions', 'kg'] }),
-    onError: err => setToast({ msg: err?.message ?? 'Failed to recall.', type: 'error' }),
-  });
-
-  const { mutate: reviewSubmission, isPending: reviewing } = useMutation({
-    mutationFn: ({ action, rejectionReason }) => markSubmissionsApi.review(submission.id, { action, rejectionReason }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['markSubmissions', 'kg'] });
-      setRejecting(false);
-      setRejectReason('');
-    },
-    onError: err => setToast({ msg: err?.message ?? 'Failed to review.', type: 'error' }),
-  });
+  const entryClosed = isLocked || reviewLocked;
 
   function scoredCount(studentId) {
     const sm = marksByStudent[studentId] ?? {};
@@ -310,76 +273,21 @@ export default function IndicatorMarkbook({
       {!isLocked && reviewLocked && (
         <div className="flex items-center gap-3 px-5 py-3 bg-slate-50 border-b border-slate-200">
           <Lock size={14} className="text-slate-500 shrink-0" />
-          <p className="text-sm font-semibold text-slate-700">These marks are locked after approval — request an unlock to edit.</p>
-        </div>
-      )}
-      {!isLocked && !reviewLocked && submission?.status === 'rejected' && (
-        <div className="flex items-center gap-3 px-5 py-3 bg-red-50 border-b border-red-200">
-          <XCircle size={14} className="text-red-500 shrink-0" />
-          <p className="text-sm text-red-800"><span className="font-semibold">Rejected:</span> {submission.rejectionReason || 'No reason given'}</p>
+          <p className="text-sm font-semibold text-slate-700">The report card for this term has been published — ask an administrator to unlock it for a correction.</p>
         </div>
       )}
 
       <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100 bg-slate-50/50 gap-3">
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-sm font-semibold text-slate-800 truncate">{className} · {subjectName}</span>
-          {submission && SUBMISSION_BADGE[submission.status] && (
-            <span className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full border shrink-0 ${SUBMISSION_BADGE[submission.status].cls}`}>
-              {submission.status === 'approved' && <CheckCircle2 size={9} />}
-              {submission.status === 'rejected' && <XCircle size={9} />}
-              {submission.status === 'locked'   && <Lock size={9} />}
-              {SUBMISSION_BADGE[submission.status].label}
+          {reviewLocked && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full border shrink-0 text-slate-600 bg-slate-100 border-slate-200">
+              <Lock size={9} /> Locked
             </span>
           )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <span className="text-xs text-slate-400">{template.name} · {indicators.length} indicator{indicators.length !== 1 ? 's' : ''} · Competency-band entry</span>
-          {!isLocked && !reviewLocked && submission?.status === 'submitted' && (
-            <button
-              onClick={() => recallSubmission()}
-              disabled={recalling}
-              className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 disabled:opacity-40"
-              title="Recall to draft"
-            >
-              <RotateCcw size={11} /> Recall
-            </button>
-          )}
-          {!isLocked && !reviewLocked && submission?.status === 'submitted' && canReview && !rejecting && (
-            <div className="flex items-center gap-1.5">
-              <button onClick={() => reviewSubmission({ action: 'approve' })} disabled={reviewing} title="Approve" className="text-emerald-600 hover:text-emerald-700 disabled:opacity-40">
-                <CheckCircle2 size={14} />
-              </button>
-              <button onClick={() => setRejecting(true)} disabled={reviewing} title="Reject" className="text-red-500 hover:text-red-700 disabled:opacity-40">
-                <XCircle size={14} />
-              </button>
-            </div>
-          )}
-          {!isLocked && !reviewLocked && submission?.status === 'submitted' && canReview && rejecting && (
-            <div className="flex items-center gap-1.5">
-              <input
-                type="text" value={rejectReason} onChange={e => setRejectReason(e.target.value)} autoFocus
-                placeholder="Reason" className="w-28 text-[11px] px-1.5 py-1 rounded border border-red-300 focus:outline-none focus:ring-1 focus:ring-red-400/30"
-              />
-              <button
-                onClick={() => reviewSubmission({ action: 'reject', rejectionReason: rejectReason })}
-                disabled={!rejectReason.trim() || reviewing}
-                className="text-[11px] font-medium text-white bg-red-600 hover:bg-red-700 disabled:opacity-40 px-2 py-1 rounded"
-              >
-                Confirm
-              </button>
-              <button onClick={() => { setRejecting(false); setRejectReason(''); }} className="text-[11px] text-slate-400 hover:text-slate-600">Cancel</button>
-            </div>
-          )}
-          {!isLocked && !underReview && !reviewLocked && (
-            <button
-              onClick={() => submitForReview()}
-              disabled={submitting}
-              className="flex items-center gap-1 text-xs font-medium text-white bg-slate-900 hover:bg-slate-800 disabled:opacity-50 px-3 py-1.5 rounded-lg transition"
-            >
-              {submitting ? <Loader2 size={11} className="animate-spin" /> : <Send size={11} />}
-              {submitting ? 'Submitting…' : 'Submit for review'}
-            </button>
-          )}
         </div>
       </div>
 

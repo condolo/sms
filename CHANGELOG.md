@@ -6,6 +6,29 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.177.0] — 2026-10-13 — feat(report-cards): Mark-submission workflow redesign — autonomous entry, automatic lock at publish
+
+Reported directly, alongside a screenshot: a student added to a class roster after the rest of the class had already gone through submit-for-review/approve had no way to enter marks — the whole column was read-only for the entire class, new student or not. The user's own diagnosis, given directly: remove submit-for-review; let teachers edit freely until the report card is published; lock marks automatically at publish instead of via a manual step; warn before publish that it locks marks and makes the report visible to students and parents.
+
+### Changed
+- **`submitted`/`approved` no longer block mark entry.** `POST /assessment/marks`, `/marks/bulk`, and `/indicator-marks/bulk` now check only `isLocked` on the mark itself — a teacher can edit any student's mark at any time before publish, including one added to the roster mid-term.
+- **Publishing a report card now locks the Markbook automatically.** `/publish` and `/kg/publish` bulk-lock every in-scope `assessment_marks`/`indicator_marks` document and create the matching `mark_submissions` `locked` records, right after the batch completes. No manual admin "Lock" step is needed anymore.
+- **The pre-publish moderation gate is removed, not relaxed.** `/publish` no longer blocks on `policy.require_moderation_complete`; `/generate`'s preview no longer returns `provisional`/`unmoderatedExams`. The now-dead "Require moderation to be complete" toggle is removed from Report Cards → Settings → Publication Policy (the other two completeness toggles are unaffected).
+- **Publish now asks for explicit confirmation first**, naming exactly what happens: marks lock, teachers can no longer edit them, and report cards become visible to students and parents immediately.
+- **The submit-for-review UI is removed from both Markbook grids** (numeric and Kindergarten competency-band) — replaced by a plain "Locked" pill once a report card has been published for that assessment. The rare post-publish correction path (unlock-request → admin-approve → 24h auto-relock) is unchanged.
+
+### Not changed
+- The rare-correction flow for marks after publish: an admin unlocks, the teacher/admin corrects, an admin re-publishes (already-existing versioning behavior).
+- The separate, larger idea of students/parents seeing scheduled-assessment results live before publish — out of scope for this change.
+
+### Tests
+- `assessment-marks-submission-lock.test.js`, `indicator-marks-submission-lock.test.js` — rewritten: `submitted`/`approved`/`rejected`/`draft` all now permit writes; `isLocked` still returns 403.
+- `report-cards-term-scope.test.js` — the `provisional`/`unmoderatedExams` describe block removed along with the fields.
+
+Full suite: 301/301 suites, 3114/3114 tests.
+
+---
+
 ## [v5.176.0] — 2026-10-13 — fix(students): House free-text fallback, Prev/Next profile navigation, guardian-name sync
 
 Three concrete, independent reports from the same pass:

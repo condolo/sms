@@ -39,6 +39,7 @@ const { ok, created, paginate, parsePagination, E, fail } = require('../utils/re
 const { rankStudents, mergeRankings, bestPerSubject, computeRankingScore } = require('../utils/ranking');
 const { mergeConfig, resolveGrade, resolveCurrentPeriod, OBSERVATION_RATING_VALUES, DEFAULT_GRADING_SCHEMA } = require('./academic-config');
 const { getConfig: _getAssessmentConfig } = require('./assessment');
+const { KG_INDICATORS_TYPE } = require('./mark-submissions');
 const { resolveTemplate } = require('./report-card-templates');
 const { getLayout }       = require('../utils/report-layouts');
 const { sectionIdForClass, resolveGradeScale } = require('../utils/grade-scale');
@@ -57,7 +58,6 @@ const { dispatchNotification } = require('../utils/notify-dispatch');
 const email = require('../utils/email');
 const {
   aggregateAssessmentMarks,
-  aggregateUnmoderatedMarks,
   computeFinalScores,
   attendanceSummary,
   behaviourSummary,
@@ -95,7 +95,15 @@ async function _loadConfig(schoolId) {
    for the one pre-existing rule (moderation); the two new completeness
    rules default OFF — no school has ever had them, and per §12's own
    "needs a verified runtime consumer before it ships as a toggle" bar,
-   they're additive capabilities, never a silent new restriction. */
+   they're additive capabilities, never a silent new restriction.
+
+   require_moderation_complete is now a NO-OP (2026-10-13 mark-submission
+   workflow redesign): /publish no longer gates on a pre-publish approval
+   step — it locks marks automatically instead (see the auto-lock step
+   below). The key is kept in the schema/API only so existing saved
+   academic_config documents and this policy's GET/PATCH routes don't
+   break; it's been removed from the Settings UI since toggling it now
+   has no effect. */
 const PUBLICATION_POLICY_DEFAULTS = {
   require_moderation_complete:       true,
   require_subject_comments_complete: false,
@@ -431,6 +439,17 @@ function _validate(schema, data) {
    re-saved since this fix still carries academicYearId: null and won't
    match a resolved year filter; that's an accepted gap for untouched
    historical marks, not a live-write bug. */
+// Same helper, same precedent, as assessment.js's/academic-calc.js's/
+// mark-submissions.js's own _yearFilterPart — not imported (none of
+// those export it), duplicated locally per this codebase's established
+// convention for this one small helper. Used by the auto-lock step in
+// /publish and /kg/publish below.
+function _yearFilterPart(academicYearId) {
+  return academicYearId
+    ? { $or: [{ academicYearId }, { academicYearId: null }, { academicYearId: { $exists: false } }] }
+    : {};
+}
+
 async function _resolveTermScope(schoolId, ctx, { academicYearId, termId, termNumber }) {
   if (termId && academicYearId) return { academicYearId, termId };
 
@@ -472,12 +491,12 @@ router.post('/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
       _loadCaConfig(schoolId),
     ]);
 
-    const [caMarksData, unmoderatedExams] = await Promise.all([
-      aggregateAssessmentMarks(schoolId, classId, termNum ?? null, scope.academicYearId, studentId),
-      // Same moderation gate /publish enforces — a warning here, never a block,
-      // since a preview is a legitimate, earlier use than /publish's.
-      aggregateUnmoderatedMarks(schoolId, classId, termNum ?? null, scope.academicYearId),
-    ]);
+    // aggregateUnmoderatedMarks/"provisional" REMOVED 2026-10-13 — workflow
+    // redesign: there is no more pre-publish approval step, so under the
+    // new design every not-yet-published class would always show
+    // "provisional" (nothing is ever "approved" before publish locks it
+    // directly), which is no longer a meaningful signal.
+    const caMarksData = await aggregateAssessmentMarks(schoolId, classId, termNum ?? null, scope.academicYearId, studentId);
 
     const activeWeights = _convertCustomTypesToWeights(caConfig.customTypes);
     const reportSectionId = await sectionIdForClass(schoolId, classId);
@@ -545,12 +564,6 @@ router.post('/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
     const viewable = (await Promise.all(students.map(s => viewReportFor(req, { ...s, classId, streamId: studentStreamMap[s.studentId] ?? null, comments: s.comments ?? {} })))).filter(Boolean);
     return ok(res, {
       generated: viewable.length,
-      // Advisory only — never blocks the preview. True when at least one
-      // exam feeding these scores hasn't been moderated/approved yet, so
-      // the numbers shown could still change before /publish would accept
-      // them.
-      provisional: unmoderatedExams.length > 0,
-      unmoderatedExams: unmoderatedExams.map(e => ({ id: e.id, title: e.title, status: e.status })),
       config: {
         gradingType: config.gradingType, passMark: config.passMark,
         rankingEnabled: config.rankingEnabled, rankingSubjectStrategy: config.rankingSubjectStrategy,
@@ -650,45 +663,13 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
     }
     const activeSchema = scale.bands;
 
-    // ── Step 2: Moderation guard ─────────────────────────────
-    // RC9 — enforcement is now policy-driven, default true (today's exact
-    // hardcoded behavior for every school that hasn't opted out).
-    const unmoderatedAtPublish = await aggregateUnmoderatedMarks(schoolId, classId, termNum ?? null, scope.academicYearId);
-
-    if (skipModerationCheck) {
-      // Write audit entry for the bypass — this is mandatory, non-negotiable
-      await tenantModel('mark_audit_log', ctx).create({
-        action:    'MODERATION_BYPASS',
-        batchId,
-        schoolId,  classId,
-        termId:    scope.termId,
-        editedBy:  userId,
-        reason:    skipReason,
-        timestamp: now,
-        submissionStatusAtBypass: unmoderatedAtPublish.map(e => ({ id: e.id, title: e.title, status: e.status })),
-      });
-      console.warn(`[REPORT-CARDS] ⚠️  Moderation check BYPASSED — batch ${batchId} by ${userId}: "${skipReason}"`);
-    } else if (policy.require_moderation_complete) {
-      const unmoderated = unmoderatedAtPublish;
-      if (unmoderated.length > 0) {
-        await Batches.updateOne({ id: batchId }, {
-          status: 'failed',
-          failureReason: `${unmoderated.length} exam(s) not yet approved`,
-          unmoderatedExams: unmoderated.map(e => ({ id: e.id, title: e.title, status: e.status })),
-          completedAt: now,
-        });
-        // Carries the structured list as `unmoderatedExams` alongside the
-        // human-readable message — previously the client had no way to
-        // detect "this is the moderation gate" short of parsing the
-        // message text, so there was no UI path to the skipModerationCheck
-        // escape hatch this message itself instructs the caller to use.
-        return fail(res, 'MODERATION_INCOMPLETE', [
-          `${unmoderated.length} exam(s) for this class/term are not yet approved:`,
-          ...unmoderated.map(e => `  • "${e.title}" (${e.status})`),
-          'Approve all exams first — or pass skipModerationCheck: true with a documented skipReason.'
-        ].join('\n'), 400, { unmoderatedExams: unmoderated });
-      }
-    }
+    // Step 2 (moderation guard) REMOVED 2026-10-13 — workflow redesign:
+    // there is no more pre-publish approval step to be "complete" against.
+    // Publish itself now locks marks automatically (Step 7b below)
+    // instead of requiring each subject to already be individually
+    // submitted+approved+manually-locked beforehand. skipModerationCheck/
+    // skipReason are still accepted on the request for backward API
+    // compatibility but have nothing left to bypass.
 
     // ── Step 3: Aggregate grades + CA marks, then compute scores ──
     // Markbook is the only mark source. scope.academicYearId — see
@@ -1014,6 +995,58 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
       newVersions: newSnaps.map(s => ({ snapshotId: s.id, studentId: s.studentId, version: s.version })),
     });
 
+    // ── Step 9b: Lock the Markbook automatically (2026-10-13 workflow
+    //    redesign) — publishing now locks every mark it was built from,
+    //    instead of requiring each subject to already be individually
+    //    submitted+approved+manually-locked beforehand. The per-
+    //    {classId,subjectId,termNumber,assessmentType,instance,streamId}
+    //    mark_submissions docs created here directly in 'locked' state
+    //    (skipping draft/submitted/approved entirely) are what the
+    //    EXISTING unlock-request/approve/24h-auto-relock flow
+    //    (mark-submissions.js, unchanged) still operates on for a rare
+    //    post-publish correction. Non-fatal: the publish itself already
+    //    succeeded above; a lock failure here is logged, not surfaced
+    //    as a publish failure.
+    try {
+      const yearFilter = _yearFilterPart(scope.academicYearId);
+      const Marks = tenantModel('assessment_marks', ctx);
+      const lockFilter = { schoolId, classId, termNumber: termNum, ...yearFilter };
+      const combos = await Marks.find(lockFilter).select('subjectId assessmentType instance streamId').lean();
+      const distinctCombos = [...new Map(
+        combos.map(c => [`${c.subjectId}::${c.assessmentType}::${c.instance}::${c.streamId ?? ''}`, c])
+      ).values()];
+
+      await Marks.updateMany(lockFilter, { $set: { isLocked: true, lockedAt: now } });
+
+      const Submissions = tenantModel('mark_submissions', ctx);
+      for (const combo of distinctCombos) {
+        const subKey = {
+          schoolId, classId, subjectId: combo.subjectId, termNumber: termNum,
+          assessmentType: combo.assessmentType, instance: combo.instance,
+          ...(combo.streamId ? { streamId: combo.streamId } : {}),
+          ...yearFilter,
+        };
+        const existingSub = await Submissions.findOne(subKey).lean();
+        if (existingSub) {
+          if (existingSub.status !== 'locked') {
+            await Submissions.updateOne({ id: existingSub.id }, {
+              $set: { status: 'locked', lockedBy: userId, lockedAt: now, updatedAt: now },
+            });
+          }
+        } else {
+          await Submissions.create({
+            id: uuidv4(), schoolId, classId, subjectId: combo.subjectId, termNumber: termNum,
+            academicYearId: scope.academicYearId, assessmentType: combo.assessmentType, instance: combo.instance,
+            streamId: combo.streamId || null,
+            status: 'locked', lockedBy: userId, lockedAt: now,
+            createdAt: now, updatedAt: now,
+          });
+        }
+      }
+    } catch (lockErr) {
+      console.error('[report-cards/publish] auto-lock failed (publish itself succeeded):', lockErr);
+    }
+
     const response = {
       batchId,
       status:      finalStatus,
@@ -1068,13 +1101,14 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
    — the same collection, same shape, any class), the financial block
    check, and _notifyReportCardsPublished (reads generic snap fields).
 
-   NOT wired: the moderation gate (aggregateUnmoderatedMarks only ever
-   reads assessment_marks/mark_submissions — meaningless for
-   indicator_marks, which isn't tied to mark_submissions yet — see
-   indicator-marks.js's own header comment for that acknowledged gap).
-   skipModerationCheck is accepted in the request body for payload-
-   shape compatibility with the numeric PublishSchema but has no effect
-   here — there is no gate to skip yet.
+   There never was a moderation gate here to begin with (indicator
+   marks were never tied to mark_submissions review-state until the
+   2026-10-13 workflow redesign wired them to it directly for locking —
+   see indicator-marks.js's header), and the numeric /publish's own
+   moderation gate was removed the same day — neither pipeline has a
+   pre-publish approval step to enforce. skipModerationCheck is
+   accepted in the request body for payload-shape compatibility with
+   the numeric PublishSchema but has no effect here.
    ══════════════════════════════════════════════════════════════ */
 
 /** Shared roster + cover-field resolution for one KG class — the parts
@@ -1338,6 +1372,52 @@ router.post('/kg/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
       successCount: newSnaps.length, failedStudents: partialFails,
       newVersions: newSnaps.map(s => ({ snapshotId: s.id, studentId: s.studentId, version: s.version })),
     });
+
+    // ── Lock the Markbook automatically (2026-10-13 workflow redesign) —
+    //    same as the numeric /publish route's identical step, targeting
+    //    indicator_marks instead of assessment_marks and the reserved
+    //    KG_INDICATORS_TYPE sentinel instead of a real assessmentType
+    //    (indicator marks have no instance/assessmentType of their own).
+    //    Non-fatal: the publish itself already succeeded above.
+    try {
+      const yearFilter = _yearFilterPart(scope.academicYearId);
+      const IndicatorMarks = tenantModel('indicator_marks', ctx);
+      const lockFilter = { schoolId, classId, termNumber: termNum, ...yearFilter };
+      const combos = await IndicatorMarks.find(lockFilter).select('subjectId streamId').lean();
+      const distinctCombos = [...new Map(
+        combos.map(c => [`${c.subjectId}::${c.streamId ?? ''}`, c])
+      ).values()];
+
+      await IndicatorMarks.updateMany(lockFilter, { $set: { isLocked: true, lockedAt: now } });
+
+      const Submissions = tenantModel('mark_submissions', ctx);
+      for (const combo of distinctCombos) {
+        const subKey = {
+          schoolId, classId, subjectId: combo.subjectId, termNumber: termNum,
+          assessmentType: KG_INDICATORS_TYPE,
+          ...(combo.streamId ? { streamId: combo.streamId } : {}),
+          ...yearFilter,
+        };
+        const existingSub = await Submissions.findOne(subKey).lean();
+        if (existingSub) {
+          if (existingSub.status !== 'locked') {
+            await Submissions.updateOne({ id: existingSub.id }, {
+              $set: { status: 'locked', lockedBy: userId, lockedAt: now, updatedAt: now },
+            });
+          }
+        } else {
+          await Submissions.create({
+            id: uuidv4(), schoolId, classId, subjectId: combo.subjectId, termNumber: termNum,
+            academicYearId: scope.academicYearId, assessmentType: KG_INDICATORS_TYPE, instance: 1,
+            streamId: combo.streamId || null,
+            status: 'locked', lockedBy: userId, lockedAt: now,
+            createdAt: now, updatedAt: now,
+          });
+        }
+      }
+    } catch (lockErr) {
+      console.error('[report-cards/kg/publish] auto-lock failed (publish itself succeeded):', lockErr);
+    }
 
     console.log(`[REPORT-CARDS] KG batch ${batchId}: ${newSnaps.length} published (${finalStatus}) by ${userId}`);
     AuditService.log({ action: 'report_card.publish', actor: req.jwtUser, schoolId, target: { type: 'class', id: classId, label: className }, details: { batchId, termId: scope.termId, studentCount: newSnaps.length, status: finalStatus, layoutKey: 'kindergarten' }, req });

@@ -794,7 +794,6 @@ function WorkflowSection() {
    POST /publish.
    ══════════════════════════════════════════════════════════════ */
 const POLICY_FIELDS = [
-  { key: 'require_moderation_complete',       label: 'Require moderation to be complete',        description: 'Block publishing until every mark for the class/term has passed moderation.' },
   { key: 'require_subject_comments_complete', label: 'Require subject comments to be complete',  description: 'Block publishing until every subject on the report has a teacher comment (only enforced when Subject Teacher Comments is enabled).' },
   { key: 'require_report_remarks_complete',   label: 'Require report-level remarks to be complete', description: "Block publishing until the Class Teacher's Remark and Principal's Comment (or the approval chain, if configured) are filled in." },
 ];
