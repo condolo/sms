@@ -1,18 +1,21 @@
 /**
- * Msingi — Student Portal Dashboard
- * Layout: Sidebar + Main — matches the Msingi student portal design.
+ * Student Portal Dashboard
+ * Layout: Sidebar + Main. Sidebar brand (name/logo/badge colour) inherits
+ * the signed-in student's own school via session.school + useSchoolTheme —
+ * same pattern as the admin Sidebar.jsx, not hardcoded to any one school.
+ * Sidebar becomes an off-canvas drawer below the lg breakpoint.
  * Data: all fetched from /api/student-portal/dashboard (unchanged).
- * UI only — zero functional or API changes.
  */
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import useAuthStore from '@/store/auth.js';
+import { useSchoolTheme } from '@/hooks/useSchoolTheme.js';
 import {
   LayoutDashboard, Calendar, BookCheck, CheckCircle, Clock,
   Download, FileText, GraduationCap, LogOut, AlertCircle,
   BookOpen, Lock, Bell, MessageSquare, Activity, Star,
-  MapPin, Play, MonitorPlay, CalendarCheck,
+  MapPin, Play, MonitorPlay, CalendarCheck, Menu, X,
 } from 'lucide-react';
 import NotificationBell from '@/components/layout/NotificationBell.jsx';
 
@@ -151,6 +154,14 @@ export default function StudentDashboard() {
   const [downloading, setDownloading] = useState(null);
   const [dlError,     setDlError]     = useState('');
   const [latestWeek,  setLatestWeek]  = useState(null); // most recent Weekly Snapshot, or undefined if none generated yet
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  /* ── Per-school branding — same pattern as Sidebar.jsx (admin shell) ── */
+  const authSchool      = session?.school;
+  const { primary, accent } = useSchoolTheme();
+  const schoolBrandName = authSchool?.name ?? 'Student Portal';
+  const schoolInitial   = schoolBrandName.trim().charAt(0).toUpperCase() || 'M';
+  const schoolLogoUrl   = authSchool?.logoUrl ?? null;
 
   /* ── Auth guard + fetch ── */
   useEffect(() => {
@@ -170,13 +181,16 @@ export default function StudentDashboard() {
       .catch(() => setLatestWeek(undefined));
   }, []);
 
-  /* ── Scroll to section helper ── */
+  /* ── Scroll to section helper ──
+     scrollIntoView (not el.offsetTop math) — robust regardless of any
+     transformed/positioned ancestor between the anchor and mainRef, and
+     regardless of the topbar's height offsetting main from the document
+     origin. See ParentDashboard.jsx's scrollToSection for the full story. */
   function scrollToSection(sectionId) {
     setActiveNav(sectionId);
+    setMobileNavOpen(false);
     const el = document.getElementById(sectionId);
-    if (el && mainRef.current) {
-      mainRef.current.scrollTo({ top: el.offsetTop - 16, behavior: 'smooth' });
-    }
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   /* ── Loading state ── */
@@ -256,24 +270,53 @@ export default function StudentDashboard() {
   return (
     <div id="student-portal-root" className="flex h-screen overflow-hidden bg-[#f8fafc]">
 
+      {/* ══ MOBILE SIDEBAR BACKDROP ══════════════════════════════ */}
+      {mobileNavOpen && (
+        <div
+          id="student-sidebar-backdrop"
+          className="fixed inset-0 bg-black/40 z-30 lg:hidden"
+          onClick={() => setMobileNavOpen(false)}
+        />
+      )}
+
       {/* ══ SIDEBAR ══════════════════════════════════════════════ */}
-      <aside id="student-sidebar" className="w-[220px] bg-[#064e3b] flex flex-col flex-shrink-0">
+      <aside
+        id="student-sidebar"
+        className={`fixed lg:static inset-y-0 left-0 z-40 w-[220px] bg-[#064e3b] flex flex-col flex-shrink-0 h-full transition-transform duration-200 lg:translate-x-0 ${mobileNavOpen ? 'translate-x-0' : '-translate-x-full'}`}
+      >
 
         {/* Brand */}
-        <div id="sidebar-brand" className="px-4 py-5 border-b border-[#065f46]">
-          <div className="flex items-center gap-2.5">
-            <div
-              id="sidebar-logo-icon"
-              className="w-[34px] h-[34px] rounded-[8px] flex items-center justify-center text-white font-extrabold text-base flex-shrink-0"
-              style={{ background: 'linear-gradient(135deg, #10b981, #059669)' }}
-            >
-              M
-            </div>
-            <div>
-              <div className="text-white font-bold text-[15px] leading-tight">Msingi</div>
+        <div id="sidebar-brand" className="px-4 py-5 border-b border-[#065f46] flex items-center justify-between">
+          <div className="flex items-center gap-2.5 min-w-0">
+            {schoolLogoUrl ? (
+              <img
+                src={schoolLogoUrl}
+                alt={schoolBrandName}
+                id="sidebar-logo-icon"
+                className="w-[34px] h-[34px] rounded-[8px] object-contain bg-white/10 p-0.5 flex-shrink-0"
+              />
+            ) : (
+              <div
+                id="sidebar-logo-icon"
+                className="w-[34px] h-[34px] rounded-[8px] flex items-center justify-center text-white font-extrabold text-base flex-shrink-0"
+                style={{ background: `linear-gradient(135deg, ${primary}, ${accent})` }}
+              >
+                {schoolInitial}
+              </div>
+            )}
+            <div className="min-w-0">
+              <div id="sidebar-brand-name" className="text-white font-bold text-[15px] leading-tight truncate">{schoolBrandName}</div>
               <div className="text-[11px] text-emerald-300 mt-0.5">Student Portal</div>
             </div>
           </div>
+          <button
+            id="sidebar-mobile-close"
+            onClick={() => setMobileNavOpen(false)}
+            className="lg:hidden flex-shrink-0 p-1 text-emerald-300 hover:text-white"
+            aria-label="Close menu"
+          >
+            <X size={18} />
+          </button>
         </div>
 
         {/* Navigation */}
@@ -361,26 +404,34 @@ export default function StudentDashboard() {
       <div id="student-main-wrapper" className="flex-1 flex flex-col overflow-hidden">
 
         {/* Topbar */}
-        <header id="student-topbar" className="bg-white border-b border-slate-200 h-14 flex items-center px-6 gap-4 flex-shrink-0">
-          <h1 id="topbar-greeting" className="text-[16px] font-bold text-slate-900 flex-1">
+        <header id="student-topbar" className="bg-white border-b border-slate-200 min-h-14 flex flex-wrap items-center px-3 sm:px-6 py-2 gap-2 sm:gap-4 flex-shrink-0">
+          <button
+            id="sidebar-mobile-open"
+            onClick={() => setMobileNavOpen(true)}
+            className="lg:hidden flex-shrink-0 p-1.5 -ml-1 text-slate-500 hover:text-slate-800 rounded-lg hover:bg-slate-100"
+            aria-label="Open menu"
+          >
+            <Menu size={20} />
+          </button>
+          <h1 id="topbar-greeting" className="text-[14px] sm:text-[16px] font-bold text-slate-900 flex-1 min-w-0 truncate">
             {_greeting()}, {firstName} 👋
           </h1>
-          <span id="topbar-term-badge" className="text-[12px] font-medium text-slate-500 bg-slate-100 px-3 py-1 rounded-full whitespace-nowrap">
+          <span id="topbar-term-badge" className="hidden sm:inline text-[12px] font-medium text-slate-500 bg-slate-100 px-3 py-1 rounded-full whitespace-nowrap">
             {termLabel}
           </span>
           <NotificationBell myUserId={session.user?.id} onSelect={() => scrollToSection('section-messages')} />
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 w-full sm:w-auto order-last sm:order-none">
             <button
               id="btn-report-card"
               onClick={() => scrollToSection('section-grades')}
-              className="px-3.5 py-[7px] rounded-[7px] bg-slate-100 text-slate-600 text-[12px] font-semibold hover:bg-slate-200 transition"
+              className="flex-1 sm:flex-initial px-3 sm:px-3.5 py-[7px] rounded-[7px] bg-slate-100 text-slate-600 text-[11px] sm:text-[12px] font-semibold hover:bg-slate-200 transition whitespace-nowrap"
             >
               My Report Card
             </button>
             <button
               id="btn-view-timetable"
               onClick={() => scrollToSection('section-timetable')}
-              className="px-3.5 py-[7px] rounded-[7px] bg-emerald-600 text-white text-[12px] font-semibold hover:bg-emerald-700 transition"
+              className="flex-1 sm:flex-initial px-3 sm:px-3.5 py-[7px] rounded-[7px] bg-emerald-600 text-white text-[11px] sm:text-[12px] font-semibold hover:bg-emerald-700 transition whitespace-nowrap"
             >
               View Timetable
             </button>
@@ -391,11 +442,11 @@ export default function StudentDashboard() {
         <main
           id="student-main-content"
           ref={mainRef}
-          className="flex-1 overflow-y-auto p-5 space-y-4"
+          className="flex-1 overflow-y-auto p-3 sm:p-5 space-y-4"
         >
 
           {/* ── Stat cards ─────────────────────────────────────── */}
-          <div id="section-dashboard" className="grid grid-cols-4 gap-3.5">
+          <div id="section-dashboard" className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
 
             <StatCard
               id="stat-card-average"
@@ -455,7 +506,7 @@ export default function StudentDashboard() {
           </div>
 
           {/* ── Two-column grid ────────────────────────────────── */}
-          <div className="grid gap-3.5" style={{ gridTemplateColumns: '1fr 380px' }}>
+          <div className="grid grid-cols-1 lg:[grid-template-columns:1fr_380px] gap-3.5">
 
             {/* LEFT: Today's Schedule */}
             <div id="section-timetable" className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden">
@@ -826,7 +877,7 @@ export default function StudentDashboard() {
               <Activity size={14} className="text-emerald-500" />
               <h2 className="text-[13px] font-bold text-slate-900">Attendance Detail</h2>
             </div>
-            <div className="px-[18px] py-4 grid grid-cols-4 gap-4">
+            <div className="px-[18px] py-4 grid grid-cols-2 sm:grid-cols-4 gap-4">
               {[
                 { id: 'att-present', label: 'Present',  value: attendance.present ?? 0,  color: 'bg-emerald-500', text: 'text-emerald-600' },
                 { id: 'att-absent',  label: 'Absent',   value: attendance.absent  ?? 0,  color: 'bg-red-400',     text: 'text-red-600'     },
