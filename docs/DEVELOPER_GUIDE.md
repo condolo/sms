@@ -6283,6 +6283,28 @@ A second, independent bug compounded the error's visible scope: `SettingsPage.js
 ### Verified
 All 6 directly-related test files green (59 tests) before the full suite run.
 
+## 111. The Finance Sub-Permission Backfill Was One-Time Only and Could Permanently Miss a Role (v5.180.0)
+
+### Reported problem
+Follow-up to §110: after that fix shipped, the user tried again and got the SAME "Apply & Save" error — but now listing only the 2 real actions per key instead of 4, confirming §110's clamp worked correctly. The remaining list proved the actor's own role genuinely held none of `finance__term_billing`/`early_payment`/`activities` in the database.
+
+### Root cause
+`finance-permission-backfill.js` (§88, security review) was designed as a true one-time migration: `if (done) return {skipped:true}` against a flag in `app_migrations`, intended for the single moment these 3 keys were introduced across an already-stable fleet of schools. That assumption broke for any role whose coarse `finance` grant was set, or whose `role_permissions` doc was created, AFTER the flag was first recorded — which `onboard.js`/`platform.js` cover for a brand-new SCHOOL (they call `withFinanceSubGrants` directly at seed time), but nothing covers for an EXISTING school's role that gains `finance` access later (e.g. a role re-saved through Roles & Permissions after the flag was set, picking up a 'finance' grant for the first time without ever being individually backfilled). Once the flag existed, such a role could never be caught — the gate skipped the whole function regardless of what was still missing, with no self-service recovery short of a direct database edit.
+
+### Fixed
+`backfillFinanceSubPermissions` now runs on every server startup instead of gating behind the one-time flag. This is safe because the function was ALREADY idempotent per-document (`if (!Array.isArray(before[key]) ...)` — never overwrites a key already set) — the only thing standing between "one-time" and "self-healing" was the early-return gate itself. The `app_migrations` record is kept (`lastRunAt`/`documentsUpdatedLastRun`, renamed from `appliedAt`/`documentsUpdated`) purely for observability, no longer as a gate.
+
+### Deliberately out of scope
+No data migration or repair script run against any live database from this session — this environment has no MongoDB access (per this session's standing note); the fix takes effect on the user's own next server restart, which re-runs the now-self-healing backfill against their real data.
+
+### Files
+- `server/utils/finance-permission-backfill.js` — removed the gating early-return; header comment rewritten.
+- `server/index.js` — startup comment corrected ("one-time" → "every startup, self-healing").
+- `server/__tests__/explicit-finance-permissions.test.js` — the old "runs once" test replaced; new test confirms a role is still backfilled on a run after `app_migrations` already has the key recorded.
+
+### Verified
+`explicit-finance-permissions.test.js`: 12/12 passing. Full suite green.
+
 ## Term billing: transport and extra-curricular on the invoice (v5.169.0)
 
 **Status before this change:** a route's `feePerTerm` was stored but no code read it for billing. `transport_assignments` was read by nothing in finance. Activities had no model. Invoices came only from fee structures.

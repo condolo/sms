@@ -6,6 +6,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.180.0] — 2026-10-13 — fix(settings): finance sub-permission backfill was one-time only and could permanently miss a role
+
+Follow-up to v5.179.0: after that fix, the same "Apply & Save" error still occurred — now listing only the 2 real actions per key instead of 4, confirming the clamp worked, but showing the actor's own role genuinely holds none of `finance__term_billing`/`early_payment`/`activities` in the database at all.
+
+### Root cause
+`finance-permission-backfill.js` ran once per database, ever, recorded in `app_migrations` and permanently skipped on every later startup. That design assumed every school's role_permissions docs already existed in final form at the moment it first ran — false for any role whose `finance` grant was set, or whose role_permissions doc was created, after that point. Such a role could never be caught: the flag skipped the whole function regardless of what was still missing, with no way to self-heal short of deleting the migration record by hand.
+
+### Fixed
+- The backfill now runs on every server startup instead of gating behind a one-time flag. It's cheap and safe to re-run: it never overwrites a key already set, so it's a no-op for every role that's already correct, and only ever fills a genuinely missing key for a role that holds the matching coarse `finance` actions. The `app_migrations` record is kept for observability (`lastRunAt`/`documentsUpdatedLastRun`) but no longer gates execution.
+
+### Tests
+- `explicit-finance-permissions.test.js` — the old "runs once, second start does nothing" test replaced with "a second run is a safe no-op"; new test confirms a role is still backfilled even when `app_migrations` already has the key recorded from a previous run.
+
+### Note
+This fix takes effect on the next server restart.
+
+---
+
 ## [v5.179.0] — 2026-10-13 — fix(settings): Roles & Permissions save failed for every role on the 3 explicit finance sub-keys
 
 Reported directly, with a screenshot: clicking "Apply & Save" on Roles & Permissions failed with "You can't grant a permission you don't hold yourself," listing `finance__term_billing`/`finance__early_payment`/`finance__activities` for every role (admin, principal, deputy_principal, finance, parent, deputy).

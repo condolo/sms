@@ -733,8 +733,9 @@ async function _migrateReportIds() {
 async function start() {
   await connect();        // Connect to MongoDB (no-op if MONGODB_URI not set)
   await ensureIndexes();  // Idempotent — safe to run on every startup
-  // One-time: existing bursars keep the explicit finance sub-permissions they
-  // had through the general finance rights (see utils/finance-permission-backfill.js).
+  // Runs every startup (self-healing, not one-time — 2026-10-13): existing
+  // bursars/admins keep the explicit finance sub-permissions their general
+  // finance rights imply (see utils/finance-permission-backfill.js).
   await backfillFinanceSubPermissions().catch(err => console.error('[startup] finance sub-permission backfill failed:', err.message));
 
   app.listen(PORT, () => {

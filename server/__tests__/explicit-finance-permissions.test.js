@@ -3,8 +3,9 @@
 
    - explicitSub refuses a caller without the explicit grant, and fails closed
    - withFinanceSubGrants derives the new keys only from actions a role holds
-   - the one-time backfill gives existing roles the keys they had, runs once,
-     and never overwrites a grant already set
+   - the backfill gives existing roles the keys they had, runs on every
+     startup (self-healing, not one-time — 2026-10-13), and never
+     overwrites a grant already set
    - extra-curricular writes are refused without the explicit grant
    ============================================================ */
 'use strict';
@@ -121,7 +122,7 @@ describe('withFinanceSubGrants — derived from what a role already holds', () =
   });
 });
 
-describe('backfillFinanceSubPermissions — one-time, never overwrites', () => {
+describe('backfillFinanceSubPermissions — self-healing on every run, never overwrites', () => {
   test('existing bursars keep their rights: keys are added to each role that holds the finance actions', async () => {
     mockStores.role_permissions = mockMakeCollection([
       { _id: 'rp_finance', schoolId: 'sch_1', roleKey: 'finance', permissions: { finance: ['read', 'create', 'update'] } },
@@ -146,14 +147,38 @@ describe('backfillFinanceSubPermissions — one-time, never overwrites', () => {
     expect(doc.permissions.finance__term_billing).toEqual(['read']);
   });
 
-  test('runs once: a second start does nothing', async () => {
+  test('a second run is a safe no-op once every key is already filled (not skipped — re-scanned and found nothing missing)', async () => {
     mockStores.role_permissions = mockMakeCollection([
       { _id: 'rp_finance', schoolId: 'sch_1', roleKey: 'finance', permissions: { finance: ['read', 'create'] } },
     ]);
-    await backfillFinanceSubPermissions();
+    const first = await backfillFinanceSubPermissions();
+    expect(first.updated).toBe(1);
     expect(mockStores.app_migrations._docs().map(d => d.key)).toContain(MIGRATION_KEY);
     const second = await backfillFinanceSubPermissions();
-    expect(second.skipped).toBe(true);
+    expect(second.updated).toBe(0);
+    expect(second.skipped).toBeUndefined();
+  });
+
+  // Reported directly, 2026-10-13: a role gained a real 'finance' grant
+  // (or its role_permissions doc was created) AFTER the one-time flag
+  // had already been recorded, and the old "skip forever once done"
+  // design meant it could never be caught — Roles & Permissions could
+  // never be saved for that role as a result. The backfill must keep
+  // finding and filling genuine gaps on every subsequent run, not just
+  // the first one ever recorded for this database.
+  test('a role missing the keys is still backfilled even on a run after app_migrations already has the key recorded', async () => {
+    mockStores.app_migrations = mockMakeCollection([
+      { key: MIGRATION_KEY, lastRunAt: '2026-01-01T00:00:00.000Z', documentsUpdatedLastRun: 0 },
+    ]);
+    mockStores.role_permissions = mockMakeCollection([
+      { _id: 'rp_admin', schoolId: 'sch_1', roleKey: 'admin', permissions: { finance: ['read', 'create', 'update', 'delete'] } },
+    ]);
+    const res = await backfillFinanceSubPermissions();
+    expect(res.updated).toBe(1);
+    const admin = mockStores.role_permissions._docs().find(d => d._id === 'rp_admin');
+    expect(admin.permissions.finance__term_billing).toEqual(['read', 'create']);
+    expect(admin.permissions.finance__early_payment).toEqual(['update', 'create']);
+    expect(admin.permissions.finance__activities).toEqual(['create', 'update']);
   });
 });
 
