@@ -3958,7 +3958,8 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       // this allowlist entirely, silently falling to N on every save.
       if (!['students','finance','attendance','grades','behaviour','events','messages','growth_profile',
             'elearning','transport','hostel','report_cards','resources'].includes(m)) return N;
-      if (m==='finance' && ['fee_structure','mpesa','import','create_invoice','void_invoice','record_payment'].includes(s)) return N;
+      if (m==='finance' && ['fee_structure','mpesa','import','create_invoice','void_invoice','record_payment',
+                             'term_billing','early_payment','activities'].includes(s)) return N;
       if (m==='growth_profile' && s !== 'view') return N;
       // 'report' is a whole-SCHOOL attendance breakdown, never a parent's
       // own child's data — enforced with hasExplicitSubGrant (no coarse-
@@ -3987,13 +3988,34 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       return N;
     },
   };
+  // Explicit finance sub-permissions (server: middleware/explicit-sub.js's
+  // FINANCE_SUB_GRANTS) each support only 2 of the generic V/E/D model's
+  // 4 actions — term_billing has no update/delete concept, early_payment
+  // and activities have no read concept. Narrowing-only mask applied to
+  // EVERY role's result below (never widens what a role-specific branch
+  // above decided), so a default never shows a checkbox whose action the
+  // server will silently drop on save — which is exactly what was
+  // tripping the self-escalation ceiling check on every permissions save
+  // for every role the moment any of these 3 rows had any checkbox set
+  // (2026-10-13): update for term_billing, read for early_payment/
+  // activities, and delete for all three are never real grants.
+  const FINANCE_SUB_MASK = {
+    finance__term_billing:  { v:true,  e:true,  d:false },
+    finance__early_payment: { v:false, e:true,  d:false },
+    finance__activities:    { v:false, e:true,  d:false },
+  };
   const perms = { byRole:{}, byUser:{} };
   /* Iterate all system roles + the legacy 'deputy' alias */
   [...SYSTEM_ROLES, 'deputy'].forEach(role => {
     if (!DEFS[role]) return;   // skip any unknown key
     perms.byRole[role] = {};
     modules.forEach(mod => mod.subs.forEach(sub => {
-      perms.byRole[role][`${mod.key}__${sub.key}`] = DEFS[role](mod.key, sub.key);
+      const key  = `${mod.key}__${sub.key}`;
+      const cell = DEFS[role](mod.key, sub.key);
+      const mask = FINANCE_SUB_MASK[key];
+      perms.byRole[role][key] = mask
+        ? { v: cell.v && mask.v, e: cell.e && mask.e, d: cell.d && mask.d }
+        : cell;
     }));
   });
   return perms;

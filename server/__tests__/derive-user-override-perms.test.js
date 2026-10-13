@@ -54,4 +54,12 @@ describe('_deriveUserOverridePerms — sparse delta, not a full definition', () 
     const derived = _deriveUserOverridePerms({ 'hr__documents': { v: true, e: true, d: true } });
     expect(derived['hr__documents'].sort()).toEqual(['create', 'delete', 'read', 'update']);
   });
+
+  // Same clamp as _deriveApiPerms (derive-api-perms.test.js) — a per-user
+  // override can touch these 3 keys too, and must be held to the same
+  // real action set, for the same reason (2026-10-13).
+  test('a per-user override on finance__term_billing is clamped to read + create only', () => {
+    const derived = _deriveUserOverridePerms({ 'finance__term_billing': { v: true, e: true, d: true } });
+    expect(derived['finance__term_billing'].sort()).toEqual(['create', 'read']);
+  });
 });

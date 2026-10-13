@@ -246,6 +246,45 @@ describe('PUT /api/settings/school — self-escalation guard', () => {
     const superDoc = mockRolePerms.docs.find(d => d.roleKey === 'superadmin');
     expect(superDoc.permissions['hr__x']).toBeUndefined();
   });
+
+  // Reported directly, 2026-10-13: saving the full Roles & Permissions
+  // matrix 422'd with "You can't grant a permission you don't hold
+  // yourself" for finance__term_billing/early_payment/activities on
+  // EVERY role, because the generic V/E/D UI derives all 4 actions
+  // (read/create/update/delete) for every sub-key, but these 3 are
+  // explicit sub-permissions (middleware/explicit-sub.js's
+  // FINANCE_SUB_GRANTS) that only ever support 2 of the 4 — nothing,
+  // not even an admin, could ever hold the other 2, so the ceiling
+  // check rejected them unconditionally. Fixed by clamping
+  // _deriveApiPerms's output to each key's real action set before the
+  // ceiling check ever sees it.
+  test('all 4 V/E/D boxes checked on finance__term_billing succeeds for an actor who holds only its 2 real actions', async () => {
+    // _deriveApiPerms also always emits the coarse 'finance' union alongside
+    // the sub-key, so the actor needs that too — same as it would after a
+    // real backfill (withFinanceSubGrants only ever derives these FROM an
+    // existing coarse finance grant in the first place).
+    const adminPerms = mockRolePerms.docs.find(d => d.roleKey === 'admin').permissions;
+    adminPerms.finance = ['read', 'create'];
+    adminPerms.finance__term_billing = ['read', 'create'];
+    const res = await supertest(buildApp())
+      .put('/api/settings/school')
+      .set('Cookie', cookieFor({ userId: 'u_admin', schoolId: SCHOOL_A, role: 'admin' }))
+      .send({ modulePermissions: { byRole: { teacher: { 'finance__term_billing': { v: true, e: true, d: true } } } } });
+    expect(res.status).toBe(200);
+    const teacherDoc = mockRolePerms.docs.find(d => d.roleKey === 'teacher');
+    expect(teacherDoc.permissions['finance__term_billing'].sort()).toEqual(['create', 'read']);
+  });
+
+  test('an actor with no finance grant at all is still correctly refused — the fix narrows what is requested, it does not bypass the ceiling', async () => {
+    const res = await supertest(buildApp())
+      .put('/api/settings/school')
+      .set('Cookie', cookieFor({ userId: 'u_admin', schoolId: SCHOOL_A, role: 'admin' }))
+      .send({ modulePermissions: { byRole: { teacher: { 'finance__term_billing': { v: true, e: true, d: true } } } } });
+    expect(res.status).toBe(422);
+    // Never complains about update/delete any more — those are dropped before the ceiling check, not rejected by it.
+    expect(res.body.error.message).not.toMatch(/term_billing:update|term_billing:delete/);
+    expect(res.body.error.message).toMatch(/term_billing:read/);
+  });
 });
 
 describe('PUT /api/settings/school — per-user override target validation', () => {

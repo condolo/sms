@@ -6251,6 +6251,38 @@ Raised directly, from a screenshot of the "New Kindergarten Template" screen's "
 ### Verified
 Both edited client files confirmed to compile via a dev-server dynamic import. Full suite green after the new tests were added.
 
+## 110. Roles & Permissions Save Failed on Every Role for the 3 Explicit Finance Sub-Keys (v5.179.0)
+
+### Reported problem
+Raised directly, with a screenshot: "Apply & Save" on Roles & Permissions failed with `You can't grant a permission you don't hold yourself`, listing `finance__term_billing`/`finance__early_payment`/`finance__activities` for every role (admin, principal, deputy_principal, finance, parent, deputy) in the bulk payload.
+
+### Root cause, traced to the exact lines
+`finance__term_billing`, `finance__early_payment`, `finance__activities` are "explicit sub-permissions" (§88's security review added the concept; `middleware/explicit-sub.js`'s `FINANCE_SUB_GRANTS` is the single source of truth) that each support only **2** of the standard 4 actions — confirmed by grepping every real `explicitSub('finance', <key>, <action>)` call site:
+- `term_billing`: `read` (`finance.js`'s preview + early-payments list) and `create` (generate). Never update, never delete.
+- `early_payment`: `update` (change deadline/%) and `create` (confirm). Never read, never delete.
+- `activities`: `create` and `update` (`extracurricular.js`). Never read, never delete.
+
+But the generic V/E/D permission-matrix UI (`SettingsPage.jsx`) treats every sub-module row identically — `_deriveApiPerms`/`_deriveUserOverridePerms` (`settings.js`) always derive **all 4** actions (V→read, E→create+update, D→delete) whenever a box is checked, with no per-key awareness that some keys support fewer. Since `_actorEffectiveAllows` (the self-escalation ceiling check, §72's security review) treats `EXPLICIT_SUB_KEYS` as never-inherited-from-the-coarse-grant and nothing — not even an admin, not even the backfill (`finance-permission-backfill.js`) or the new-school seed (`onboard.js`/`platform.js`, both via `withFinanceSubGrants`) — ever grants the "impossible" 2 actions on these 3 keys to anyone but superadmin, ANY save that touched one of these rows always requested at least one action nobody could hold. That tripped the ceiling check for every role in the same bulk save, not just the one row that happened to have the stray checkbox.
+
+A second, independent bug compounded the error's visible scope: `SettingsPage.jsx`'s `_makeDefaultPerms` for the `parent` role (line ~3961) excludes several finance sub-keys from its blanket view-grant (`fee_structure`, `mpesa`, `import`, etc.) but never added the 3 NEW keys to that exclusion list when they shipped (v5.169.2) — so `parent` fell through to `return V;`, defaulting to a `read` request on all 3, something a parent should never have at all (these are bursar/admin operational actions, not a parent-portal feature).
+
+### Fixed
+- `server/routes/settings.js`: `_deriveApiPerms` and `_deriveUserOverridePerms` both now filter their derived `subActions` for any key present in `FINANCE_SUB_GRANTS` down to the intersection with that key's real wanted-action list, before anything (including the coarse module-level union) is computed from them. Defense in depth — correct regardless of what any client, old or new, sends.
+- `client/src/pages/settings/SettingsPage.jsx`: `_makeDefaultPerms` applies the identical mask (`FINANCE_SUB_MASK`) to every role's computed default in the shared iteration loop, narrowing-only, never widening whatever a role-specific branch decided — so a default never shows a checkbox implying a capability the server will silently drop. `parent`'s exclusion list gained the 3 new keys directly, since that's a correctness bug independent of the ceiling mechanics (a parent should never default to seeing these rows as granted at all, not just have the impossible actions trimmed).
+
+### Deliberately out of scope
+- `POST /custom-roles`'s baseRole-copy path (which copies an EXISTING role's already-saved `permissions`, not a V/E/D cell) wasn't touched — not part of the reported bug, and any stale over-broad data in a role's saved doc from before this fix is a one-time data-hygiene concern, not something code can retroactively repair without a migration nobody asked for here.
+- Did not extend `finance-permission-backfill.js` to re-run per-school or per-new-key — `onboard.js`/`platform.js` already call `withFinanceSubGrants` at creation time for every new school, independently of the one-time global backfill, so a normally-onboarded school's admin role should already hold the 2 real actions on each of these 3 keys; this fix's clamp is what makes requesting ONLY those 2 (instead of 4) actually succeed.
+
+### Files
+- `server/routes/settings.js` — the two derivation functions.
+- `client/src/pages/settings/SettingsPage.jsx` — `_makeDefaultPerms`'s shared mask + `parent`'s exclusion list.
+- `server/__tests__/derive-api-perms.test.js`, `derive-user-override-perms.test.js` — 5 new unit tests.
+- `server/__tests__/routes/settings-permission-escalation.test.js` — 2 new end-to-end tests: the exact reported scenario now succeeds for an actor holding the 2 real actions; an actor with no finance grant at all is still correctly refused, just for 2 actions instead of 4 (confirms the fix narrows what's requested, it does not bypass the ceiling).
+
+### Verified
+All 6 directly-related test files green (59 tests) before the full suite run.
+
 ## Term billing: transport and extra-curricular on the invoice (v5.169.0)
 
 **Status before this change:** a route's `feePerTerm` was stored but no code read it for billing. `transport_assignments` was read by nothing in finance. Activities had no model. Invoices came only from fee structures.

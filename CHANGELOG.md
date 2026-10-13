@@ -6,6 +6,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.179.0] — 2026-10-13 — fix(settings): Roles & Permissions save failed for every role on the 3 explicit finance sub-keys
+
+Reported directly, with a screenshot: clicking "Apply & Save" on Roles & Permissions failed with "You can't grant a permission you don't hold yourself," listing `finance__term_billing`/`finance__early_payment`/`finance__activities` for every role (admin, principal, deputy_principal, finance, parent, deputy).
+
+### Root cause
+`finance__term_billing`, `finance__early_payment`, and `finance__activities` are "explicit sub-permissions" (`middleware/explicit-sub.js`'s `FINANCE_SUB_GRANTS`) that each support only 2 of the standard 4 actions — term_billing has no update/delete concept at all, early_payment and activities have no read concept. But the generic V/E/D permission-matrix UI treats every sub-module row identically, deriving all 4 actions (read/create/update/delete) whenever any box is checked. Since nothing — not even an admin — can ever hold the other 2 actions on these 3 keys (no route checks them, the backfill never grants them), any save that touched one of these rows always requested at least one action nobody could hold, tripping the self-escalation ceiling check for every role in the same bulk save. A second, independent bug compounded it: the `parent` role's client-side default fell through to a blanket view-grant on all 3 of these admin-only operational keys, which it should never have had in the first place.
+
+### Fixed
+- `server/routes/settings.js`'s `_deriveApiPerms`/`_deriveUserOverridePerms` now clamp these 3 keys to their real action set (sourced from `FINANCE_SUB_GRANTS`, the same single source of truth the backfill and the ceiling check already use) before the self-escalation check ever sees them — defense in depth, correct regardless of what any client sends.
+- `client/src/pages/settings/SettingsPage.jsx`'s `_makeDefaultPerms` applies the same clamp to every role's computed default, so the UI never shows a checkbox for an action that would be silently dropped on save; `parent`'s default now correctly excludes all 3 keys instead of falling through to a view grant it was never meant to have.
+
+### Tests
+- `derive-api-perms.test.js`, `derive-user-override-perms.test.js` — 5 new tests pinning the clamp (including that a sibling finance key outside `FINANCE_SUB_GRANTS` is unaffected).
+- `settings-permission-escalation.test.js` — 2 new end-to-end tests: the exact reported scenario (all 4 boxes checked) now succeeds for an actor who holds the 2 real actions, and an actor with no finance grant at all is still correctly refused, just for the 2 real actions instead of 4.
+
+---
+
 ## [v5.178.0] — 2026-10-13 — feat(report-cards): Kindergarten templates load subjects from curriculum; comments restricted to the class teacher
 
 Raised directly from a screenshot of the Kindergarten Template builder: why re-pick subjects on the template when the school already has a real curriculum (`class_subjects`) and real teaching assignments? A report card should read existing configuration, not duplicate it.

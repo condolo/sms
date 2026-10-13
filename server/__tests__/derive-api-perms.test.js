@@ -115,3 +115,42 @@ describe('_deriveApiPerms — hr__workflow special case (2026-09, Priority-0 aud
     expect(derived['hr__workflow'].sort()).toEqual(['create', 'read', 'update']); // sub-level array unaffected by the special case
   });
 });
+
+describe('_deriveApiPerms — explicit finance sub-permissions clamped to their real action set (2026-10-13)', () => {
+  // finance__term_billing/early_payment/activities each support only the
+  // 2 actions their real routes check (FINANCE_SUB_GRANTS in
+  // middleware/explicit-sub.js) — never the generic V/E/D model's full
+  // 4. Before this fix, checking every box (as the UI's own blanket
+  // admin/superadmin default did) produced 'update'/'delete' for
+  // term_billing and 'read'/'delete' for early_payment/activities —
+  // actions nothing, not even an admin, could ever hold, which tripped
+  // the self-escalation ceiling check in settings.js on every save.
+  test('term_billing: all 4 boxes checked still yields only read + create, never update or delete', () => {
+    const derived = _deriveApiPerms({ 'finance__term_billing': { v: true, e: true, d: true } });
+    expect(derived['finance__term_billing'].sort()).toEqual(['create', 'read']);
+  });
+
+  test('early_payment: all 4 boxes checked still yields only create + update, never read or delete', () => {
+    const derived = _deriveApiPerms({ 'finance__early_payment': { v: true, e: true, d: true } });
+    expect(derived['finance__early_payment'].sort()).toEqual(['create', 'update']);
+  });
+
+  test('activities: all 4 boxes checked still yields only create + update, never read or delete', () => {
+    const derived = _deriveApiPerms({ 'finance__activities': { v: true, e: true, d: true } });
+    expect(derived['finance__activities'].sort()).toEqual(['create', 'update']);
+  });
+
+  test('the coarse finance array is clamped too, so it never gains delete from these 3 keys alone', () => {
+    const derived = _deriveApiPerms({
+      'finance__term_billing':  { v: true, e: true, d: true },
+      'finance__early_payment': { v: true, e: true, d: true },
+      'finance__activities':    { v: true, e: true, d: true },
+    });
+    expect(derived.finance.sort()).toEqual(['create', 'read', 'update']);
+  });
+
+  test('a sibling finance sub-key not in FINANCE_SUB_GRANTS is completely unaffected', () => {
+    const derived = _deriveApiPerms({ 'finance__void_invoice': { v: true, e: true, d: true } });
+    expect(derived['finance__void_invoice'].sort()).toEqual(['create', 'delete', 'read', 'update']);
+  });
+});

@@ -23,7 +23,7 @@ const emailUtil             = require('../utils/email');
 const { encrypt, smtpEncryptReady } = require('../utils/smtpEncrypt');
 const { DEFAULTS: NOTIF_DEFAULTS, EVENT_REGISTRY, GROUPS: NOTIF_GROUPS } = require('../utils/notif-settings');
 const { rbac, invalidatePermCache, hasExplicitSubGrant, _mergeUserOverrides, _loadPerms, _loadUserPerms } = require('../middleware/rbac');
-const { EXPLICIT_SUB_KEYS } = require('../middleware/explicit-sub');
+const { EXPLICIT_SUB_KEYS, FINANCE_SUB_GRANTS } = require('../middleware/explicit-sub');
 const { invalidateModuleConfigCache } = require('../middleware/module-gate');
 const { invalidateScopeCache, invalidateScopeCacheForRole } = require('../middleware/scopeMiddleware');
 const AuditService           = require('../services/audit');
@@ -155,10 +155,24 @@ function _deriveApiPerms(byRoleCell) {
     const actions = new Set();
     for (const [key, cell] of Object.entries(byRoleCell ?? {})) {
       if (!key.startsWith(`${mod}__`)) continue;
-      const subActions = [];
+      let subActions = [];
       if (cell.v) subActions.push('read');
       if (cell.e) { subActions.push('create'); subActions.push('update'); }
       if (cell.d) subActions.push('delete');
+
+      // Explicit finance sub-permissions (finance__term_billing,
+      // finance__early_payment, finance__activities) each support only the
+      // 2 actions their real routes actually check (FINANCE_SUB_GRANTS —
+      // the same source the backfill and the self-escalation ceiling check
+      // below both use), never the generic V/E/D model's full 4. Clamping
+      // here means a stray D checkbox (or an 'update' implied by E for
+      // term_billing, which has no update concept at all) never generates
+      // a grant request for an action nothing — not even an admin — can
+      // ever hold, which is exactly what was tripping the ceiling check
+      // on every save, for every role, the moment any of these 3 rows had
+      // any checkbox set (2026-10-13).
+      if (FINANCE_SUB_GRANTS[key]) subActions = subActions.filter(a => FINANCE_SUB_GRANTS[key].includes(a));
+
       perms[key] = subActions; // sub-level grant, e.g. perms['hr__leave_view']
       subActions.forEach(a => actions.add(a));
 
@@ -223,10 +237,12 @@ function _deriveApiPerms(byRoleCell) {
 function _deriveUserOverridePerms(byUserCell) {
   const perms = {};
   for (const [key, cell] of Object.entries(byUserCell ?? {})) {
-    const subActions = [];
+    let subActions = [];
     if (cell.v) subActions.push('read');
     if (cell.e) { subActions.push('create'); subActions.push('update'); }
     if (cell.d) subActions.push('delete');
+    // Same clamp as _deriveApiPerms above, for the same reason — see its comment.
+    if (FINANCE_SUB_GRANTS[key]) subActions = subActions.filter(a => FINANCE_SUB_GRANTS[key].includes(a));
     perms[key] = subActions;
   }
   return perms;
