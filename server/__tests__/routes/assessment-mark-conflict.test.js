@@ -86,6 +86,14 @@ jest.mock('../../utils/model', () => ({
         find:    jest.fn(() => mockChain(() => [{ classId: 'cls_001', subjectId: 'subj_001' }])),
       };
     }
+    // class_subjects — curriculum-integrity guard (every subject written here is
+    // genuinely in this class's curriculum; this file is about conflict detection).
+    if (collection === 'class_subjects') {
+      return {
+        findOne: jest.fn(() => mockChain(() => ({ id: 'cs_1', classId: 'cls_001', subjectId: 'subj_001' }))),
+        find:    jest.fn(() => mockChain(() => [{ classId: 'cls_001', subjectId: 'subj_001' }])),
+      };
+    }
     // 'students' — resolved by assessment.js's POST /marks(/bulk) to
     // denormalize/scope-check streamId (Milestone 2); no test here cares
     // about actual stream values, so an empty result keeps every write

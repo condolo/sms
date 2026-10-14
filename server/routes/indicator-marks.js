@@ -43,7 +43,7 @@ const { planGate }       = require('../middleware/plan');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, E }           = require('../utils/response');
 const { canWriteSubject, unassignedPairs } = require('../utils/subject-scope');
-const { isElective, electiveMarkProblem }  = require('../utils/elective-scope');
+const { isElective, electiveMarkProblem, pairsNotInCurriculum } = require('../utils/elective-scope');
 const { isYearArchived } = require('../utils/archival');
 const ScopeEngine         = require('../utils/scopeEngine');
 const { restrictToTaught } = require('../utils/teaching-scope');
@@ -150,6 +150,17 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), as
         return [`${d.classId}::${d.subjectId}::${streamId}`, { classId: d.classId, subjectId: d.subjectId, streamId }];
       })
     ).values()];
+    // Guard: curriculum integrity — same as assessment.js's /marks/bulk
+    // (same bug class, reported directly against the ordinary Markbook):
+    // every {classId, subjectId} pair must actually be in that class's
+    // curriculum, for every role including management.
+    const uncurriculumPairs = await pairsNotInCurriculum(req, [...new Map(
+      distinctPairs.map(p => [`${p.classId}::${p.subjectId}`, { classId: p.classId, subjectId: p.subjectId }])
+    ).values()]);
+    if (uncurriculumPairs.length > 0) {
+      return E.badRequest(res, `Not part of this class's curriculum — add in Curriculum first: ${uncurriculumPairs.map(p => p.subjectId).join(', ')}`);
+    }
+
     const electiveKeys = new Set();
     for (const p of distinctPairs) {
       if (await isElective(req, p.classId, p.subjectId)) electiveKeys.add(`${p.classId}::${p.subjectId}`);

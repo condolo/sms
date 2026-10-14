@@ -23,6 +23,7 @@ jest.mock('../../utils/scopeEngine', () => ({ applyToFilter: jest.fn(), hasNoAss
 jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => next() }));
 
 let mockTeachingAssignments = [];
+let mockClassSubjects       = [];
 let mockStudents            = [];
 let mockRcTemplates         = [];
 let mockIndicatorMarks      = [];
@@ -74,6 +75,7 @@ jest.mock('../../utils/tenant-model', () => ({
   tenantContext: (req) => ({ schoolId: req.jwtUser.schoolId }),
   tenantModel: (collection) => {
     if (collection === 'teaching_assignments') return mockCollFor(mockTeachingAssignments);
+    if (collection === 'class_subjects')       return mockCollFor(mockClassSubjects);
     if (collection === 'students')             return mockCollFor(mockStudents);
     if (collection === 'rc_templates')          return mockCollFor(mockRcTemplates);
     if (collection === 'indicator_marks')       return mockCollFor(mockIndicatorMarks);
@@ -110,6 +112,8 @@ const TEMPLATE_A = {
 
 beforeEach(() => {
   mockTeachingAssignments = [{ schoolId: SCHOOL_A, teacherId: 'usr_t1', classId: 'classA', subjectId: 'subj_science', streamId: null }];
+  // Curriculum-integrity guard (new) — see indicator-marks.test.js's identical fixture.
+  mockClassSubjects   = [{ schoolId: SCHOOL_A, classId: 'classA', subjectId: 'subj_science', isCompulsoryForClass: true }];
   mockStudents        = [{ id: 's1', schoolId: SCHOOL_A, streamId: null }];
   mockRcTemplates     = [{ ...TEMPLATE_A }];
   mockIndicatorMarks  = [];

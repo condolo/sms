@@ -19,7 +19,7 @@ jest.mock('../../middleware/module-gate', () => ({ moduleGate: () => (_req, _res
 jest.mock('../../services/audit', () => ({ log: jest.fn() }));
 jest.mock('../../utils/job-queue', () => ({ enqueueJob: jest.fn(), registerHandler: jest.fn() }));
 jest.mock('../../utils/workflow-config', () => ({ getWorkflowConfig: jest.fn().mockResolvedValue(null), resolveStep: jest.fn().mockResolvedValue([]) }));
-jest.mock('../../utils/elective-scope', () => ({ isElective: jest.fn().mockResolvedValue(false), canTeachElective: jest.fn().mockResolvedValue(true) }));
+jest.mock('../../utils/elective-scope', () => ({ isElective: jest.fn().mockResolvedValue(false), canTeachElective: jest.fn().mockResolvedValue(true), isInCurriculum: jest.fn().mockResolvedValue(true) }));
 jest.mock('../../utils/teaching-scope', () => ({ restrictToTaught: jest.fn(), taughtPairs: jest.fn().mockResolvedValue([]) }));
 
 let mockJwtUser;

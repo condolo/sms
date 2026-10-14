@@ -123,7 +123,12 @@ const TEMPLATE_A = {
 
 beforeEach(() => {
   mockTeachingAssignments = [{ schoolId: SCHOOL_A, teacherId: 'usr_t1', classId: 'classA', subjectId: 'subj_science', streamId: null }];
-  mockClassSubjects  = [];
+  // Curriculum-integrity guard (new): a mark write now hard-requires a
+  // class_subjects link for {classId, subjectId}, for every role. Every
+  // test in this file writes classA/subj_science, so it's genuinely
+  // curriculum-linked here, same as it would be in a real school that
+  // has a teaching_assignments row for it.
+  mockClassSubjects  = [{ schoolId: SCHOOL_A, classId: 'classA', subjectId: 'subj_science', isCompulsoryForClass: true }];
   mockStudents        = [{ id: 's1', schoolId: SCHOOL_A, streamId: null }];
   mockRcTemplates    = [{ ...TEMPLATE_A }];
   mockIndicatorMarks = [];

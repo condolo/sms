@@ -23,6 +23,7 @@ jest.mock('../../utils/workflow-config', () => ({ getWorkflowConfig: jest.fn().m
 jest.mock('../../utils/elective-scope', () => ({
   isElective: jest.fn().mockResolvedValue(false),
   canTeachElective: jest.fn().mockResolvedValue(true),
+  isInCurriculum: jest.fn().mockResolvedValue(true),
 }));
 
 let mockJwtUser;

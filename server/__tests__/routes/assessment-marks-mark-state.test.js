@@ -51,6 +51,15 @@ jest.mock('../../utils/model', () => ({
         find:    jest.fn(() => mockChain(() => [{ classId: 'cls_001', subjectId: 'subj_001' }])),
       };
     }
+    // class_subjects — curriculum-integrity guard; this file is about
+    // mark-state handling, not curriculum, so cls_001/subj_001 is
+    // genuinely in the curriculum for every test here.
+    if (collection === 'class_subjects') {
+      return {
+        findOne: jest.fn(() => mockChain(() => ({ id: 'cs_1', classId: 'cls_001', subjectId: 'subj_001' }))),
+        find:    jest.fn(() => mockChain(() => [{ classId: 'cls_001', subjectId: 'subj_001' }])),
+      };
+    }
     return { findOne: jest.fn(() => mockChain(() => null)), find: jest.fn(() => mockChain(() => [])) };
   }),
 }));

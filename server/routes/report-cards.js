@@ -52,7 +52,7 @@ const { notifyGuardiansForStudents } = require('../utils/notify-students');
 const { canWriteSubject, unassignedPairs, isManagement } = require('../utils/subject-scope');
 const { studentPlacement, canWriteClassRemark, scopeDraftCommentsForCaller } = require('../utils/comment-scope');
 const { canViewFullReport, viewReportFor } = require('../utils/report-view-scope');
-const { isElective, enrolledStudentIds, canTeachElective } = require('../utils/elective-scope');
+const { isElective, enrolledStudentIds, canTeachElective, isInCurriculum } = require('../utils/elective-scope');
 const { getWorkflowConfig, saveWorkflowConfig, resolveStep, resolveAssigneeLabel } = require('../utils/workflow-config');
 const { dispatchNotification } = require('../utils/notify-dispatch');
 const email = require('../utils/email');
@@ -2933,6 +2933,14 @@ router.put('/draft-comments/:studentId/subject/:subjectId', authMiddleware, PLAN
     // not a behavior change to anything a user could previously see.
     if (await resolveRcTemplate(schoolId, classId)) {
       return E.forbidden(res, "This is a Kindergarten class — it doesn't use per-subject comments. Only the class teacher's remark applies.");
+    }
+
+    // Guard: curriculum integrity — same bug class as assessment.js's
+    // /marks (reported directly against the ordinary Markbook): a
+    // comment must name a subject that's actually in this class's
+    // curriculum, for every role including management.
+    if (!(await isInCurriculum(req, classId, subjectId))) {
+      return E.badRequest(res, 'This subject is not part of this class\'s curriculum.');
     }
 
     if (await isElective(req, classId, subjectId)) {

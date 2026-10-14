@@ -28,6 +28,48 @@ async function isElective(req, classId, subjectId) {
   return !!row && row.isCompulsoryForClass === false;
 }
 
+/* Reported directly (2026-10-15): logged in as admin, picking a class then
+   a subject that the class's curriculum never offered, the roster still
+   loaded (the whole class) and marks could be entered for it — "I can
+   enter marks for a subject no student is enrolled for." Root cause:
+   `isElective` above returns false both for a genuinely compulsory
+   subject AND for a subject with NO class_subjects row at all — every
+   caller branches on that boolean and falls into the "compulsory,
+   whole-class, no enrollment check" path either way, so a subject never
+   added to this class's curriculum was silently treated exactly like one
+   that was. Worse for an admin/management caller specifically: `canWriteSubject`
+   /`canTeachElective` bypass ALL checks for management roles (by design —
+   they don't need a teaching_assignments row), so nothing else in the
+   write path ever asked "does this class even teach this subject at
+   all?" This is a curriculum-integrity question, not a who's-assigned
+   question, so it applies to every role, management included. */
+
+/** True when this subject has ANY class_subjects link for this class —
+ * compulsory or elective, doesn't matter which. False means the class's
+ * curriculum never added this subject at all. */
+async function isInCurriculum(req, classId, subjectId) {
+  const { schoolId } = req.jwtUser;
+  const row = await tenantModel('class_subjects', tenantContext(req))
+    .findOne({ schoolId, classId, subjectId }).select('id').lean();
+  return !!row;
+}
+
+/** Same check for a batch of distinct {classId, subjectId} pairs in one
+ * query. Returns the subset of `pairs` that have NO class_subjects link —
+ * i.e. the subject was never added to that class's curriculum. */
+async function pairsNotInCurriculum(req, pairs) {
+  if (pairs.length === 0) return [];
+  const { schoolId } = req.jwtUser;
+  const linked = await tenantModel('class_subjects', tenantContext(req))
+    .find({
+      schoolId,
+      $or: pairs.map(({ classId, subjectId }) => ({ classId, subjectId })),
+    })
+    .select('classId subjectId').lean();
+  const linkedKeys = new Set(linked.map(l => `${l.classId}::${l.subjectId}`));
+  return pairs.filter(p => !linkedKeys.has(`${p.classId}::${p.subjectId}`));
+}
+
 /** Student ids enrolled in this subject, across all classes and streams. */
 async function enrolledStudentIds(req, subjectId) {
   const { schoolId } = req.jwtUser;
@@ -74,4 +116,4 @@ async function electiveMarkProblem(req, marks) {
   return null;
 }
 
-module.exports = { isElective, enrolledStudentIds, canTeachElective, electiveMarkProblem };
+module.exports = { isElective, isInCurriculum, pairsNotInCurriculum, enrolledStudentIds, canTeachElective, electiveMarkProblem };

@@ -60,6 +60,20 @@ jest.mock('../../utils/model', () => ({
         findOne: jest.fn(() => mockChain(() => mockAssignmentDocs[0] ?? null)),
       };
     }
+    // class_subjects — curriculum-integrity guard. Both subjects this file
+    // exercises (subj_math, subj_english) are genuinely in cls_001's
+    // curriculum; this file is about teaching-assignment scoping, so the
+    // unassigned-subject tests must fail on THAT check, not curriculum.
+    if (collection === 'class_subjects') {
+      const CURRICULUM = [
+        { classId: 'cls_001', subjectId: 'subj_math' },
+        { classId: 'cls_001', subjectId: 'subj_english' },
+      ];
+      return {
+        findOne: jest.fn((filter) => mockChain(() => CURRICULUM.find(c => c.classId === filter.classId && c.subjectId === filter.subjectId) ?? null)),
+        find:    jest.fn(() => mockChain(() => CURRICULUM)),
+      };
+    }
     // 'students' — resolved by assessment.js's POST /marks(/bulk) to
     // denormalize/scope-check streamId (Milestone 2); no test here cares
     // about actual stream values, so an empty result keeps every write

@@ -708,6 +708,14 @@ function MarkbookTab({ years }) {
   const needsStreamSelection = !isElectiveSubject && subjectStreams.length > 1;
   const activeStreamId = isElectiveSubject ? '' : (streamId || (subjectStreams.length === 1 ? subjectStreams[0].id : ''));
 
+  // Reported directly (2026-10-15): logged in as admin, picking a class then a
+  // subject the class's curriculum never offered, the roster still loaded (the
+  // whole class) and marks could be entered for it — "I can enter marks for a
+  // subject no student is enrolled for." The server now hard-refuses that write
+  // regardless of role (see elective-scope.js's isInCurriculum), but the admin
+  // picker itself offered every subject in the school, same bug class already
+  // fixed for the Kindergarten Template's subject picker (ab7b90c) — scope it to
+  // this class's own curriculum so the invalid combination is never reachable.
   const subjectsList = useMemo(() => {
     if (isTeacher) {
       if (!classId) return [];
@@ -718,8 +726,10 @@ function MarkbookTab({ years }) {
         .map(a => ({ id: a.subjectId, name: a.subjectName }))
         .filter(s => s.id && !seen.has(s.id) && seen.add(s.id));
     }
-    return allSubjectsData?.data ?? [];
-  }, [isTeacher, assignments, classId, allSubjectsData]);
+    if (!classId) return [];
+    const curriculumIds = new Set((classSubjectsData?.data ?? []).map(r => r.subjectId));
+    return (allSubjectsData?.data ?? []).filter(s => curriculumIds.has(s.id));
+  }, [isTeacher, assignments, classId, allSubjectsData, classSubjectsData]);
 
   /* ── Assessment schedule ── */
   const { data: scheduleData } = useQuery({

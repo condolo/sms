@@ -86,6 +86,15 @@ jest.mock('../../utils/model', () => ({
         findOne: jest.fn((filter) => mockChain(() => mockStudentsById[filter.id] ?? null)),
       };
     }
+    // class_subjects — curriculum-integrity guard; this file is about
+    // stream scoping, not curriculum, so cls_yr7/subj_math is genuinely
+    // in the curriculum for every test here.
+    if (collection === 'class_subjects') {
+      return {
+        findOne: jest.fn(() => mockChain(() => ({ id: 'cs_1', classId: 'cls_yr7', subjectId: 'subj_math' }))),
+        find:    jest.fn(() => mockChain(() => [{ classId: 'cls_yr7', subjectId: 'subj_math' }])),
+      };
+    }
     return { findOne: jest.fn(() => mockChain(() => null)), find: jest.fn(() => mockChain(() => [])) };
   }),
 }));

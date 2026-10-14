@@ -40,7 +40,7 @@ const { getWorkflowConfig, resolveStep } = require('../utils/workflow-config');
 const { enqueueJob, registerHandler } = require('../utils/job-queue');
 const { _model } = require('../utils/model');
 const { isManagement } = require('../utils/subject-scope');
-const { isElective, canTeachElective } = require('../utils/elective-scope');
+const { isElective, canTeachElective, isInCurriculum } = require('../utils/elective-scope');
 const { restrictToTaught, taughtPairs } = require('../utils/teaching-scope');
 
 const router = express.Router();
@@ -200,6 +200,14 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), async 
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(SubmitSchema, req.body);
     if (error) return E.validation(res, error);
+
+    // Guard: curriculum integrity — same bug class as assessment.js's
+    // /marks (reported directly against the ordinary Markbook): a
+    // submission must name a subject that's actually in this class's
+    // curriculum, for every role including management.
+    if (!(await isInCurriculum(req, data.classId, data.subjectId))) {
+      return E.badRequest(res, 'This subject is not part of this class\'s curriculum.');
+    }
 
     // A teacher whose assignment is for one stream submits that stream. A whole-class
     // submission (no streamId) would lock every stream of the class, so it is only

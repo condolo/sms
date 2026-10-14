@@ -112,6 +112,14 @@ beforeEach(() => {
       { schoolId: SCHOOL, teacherId: 't1', classId: 'c8a', subjectId: 'bio', streamId: 'st_A' },
       { schoolId: SCHOOL, teacherId: 't1', classId: 'c8a', subjectId: 'math', streamId: null },
     ],
+    // Curriculum-integrity guard (new): a comment write now hard-requires
+    // a class_subjects link for {classId, subjectId}, for every role.
+    // bio/math are genuinely in c8a's curriculum here, same as they
+    // would be in a real school with teaching_assignments rows for them.
+    class_subjects: [
+      { schoolId: SCHOOL, classId: 'c8a', subjectId: 'bio', isCompulsoryForClass: true },
+      { schoolId: SCHOOL, classId: 'c8a', subjectId: 'math', isCompulsoryForClass: true },
+    ],
     mark_submissions: [],
     report_card_draft_comments: [
       { schoolId: SCHOOL, studentId: 'stu1', classId: 'c8a', termNumber: 3,

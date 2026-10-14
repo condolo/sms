@@ -6533,6 +6533,50 @@ The user asked whether this should apply "before or after" marking a subject com
 ### Verified
 New test files: 11/11 passing. Full suite: 306/306 suites, 3159/3159 tests. Live dry-run against the production database: 143 findings matching the table above exactly.
 
+## 119. Curriculum-Integrity Guard: Marks Could Be Entered for a Subject Never Added to a Class's Curriculum (v5.188.0)
+
+### Reported problem
+Reported directly, pointedly, as an integrity concern: "I have logged in as admin... I select a class, then subject then stream then assessment and the subject I picked does not appear in the class under curriculum but students in that class still appear meaning i can enter marks for a subject no student is enrolled for? this is an assumption that kills our integrity."
+
+### Root cause
+`elective-scope.js`'s `isElective(req, classId, subjectId)` queries `class_subjects` for `{classId, subjectId}` and returns `false` when no row exists AT ALL — the exact same `false` it returns for a genuinely compulsory subject. Every write path branches on that boolean: `isElective ? (enrollment-gated, elective rules) : (whole-class, canWriteSubject)`. A subject never added to a class's curriculum therefore fell into the "compulsory, whole-class" branch with no enrollment check and no curriculum check of any kind.
+
+This was invisible for most roles because `canWriteSubject`/`canTeachElective`/`unassignedPairs` (`subject-scope.js`, `elective-scope.js`) unconditionally bypass every check for management-tier roles (`admin`, `superadmin`, `deputy_principal`, `deputy`, `principal`, `hod` — see `subject-scope.js`'s `MANAGEMENT_ROLES`). That bypass is correct for "is THIS PERSON allowed to write this mark" — management doesn't need a `teaching_assignments` row. But nothing else in any write path ever separately asked "does this class's curriculum even include this subject" — a question that should apply to every role, management included, since it's a fact about the school's curriculum, not about who's permitted to act on it.
+
+Client-side, `ExamsPage.jsx`'s admin/non-teacher subject dropdown (`subjectsList`, `!isTeacher` branch) was literally `allSubjectsData?.data` — every subject in the school, never filtered against the selected class's `classSubjectsData` — the identical bug class already fixed for the Kindergarten Template's subject picker (§ ab7b90c / "Kindergarten Template's subject picker offered every subject in the school") but never applied to the live Markbook itself.
+
+Confirmed against live data: 2 pre-existing orphan `assessment_marks` pairs exist at the demo school — `cls_demo_4a::subj_demo_mech` and `cls_demo_4a::subj_demo_bio` — real marks for subjects never added to that class's curriculum. `mark_submissions` had no orphans at any school.
+
+### Fixed
+`server/utils/elective-scope.js` gains two new exports:
+```js
+async function isInCurriculum(req, classId, subjectId) { /* true iff ANY class_subjects row exists, compulsory or elective */ }
+async function pairsNotInCurriculum(req, pairs) { /* batch form — returns the subset with no link */ }
+```
+Unlike `canWriteSubject`/`canTeachElective`, these have **no management bypass** — they're wired as an early, hard refusal in every write path that creates new data:
+- `assessment.js` — `POST /marks` (single pair) and `POST /marks/bulk` (batch, refuses the whole request naming every offending subject if any pair in the batch fails).
+- `indicator-marks.js` — its bulk write (Kindergarten competency-band marks), same pattern as assessment.js's bulk route by the file's own header comment ("mirrors assessment.js's /marks exactly").
+- `mark-submissions.js` — `POST /` (submission create).
+- `report-cards.js` — the Subject Teacher Comment write route.
+- **Deliberately NOT added to** `DELETE /marks/:id` — deleting an existing mark doesn't create new out-of-curriculum data, so the guard doesn't apply.
+
+Client: `ExamsPage.jsx`'s `subjectsList` (admin/non-teacher branch) now filters `allSubjectsData` down to the `subjectId`s present in `classSubjectsData` for the selected class, returning `[]` with no class selected (same contract the teacher branch already had). Verified live in the browser (demo school, admin role, Standard 4A — `cls_demo_4a`): the subject dropdown now shows exactly the class's 8 real curriculum subjects; Mechanics and Biology (the two subjects with the orphan marks above) no longer appear.
+
+### Deliberately out of scope
+- The 2 existing orphan `assessment_marks` rows at the demo school are untouched — this guard blocks future writes going forward, it does not retroactively judge existing data. Unlike v5.187/§118's catalog/curriculum mismatch, there's no missing fact to infer a fix from here (no class_subjects row to copy a flag from) — an admin would need to decide whether these subjects belong in that class's curriculum (and add them) or whether the existing marks are simply wrong and should be removed. No script was built for this; it's a one-off, two-row cleanup better done by hand once someone who knows the real curriculum looks at it.
+- `classes.js`'s `GET /:id/students?electiveSubjectId=` roster endpoint is unchanged — it's a read, and the write-path guard above is the actual integrity boundary regardless of what a roster view returns.
+
+### Files
+- `server/utils/elective-scope.js` — `isInCurriculum`, `pairsNotInCurriculum` added.
+- `server/routes/assessment.js`, `server/routes/indicator-marks.js`, `server/routes/mark-submissions.js`, `server/routes/report-cards.js` — guard wired into each write route.
+- `client/src/pages/exams/ExamsPage.jsx` — `subjectsList` admin branch scoped to curriculum.
+- `server/__tests__/utils/curriculum-integrity-guard.test.js` — new, 6 tests.
+- `server/__tests__/routes/assessment-curriculum-integrity.test.js` — new, 4 tests, reproduces the exact reported admin scenario.
+- 12 existing test files updated to seed a `class_subjects` fixture their scenarios had always implicitly assumed but never actually set (previously invisible because nothing checked it): `assessment-mark-conflict`, `assessment-mark-academic-year-adoption`, `assessment-stream-scope`, `assessment-subject-scope`, `assessment-marks-mark-state`, `assessment-marks-submission-lock`, `mark-submissions-submit-notify`, `mark-submissions-kg-routing`, `indicator-marks`, `indicator-marks-submission-lock`, `report-cards-subject-scope`, `report-card-comment-rights`.
+
+### Verified
+New test files: 10/10 passing. Full suite: 308/308 suites, 3169/3169 tests. Live browser verification against the demo school as described above.
+
 ## Term billing: transport and extra-curricular on the invoice (v5.169.0)
 
 **Status before this change:** a route's `feePerTerm` was stored but no code read it for billing. `transport_assignments` was read by nothing in finance. Activities had no model. Invoices came only from fee structures.

@@ -6,6 +6,32 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.188.0] — 2026-10-15 — fix(exams): a subject never added to a class's curriculum could still be marked for — "integrity" gap
+
+Reported directly, and pointedly: "I selected a class, then subject, then stream, then assessment, and the subject I picked does not appear in the class under curriculum but students in that class still appear — meaning I can enter marks for a subject no student is enrolled for... this is an assumption that kills our integrity."
+
+### Root cause, confirmed by reading every write path, not assumed
+`elective-scope.js`'s `isElective(req, classId, subjectId)` returns `false` both for a genuinely **compulsory** subject AND for a subject with **no `class_subjects` row at all** — every single write path in the app (`assessment.js`'s `/marks` and `/marks/bulk`, `indicator-marks.js`'s Kindergarten bulk write, `mark-submissions.js`'s submission create, `report-cards.js`'s Subject Teacher Comment write) branches on that one boolean and falls into the "compulsory, whole-class, no enrollment check" path whichever way it's false — so a subject that was never added to a class's curriculum was silently treated exactly like a real compulsory one. It gets worse for an admin specifically: `canWriteSubject`/`canTeachElective`/`unassignedPairs` bypass **every** check for management-tier roles (admin, superadmin, deputy, principal, HOD — by design, since they don't need a `teaching_assignments` row) — so for those roles nothing in the entire write path ever asked "does this class even teach this subject at all?" On the client, `ExamsPage.jsx`'s admin subject dropdown was the full school-wide subject catalog, not scoped to the selected class's curriculum — the exact same bug class already fixed once this session for the Kindergarten Template's subject picker (`ab7b90c`), just never applied to the actual Markbook itself.
+
+Confirmed live: 2 pre-existing orphan `assessment_marks` pairs already exist at the demo school (`cls_demo_4a::subj_demo_mech`, `cls_demo_4a::subj_demo_bio`) — real marks, for subjects never added to that class's curriculum. No orphans found in `mark_submissions` at any school.
+
+### Fixed
+- **New shared guard** — `server/utils/elective-scope.js`: `isInCurriculum(req, classId, subjectId)` and its batch form `pairsNotInCurriculum(req, pairs)`. Unlike every other check in this file, this applies to **every role including management** — "is this subject in this class's curriculum" is a fact about the curriculum, not a permission question.
+- Wired as a hard, early refusal in every write path that creates new marks/comments/submissions data: `assessment.js`'s `POST /marks` and `POST /marks/bulk`, `indicator-marks.js`'s bulk write, `mark-submissions.js`'s `POST /`, `report-cards.js`'s Subject Teacher Comment write. (`DELETE /marks/:id` deliberately untouched — deleting an existing mark doesn't create new out-of-curriculum data.)
+- `client/src/pages/exams/ExamsPage.jsx`: the admin/non-teacher subject dropdown now scopes to the selected class's own curriculum (`classSubjectsData`) instead of the full school catalog — verified live against the demo school's Standard 4A: Mechanics and Biology (the two subjects with the orphan marks above) no longer appear in the picker for that class, while its 8 real curriculum subjects do.
+
+### Deliberately out of scope
+- The 2 existing orphan `assessment_marks` rows at the demo school are left as-is — the new guard blocks future writes, it doesn't retroactively judge or delete data that already exists. No script was built to "fix" them since there's nothing to reconcile them against (unlike the catalog/curriculum-compulsory mismatch in v5.187.0, there's no missing class_subjects row to infer from — the admin would need to decide whether to add the subject to the curriculum or treat the existing marks as an error).
+
+### Tests
+- `curriculum-integrity-guard.test.js` — new, 6 tests on `isInCurriculum`/`pairsNotInCurriculum`.
+- `assessment-curriculum-integrity.test.js` — new, 4 tests reproducing the exact reported admin scenario against the real route.
+- Updated fixtures in 12 existing test files that mocked `class_subjects` as empty (never checked before, so never seeded) — each now seeds the one class/subject pair its own scenario genuinely uses, preserving original test intent.
+
+Full suite: 308/308 suites, 3169/3169 tests. Verified live in the browser against the demo school (admin role, Standard 4A).
+
+---
+
 ## [v5.187.0] — 2026-10-15 — fix(subjects): a subject marked compulsory in the Catalog never actually made its class curriculum links compulsory
 
 Direct follow-up to v5.186.0, confirmed with a live database query after the user corrected an assumption in that entry ("you have access to the db, mongodb") — this sandbox genuinely can connect to the production MongoDB via `MONGODB_URI` from `.env`, contrary to what was previously believed and documented.

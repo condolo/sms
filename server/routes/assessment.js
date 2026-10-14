@@ -30,7 +30,7 @@ const { mergeConfig, resolveCurrentPeriod } = require('./academic-config');
 const { aggregateAssessmentMarks, computeFinalScores } = require('../utils/academic-calc');
 const { isYearArchived, firstArchivedYear } = require('../utils/archival');
 const { canWriteSubject, unassignedPairs } = require('../utils/subject-scope');
-const { isElective, electiveMarkProblem } = require('../utils/elective-scope');
+const { isElective, electiveMarkProblem, isInCurriculum, pairsNotInCurriculum } = require('../utils/elective-scope');
 const { restrictToTaught, taughtSubjectIds } = require('../utils/teaching-scope');
 const ScopeEngine         = require('../utils/scopeEngine');
 const { scopeMiddleware } = require('../middleware/scopeMiddleware');
@@ -978,6 +978,17 @@ router.post('/marks', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), a
     const markStudent = await tenantModel('students', tenantContext(req))
       .findOne({ schoolId, id: d.studentId }).select('streamId').lean();
 
+    // Guard: curriculum integrity — this subject must actually be part of
+    // this class's curriculum (class_subjects), compulsory or elective,
+    // before anything else is checked. Applies to EVERY role including
+    // management: "is this subject even taught in this class" is a fact
+    // about the curriculum, not about who's allowed to write marks for
+    // it. Reported directly: as admin, a subject never added to a
+    // class's curriculum still accepted marks for the whole class.
+    if (!(await isInCurriculum(req, d.classId, d.subjectId))) {
+      return _err(res, 'This subject is not part of this class\'s curriculum — add it in Curriculum first.', 400);
+    }
+
     // Guard: subject-teacher scoping (RC6) — unconditional (see subject-scope.js)
     // Electives: teaching and enrolment are checked per student, not by stream.
     const electiveProblem = await electiveMarkProblem(req, [{ classId: d.classId, subjectId: d.subjectId, studentId: d.studentId }]);
@@ -1154,6 +1165,17 @@ router.post('/marks/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
         return [`${d.classId}::${d.subjectId}::${streamId}`, { classId: d.classId, subjectId: d.subjectId, streamId }];
       })
     ).values()];
+    // Guard: curriculum integrity — every {classId, subjectId} pair in this
+    // batch must actually be part of that class's curriculum. Applies to
+    // every role including management — see the single-mark route's
+    // identical guard above for why.
+    const uncurriculumPairs = await pairsNotInCurriculum(req, [...new Map(
+      distinctPairs.map(p => [`${p.classId}::${p.subjectId}`, { classId: p.classId, subjectId: p.subjectId }])
+    ).values()]);
+    if (uncurriculumPairs.length > 0) {
+      return _err(res, `Not part of this class's curriculum — add in Curriculum first: ${uncurriculumPairs.map(p => p.subjectId).join(', ')}`, 400);
+    }
+
     // Elective pairs are checked by enrolment and teaching (elective-scope.js), not by stream.
     const electiveKeys = new Set();
     for (const p of distinctPairs) {
