@@ -6646,6 +6646,52 @@ Both triggers are invisible from the Classes page (never applies the stream-leve
 ### Verified
 New test file: 8/8 passing. Full suite: 310/310 suites, 3183/3183 tests. Live browser walkthrough (demo school, KG class, single stream KG1): clearing the stream while staying in KG is refused inline, zero network requests fired; restoring the stream and saving succeeds (`PUT` → 200).
 
+## 122. Parent-Safe School Messaging: Category Recipients, Never a Fellow Parent (v5.191.0)
+
+### Reported problem
+"the parent cannot message the school, in the message, I need the parent can select whom they want to message, nurse, discipline, subject teachers etc but not fellow parents."
+
+### Confirmed before building anything
+The Parent Portal's Messages page (`ParentDashboard.jsx`'s `MessagesPage`) was read-only — an inbox list and nothing else. No compose feature existed in this codebase at all, for any parent, at any school.
+
+### Why a new, parent-specific send path — not just granting `messages:create`
+`messages.js`'s generic `POST /` accepts an arbitrary `recipients` array with essentially no validation (only `'all'` is role-gated). Granting a parent `messages:create` and pointing them at the existing staff Compose UI would let them address another parent's userId directly, or the `'parents'` role-group key — the exact outcome explicitly ruled out. So a parent never supplies a raw recipient at all. They pick a **category** (a label only); the server re-resolves that category to real staff userIds **at send time**, independently, from live assignment/role data.
+
+### Categories — every one grounded in real data, nothing fabricated
+`server/utils/parent-message-recipients.js`:
+- `class_teacher` — the child's own stream's `formTeacherId` (a `teachers.id`, cross-referenced to `teachers.userId` — NOT the same convention as `teaching_assignments.teacherId`, which is already a `userId`; confirmed by direct live-data lookup before writing this, not assumed).
+- `subject:<id>` — one per subject genuinely in the child's curriculum (`class_subjects`): compulsory subjects always offered; electives only when the child is actually in `student_subjects` for it — reuses `elective-scope.js`'s `isElective`/`enrolledStudentIds` rather than a second enrollment check. The real assigned teacher is read straight off `teaching_assignments.teacherName` (already denormalized there — no join needed), matched to the child's own `streamId` for a stream-specific compulsory assignment, or any row for a subject-spanning elective.
+- `discipline` — every active `users` doc holding the real `discipline_committee` SYSTEM_ROLE.
+- `administration` — every active `admin`/`superadmin`/`principal`/`deputy_principal`/`deputy` account.
+- `custom:<tag>` — **no "Nurse" role or module exists anywhere in this codebase** (confirmed by checking `role-validation.js`'s `SYSTEM_ROLES` and `staffResponsibilities.js`'s built-in tag list — neither has one). Rather than fabricate a dead-end option, any `teachers.extraRoles` tag a school has added BEYOND the built-in set (`BUILTIN_EXTRA_ROLE_VALUES`) is surfaced automatically as its own category, labeled with whatever the school's own `schools.staffResponsibilities` calls it — so a school that tags a staff member "Nurse" via Staff Roles & Responsibilities gets a working "Nurse" message category with zero code change. A category is only ever offered when at least one active teacher currently holds the tag.
+
+Never reachable, by construction: `'all'`, the `'parents'`/`'students'` role groups, or any parent/guardian/student userId — the resolver's only collection reads are `students`, `streams`, `teachers`, `class_subjects`, `subjects`, `teaching_assignments`, `users`, `schools`. No parent-facing collection is ever queried for a recipient id.
+
+### Routes (`server/routes/parent-portal.js`)
+- `GET /message-recipients?childId=` — `_requireParent` + the same `linkedIds.includes(childId)` ownership check `/dashboard/:childId` already uses. Returns `{key, label}` pairs only — `recipientUserIds` are never sent to the client, so there's nothing for a compromised/modified client to replay.
+- `POST /messages` — body `{childId, category, subject, body}`. Re-resolves `category` via `resolveOneCategory` (same function the GET uses) — the client's `category` string is the only input that matters; any other field the client might add (tested explicitly: `recipients`, `recipientUserIds`) is ignored. Refuses an unlinked child, an empty subject/body, or a category that no longer resolves (e.g. the teacher was deactivated between loading the list and sending).
+
+### Shared send path, not a second implementation
+`server/routes/messages.js` gains `createDirectMessage(req, {recipientUserIds, subject, body, senderName, senderRole})`, extracted from `POST /`'s own direct-recipient branch (message creation + batched email notification). Both the original route and the new parent route call it — avoids a second, independently-drifting "create a message and notify" implementation, per this project's own standing rule against duplicated business logic.
+
+### Client
+`ParentDashboard.jsx`: a "New Message" button on the Messages page header opens a modal — a `<select>` populated from `GET /message-recipients`, subject, body, send. `client.js` gains `parentMessaging.recipients`/`.send` (routed through the existing CSRF-aware `_req` helper — an early draft hand-rolled its own `fetch()` for the POST and was correctly rejected with 403 by the server's CSRF middleware; fixed by using the real API client instead of a second, non-CSRF-aware fetch wrapper).
+
+### Verified live, not just unit-tested
+Logged in as the demo parent, opened Messages → New Message: the dropdown showed the real resolved set for that child (Class Teacher, each of 7 real subject teachers, School Administration) — no parent-to-parent option anywhere. Sent to "School Administration"; confirmed server-side the message was created with `recipients` set to every live admin-tier account at the school (the dev SMTP credentials are invalid in this sandbox, so the *email* notifications logged `535 Invalid login` for each — expected, unrelated to this feature; the in-app message itself was created correctly regardless, since email notification is fire-and-forget and never blocks the write). Logged in as the demo admin and confirmed the message appears in the real inbox: sender "Demo Parent", subject, body, and a "Direct Message" tag all correct.
+
+One incidental finding, not a bug in this feature: the demo school has a teacher whose `extraRoles` still literally contains the string `'timetabler'` (pre-dating this session's earlier rename to `timetable_coordinator`, which `BUILTIN_EXTRA_ROLE_VALUES` now lists instead) — so it surfaced here as a `custom:timetabler` category labeled "Timetabler". Harmless (it resolves to a real teacher, same person a correctly-migrated tag would reach), but confirms that school's data still needs `migrate-staff-responsibility-rename.js --apply` run against it, independent of this feature.
+
+### Files
+- `server/utils/parent-message-recipients.js` — new.
+- `server/routes/parent-portal.js`, `server/routes/messages.js` — new routes / extracted helper.
+- `client/src/pages/parent-portal/ParentDashboard.jsx`, `client/src/api/client.js`.
+- `server/__tests__/utils/parent-message-recipients.test.js` — new, 13 tests.
+- `server/__tests__/routes/parent-portal-message-compose.test.js` — new, 8 tests.
+
+### Verified
+New test files: 21/21 passing. Full suite: 312/312 suites, 3204/3204 tests. Live end-to-end browser walkthrough as described above.
+
 ## Term billing: transport and extra-curricular on the invoice (v5.169.0)
 
 **Status before this change:** a route's `feePerTerm` was stored but no code read it for billing. `transport_assignments` was read by nothing in finance. Activities had no model. Invoices came only from fee structures.

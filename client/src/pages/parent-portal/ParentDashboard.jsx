@@ -33,12 +33,12 @@ import { buildModuleConfigMap } from '@/config/moduleNav.js';
 import {
   Activity, AlertCircle, Bell, BookCheck, Calendar,
   CheckCircle, Download, FileText, GraduationCap,
-  Lock, LogOut, MessageSquare, Star, Wallet,
+  Lock, LogOut, MessageSquare, Send, Star, Wallet,
   ChevronDown, ChevronLeft, ChevronRight, MonitorPlay, MapPin, BookOpen, CalendarCheck,
   Menu, X, TrendingUp,
 } from 'lucide-react';
 import NotificationBell from '@/components/layout/NotificationBell.jsx';
-import { messages as messagesApi } from '@/api/client.js';
+import { messages as messagesApi, parentMessaging } from '@/api/client.js';
 
 /* ── API helpers ────────────────────────────────────────────────── */
 const API_BASE = import.meta.env.VITE_API_BASE || '';
@@ -217,6 +217,16 @@ export default function ParentDashboard() {
   const [latestWeek,    setLatestWeek]    = useState(null); // most recent Weekly Snapshot for activeChildId, or undefined if none generated yet
   const [inboxMessages, setInboxMessages] = useState(null); // real /api/messages inbox — per parent, not per child
   const [inboxLoading,  setInboxLoading]  = useState(false);
+  // Reported directly: "the parent cannot message the school... select
+  // whom they want to message... but not fellow parents." Compose state
+  // for the new send flow — recipients are a server-resolved category
+  // list (never a raw address the parent types), scoped to activeChildId.
+  const [composeOpen,     setComposeOpen]     = useState(false);
+  const [recipientOptions, setRecipientOptions] = useState(null); // null = loading
+  const [composeForm,     setComposeForm]     = useState({ category: '', subject: '', body: '' });
+  const [composeSending,  setComposeSending]  = useState(false);
+  const [composeError,    setComposeError]    = useState('');
+  const [composeSent,     setComposeSent]     = useState(false);
   const [initError,     setInitError]     = useState('');
   const [activePage,    setActivePage]    = useState('overview');
   const [childMenuOpen, setChildMenuOpen] = useState(false);
@@ -326,6 +336,33 @@ export default function ParentDashboard() {
     messagesApi.markRead(m.id)
       .then(() => window.dispatchEvent(new Event('messages:read')))
       .catch(() => {});
+  }
+
+  function openCompose() {
+    setComposeForm({ category: '', subject: '', body: '' });
+    setComposeError('');
+    setComposeSent(false);
+    setComposeOpen(true);
+    setRecipientOptions(null);
+    parentMessaging.recipients(activeChildId)
+      .then(r => setRecipientOptions(r?.data ?? []))
+      .catch(() => setRecipientOptions([]));
+  }
+  function sendCompose() {
+    if (!composeForm.category)        { setComposeError('Choose who to message'); return; }
+    if (!composeForm.subject.trim())  { setComposeError('Subject is required'); return; }
+    if (!composeForm.body.trim())     { setComposeError('Message is required'); return; }
+    setComposeSending(true);
+    setComposeError('');
+    parentMessaging.send({
+      childId:  activeChildId,
+      category: composeForm.category,
+      subject:  composeForm.subject.trim(),
+      body:     composeForm.body.trim(),
+    })
+      .then(() => { setComposeSent(true); setComposeForm({ category: '', subject: '', body: '' }); })
+      .catch(err => setComposeError(err.message || 'Could not send — please try again.'))
+      .finally(() => setComposeSending(false));
   }
 
   function handleLogout() { logout(); navigate('/login', { replace: true }); }
@@ -889,10 +926,23 @@ export default function ParentDashboard() {
     const myUserId = session?.user?.id;
     const inboxUnread = inboxMessages?.filter(m => !m.isRead?.[myUserId]).length ?? 0;
     return (
+      <>
       <Card id="section-messages">
         <CardHeader
           icon={MessageSquare} iconClass="text-sky-500" title="Messages"
-          right={inboxUnread > 0 && <span id="messages-unread-badge" className="text-[11px] font-semibold text-amber-600 bg-amber-50 px-2.5 py-[5px] rounded-full">{inboxUnread} unread</span>}
+          right={
+            <div className="flex items-center gap-2">
+              {inboxUnread > 0 && <span id="messages-unread-badge" className="text-[11px] font-semibold text-amber-600 bg-amber-50 px-2.5 py-[5px] rounded-full">{inboxUnread} unread</span>}
+              <button
+                id="compose-message-button"
+                onClick={openCompose}
+                className="flex items-center gap-1.5 text-[11px] font-semibold text-white px-3 py-[7px] rounded-lg transition hover:opacity-90"
+                style={{ background: primary }}
+              >
+                <Send size={12} /> New Message
+              </button>
+            </div>
+          }
         />
         {inboxLoading || inboxMessages === null ? (
           <div className="p-5 space-y-2">{[...Array(3)].map((_, i) => <div key={i} className="h-12 rounded-lg bg-slate-100 animate-pulse" />)}</div>
@@ -924,6 +974,97 @@ export default function ParentDashboard() {
           </div>
         )}
       </Card>
+      <ComposeMessageModal />
+      </>
+    );
+  }
+
+  /* ── Compose modal — recipients are a server-resolved category list,
+     never a free-text address. The category options never include
+     another parent, guardian, or student — see
+     server/utils/parent-message-recipients.js for how each option is
+     actually resolved. ── */
+  function ComposeMessageModal() {
+    if (!composeOpen) return null;
+    return (
+      <AnimatePresence>
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          className="fixed inset-0 bg-black/30 z-40" onClick={() => setComposeOpen(false)} />
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+              <h3 className="text-sm font-semibold text-slate-900">New Message</h3>
+              <button onClick={() => setComposeOpen(false)} className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100">
+                <X size={16} />
+              </button>
+            </div>
+
+            {composeSent ? (
+              <div className="px-5 py-8 text-center">
+                <CheckCircle size={28} className="text-emerald-500 mx-auto mb-2" />
+                <p className="text-sm font-medium text-slate-800">Message sent</p>
+                <button onClick={() => setComposeOpen(false)} className="mt-4 text-[12px] font-semibold px-4 py-2 rounded-lg text-white" style={{ background: primary }}>
+                  Done
+                </button>
+              </div>
+            ) : (
+              <div className="px-5 py-4 space-y-3">
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">To</label>
+                  {recipientOptions === null ? (
+                    <div className="h-9 rounded-lg bg-slate-100 animate-pulse mt-1" />
+                  ) : recipientOptions.length === 0 ? (
+                    <p className="text-[12px] text-slate-400 mt-1">No one is set up to receive messages for this child yet — contact the school office directly.</p>
+                  ) : (
+                    <select
+                      className="w-full mt-1 text-[13px] border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1"
+                      value={composeForm.category}
+                      onChange={e => setComposeForm(f => ({ ...f, category: e.target.value }))}
+                    >
+                      <option value="">Select who to message…</option>
+                      {recipientOptions.map(opt => (
+                        <option key={opt.key} value={opt.key}>{opt.label}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Subject</label>
+                  <input
+                    className="w-full mt-1 text-[13px] border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1"
+                    value={composeForm.subject}
+                    onChange={e => setComposeForm(f => ({ ...f, subject: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Message</label>
+                  <textarea
+                    rows={4}
+                    className="w-full mt-1 text-[13px] border border-slate-200 rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-1"
+                    value={composeForm.body}
+                    onChange={e => setComposeForm(f => ({ ...f, body: e.target.value }))}
+                  />
+                </div>
+                {composeError && <p className="text-[12px] text-red-600">{composeError}</p>}
+                <div className="flex justify-end gap-2 pt-1">
+                  <button onClick={() => setComposeOpen(false)} className="text-[12px] font-medium text-slate-500 px-3 py-2 rounded-lg hover:bg-slate-50">
+                    Cancel
+                  </button>
+                  <button
+                    onClick={sendCompose}
+                    disabled={composeSending || recipientOptions === null || recipientOptions.length === 0}
+                    className="flex items-center gap-1.5 text-[12px] font-semibold text-white px-4 py-2 rounded-lg disabled:opacity-50"
+                    style={{ background: primary }}
+                  >
+                    <Send size={12} /> {composeSending ? 'Sending…' : 'Send'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </motion.div>
+      </AnimatePresence>
     );
   }
 

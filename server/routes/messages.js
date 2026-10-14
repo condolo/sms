@@ -15,6 +15,7 @@ const notif = require('../utils/notif-settings');
 const { enqueueBatch } = require('../utils/email-queue');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { schoolLoginUrl } = require('../utils/school-url');
+const { _model } = require('../utils/model');
 
 const router = express.Router();
 router.use(authMiddleware, tenantMiddleware, moduleGate('messages'));
@@ -234,6 +235,43 @@ router.post('/', rbac('messages', 'create'), async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+/* ── Shared helper: create a message + notify a small, explicit list of
+   direct recipients by email. Extracted for parent-portal.js's own
+   send route (parent-message-recipients.js resolves a category to a
+   short, real userId list — never 'all'/a role group, so only this
+   "direct" notification shape ever applies there) rather than
+   duplicating the create+notify logic a second time. */
+async function createDirectMessage(req, { recipientUserIds, subject, body, senderName, senderRole, type = 'direct' }) {
+  const { schoolId, userId } = req.jwtUser;
+  const Msg  = tenantModel('messages', tenantContext(req));
+  const User = tenantModel('users', tenantContext(req));
+
+  const msg = await Msg.create({
+    id: uuidv4(), schoolId, senderId: userId, senderName, senderRole,
+    recipients: recipientUserIds, subject, body, type, isRead: {},
+    createdAt: new Date().toISOString(),
+  });
+
+  const school = req.school ?? await _model('schools').findOne({ id: schoolId }).lean();
+  const schoolEmail = school?.systemEmail || '';
+  const preview = body.length > 160 ? body.substring(0, 157) + '…' : body;
+  const loginUrl = await schoolLoginUrl(schoolId);
+  const emailEnabled = await notif.isEnabled(schoolId, 'new_message', 'email');
+
+  const targets = await User.find({ schoolId, id: { $in: recipientUserIds } }).select('id name email').lean();
+  const notifyJobs = [];
+  for (const u of targets) {
+    if (u.id === userId || !u.email || !emailEnabled) continue;
+    notifyJobs.push(() => email.sendMessageNotification({
+      recipientName: u.name, recipientEmail: u.email, senderName, subject, preview,
+      schoolName: school?.name, schoolEmail, schoolId, isDirect: true, appUrl: loginUrl,
+    }));
+  }
+  enqueueBatch(notifyJobs).catch(err => console.error('[messages] email queue error:', err));
+
+  return msg.toObject();
+}
+
 /* ── PATCH /api/messages/:id/read — mark as read ─────────── */
 router.patch('/:id/read', rbac('messages', 'update'), async (req, res) => {
   try {
@@ -281,3 +319,7 @@ module.exports = router;
 // queried recipientId/readAt, fields this collection has never had —
 // messages actually use `recipients` + `isRead.${userId}`).
 module.exports._inboxQuery = _inboxQuery;
+// Reused by parent-portal.js's parent-safe compose route — see
+// createDirectMessage's own header comment for why this is shared
+// rather than reimplemented.
+module.exports.createDirectMessage = createDirectMessage;

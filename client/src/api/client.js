@@ -708,6 +708,13 @@ export const messages = {
   unreadCount: ()       => _get('/messages/unread-count'),
 };
 
+// Parent-safe compose — recipients are a server-resolved category list
+// (never a free-text address); see server/utils/parent-message-recipients.js.
+export const parentMessaging = {
+  recipients: (childId) => _get('/parent-portal/message-recipients', { childId }),
+  send:       (data)    => _post('/parent-portal/messages', data),
+};
+
 export const studentSubjects = {
   counts:   ()       => _get('/student-subjects/counts'),
   list:     (params) => _get('/student-subjects', params),

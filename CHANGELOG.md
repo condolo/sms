@@ -6,6 +6,37 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.191.0] — 2026-10-15 — feat(messages): parents can now message the school — safe recipient categories, never a fellow parent
+
+Reported directly: "the parent cannot message the school, in the message, I need the parent can select whom they want to message, nurse, discipline, subject teachers etc but not fellow parents." Confirmed: the Parent Portal's Messages page was read-only — no compose feature existed at all.
+
+### Design — the hard safety requirement is "never a fellow parent"
+The generic `/api/messages` route accepts an arbitrary `recipients` array with no validation beyond a broadcast-roles check for `'all'` — simply granting parents `messages:create` would let a parent address another parent's userId or the `'parents'` group key directly. Instead, a parent never supplies a raw recipient at all: they pick a **category**, and the server re-resolves that category to real staff userIds **at send time**, from real assignment/role data — never trusting what the client echoes back.
+
+Categories offered, each grounded in data that actually exists:
+- **Class Teacher** — the child's own stream's form teacher.
+- **[Subject] Teacher** — the real assigned teacher for each subject actually in the child's curriculum (compulsory subjects always offered; electives only if the child is actually enrolled — same rule the Markbook already enforces for marks).
+- **Discipline Office** — every active account holding the real `discipline_committee` role.
+- **School Administration** — every active admin/superadmin/principal/deputy_principal/deputy account.
+- **Any school-custom staff-responsibility tag** (e.g. a school that tags a staff member "Nurse" via Staff Roles & Responsibilities) — surfaced automatically once at least one active teacher holds it, with zero code change required. There is no built-in "Nurse" role or module in this codebase, so one was not fabricated; a category only ever appears when it resolves to a real person.
+
+Never offered, by construction: `'all'`, the `'parents'`/`'students'` role groups, or any direct parent/guardian/student userId — the resolver only ever reads `teachers`/`users`/`class_subjects`/`teaching_assignments`/`streams`, never a parent-facing collection.
+
+### Added
+- `server/utils/parent-message-recipients.js` — `resolveMessageCategories` (the full list for one child) and `resolveOneCategory` (the single re-resolution the send route trusts).
+- `server/routes/parent-portal.js` — `GET /message-recipients?childId=` (labels only, never leaks recipient userIds to the client) and `POST /messages` (re-resolves `category` server-side; rejects a child not linked to the calling parent, a category that doesn't resolve, or a missing subject/body).
+- `server/routes/messages.js` — `createDirectMessage`, a shared helper extracted from the existing `POST /` handler's direct-recipient path, so the new parent route reuses the same message-creation + email-notification logic rather than a second implementation.
+- `client/src/pages/parent-portal/ParentDashboard.jsx` — a "New Message" compose modal on the Messages page: server-driven recipient dropdown, subject, body, send.
+- `client/src/api/client.js` — `parentMessaging.recipients`/`.send`.
+
+### Tests
+- `parent-message-recipients.test.js` — new, 13 tests (per-child categories, enrollment-gated electives, school-wide categories, custom-tag surfacing, built-in tags never surfaced, never queries a parent/guardian/student collection).
+- `parent-portal-message-compose.test.js` — new, 8 tests (authorization, category re-resolution, client cannot inject its own recipient list).
+
+Full suite: 312/312 suites, 3204/3204 tests. Verified live end-to-end in the browser: parent sends via "School Administration" → message appears correctly in the admin's real inbox, sender "Demo Parent", labeled Direct Message.
+
+---
+
 ## [v5.190.0] — 2026-10-15 — fix(students): a student already assigned to a stream could silently lose it on an unrelated profile edit
 
 Reported directly, against live data: "what makes students who were already assigned in stream leave and now not assigned again" — alongside a screenshot of "Not yet in a stream — 1 student in Year 5 hasn't been assigned to a stream yet. Imani Ngibuini." Resumes and completes a fix that had been drafted and paused earlier this session (uncommitted, untested) for a related symptom, now confirmed live and finished properly.

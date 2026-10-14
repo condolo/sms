@@ -16,11 +16,13 @@ const { isTimetablePublished, publishedReader } = require('../utils/timetable-pu
 const { resolveCurrentPeriod } = require('./academic-config');
 const { _getMpesaConfig } = require('./mpesa');
 const { _inboxQuery } = require('./messages');
-const { ok, E }          = require('../utils/response');
+const { ok, created, E } = require('../utils/response');
 // Weekly Snapshot's read logic is shared with weekly-snapshots.js's own
 // staff-facing routes — see that file's _findAuthorizedStudent header
 // comment for why this isn't reimplemented here.
 const { _helpers: weeklySnapshotHelpers } = require('./weekly-snapshots');
+const { resolveMessageCategories, resolveOneCategory } = require('../utils/parent-message-recipients');
+const { createDirectMessage } = require('./messages');
 
 const router = express.Router();
 
@@ -450,6 +452,79 @@ router.get('/weekly-snapshot/:childId/:weekStart/pdf', authMiddleware, async (re
     await weeklySnapshotHelpers.streamSnapshotPdf(req, res, req.params.childId, req.params.weekStart);
   } catch (err) {
     console.error('[parent-portal GET /weekly-snapshot/:childId/:weekStart/pdf]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   GET /api/parent-portal/message-recipients?childId=X
+   Reported directly: "the parent cannot message the school, in the
+   message, I need the parent can select whom they want to message,
+   nurse, discipline, subject teachers etc but not fellow parents."
+   See server/utils/parent-message-recipients.js for the full design —
+   every category here is resolved from real assignment/role data, and
+   deliberately never includes another parent, guardian, or student.
+   ══════════════════════════════════════════════════════════════ */
+router.get('/message-recipients', authMiddleware, async (req, res) => {
+  if (!_requireParent(req, res)) return;
+  try {
+    const { studentIds = [], guardianOf = [] } = req.jwtUser;
+    const linkedIds = [...new Set([...studentIds, ...guardianOf])];
+    const childId = req.query.childId;
+    if (!childId || !linkedIds.includes(childId)) {
+      return E.forbidden(res, 'You do not have access to this student\'s records.');
+    }
+    const categories = await resolveMessageCategories(req, childId);
+    // Never leak internal recipient userIds to the client — the key is
+    // enough to pick from, re-resolved server-side again on send.
+    return ok(res, categories.map(c => ({ key: c.key, label: c.label })));
+  } catch (err) {
+    console.error('[parent-portal GET /message-recipients]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   POST /api/parent-portal/messages
+   Body: { childId, category, subject, body }
+   `category` is NEVER trusted as a recipient — it's re-resolved here,
+   server-side, from the same real data message-recipients above reads,
+   to the actual current staff userId(s). A parent can never reach
+   another parent, guardian, or student through this route — there is
+   no code path here that can resolve to one.
+   ══════════════════════════════════════════════════════════════ */
+router.post('/messages', authMiddleware, async (req, res) => {
+  if (!_requireParent(req, res)) return;
+  try {
+    const { schoolId, userId, studentIds = [], guardianOf = [] } = req.jwtUser;
+    const linkedIds = [...new Set([...studentIds, ...guardianOf])];
+    const { childId, category, subject, body } = req.body;
+
+    if (!childId || !linkedIds.includes(childId)) {
+      return E.forbidden(res, 'You do not have access to this student\'s records.');
+    }
+    if (!category || !subject?.trim() || !body?.trim()) {
+      return E.badRequest(res, 'category, subject, and body are required');
+    }
+
+    const recipientUserIds = await resolveOneCategory(req, childId, category);
+    if (!recipientUserIds || recipientUserIds.length === 0) {
+      return E.badRequest(res, 'That recipient is no longer available — please pick another and try again.');
+    }
+
+    // Re-fetched, not trusted from the JWT — same convention messages.js's
+    // own POST / uses, since a JWT's name can be stale.
+    const senderUser = await tenantModel('users', tenantContext(req)).findOne({ id: userId, schoolId }).select('name email').lean();
+    const msg = await createDirectMessage(req, {
+      recipientUserIds,
+      subject: subject.trim(),
+      body: body.trim(),
+      senderName: senderUser?.name || senderUser?.email || 'Parent',
+      senderRole: 'parent',
+    });
+    return created(res, msg);
+  } catch (err) {
+    console.error('[parent-portal POST /messages]', err);
     return E.serverError(res);
   }
 });

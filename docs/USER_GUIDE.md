@@ -628,6 +628,14 @@ Open a message and scroll to the **Reply** box at the bottom. Type your reply an
 - **Notifications** (bell icon, top-right): automatic system alerts (attendance, behaviour, finance).
 - **Messages** (Communication module): manually composed messages — permanently stored and accessible from any device.
 
+### Parent Portal — Messaging the School
+Parents and guardians can now send a message directly from the **Messages** page of their Parent Portal (also reachable via the **Message School** button on Overview):
+1. Click **New Message**.
+2. Choose **who** to message from the dropdown — your child's Class Teacher, any of their actual subject teachers, the Discipline Office, School Administration, or any other staff category your school has set up (e.g. a school nurse, if your school has tagged one in Staff Roles & Responsibilities).
+3. Write a subject and message, then click **Send**.
+
+You can only choose from staff categories that genuinely exist for your child — there is no way to message another parent through this feature. The staff member receives your message in their normal inbox, with an email notification, the same as any other message.
+
 ---
 
 ## 11b. eLearning — Online Sessions *(Standard plan)*
