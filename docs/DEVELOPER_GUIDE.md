@@ -6337,6 +6337,35 @@ A pure relocation — no data model change, no resolution-logic change, no chang
 - `server/__tests__/routes/rc-templates-rbac.test.js` — rewritten for the `assessment` scope.
 - `docs/SCHOOL_ADMIN_GUIDE.md`, `docs/USER_GUIDE.md` — "Report Cards → Kindergarten Templates" → "Exams → Kindergarten Templates" everywhere it's named.
 
+## 113. A Deleted Subject's Code Permanently Blocked Re-Creating or Editing Another One, With No Way to Trace It (v5.182.0)
+
+### Reported problem
+Raised directly: "there are subjects which were deleted but the system doesn't delete, it just hides from the list — now I can't trace the subject and I also can't add it or edit or delete it because somehow it is in the system."
+
+### Root cause, confirmed in `server/routes/subjects.js` before changing anything
+- `DELETE /:id` only ever soft-deletes (`{isActive: false}`) — never a real delete. `GET /`'s filter (`isActive: {$ne: false}`) always hides it, with no `?includeInactive`-style escape hatch anywhere, and the client (`CatalogTab.jsx`) had no "show inactive" UI at all — a deactivated subject was completely untraceable.
+- `POST /`'s and `PUT /:id`'s code-uniqueness checks (`findOne({schoolId, code})`) had **no `isActive` filter** — a deactivated subject's code stayed permanently reserved forever. Trying to create a new subject with that code, or edit an existing one to use it, failed with `409 Conflict: "Subject code 'X' already exists"`, with the blocking record itself invisible anywhere in the UI to find and fix.
+- This codebase had **zero prior test coverage** for `subjects.js` at all (confirmed: no test file imports it).
+
+### Fixed
+- `POST /` and `PUT /:id`'s uniqueness checks now add `isActive: {$ne: false}` — scoped to active subjects only, matching the already-correct precedent elsewhere in this codebase (e.g. `students.js`'s admission-number collision check, which already excludes the record being edited).
+- `GET /` gained `?includeInactive=true` (default behavior for every other caller unchanged).
+- New `PATCH /api/subjects/:id/reactivate` — restores the ORIGINAL record (`isActive: true`), preserving its real `id` and every existing reference to it (`class_subjects` curriculum links, historical marks, teaching assignments) — deliberately not "just create a new subject with the same code," which would leave those references split across two different subject ids for no reason. Refuses with a clear message if another active subject has since taken the code.
+- `CatalogTab.jsx` gained a "Show deactivated subjects" checkbox next to the search box — toggles `?includeInactive=true` on the subjects query. An inactive subject's row renders dimmed with an "Inactive" badge in place of its enrollment count, and its row actions swap to a single Reactivate button (Edit/Delete/Enroll make no sense for a deactivated subject). The header stats (Subjects/Compulsory counts) stay computed from active subjects only regardless of the toggle, so turning it on to investigate doesn't inflate them.
+
+### Deliberately out of scope
+- No hard-delete button added. A subject can be referenced by `assessment_marks`, `teaching_assignments`, `timetable_slots`, and report-card history — permanently deleting one is a materially different, riskier operation than this report asked for, and not something to add without the same referential-integrity care this codebase gives every other "can I really delete this" decision (e.g. the Duplicate-student merge tooling). Soft-delete + reactivate covers the reported problem (untraceable, can't add/edit) without that risk.
+- Departments (`departments.js`) have the identical soft-delete-only pattern and were not audited or touched here — flagging as a separate, unverified possible gap, not assumed to have the same bug.
+
+### Files
+- `server/routes/subjects.js` — both uniqueness checks scoped; `?includeInactive`; new reactivate route.
+- `client/src/pages/subjects/CatalogTab.jsx` — toggle, dimmed/badged inactive rows, Reactivate action, active-only stats.
+- `client/src/api/client.js` — `subjects.reactivate(id)`.
+- `server/__tests__/routes/subjects.test.js` — new, 9 tests (first-ever coverage for this route).
+
+### Verified
+New test file: 9/9 passing. Full suite: 302/302 suites, 3134/3134 tests. Both edited client files confirmed to compile via a dev-server dynamic import.
+
 ## Term billing: transport and extra-curricular on the invoice (v5.169.0)
 
 **Status before this change:** a route's `feePerTerm` was stored but no code read it for billing. `transport_assignments` was read by nothing in finance. Activities had no model. Invoices came only from fee structures.

@@ -9,7 +9,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Plus, Pencil, Trash2, ChevronDown, ChevronRight, Search,
   X, BookOpen, Users, Library, AlertTriangle, Check, UserPlus,
-  UserMinus, GraduationCap,
+  UserMinus, GraduationCap, RotateCcw,
 } from 'lucide-react';
 import clsx from 'clsx';
 import {
@@ -505,7 +505,7 @@ function DeleteDialog({ item, type, onConfirm, onClose, deleting }) {
 }
 
 /* ── Department card ─────────────────────────────────────── */
-function DeptCard({ dept, subjects, canCreate, canEdit, canDelete, enrollCounts, onEditDept, onDeleteDept, onAddSubject, onEditSubject, onDeleteSubject, onEnroll }) {
+function DeptCard({ dept, subjects, canCreate, canEdit, canDelete, enrollCounts, onEditDept, onDeleteDept, onAddSubject, onEditSubject, onDeleteSubject, onEnroll, onReactivateSubject }) {
   const [expanded, setExpanded] = useState(true);
   return (
     <div className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm">
@@ -543,31 +543,44 @@ function DeptCard({ dept, subjects, canCreate, canEdit, canDelete, enrollCounts,
                 : <div className="divide-y divide-slate-50">
                     {subjects.map(sub => {
                       const count = enrollCounts[sub.id] ?? 0;
+                      const inactive = sub.isActive === false;
                       return (
-                        <div key={sub.id} className="flex items-center gap-3 px-5 py-2.5 hover:bg-slate-50/60 transition group">
+                        <div key={sub.id} className={clsx('flex items-center gap-3 px-5 py-2.5 transition group', inactive ? 'bg-slate-50/50' : 'hover:bg-slate-50/60')}>
                           <ColorDot color={sub.color} size="sm" />
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-sm font-medium text-slate-800">{sub.name}</span>
+                              <span className={clsx('text-sm font-medium', inactive ? 'text-slate-400 line-through' : 'text-slate-800')}>{sub.name}</span>
                               <span className="text-[11px] font-mono text-slate-400">{sub.code}</span>
                               {sub.shortName && sub.shortName !== sub.name && <span className="text-[11px] text-slate-400">({sub.shortName})</span>}
-                              {sub.isCompulsory && <span className="rounded-full bg-green-100 px-1.5 py-0.5 text-[10px] font-medium text-green-700">Compulsory</span>}
-                              <span className={clsx('rounded-full px-2 py-0.5 text-[10px] font-medium flex items-center gap-1', count > 0 ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-500')}>
-                                <Users size={9} />{count} enrolled
-                              </span>
+                              {inactive ? (
+                                <span className="rounded-full bg-slate-200 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">Inactive</span>
+                              ) : (
+                                <>
+                                  {sub.isCompulsory && <span className="rounded-full bg-green-100 px-1.5 py-0.5 text-[10px] font-medium text-green-700">Compulsory</span>}
+                                  <span className={clsx('rounded-full px-2 py-0.5 text-[10px] font-medium flex items-center gap-1', count > 0 ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-500')}>
+                                    <Users size={9} />{count} enrolled
+                                  </span>
+                                </>
+                              )}
                             </div>
                             {sub.sections?.length > 0 && (
                               <div className="flex flex-wrap gap-1 mt-1">{sub.sections.map(s => <SectionPill key={s} value={s} />)}</div>
                             )}
                           </div>
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition shrink-0">
-                            {canEdit && <button onClick={() => onEnroll(sub)} className="p-1 rounded text-violet-500 hover:text-violet-700 hover:bg-violet-50 transition" title="Manage enrollment"><UserPlus size={13} /></button>}
-                            {/* Was unconditional — Edit/Delete rendered for every viewer regardless
-                                of real permission, relying entirely on the server's 403 to block
-                                the actual save. Now matches subjects:update/delete like every
-                                other action on this page. */}
-                            {canEdit   && <button onClick={() => onEditSubject(sub)} className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"><Pencil size={13} /></button>}
-                            {canDelete && <button onClick={() => onDeleteSubject(sub)} className="p-1 rounded text-slate-400 hover:text-red-500 hover:bg-red-50 transition"><Trash2 size={13} /></button>}
+                            {inactive ? (
+                              canEdit && <button onClick={() => onReactivateSubject(sub)} className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium text-violet-600 hover:text-violet-700 hover:bg-violet-50 transition" title="Reactivate"><RotateCcw size={12} />Reactivate</button>
+                            ) : (
+                              <>
+                                {canEdit && <button onClick={() => onEnroll(sub)} className="p-1 rounded text-violet-500 hover:text-violet-700 hover:bg-violet-50 transition" title="Manage enrollment"><UserPlus size={13} /></button>}
+                                {/* Was unconditional — Edit/Delete rendered for every viewer regardless
+                                    of real permission, relying entirely on the server's 403 to block
+                                    the actual save. Now matches subjects:update/delete like every
+                                    other action on this page. */}
+                                {canEdit   && <button onClick={() => onEditSubject(sub)} className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"><Pencil size={13} /></button>}
+                                {canDelete && <button onClick={() => onDeleteSubject(sub)} className="p-1 rounded text-slate-400 hover:text-red-500 hover:bg-red-50 transition"><Trash2 size={13} /></button>}
+                              </>
+                            )}
                           </div>
                         </div>
                       );
@@ -603,6 +616,12 @@ export default function CatalogTab({ flash }) {
   const [subSlide, setSubSlide]       = useState(null);
   const [enrollSlide, setEnrollSlide] = useState(null);
   const [delTarget, setDelTarget]     = useState(null);
+  // Reported directly: a deleted subject is soft-deleted (isActive:false)
+  // and simply vanishes from the list with no way to find it again — its
+  // code still permanently blocks creating a new subject with that code
+  // (fixed server-side), but an admin also needs a way to actually SEE
+  // and reactivate the stuck record instead of being stopped there.
+  const [showInactive, setShowInactive] = useState(false);
 
   const { data: depts = [], isPending: deptsLoading } = useQuery({
     queryKey: ['departments'],
@@ -611,8 +630,8 @@ export default function CatalogTab({ flash }) {
     staleTime: 60_000,
   });
   const { data: allSubjects = [], isPending: subsLoading } = useQuery({
-    queryKey: ['subjects'],
-    queryFn:  () => subsApi.list(),
+    queryKey: ['subjects', { showInactive }],
+    queryFn:  () => subsApi.list(showInactive ? { includeInactive: 'true' } : undefined),
     select:   r => r?.data ?? (Array.isArray(r) ? r : []),
     staleTime: 60_000,
   });
@@ -643,6 +662,11 @@ export default function CatalogTab({ flash }) {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['subjects'] }); setDelTarget(null); flash('Subject deactivated'); },
     onError: err => flash(err.message ?? 'Delete failed', 'error'),
   });
+  const reactivateSub = useMutation({
+    mutationFn: id => subsApi.reactivate(id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['subjects'] }); flash('Subject reactivated'); },
+    onError: err => flash(err.message ?? 'Reactivate failed', 'error'),
+  });
 
   const q = search.trim().toLowerCase();
   const filteredDepts = q
@@ -653,9 +677,14 @@ export default function CatalogTab({ flash }) {
     return q ? subs.filter(s => s.name.toLowerCase().includes(q) || s.code.toLowerCase().includes(q)) : subs;
   }
 
+  // Stats always reflect active subjects, regardless of the "Show
+  // inactive" toggle — otherwise turning it on would inflate these counts
+  // with deactivated subjects that aren't really part of the school's
+  // current registry.
+  const activeSubjects  = allSubjects.filter(s => s.isActive !== false);
   const totalEnrolled   = Object.values(enrollCounts).reduce((a, b) => a + b, 0);
-  const totalSubjects   = allSubjects.length;
-  const compulsoryCount = allSubjects.filter(s => s.isCompulsory).length;
+  const totalSubjects   = activeSubjects.length;
+  const compulsoryCount = activeSubjects.filter(s => s.isCompulsory).length;
   const loading         = deptsLoading || subsLoading;
 
   return (
@@ -703,13 +732,22 @@ export default function CatalogTab({ flash }) {
       </div>
 
       {/* Search */}
-      <div className="px-6 pb-4">
-        <div className="relative max-w-sm">
+      <div className="px-6 pb-4 flex items-center gap-4 flex-wrap">
+        <div className="relative max-w-sm flex-1 min-w-[200px]">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search departments or subjects…"
             className="w-full rounded-lg border border-slate-300 pl-8 pr-8 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 bg-white" />
           {search && <button onClick={() => setSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"><X size={14} /></button>}
         </div>
+        {/* Deleted subjects are soft-deleted, not removed, so a deleted
+            one's code stays unique-checked (see subjects.js) and this is
+            the only way to find, trace, or reactivate it — it never
+            appears in the list above otherwise. */}
+        <label className="flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer select-none">
+          <input type="checkbox" checked={showInactive} onChange={e => setShowInactive(e.target.checked)}
+            className="rounded border-slate-300 text-violet-600 focus:ring-violet-500/20" />
+          Show deactivated subjects
+        </label>
       </div>
 
       {/* Content */}
@@ -732,6 +770,7 @@ export default function CatalogTab({ flash }) {
               onEditSubject={s => setSubSlide({ mode: 'edit', data: s, deptId: s.departmentId })}
               onDeleteSubject={s => setDelTarget({ type: 'Subject', item: s })}
               onEnroll={s => setEnrollSlide(s)}
+              onReactivateSubject={s => reactivateSub.mutate(s.id)}
             />
           ))
         )}

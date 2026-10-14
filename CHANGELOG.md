@@ -6,6 +6,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.182.0] — 2026-10-14 — fix(subjects): a deleted subject's code permanently blocked re-creating or editing another one, with no way to trace it
+
+Reported directly: "there are subjects which were deleted but the system doesn't delete, it just hides from the list — now I can't trace the subject and I also can't add it or edit or delete it because somehow it is in the system."
+
+### Root cause
+Deleting a subject only ever soft-deletes it (`isActive: false`) — `GET /` always hides it. But `POST /`'s and `PUT /:id`'s code-uniqueness checks had no `isActive` filter at all, so a deactivated subject's code stayed permanently reserved — trying to create or edit another subject to use that code failed with "already exists," with no way to find the deactivated record anywhere in the UI to fix it.
+
+### Fixed
+- `POST /` and `PUT /:id`'s code-uniqueness checks now scope to active subjects only — a deactivated subject's code can be reused.
+- `GET /` gained `?includeInactive=true`, and the Subjects & Departments screen gained a "Show deactivated subjects" toggle, so a deactivated subject is traceable again instead of simply vanishing. Shown dimmed with an "Inactive" badge; stats (total/compulsory counts) stay active-only regardless of the toggle.
+- New `PATCH /api/subjects/:id/reactivate` — restores the original record (keeping its real id and every existing reference to it, e.g. curriculum links) rather than forcing a fresh subject with a new id. Refuses if another active subject has since taken the code.
+
+### Tests
+- `subjects.test.js` — new, 9 tests (this route had zero prior coverage): list hides/shows inactive by flag, both uniqueness checks scoped correctly, reactivate succeeds/conflicts/404s.
+
+---
+
 ## [v5.181.0] — 2026-10-13 — refactor(exams): Kindergarten Templates moved out of Report Cards entirely, into Exams
 
 Raised directly, looking at the Grading Scales screen: why isn't Kindergarten's performance-bands/indicators configuration done there, or at least under Exams, instead of a separate tab under Report Cards? Research confirmed the architecture had no documented reason to keep it in Report Cards — only a renderer-build sequencing decision was ever on record, never a config-location one — so this is a pure relocation.

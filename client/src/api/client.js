@@ -640,6 +640,7 @@ export const departments = _resource('departments');
 export const subjects = {
   ..._resource('subjects'),
   byDepartment: (departmentId, params) => _get('/subjects', { ...params, departmentId }),
+  reactivate:   (id) => _patch(`/subjects/${id}/reactivate`, {}),
 };
 
 export const events = {

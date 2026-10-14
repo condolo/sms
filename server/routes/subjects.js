@@ -39,7 +39,12 @@ function _v(data) {
 router.get('/', authMiddleware, async (req, res) => { // rbac: intentionally open to every authenticated user — reference data
   try {
     const { schoolId } = req.jwtUser;
-    const filter = { schoolId, isActive: { $ne: false } };
+    // Reported directly: a deleted (soft-deleted, isActive:false) subject
+    // is permanently untraceable from here with no way to see, reactivate,
+    // or distinguish it from one that never existed — ?includeInactive=true
+    // is the escape hatch (Catalog's own "Show inactive" toggle), default
+    // behavior (every other caller) is unchanged.
+    const filter = req.query.includeInactive === 'true' ? { schoolId } : { schoolId, isActive: { $ne: false } };
     if (req.query.departmentId) filter.departmentId = req.query.departmentId;
     if (req.query.section)      filter.sections     = req.query.section;
     if (req.query.isCompulsory) filter.isCompulsory = req.query.isCompulsory === 'true';
@@ -98,8 +103,13 @@ router.post('/', authMiddleware, rbac('subjects', 'create'), async (req, res) =>
     const dept = await tenantModel('departments', tenantContext(req)).findOne({ id: data.departmentId, schoolId }).lean();
     if (!dept) return E.badRequest(res, 'Department not found in this school');
 
-    // Code uniqueness within school
-    const dup = await tenantModel('subjects', tenantContext(req)).findOne({ schoolId, code: data.code }).lean();
+    // Code uniqueness within school — ACTIVE subjects only (reported
+    // directly: a deleted subject's code blocked re-creating one with the
+    // same code forever, with the deleted record itself invisible from
+    // GET / and so untraceable/un-fixable from the UI). A school reusing a
+    // retired subject's code is legitimate; two simultaneously-active
+    // subjects sharing one is not.
+    const dup = await tenantModel('subjects', tenantContext(req)).findOne({ schoolId, code: data.code, isActive: { $ne: false } }).lean();
     if (dup) return E.conflict(res, `Subject code '${data.code}' already exists`);
 
     const doc = await tenantModel('subjects', tenantContext(req)).create({
@@ -128,8 +138,9 @@ router.put('/:id', authMiddleware, rbac('subjects', 'update'), async (req, res) 
     }
 
     if (data.code) {
+      // Same ACTIVE-only scoping as POST / above — see its comment.
       const conflict = await tenantModel('subjects', tenantContext(req)).findOne({
-        schoolId, code: data.code, id: { $ne: req.params.id },
+        schoolId, code: data.code, id: { $ne: req.params.id }, isActive: { $ne: false },
       }).lean();
       if (conflict) return E.conflict(res, `Subject code '${data.code}' already used`);
     }
@@ -156,6 +167,28 @@ router.delete('/:id', authMiddleware, rbac('subjects', 'delete'), async (req, re
     if (!doc) return E.notFound(res, 'Subject not found');
     return ok(res, { message: 'Subject deactivated' });
   } catch (err) { console.error('[subjects DELETE /:id]', err); return E.serverError(res); }
+});
+
+/* ── PATCH /api/subjects/:id/reactivate ────────────────────── */
+router.patch('/:id/reactivate', authMiddleware, rbac('subjects', 'update'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    // Same active-only code check as POST/PUT above — another subject may
+    // have since taken this code while this one was inactive.
+    const existing = await tenantModel('subjects', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
+    if (!existing) return E.notFound(res, 'Subject not found');
+    const conflict = await tenantModel('subjects', tenantContext(req)).findOne({
+      schoolId, code: existing.code, id: { $ne: req.params.id }, isActive: { $ne: false },
+    }).lean();
+    if (conflict) return E.conflict(res, `Subject code '${existing.code}' is now used by another active subject — change its code before reactivating.`);
+
+    const doc = await tenantModel('subjects', tenantContext(req)).findOneAndUpdate(
+      { id: req.params.id, schoolId },
+      { isActive: true, updatedBy: userId },
+      { new: true },
+    );
+    return ok(res, doc.toObject());
+  } catch (err) { console.error('[subjects PATCH /:id/reactivate]', err); return E.serverError(res); }
 });
 
 module.exports = router;
