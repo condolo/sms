@@ -1666,7 +1666,7 @@ function ReviewTab({ years }) {
         {isLoading ? (
           <Skeleton className="h-20" />
         ) : submissions.length === 0 ? (
-          <p className="text-sm text-slate-400 text-center py-4">No submissions awaiting moderation.</p>
+          <p className="text-sm text-slate-400 text-center py-4">No locked marks right now — nothing has been published for this filter yet, or every correction is already settled.</p>
         ) : (
           <table className="w-full text-sm">
             <thead>

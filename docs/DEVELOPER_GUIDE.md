@@ -6403,6 +6403,33 @@ Omit `--schoolId` to scan/fix every school in one pass.
 ### Verified
 Full suite: 303/303 suites, 3141/3141 tests. Both edited client config/UI files confirmed to compile via a dev-server dynamic import.
 
+## 115. Kindergarten Template's Subject Picker Offered Every Subject in the School, Not the Assigned Class's Curriculum (v5.184.0)
+
+### Reported problem
+Raised directly, with a screenshot of the "Select a subject…" dropdown: the picker should only ever offer subjects actually in the curriculum of the class(es) this template is assigned to — not every subject in the school. Paired with a second, related ask: the form should ask for the class first, then subjects, not last; and whether "Review" (Exams' tab, shown rendering an empty "No submissions awaiting moderation" list) had been removed.
+
+### Investigation, confirmed before changing anything
+- `RCTemplatesSection.jsx`'s `subjectOptions` was `subjectsApi.list({limit:500})` with no filter at all — exactly as reported.
+- **No stream-level curriculum concept exists anywhere in this codebase** — confirmed by grepping `class-subjects.js` for `streamId` (zero matches). `class_subjects` is keyed on `classId` only; a class's curriculum is identical across every stream of it. "Subjects for this stream" is therefore the same question as "subjects for this class" — the data to scope by a stream specifically doesn't exist, so no stream picker was added; one would have nothing real to filter against.
+- **Review was not removed.** `ReviewTab` (ExamsPage.jsx) still has its full unlock-request/lock/unlock machinery, untouched since §108's redesign. It renders empty because nothing has been published yet for the filtered scope — under that redesign, nothing ever reaches `submitted` status anymore, and a `locked` mark_submissions doc (what this list is now for) is only created automatically at publish time. The one real stale artifact: its empty-state copy still said "No submissions awaiting moderation," describing a state that no longer exists.
+
+### Fixed
+- **"Assign to Classes" moved to the top of the form** (right after Basic Information, before Performance Bands and before Subjects & Learning Indicators) — the admin picks the class(es) first, then everything downstream can be scoped to that choice.
+- **The subject picker is now live-scoped to curriculum.** A new reactive query (`['rc-template-curriculum-scope', form.classIds]`, same `classSubjectsApi.list({classId})` source "Load from curriculum" already used) derives a `Set` of subject ids actually in the curriculum of the assigned class(es); `scopedSubjectOptions` filters the full list down to it. Falls back to the unfiltered full list only when `form.classIds.length === 0` — a pure section-default template has no single class to scope against, same precedent "Load from curriculum" already established for that case. `optionsForRow(subjectId)` ensures a subject already selected in a row stays visible/selectable there even if it's since fallen out of scope (e.g. the class was changed after picking it) — never silently hides an existing choice out from under the admin.
+- Added a distinct hint for the empty-curriculum case (classes assigned, but zero subjects configured for them yet) so the picker doesn't look broken — points at Subjects & Departments.
+- `ReviewTab`'s empty-state text corrected to describe what the list is actually for post-redesign (rare post-publish corrections), not moderation.
+
+### Deliberately out of scope
+- Did not rewrite `ReviewTab`'s deeper internals (the "pending submissions" table/approve-reject UI it still has) — already a known, explicitly-scoped-out item from §108's redesign; only the one empty-state string was touched here since it was concretely misleading.
+- Did not add a stream picker to the template form, for the reason stated above — it would be UI with nothing real to filter.
+
+### Files
+- `client/src/pages/exams/components/RCTemplatesSection.jsx` — section reorder; curriculum-scoping query/derivation; `optionsForRow`; hint text.
+- `client/src/pages/exams/ExamsPage.jsx` — `ReviewTab` empty-state copy.
+
+### Verified
+Both files confirmed to compile via a dev-server dynamic import. Client-only change — no server-side logic touched, so no Jest suite impact.
+
 ## Term billing: transport and extra-curricular on the invoice (v5.169.0)
 
 **Status before this change:** a route's `feePerTerm` was stored but no code read it for billing. `transport_assignments` was read by nothing in finance. Activities had no model. Invoices came only from fee structures.

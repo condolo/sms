@@ -6,6 +6,22 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.184.0] — 2026-10-14 — fix(exams): Kindergarten Template's subject picker offered every subject in the school, not just the assigned class's own curriculum
+
+Raised directly, with a screenshot of "Select a subject…" showing a full school-wide list: the subject picker should only ever offer subjects actually in the curriculum of the class(es) this template is assigned to, and the form should ask for the class before asking for subjects, not after.
+
+### Changed
+- **"Assign to Classes" moved to the top of the form**, right after naming the template — before Performance Bands and before Subjects & Learning Indicators, instead of last.
+- **The subject picker is now scoped live** to the curriculum (`class_subjects`) of whichever class(es) are assigned above — reuses the same source "Load from curriculum" already used, kept reactive so it stays correct as classes are ticked on/off, rather than a one-shot fetch. Falls back to the full school-wide list only when zero classes are assigned yet (a pure section-default template has no single class curriculum to scope against). A subject already picked before its class changed stays visible in its own row even if it's since fallen out of scope — never silently hides an existing choice.
+- Added a clear hint when the assigned class(es) have no curriculum configured yet at all (an empty picker would otherwise look broken, not empty-for-a-reason).
+- Report Cards/Exams → Review tab's empty-state text corrected from "No submissions awaiting moderation" (describes a state that no longer exists under the 2026-10-13 mark-submission redesign) to a message matching what this list is actually for now — rare post-publish unlock corrections, not moderation.
+
+### Confirmed, not changed
+- The Review tab itself is **not removed** — it's fully implemented (unlock-request, lock, unlock all functional); it shows empty right now because nothing has been published yet in this account, which is expected, not a bug.
+- There is no stream-level curriculum concept anywhere in this codebase — `class_subjects` is keyed on `classId` only, so "subjects for this stream" is really "subjects for this class," identical across every stream of it. Streams matter later, at Markbook entry, for scoping *who* enters marks — never *which* subjects exist. No stream picker was added to this form, since one would have nothing real to scope.
+
+---
+
 ## [v5.183.0] — 2026-10-14 — fix(security): "Timetabler" staff-responsibility tag collided with the real `timetabler` RBAC role — closed, and a live read-access leak with it
 
 Reported directly, with a screenshot: saving an unrelated change in Settings (Manage Houses) failed with `"Timetabler" can't be used as a responsibility name — "timetabler" is reserved for a real system role`. The user asked, correctly, to be careful since this smelled like a deeper issue — it was.

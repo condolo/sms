@@ -27,7 +27,7 @@
    server/utils/rc-template-scale.js's resolveRcTemplate, rather than
    a third scoping pattern.
    ============================================================ */
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -447,7 +447,7 @@ function TemplateSlideOver({ initial, classes, subjectOptions, onSave, onClose, 
   }
 
   /* ── Load subjects from curriculum (class_subjects) — the class(es)
-     already assigned below (Assign to Classes) have a real curriculum;
+     already assigned above (Assign to Classes) have a real curriculum;
      this is a one-time "starting point" pull, not an ongoing sync, so a
      subject later removed from curriculum never silently deletes
      indicators an admin already configured here. Only ADDS subjects not
@@ -488,6 +488,47 @@ function TemplateSlideOver({ initial, classes, subjectOptions, onSave, onClose, 
     } finally {
       setLoadingCurriculum(false);
     }
+  }
+
+  /* ── Scope the "Add subject" dropdown to the assigned class(es)' real
+     curriculum, live — reported directly: picking a subject offered every
+     subject in the whole school, not just the ones this class/these
+     classes actually teach. Same source as "Load from curriculum" above,
+     kept reactive (re-fetches whenever classIds changes) rather than a
+     one-shot button click, since this has to stay correct as the admin
+     ticks classes on/off above. Falls back to the full school-wide list
+     only when zero classes are assigned yet (a pure section-default
+     template has no single class curriculum to scope against — there is
+     no stream-level curriculum concept anywhere in this codebase either;
+     class_subjects is keyed on classId only, so "subjects for this
+     stream" is really "subjects for this class," identical across every
+     stream of it). */
+  const { data: curriculumLinksData } = useQuery({
+    queryKey: ['rc-template-curriculum-scope', form.classIds],
+    queryFn:  () => Promise.all(form.classIds.map(id => classSubjectsApi.list({ classId: id }))),
+    enabled:  form.classIds.length > 0,
+    staleTime: 60_000,
+  });
+  const curriculumSubjectIds = useMemo(() => {
+    if (form.classIds.length === 0) return null; // null = no scope, show every subject
+    const ids = new Set();
+    for (const res of curriculumLinksData ?? []) {
+      for (const link of res?.data ?? []) {
+        if (link.subject?.id) ids.add(link.subject.id);
+      }
+    }
+    return ids;
+  }, [curriculumLinksData, form.classIds.length]);
+  const scopedSubjectOptions = curriculumSubjectIds
+    ? subjectOptions.filter(s => curriculumSubjectIds.has(s.id ?? s._id))
+    : subjectOptions;
+  // A subject already picked before its class was changed (or before this
+  // scoping existed) must stay visible/selected in its own row even if it
+  // has since fallen out of scope — never silently hide an existing choice.
+  function optionsForRow(subjectId) {
+    if (!curriculumSubjectIds || !subjectId || curriculumSubjectIds.has(subjectId)) return scopedSubjectOptions;
+    const current = subjectOptions.find(s => (s.id ?? s._id) === subjectId);
+    return current ? [current, ...scopedSubjectOptions] : scopedSubjectOptions;
   }
 
   /* ── Class toggle ── */
@@ -602,6 +643,84 @@ function TemplateSlideOver({ initial, classes, subjectOptions, onSave, onClose, 
             </div>
           </Section>
 
+          {/* ── Assign to Classes — moved here, right after naming the
+             template (2026-10-14): reported directly, the admin should
+             pick WHICH class(es) this template is for before picking
+             subjects, not after — so the subject picker below can be
+             scoped to the real curriculum of whatever's chosen here,
+             instead of offering every subject in the school. ── */}
+          <Section title="Assign to Classes" icon={LayoutTemplate} defaultOpen>
+            {/* Section default — resolves for EVERY class in the section
+                that isn't explicitly listed below, same convention the
+                RC11 layout-template registry already uses (section
+                default → explicit override wins). Mirrors grade scales:
+                set once for "Kindergarten," new KG classes pick it up
+                automatically, no need to remember to add them below. */}
+            <div className="mb-4 pb-4 border-b border-slate-100 space-y-2">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Default for a whole section (optional)</label>
+                <select
+                  value={form.sectionId ?? ''}
+                  onChange={e => setForm(f => ({ ...f, sectionId: e.target.value || null, isDefault: e.target.value ? f.isDefault : false }))}
+                  className={iCls()}
+                >
+                  <option value="">No section default — assign to specific classes only</option>
+                  {sections.map(s => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+              {form.sectionId && (
+                <label className="flex items-center justify-between py-1 cursor-pointer group">
+                  <span className="text-xs text-slate-500 group-hover:text-slate-700 transition">
+                    Make this the default — applies to every class in this section, except classes listed below in another template
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setForm(f => ({ ...f, isDefault: !f.isDefault }))}
+                    className={`relative inline-flex h-4.5 w-8 items-center rounded-full transition-colors shrink-0 ${
+                      form.isDefault ? 'bg-indigo-600' : 'bg-slate-200'
+                    }`}
+                  >
+                    <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${
+                      form.isDefault ? 'translate-x-4' : 'translate-x-0.5'
+                    }`} />
+                  </button>
+                </label>
+              )}
+            </div>
+
+            <p className="text-xs text-slate-400 -mt-1 mb-3">
+              Select which SPECIFIC classes will use this template — these win over any section default above. A class can only have one active template.
+              {' '}Picking a class here scopes the subject picker further down to that class's own curriculum.
+            </p>
+            {classes.length === 0 ? (
+              <p className="text-xs text-slate-400 italic">No classes found — create classes first.</p>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {classes.map(cls => {
+                  const active = form.classIds.includes(cls.id ?? cls._id?.toString());
+                  const cId    = cls.id ?? cls._id?.toString();
+                  return (
+                    <button
+                      key={cId}
+                      type="button"
+                      onClick={() => toggleClass(cId)}
+                      className={`text-left px-3 py-2 rounded-lg border text-sm transition ${
+                        active
+                          ? 'border-indigo-400 bg-indigo-50 text-indigo-700 font-medium'
+                          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                      }`}
+                    >
+                      {cls.name}
+                      {active && <span className="ml-1 text-indigo-400">✓</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </Section>
+
           {/* ── Performance Bands ── */}
           <Section title="Performance Bands" icon={Tag} defaultOpen>
             <p className="text-xs text-slate-400 -mt-1 mb-2">
@@ -665,7 +784,11 @@ function TemplateSlideOver({ initial, classes, subjectOptions, onSave, onClose, 
           <Section title="Subjects & Learning Indicators" icon={BookOpen} defaultOpen>
             <p className="text-xs text-slate-400 -mt-1 mb-3">
               Add subjects and the specific "Able to…" competencies assessed under each.
-              {form.classIds.length === 0 && ' Assign a class below (Assign to Classes) to load its subjects automatically, or add them manually here.'}
+              {form.classIds.length === 0
+                ? ' Assign a class above (Assign to Classes) to scope this list to its real curriculum, or add subjects manually here.'
+                : curriculumSubjectIds?.size === 0
+                  ? ' The class(es) assigned above have no subjects in their curriculum yet — set that up in Subjects & Departments, or add one manually below.'
+                  : ' Scoped to the curriculum of the class(es) assigned above.'}
             </p>
             <div className="space-y-2">
               {form.subjects.map(subj => (
@@ -673,7 +796,7 @@ function TemplateSlideOver({ initial, classes, subjectOptions, onSave, onClose, 
                   key={subj._uid}
                   subject={subj}
                   templateBands={form.performanceBands}
-                  subjectOptions={subjectOptions}
+                  subjectOptions={optionsForRow(subj.subjectId)}
                   onChange={updated => updateSubject(subj._uid, updated)}
                   onRemove={() => removeSubject(subj._uid)}
                 />
@@ -702,78 +825,6 @@ function TemplateSlideOver({ initial, classes, subjectOptions, onSave, onClose, 
               </button>
               {curriculumMsg && <span className="text-xs text-slate-400">{curriculumMsg}</span>}
             </div>
-          </Section>
-
-          {/* ── Assign to Classes ── */}
-          <Section title="Assign to Classes" icon={LayoutTemplate} defaultOpen={false}>
-            {/* Section default — resolves for EVERY class in the section
-                that isn't explicitly listed below, same convention the
-                RC11 layout-template registry already uses (section
-                default → explicit override wins). Mirrors grade scales:
-                set once for "Kindergarten," new KG classes pick it up
-                automatically, no need to remember to add them below. */}
-            <div className="mb-4 pb-4 border-b border-slate-100 space-y-2">
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Default for a whole section (optional)</label>
-                <select
-                  value={form.sectionId ?? ''}
-                  onChange={e => setForm(f => ({ ...f, sectionId: e.target.value || null, isDefault: e.target.value ? f.isDefault : false }))}
-                  className={iCls()}
-                >
-                  <option value="">No section default — assign to specific classes only</option>
-                  {sections.map(s => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </select>
-              </div>
-              {form.sectionId && (
-                <label className="flex items-center justify-between py-1 cursor-pointer group">
-                  <span className="text-xs text-slate-500 group-hover:text-slate-700 transition">
-                    Make this the default — applies to every class in this section, except classes listed below in another template
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setForm(f => ({ ...f, isDefault: !f.isDefault }))}
-                    className={`relative inline-flex h-4.5 w-8 items-center rounded-full transition-colors shrink-0 ${
-                      form.isDefault ? 'bg-indigo-600' : 'bg-slate-200'
-                    }`}
-                  >
-                    <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${
-                      form.isDefault ? 'translate-x-4' : 'translate-x-0.5'
-                    }`} />
-                  </button>
-                </label>
-              )}
-            </div>
-
-            <p className="text-xs text-slate-400 -mt-1 mb-3">
-              Select which SPECIFIC classes will use this template — these win over any section default above. A class can only have one active template.
-            </p>
-            {classes.length === 0 ? (
-              <p className="text-xs text-slate-400 italic">No classes found — create classes first.</p>
-            ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {classes.map(cls => {
-                  const active = form.classIds.includes(cls.id ?? cls._id?.toString());
-                  const cId    = cls.id ?? cls._id?.toString();
-                  return (
-                    <button
-                      key={cId}
-                      type="button"
-                      onClick={() => toggleClass(cId)}
-                      className={`text-left px-3 py-2 rounded-lg border text-sm transition ${
-                        active
-                          ? 'border-indigo-400 bg-indigo-50 text-indigo-700 font-medium'
-                          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
-                      }`}
-                    >
-                      {cls.name}
-                      {active && <span className="ml-1 text-indigo-400">✓</span>}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
           </Section>
 
           {/* ── Display Options ── */}
