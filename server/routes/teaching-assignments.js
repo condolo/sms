@@ -58,6 +58,17 @@ const router = express.Router();
 // exact strings SYSTEM_ROLES uses — this is a deliberate capability
 // grant, not the accidental string collision it used to be.
 const FULL_MANAGE = new Set(['admin', 'superadmin', 'deputy', 'principal', 'acting_deputy', 'head_of_school']);
+// 'timetable_coordinator' is the renamed responsibility tag for the OLD
+// 'timetabler' value (2026-10-14) — that value collided with the real
+// 'timetabler' SYSTEM_ROLES key, and this is exactly where it leaked: a
+// teacher merely TAGGED "Timetabler" was silently granted the same
+// broad read access below as an account actually holding the real
+// timetabler role. Listed explicitly alongside the real role key in
+// isTeacherOnly's check further down, same precedent as FULL_MANAGE
+// above — the real role key stays (an actual timetabler account must
+// still see every teacher's assignments), the tag is now an explicit
+// grant rather than an accident, and existing teachers keep the same
+// functional access across the rename.
 
 function _effectiveRoles(req) {
   const role       = req.jwtUser?.role       ?? '';
@@ -157,7 +168,7 @@ router.get('/', authMiddleware, async (req, res) => { // rbac: self-scoped below
 
     // Teachers can only read their own assignments
     const isTeacherOnly = eff.has('teacher') &&
-      !['admin','superadmin','principal','deputy','acting_deputy','head_of_school','hod','timetabler']
+      !['admin','superadmin','principal','deputy','acting_deputy','head_of_school','hod','timetabler','timetable_coordinator']
         .some(r => eff.has(r));
 
     if (isTeacherOnly) {

@@ -6,6 +6,40 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.183.0] — 2026-10-14 — fix(security): "Timetabler" staff-responsibility tag collided with the real `timetabler` RBAC role — closed, and a live read-access leak with it
+
+Reported directly, with a screenshot: saving an unrelated change in Settings (Manage Houses) failed with `"Timetabler" can't be used as a responsibility name — "timetabler" is reserved for a real system role`. The user asked, correctly, to be careful since this smelled like a deeper issue — it was.
+
+### Root cause
+`'timetabler'` was one of the six **built-in** staff-responsibility tags (Settings → Staff Roles & Responsibilities) — the exact same string `SYSTEM_ROLES` uses for the real Timetabler account role. This is the identical collision class a prior security fix (2026-09, per that code's own comments) closed for `'deputy'`/`'principal'` (renamed to `acting_deputy`/`head_of_school`) — that fix's own comment even used *"tagging someone Timetabler"* as its illustrative example of the bug, but never actually added `timetabler` to the rename list.
+
+Two confirmed consequences, traced directly (not assumed):
+1. **Settings lockout.** `PUT /api/settings/school` rejects any save whose `staffResponsibilities` array contains a SYSTEM_ROLES-colliding value. Every settings panel (including Manage Houses) saves through this one shared endpoint by spreading the *entire* currently-loaded settings object — so once a school's `staffResponsibilities` list ever had "Timetabler" added (the built-in option, available until this fix), **every subsequent settings save of any kind failed**, with the offending entry invisible anywhere in the UI to find and remove.
+2. **Live privilege leak**, confirmed by reading every place the literal string `'timetabler'` is checked server-side: `teaching-assignments.js`'s `isTeacherOnly` check merges `role + roles + extraRoles` into one set with no distinction, so a teacher merely *tagged* "Timetabler" as a responsibility was silently granted the same broad read access to every other teacher's assignments as an account actually holding the real `timetabler` RBAC role — without ever going through Roles & Permissions. Checked the three other places "school-level broad access" roles are evaluated (`lessons.js`, `weekly-snapshots.js`, `timetable.js`, `scopeEngine.js`'s `TIMETABLE_FLOOR_ROLES`, `timetable-publish.js`'s `EDITOR_ROLES`) — all five check only the real account role/roles, never extraRoles, so this one spot was the sole leak.
+
+### Fixed
+- Renamed the built-in value to `timetable_coordinator` (label stays "Timetabler") in both `server/config/staffResponsibilities.js` and its client mirror.
+- `teaching-assignments.js`'s broad-read check now explicitly includes `timetable_coordinator` alongside the real `timetabler` role — same precedent as `acting_deputy`/`head_of_school` — an explicit capability grant instead of an accidental string collision, with zero functional change for anyone who already had the tag.
+- Extended the **existing** `migrate-staff-responsibility-rename.js` script's `RENAME` map rather than writing a second script — it already migrates both `teachers.extraRoles` and `schools.staffResponsibilities`, lossless and idempotent.
+- Updated the demo-data seed script so a fresh seed doesn't recreate the stale value.
+
+### Action required (cannot be done from this environment — no database access)
+Any school already stuck in this state (confirmed: the demo account) needs the migration **run** against its data:
+```
+node server/scripts/migrate-staff-responsibility-rename.js --schoolId=<id>          # dry run first
+node server/scripts/migrate-staff-responsibility-rename.js --schoolId=<id> --apply  # then apply
+```
+Omit `--schoolId` to check/fix every school. The code fix alone only prevents this from happening to *new* data — it does not retroactively repair an already-saved `staffResponsibilities` array.
+
+### Tests
+- `migrate-staff-responsibility-rename.test.js` — extended for the new rename pair; two tests that used `'timetabler'` as a "preserved, non-colliding" example corrected.
+- `teaching-assignments-timetabler-tag.test.js` — new, 5 tests: real role unaffected, new tag grants the same access, old un-migrated tag keeps working until migrated, unrelated tag doesn't leak, plain teacher stays scoped.
+- `import-teachers-role-validation.test.js`, `teachers-extra-roles-revocation.test.js` — 2 pre-existing tests that happened to use `'timetabler'` as an arbitrary valid-value example (now correctly rejected, since it's renamed) swapped to `exam_officer`.
+
+Full suite: 303/303 suites, 3141/3141 tests.
+
+---
+
 ## [v5.182.0] — 2026-10-14 — fix(subjects): a deleted subject's code permanently blocked re-creating or editing another one, with no way to trace it
 
 Reported directly: "there are subjects which were deleted but the system doesn't delete, it just hides from the list — now I can't trace the subject and I also can't add it or edit or delete it because somehow it is in the system."

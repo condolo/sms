@@ -120,9 +120,9 @@ describe('PUT /api/teachers/:id — extraRoles change triggers token revocation'
   test('scenario 7: multiple extra roles set at once — single revocation call, all roles present', async () => {
     const res = await supertest(buildApp())
       .put('/api/teachers/tch_1')
-      .send({ extraRoles: ['hod', 'timetabler'] });
+      .send({ extraRoles: ['hod', 'exam_officer'] });
 
-    expect(res.body.data.extraRoles).toEqual(['hod', 'timetabler']);
+    expect(res.body.data.extraRoles).toEqual(['hod', 'exam_officer']);
     expect(mockRevokeUserTokens).toHaveBeenCalledTimes(1);
   });
 
@@ -148,10 +148,10 @@ describe('PUT /api/teachers/:id — extraRoles change triggers token revocation'
   });
 
   test('reordering the same set of extra roles does NOT revoke (set-equality, not array-equality)', async () => {
-    mockTeachers[0].extraRoles = ['hod', 'timetabler'];
+    mockTeachers[0].extraRoles = ['hod', 'exam_officer'];
     const res = await supertest(buildApp())
       .put('/api/teachers/tch_1')
-      .send({ extraRoles: ['timetabler', 'hod'] });
+      .send({ extraRoles: ['exam_officer', 'hod'] });
 
     expect(res.status).toBe(200);
     expect(mockRevokeUserTokens).not.toHaveBeenCalled();

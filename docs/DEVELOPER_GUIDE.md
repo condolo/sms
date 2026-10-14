@@ -6366,6 +6366,43 @@ Raised directly: "there are subjects which were deleted but the system doesn't d
 ### Verified
 New test file: 9/9 passing. Full suite: 302/302 suites, 3134/3134 tests. Both edited client files confirmed to compile via a dev-server dynamic import.
 
+## 114. The "Timetabler" Staff-Responsibility Tag Collided With the Real `timetabler` RBAC Role — Unpatched Since the 2026-09 Fix That Named It as the Example (v5.183.0)
+
+### Reported problem
+Raised directly, with a screenshot: saving Manage Houses (Behaviour → Houses) failed with `"Timetabler" can't be used as a responsibility name — "timetabler" is reserved for a real system role. Pick a different name.` The user asked what Houses and Timetabler could possibly have to do with each other, and separately asked to be careful — correctly: this was a real, live gap, not a one-off glitch.
+
+### Root cause, traced before any change, not assumed
+- `server/config/staffResponsibilities.js`'s `BUILTIN_STAFF_RESPONSIBILITIES` (the Settings → Staff Roles & Responsibilities picker) had `{ value: 'timetabler', label: 'Timetabler' }` — the exact string `server/utils/role-validation.js`'s `SYSTEM_ROLES` uses for the real Timetabler account role. Checked every other built-in value against `SYSTEM_ROLES` systematically rather than assuming only this one collided: `hod`, `class_teacher`, `acting_deputy`, `head_of_school` don't match anything; `exam_officer` is a near-miss but genuinely distinct from the real role key `exams_officer` (note the 's'). `timetabler` was the only actual collision.
+- This is the identical bug class a 2026-09 security fix closed for `'deputy'`/`'principal'` (renamed to `acting_deputy`/`head_of_school`, `server/scripts/migrate-staff-responsibility-rename.js`) — that fix's own header comment literally uses *"tagging someone Timetabler"* as its illustrative example of the collision, but `timetabler` itself was never added to the rename.
+- **Consequence 1 — Settings lockout.** `PUT /api/settings/school` rejects the whole request if `staffResponsibilities` contains any SYSTEM_ROLES-colliding value (the exact guard the 2026-09 fix added). Every settings panel — Manage Houses included — saves through this one shared route by spreading the entire currently-loaded school-settings object and overriding just its own field (`HousesTab.jsx`: `settingsApi.school.update({ ...schoolSettings, houses: updatedHouses })`). So a school whose `staffResponsibilities` array ever had the built-in "Timetabler" option added (available right up until this fix) has every subsequent settings save of any kind fail — not just responsibility edits — with the offending record invisible anywhere in the UI (no "show inactive"-style surface exists for this list) to find and remove.
+- **Consequence 2 — live privilege leak.** Checked every server-side location that checks the literal string `'timetabler'` (`grep -rn "'timetabler'" server/`): `messages.js`'s `ROLE_GROUPS`, `timetable.js`'s `_canEdit`, `scopeEngine.js`'s `TIMETABLE_FLOOR_ROLES` (consumed only via `req.jwtUser.role`, confirmed at its one call site in `timetable.js`), and `timetable-publish.js`'s `EDITOR_ROLES` all check only the real account `role`/`roles` — never `extraRoles` — so none of them leak. `teaching-assignments.js`'s `_effectiveRoles()` is the one exception: it merges `role + roles + extraRoles` into a single Set, and `isTeacherOnly`'s broad-read check tested that merged set against a list literally containing `'timetabler'`. A teacher merely tagged "Timetabler" as a responsibility — never granted the real RBAC role through Roles & Permissions — was silently given the same broad read access to every other teacher's assignments as someone who actually holds it.
+
+### Fixed
+- Renamed the built-in value to `timetable_coordinator` (label unchanged: "Timetabler") in `server/config/staffResponsibilities.js` and its client mirror `client/src/config/staffResponsibilities.js`.
+- `teaching-assignments.js`: `isTeacherOnly`'s broad-read list now explicitly includes `timetable_coordinator` alongside the real `timetabler` role key — same precedent `FULL_MANAGE` already set for `acting_deputy`/`head_of_school`: an explicit, readable capability grant instead of an accidental string match, with the real role key kept (an actual timetabler account must still see every teacher's assignments) and zero functional change for anyone who already held the tag. The OLD `'timetabler'` string is deliberately left in the list too, alongside the new one — so a teacher whose `extraRoles` hasn't been migrated yet keeps exactly the same access in the interim, not a silent regression the moment this code ships.
+- Extended the already-existing `migrate-staff-responsibility-rename.js`'s `RENAME` map (`{ deputy, principal, timetabler }` now, was `{ deputy, principal }`) rather than writing a second script — it already handles both `teachers.extraRoles` and `schools.staffResponsibilities`, lossless, idempotent, dry-run-by-default.
+- `server/scripts/seed-demo-data.js`: the one seeded teacher with this tag updated so a fresh seed doesn't recreate the stale value.
+
+### Deliberately out of scope — action required, cannot be done from this environment
+This environment has no live database access. The code fix prevents the collision from being *created* again; it does not retroactively repair a school whose `staffResponsibilities` (or a teacher's `extraRoles`) already has the old value saved — confirmed live on the demo account, the trigger for this report. That requires actually **running** the migration script against real data, from a terminal with `MONGODB_URI` set:
+```
+node server/scripts/migrate-staff-responsibility-rename.js --schoolId=<id>          # dry run — reports only
+node server/scripts/migrate-staff-responsibility-rename.js --schoolId=<id> --apply  # writes the rename
+```
+Omit `--schoolId` to scan/fix every school in one pass.
+
+### Files
+- `server/config/staffResponsibilities.js`, `client/src/config/staffResponsibilities.js` — renamed value.
+- `server/routes/teaching-assignments.js` — explicit grant for the renamed tag, comment rewritten.
+- `server/scripts/migrate-staff-responsibility-rename.js` — `RENAME` map extended; header comment and the dynamic summary label updated.
+- `server/scripts/seed-demo-data.js` — one seeded teacher's `extraRoles` updated.
+- `server/__tests__/migrate-staff-responsibility-rename.test.js` — extended; two tests that used `'timetabler'` as a "preserved" example corrected to a genuinely non-colliding value.
+- `server/__tests__/routes/teaching-assignments-timetabler-tag.test.js` — new, 5 tests pinning exactly the access-matrix described above.
+- `server/__tests__/routes/import-teachers-role-validation.test.js`, `teachers-extra-roles-revocation.test.js` — 2 pre-existing tests that happened to use `'timetabler'` as an arbitrary "any valid built-in value" example (now correctly rejected on write, since it's renamed) swapped to `exam_officer`, including fixing a now-incorrect alphabetical-sort expectation the swap exposed.
+
+### Verified
+Full suite: 303/303 suites, 3141/3141 tests. Both edited client config/UI files confirmed to compile via a dev-server dynamic import.
+
 ## Term billing: transport and extra-curricular on the invoice (v5.169.0)
 
 **Status before this change:** a route's `feePerTerm` was stored but no code read it for billing. `transport_assignments` was read by nothing in finance. Activities had no model. Invoices came only from fee structures.

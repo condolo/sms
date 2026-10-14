@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /* ============================================================
-   Msingi — Staff Responsibility value rename ('deputy'/'principal')
-   Security fix, 2026-09.
+   Msingi — Staff Responsibility value rename
+   ('deputy'/'principal': security fix, 2026-09. 'timetabler': same
+   fix class, closed 2026-10-14 — see below.)
 
    'deputy' and 'principal' used to be two of the six built-in
    teacher.extraRoles responsibility values (Settings -> Staff Roles &
@@ -19,24 +20,38 @@
    and 'head_of_school' (see server/config/staffResponsibilities.js)
    so no extraRoles value can ever equal a SYSTEM_ROLES value again.
 
-   This script migrates the two places the OLD values can already be
+   'timetabler' had the EXACT SAME collision — the comment above even
+   named it as the illustrative example of the bug class — but was
+   never actually added to RENAME in that original pass. Reported
+   directly (2026-10-14): a school with this built-in value already
+   saved to staffResponsibilities could no longer save ANY settings
+   change through PUT /school at all (that route bundles the whole
+   school document; the self-escalation-adjacent guard there rejects
+   the request on sight), and teaching-assignments.js's
+   isTeacherOnly check confirmed the same live privilege leak — a
+   teacher merely tagged "Timetabler" silently got the real
+   'timetabler' role's broad read access. Renamed to
+   'timetable_coordinator', added to RENAME below rather than given a
+   second script — the whole point of centralizing this.
+
+   This script migrates the places the OLD values can already be
    persisted, so existing data matches what the renamed code now
    expects:
-     - teachers.extraRoles arrays containing 'deputy' or 'principal'
-     - schools.staffResponsibilities entries whose value is 'deputy'
-       or 'principal' (a school's own persisted customization of the
+     - teachers.extraRoles arrays containing a colliding value
+     - schools.staffResponsibilities entries whose value is a
+       colliding value (a school's own persisted customization of the
        picker — most schools have never saved one and fall back to
        the client's own default list, already updated in code, so
        nothing to migrate for them)
 
-   Both are a straight, lossless rename — 'deputy' really does mean
-   "this teacher has deputy-level responsibilities," identical in
-   meaning to the new 'acting_deputy' value, and likewise for
-   'principal' -> 'head_of_school'. There is no scenario where this
-   loses information or requires a human decision, unlike the
-   role_permissions reconciliation migrate-legacy-deputy-role.js does
-   — there is no separate "acting_deputy-keyed document" to conflict
-   with, since these values only ever lived in an array field.
+   Every mapping here is a straight, lossless rename — e.g. 'deputy'
+   really does mean "this teacher has deputy-level responsibilities,"
+   identical in meaning to the new 'acting_deputy' value, and likewise
+   for the others. There is no scenario where this loses information
+   or requires a human decision, unlike the role_permissions
+   reconciliation migrate-legacy-deputy-role.js does — there is no
+   separate "acting_deputy-keyed document" to conflict with, since
+   these values only ever lived in an array field.
 
    Usage:
      node server/scripts/migrate-staff-responsibility-rename.js            # dry run (default) — reports only, writes nothing
@@ -53,7 +68,7 @@ require('dotenv').config();
 const mongoose = require('mongoose');
 const { _model } = require('../utils/model');
 
-const RENAME = { deputy: 'acting_deputy', principal: 'head_of_school' };
+const RENAME = { deputy: 'acting_deputy', principal: 'head_of_school', timetabler: 'timetable_coordinator' };
 
 /* ── Pure decision logic — exported for unit testing without a DB ── */
 
@@ -147,7 +162,7 @@ if (require.main === module) {
     await mongoose.disconnect();
 
     console.error('\n═══════════════════════════════════════════════════════');
-    console.error('  Staff responsibility rename (deputy/principal) — summary');
+    console.error(`  Staff responsibility rename (${Object.keys(RENAME).join('/')}) — summary`);
     console.error('═══════════════════════════════════════════════════════');
     console.error(`  Teachers renamed${apply ? '' : ' (would rename)'} : ${findings.teachersRenamed.length}`);
     console.error(`  Schools renamed${apply ? '' : ' (would rename)'}  : ${findings.schoolsRenamed.length}`);

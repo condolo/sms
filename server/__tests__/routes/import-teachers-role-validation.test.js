@@ -201,10 +201,10 @@ describe('POST /api/import-export/teachers — extraRoles', () => {
     const res = await supertest(buildApp())
       .post('/api/import-export/teachers')
       .set('Content-Type', 'application/json')
-      .send({ rows: [row({ extraRoles: 'hod, hod, timetabler' })] });
+      .send({ rows: [row({ extraRoles: 'hod, hod, exam_officer' })] });
 
     expect(res.status).toBe(201);
-    expect(mockStores.teachers._docs()[0].extraRoles.sort()).toEqual(['hod', 'timetabler']);
+    expect(mockStores.teachers._docs()[0].extraRoles.sort()).toEqual(['exam_officer', 'hod']);
   });
 
   test('an invalid extraRole is rejected with a clear per-row error', async () => {

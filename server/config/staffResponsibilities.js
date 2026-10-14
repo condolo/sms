@@ -48,16 +48,38 @@
    exactly the class of bug the v5.96.0 model-factory drift was.
    One file each side (client/src/config/staffResponsibilities.js
    mirrors this one) instead.
-   ============================================================ */
+
+   'timetabler' had the EXACT SAME collision, left unfixed in the pass
+   above despite the fix's own comment using "tagging someone
+   Timetabler" as its own illustrative example of the bug class.
+   Reported directly (2026-10-14): a school with this built-in value
+   already saved to staffResponsibilities (schools.staffResponsibilities
+   entries persist once an admin has ever touched the panel — see
+   PUT /school's guard below) could no longer save ANY settings change
+   through PUT /school at all, Houses included, since that route
+   bundles the whole school document and the guard rejects the request
+   on sight — with the actual offending record invisible anywhere in
+   the UI to fix. Also a live, unpatched instance of the SAME
+   privilege leak the deputy/principal rename closed:
+   teaching-assignments.js's _effectiveRoles() merges extraRoles into
+   the same set checked against the real 'timetabler' SYSTEM_ROLES key,
+   so a teacher merely TAGGED "Timetabler" was silently granted that
+   role's broad read access to every other teacher's assignments,
+   without ever going through Roles & Permissions. Renamed to
+   'timetable_coordinator' — see teaching-assignments.js's own comment
+   for how that capability grant is now explicit instead of accidental,
+   and server/scripts/migrate-staff-responsibility-rename.js for the
+   migration of already-persisted data (same script the deputy/
+   principal rename used, extended rather than duplicated). */
 'use strict';
 
 const BUILTIN_STAFF_RESPONSIBILITIES = [
-  { value: 'hod',            label: 'Head of Department' },
-  { value: 'class_teacher',  label: 'Class Teacher / Form Tutor' },
-  { value: 'timetabler',     label: 'Timetabler' },
-  { value: 'exam_officer',   label: 'Exam Officer' },
-  { value: 'acting_deputy',  label: 'Deputy Head' },
-  { value: 'head_of_school', label: 'Head of School' },
+  { value: 'hod',                    label: 'Head of Department' },
+  { value: 'class_teacher',          label: 'Class Teacher / Form Tutor' },
+  { value: 'timetable_coordinator',  label: 'Timetabler' },
+  { value: 'exam_officer',           label: 'Exam Officer' },
+  { value: 'acting_deputy',          label: 'Deputy Head' },
+  { value: 'head_of_school',         label: 'Head of School' },
 ];
 
 const BUILTIN_EXTRA_ROLE_VALUES = new Set(BUILTIN_STAFF_RESPONSIBILITIES.map(r => r.value));
