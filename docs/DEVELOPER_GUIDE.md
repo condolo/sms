@@ -6473,11 +6473,13 @@ Raised directly, urgently: "I have just received a disturbing call that the mark
 - No code change to the Markbook's stream-selection logic itself — it was confirmed correct, not patched.
 - No automatic data migration — same reasoning as `migrate-legacy-deputy-role.js`'s own "never auto-resolved" findings: this needs a human decision per assignment, not a script's guess.
 
-### Action required (cannot be done from this environment — no database access)
+### Action required
 ```
 node server/scripts/diagnose-stream-ambiguous-assignments.js --schoolId=<id>
 ```
 For each finding: go to the listed class's Assignments, remove the ambiguous whole-class row, and create the correct per-stream assignment(s) instead.
+
+**Correction (§118 below):** the line above originally said this environment has no database access. That was wrong — `.env`'s `MONGODB_URI` connects directly from this sandbox (`mongoose.connect(process.env.MONGODB_URI)` works), confirmed while investigating §118. Don't assume no DB access in a future session either; check by connecting first.
 
 ### Files
 - `server/scripts/diagnose-stream-ambiguous-assignments.js` — new.
@@ -6485,6 +6487,51 @@ For each finding: go to the listed class's Assignments, remove the ambiguous who
 
 ### Verified
 New test file: 7/7 passing. Full suite: 304/304 suites, 3148/3148 tests.
+
+## 118. Catalog `isCompulsory` vs Curriculum `isCompulsoryForClass`: the Two Flags Never Synced (v5.187.0)
+
+### Reported problem
+Direct follow-up to §117, same live incident: "when i mark subjects compulsory, does that reflect in the enrollment and curriculum and now in the markbook?", then confirmed with a reproduction: "I have confirmed, in one school almost all subjects are compulsory, when i select am not seeing the stream even for the compulsory subjects?" Then, after §117's diagnostic returned 0 findings: "you have access to the db, mongodb, and confirm if this could be a bug and if this was created after making subjects compulsory it should apply before or after, now. be intentional."
+
+### Investigated with live data, not assumed
+§117's `diagnose-stream-ambiguous-assignments.js` found **0** real stream-ambiguous rows against the live database — the Markbook's stream logic itself is not the cause here. Pivoted to the next hypothesis and confirmed it directly with a cross-tabulation query across all four real schools in the database:
+
+| School | Catalog subjects | Catalog-compulsory | Curriculum links | Curriculum-compulsory |
+|---|---|---|---|---|
+| Msingi Demo School | 18 | 4 | 102 | 43 |
+| Mascit Lab Academy | 25 | 3 | 94 | 12 |
+| Trinitas International School | 20 | **19** | 143 | **14** |
+| Trinity International School | 73 | 0 | 96 | 0 |
+
+Trinitas is the school the user was describing almost verbatim — "almost all subjects are compulsory" (19 of 20, in the Catalog) — yet only 14 of its 143 curriculum links were actually `isCompulsoryForClass: true`. Drilling further: of the 134 curriculum links belonging to those 19 catalog-compulsory subjects, **120 (90%) were sitting at `isCompulsoryForClass: false`.**
+
+### Root cause
+`subjects.isCompulsory` (Catalog, school-wide) and `class_subjects.isCompulsoryForClass` (Curriculum, per class) are two completely independent fields. The Catalog flag has never had any functional effect except as a `GET /api/subjects?isCompulsory=true` list filter (confirmed earlier, §117's investigation and before). The Curriculum flag is the only one `teaching-assignments.js`'s Stream rule and the Markbook/Attendance roster logic actually read. `server/routes/class-subjects.js`'s `POST /` and `POST /bulk` always created a new link with `isCompulsoryForClass` defaulting to `false`, never looking at the subject's own Catalog flag — so even a school that diligently marks every subject compulsory in the Catalog gets curriculum links that silently default to elective unless someone ALSO flips the per-class toggle in the Curriculum tab, subject by subject, class by class. At Trinitas, that second step was essentially never done.
+
+This is why the Markbook "didn't honor the stream, even for compulsory subjects": it was honoring the real flag correctly. The subjects just weren't actually compulsory per that flag, whatever the Catalog said.
+
+### Order-dependency question, answered directly
+The user asked whether this should apply "before or after" marking a subject compulsory. Answer: **it applied neither way, before this fix** — nothing in the codebase re-reads `subjects.isCompulsory` at any time after a `class_subjects` link exists, and nothing applied it retroactively when the Catalog flag changed after link creation either. The two flags simply never communicated, regardless of sequencing.
+
+### Fixed
+- `server/routes/class-subjects.js` — `POST /` (single) and `POST /bulk`: when the request doesn't explicitly pass `isCompulsoryForClass` for a subject, the new link now defaults to that subject's own Catalog `isCompulsory` value instead of unconditionally `false`. An explicit `true`/`false` in the request still always wins — a school can still legitimately make one class treat a catalog-compulsory subject as elective.
+- `PUT /class-subjects/:id` (the explicit per-class override endpoint) is unchanged — it already takes an explicit value and should keep doing exactly that.
+
+### Added, not auto-applied to existing data
+`server/scripts/reconcile-catalog-compulsory.js` — finds existing `class_subjects` links where the subject is Catalog-compulsory but the link isn't, across every school or one scoped with `--schoolId=`. Dry run by default; `--apply` writes `isCompulsoryForClass: true` for every link found. Unlike §117's diagnostic, there's no missing fact a human alone can supply here (no "which stream" to guess) — but a currently-`false` link could still be a deliberate, legitimate per-class override rather than this bug, so a human should read the dry-run report before anyone runs `--apply`. Confirmed against live data: **143 mismatches total** — 120 at Trinitas, 18 at Mascit Lab Academy, 5 at the demo school, 0 at Trinity (which has no catalog-compulsory subjects at all).
+
+### Deliberately out of scope
+- No automatic retroactive write to existing data from this fix alone — see the script above; `--apply` is a deliberate, separate, human-reviewed action.
+- No change to `PUT /api/subjects/:id` (the Catalog-level toggle) to cascade into existing curriculum links on save — that would be a second, different design (continuous two-way sync) not requested here; this fix only corrects the default at curriculum-link *creation* time.
+
+### Files
+- `server/routes/class-subjects.js` — `POST /`, `POST /bulk` updated.
+- `server/scripts/reconcile-catalog-compulsory.js` — new.
+- `server/__tests__/routes/class-subjects-catalog-default.test.js` — new, 6 tests.
+- `server/__tests__/reconcile-catalog-compulsory.test.js` — new, 5 tests.
+
+### Verified
+New test files: 11/11 passing. Full suite: 306/306 suites, 3159/3159 tests. Live dry-run against the production database: 143 findings matching the table above exactly.
 
 ## Term billing: transport and extra-curricular on the invoice (v5.169.0)
 

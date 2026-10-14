@@ -272,11 +272,23 @@ router.get('/', authMiddleware, async (req, res) => { // rbac: intentionally ope
 });
 
 /* ── POST /api/class-subjects — assign a single subject to a class ─
-   Body: { classId, subjectId, isCompulsoryForClass? } */
+   Body: { classId, subjectId, isCompulsoryForClass? }
+   When isCompulsoryForClass is omitted, the new curriculum link inherits
+   the subject's own catalog-level `isCompulsory` flag as its starting
+   value (Tier 2 defaults from Tier 1 — see the module header). Confirmed
+   directly against live data (2026-10-15): a school can mark a subject
+   compulsory in the Catalog believing it applies everywhere, while every
+   curriculum link created afterwards defaulted to `false` regardless,
+   because this route never looked at the catalog flag at all — the two
+   "compulsory" concepts never agreed unless an admin also toggled the
+   per-class flag separately in the Curriculum tab. This default makes
+   the common case agree out of the box; an explicit true/false in the
+   request body still always wins, so a class can still legitimately
+   diverge from the catalog default when a school intends that. */
 router.post('/', authMiddleware, rbac('subjects', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
-    const { classId, subjectId, isCompulsoryForClass = false } = req.body;
+    const { classId, subjectId, isCompulsoryForClass } = req.body;
 
     if (!classId || !subjectId) {
       return E.badRequest(res, 'classId and subjectId required');
@@ -296,12 +308,16 @@ router.post('/', authMiddleware, rbac('subjects', 'update'), async (req, res) =>
       .lean();
     if (existing) return E.conflict(res, 'Subject is already in this class curriculum');
 
+    const resolvedCompulsory = typeof isCompulsoryForClass === 'boolean'
+      ? isCompulsoryForClass
+      : Boolean(subject.isCompulsory);
+
     const doc = await tenantModel('class_subjects', tenantContext(req)).create({
       id:                   uuidv4(),
       schoolId,
       classId,
       subjectId,
-      isCompulsoryForClass: Boolean(isCompulsoryForClass),
+      isCompulsoryForClass: resolvedCompulsory,
       isActive:             true,
       createdBy:            userId,
       updatedBy:            userId,
@@ -334,9 +350,10 @@ router.post('/bulk', authMiddleware, rbac('subjects', 'update'), async (req, res
     /* Validate all subject IDs exist and are active */
     const validSubjects = await tenantModel('subjects', tenantContext(req))
       .find({ schoolId, id: { $in: subjectIds }, isActive: { $ne: false } })
-      .select('id')
+      .select('id isCompulsory')
       .lean();
     const validIds = new Set(validSubjects.map(s => s.id));
+    const catalogCompulsoryById = new Map(validSubjects.map(s => [s.id, Boolean(s.isCompulsory)]));
 
     /* Already in curriculum — skip silently */
     const alreadyAssigned = await tenantModel('class_subjects', tenantContext(req))
@@ -352,7 +369,11 @@ router.post('/bulk', authMiddleware, rbac('subjects', 'update'), async (req, res
         schoolId,
         classId,
         subjectId:            s.subjectId,
-        isCompulsoryForClass: Boolean(s.isCompulsoryForClass),
+        /* Same catalog-default inheritance as POST / (see its header
+           comment) — an explicit per-subject flag in the request still wins. */
+        isCompulsoryForClass: typeof s.isCompulsoryForClass === 'boolean'
+          ? s.isCompulsoryForClass
+          : catalogCompulsoryById.get(s.subjectId) ?? false,
         isActive:             true,
         createdBy:            userId,
         updatedBy:            userId,

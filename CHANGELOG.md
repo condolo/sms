@@ -6,6 +6,43 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.187.0] — 2026-10-15 — fix(subjects): a subject marked compulsory in the Catalog never actually made its class curriculum links compulsory
+
+Direct follow-up to v5.186.0, confirmed with a live database query after the user corrected an assumption in that entry ("you have access to the db, mongodb") — this sandbox genuinely can connect to the production MongoDB via `MONGODB_URI` from `.env`, contrary to what was previously believed and documented.
+
+### Root cause, confirmed against live data — not the stream logic, a second independent flag
+v5.186.0's diagnostic (`diagnose-stream-ambiguous-assignments.js`) returned **0 findings** against the live database — the stream-selection logic itself is not the bug. Pivoted to the user's next report ("almost all subjects are compulsory, when i select am not seeing the stream even for the compulsory subjects") and found the real cause: **"compulsory" is two independent flags that have never synced.**
+- `subjects.isCompulsory` — a school-wide Catalog label. Confirmed (again) to have **zero functional effect** anywhere except as a `?isCompulsory=true` list filter.
+- `class_subjects.isCompulsoryForClass` — the per-class Curriculum flag. This is the **only** flag that drives the stream-requirement rule in `teaching-assignments.js` and the Markbook/Attendance whole-class-vs-enrolled-only roster logic.
+
+`POST /class-subjects` and `POST /class-subjects/bulk` always defaulted a new curriculum link's `isCompulsoryForClass` to `false`, regardless of the subject's own Catalog flag. Live query confirms the consequence, across every real school:
+
+| School | Catalog-compulsory subjects | Curriculum links for those subjects | ...NOT marked compulsory for the class |
+|---|---|---|---|
+| Trinitas International School | 19 | 134 | **120** |
+| Mascit Lab Academy | — | — | 18 |
+| Msingi Demo School | — | — | 5 |
+| Trinity International School | 0 | — | 0 |
+
+At Trinitas, a teacher of any of those 19 subjects almost never saw a stream prompt — not because the Markbook ignored the stream rule, but because the system's real, operative flag correctly classified the link as an elective, exactly as designed for electives (whole-class/all-streams roster, no stream required). The Catalog flag that said "compulsory" was never actually consulted by anything that mattered.
+
+### Order-dependency question, answered directly
+User asked whether this should apply "before or after" marking a subject compulsory. Confirmed: **neither, currently** — the two flags have no relationship at any time. Marking a subject compulsory in the Catalog *before* creating its class links did nothing (links still defaulted to `false`); marking it compulsory *after* links already existed also did nothing (no code path re-reads the Catalog flag once a link exists). This is now fixed going forward for the *creation* case — see below — and the *existing-data* case is covered by a new reconciliation script, not an automatic retroactive rewrite (see rationale below).
+
+### Fixed
+- `server/routes/class-subjects.js` — `POST /` and `POST /bulk` now default a new link's `isCompulsoryForClass` to the subject's own Catalog `isCompulsory` flag when the caller doesn't explicitly specify one. An explicit `true`/`false` in the request body still always wins, so a class can still deliberately diverge from the Catalog default (e.g. a subject compulsory school-wide but genuinely elective for one specific class) — this only fixes the common case where nobody set it either way.
+
+### Added
+- `server/scripts/reconcile-catalog-compulsory.js` — finds existing `class_subjects` links whose subject is Catalog-compulsory but the link itself is not, across every school (or one with `--schoolId=`). Dry-run by default (reports only); `--apply` sets `isCompulsoryForClass:true` for every link found. Not auto-applied here — unlike the stream-ambiguous case there's no missing *fact* a human must supply, but a currently-`false` link could still be a deliberate per-class override rather than this bug, so a human reviews the report before anyone runs `--apply`.
+
+### Tests
+- `class-subjects-catalog-default.test.js` — new, 6 tests on the route-level default-inheritance behavior (single POST, bulk POST, explicit-override-wins both directions).
+- `reconcile-catalog-compulsory.test.js` — new, 5 tests on the pure mismatch-decision logic.
+
+Full suite: 306/306 suites, 3159/3159 tests.
+
+---
+
 ## [v5.186.0] — 2026-10-15 — diag(exams): Markbook stream-selection logic confirmed correct; new tool to find assignments that predate the rule that enforces it
 
 Reported directly, urgently ("a disturbing call"): "the markbook does not honor the stream, one teacher maybe teaching only one stream, and even if a teacher has two streams in a class, still the stream has to be selected... I thought we implemented this?!"
