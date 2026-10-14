@@ -6,6 +6,32 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.190.0] — 2026-10-15 — fix(students): a student already assigned to a stream could silently lose it on an unrelated profile edit
+
+Reported directly, against live data: "what makes students who were already assigned in stream leave and now not assigned again" — alongside a screenshot of "Not yet in a stream — 1 student in Year 5 hasn't been assigned to a stream yet. Imani Ngibuini." Resumes and completes a fix that had been drafted and paused earlier this session (uncommitted, untested) for a related symptom, now confirmed live and finished properly.
+
+### Confirmed against live data before touching anything
+Imani Ngibuini's student record: `classId` Year 5 (Trinitas), `streamId: null`, `createdAt: 2026-09-07` (the class's original enrollment batch), but `updatedAt: 2026-10-12` — updated just 3 days before the report, by the same admin account that created her. The class genuinely has 2 active streams (Diamond, Sapphire). This is exactly the shape of the already-drafted, paused fix's root cause: `StudentProfile.jsx`'s edit form had two ways to silently blank a working stream assignment, with nothing anywhere validating the result.
+
+### Root cause — two triggers for the same symptom
+1. **Class reassignment**: `onClassChange` in the edit form always reset `streamId`/`streamName` to `null` the moment the Class dropdown changed, with no requirement to then pick a new stream — "No stream" was a fully valid, silent submission even when the new class has multiple streams.
+2. **Same-class stream clearing (the live-data case)**: the Stream dropdown always offered "No stream" as a selectable option, with nothing stopping an admin from explicitly clearing an *already-correctly-assigned* stream while the student stays in the very same class — editing the profile for any unrelated reason (and perhaps re-touching this field without meaning to) could demote a working assignment to broken, invisibly.
+
+In both cases, the Classes page never exercises the stream-level roster filter, so the admin saw the student "fine" everywhere they happened to check — only a non-floor teacher scoped to one specific stream in the Markbook/Attendance would find the student missing.
+
+### Fixed
+- `client/src/pages/students/StudentProfile.jsx` — submit is now blocked (with an inline error) for either trigger: a genuine class reassignment with 2+ new streams and none chosen, or clearing an already-assigned stream while staying in the same (streamed) class. A new class with exactly one stream is still auto-resolved rather than blocked.
+- `server/routes/students.js`'s `PUT /:id` — the same two guards, server-side (defense in depth — this form's own client-side validation is not the only way to reach this route). Also fixed a gap in the originally-drafted version: when the server auto-resolves or corrects `streamId` (new class has exactly one stream, or a mismatched/stale streamId is replaced), it now also corrects the denormalized `streamName` to match — the draft left it stale, which would have re-introduced a smaller version of the same "two fields disagree" problem this fix exists to close.
+
+### Verified
+New test file: 8/8 passing. Full suite: 310/310 suites, 3183/3183 tests. Live browser walkthrough against the demo school: clearing an already-assigned stream in the same class is now refused inline with no network request sent; restoring it and saving succeeds normally (200 OK).
+
+### Files
+- `client/src/pages/students/StudentProfile.jsx`, `server/routes/students.js` — both guards.
+- `server/__tests__/routes/students-class-stream-reassignment.test.js` — new, 8 tests.
+
+---
+
 ## [v5.189.0] — 2026-10-15 — diag(subjects): a late-joining student can be silently missed when a class's electives were bulk-enrolled earlier
 
 Reported directly: "is there a way a student can appear in the attendance of the teacher but is missing in the teacher's markbook? Maryanne Makena 3D is missing in teacher's markbook... find out if there is a gap a bug or miscommunication."

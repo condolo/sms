@@ -781,6 +781,65 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('students', 'update'), as
     }
     if (!existing) return E.notFound(res, 'Student not found');
 
+    // Class reassignment — reported directly (2026-10-13): a student
+    // moved to a different class via this form vanished from that
+    // class's Markbook/Attendance for any non-floor teacher, while still
+    // showing up fine on the Classes page. Root cause — Markbook/
+    // Attendance scope a non-floor teacher to their own assigned STREAM
+    // within the class (teaching_assignments requires one whenever the
+    // class has streams at all), but nothing here ever re-validated
+    // streamId against the NEW class — a stale value from the old class,
+    // or simply null, both silently passed through, and an admin/floor
+    // role viewing the Classes page never hits that stream filter at
+    // all, so the gap was invisible from there. Defense in depth for the
+    // client's own validation (StudentProfile.jsx): if the new class has
+    // exactly one stream, resolve it automatically rather than block;
+    // if it has more than one, a real streamId belonging to that class
+    // is required.
+    if (data.classId !== undefined && data.classId !== existing.classId) {
+      const classStreams = await tenantModel('streams', tenantContext(req))
+        .find({ schoolId, classId: data.classId }).select('id name').lean();
+      if (classStreams.length > 0) {
+        // Dual ID forms — a stream pre-dating the UUID `id` field has only
+        // Mongo's own _id; the client sends whichever one it was given.
+        const match = data.streamId
+          ? classStreams.find(s => s.id === data.streamId || String(s._id) === data.streamId)
+          : null;
+        if (match) {
+          data.streamId   = match.id ?? String(match._id); // normalize to the canonical form
+          data.streamName = match.name ?? null; // keep the denormalized name in lockstep — never let it point at a different stream than streamId
+        } else if (classStreams.length === 1) {
+          const only = classStreams[0];
+          data.streamId   = only.id ?? String(only._id);
+          data.streamName = only.name ?? null;
+        } else {
+          return E.badRequest(res, 'This class has more than one stream — pick one for the student before saving, or they will be invisible to that stream\'s teacher in the Markbook and Attendance.');
+        }
+      } else if (data.streamId === undefined) {
+        data.streamId   = null; // the new class has no streams — never carry over a stale one from the old class
+        data.streamName = null;
+      }
+    }
+
+    // Same gap, different trigger — reported directly (2026-10-15):
+    // a student already correctly assigned to a stream was later found
+    // with streamId:null while still in the SAME class, after an
+    // unrelated profile edit. The class dropdown's own guard above only
+    // fires when classId itself changes; this form's "No stream" option
+    // is always selectable regardless, with nothing stopping an explicit
+    // clear from silently demoting an already-stream-assigned student.
+    // Nothing in this product ever asks an admin to deliberately
+    // unassign a student FROM a stream while keeping them in the same
+    // (streamed) class, so treat an explicit null here as the same
+    // mistake, not a deliberate choice.
+    if (data.classId === undefined && data.streamId === null && existing.streamId) {
+      const sameClassStreams = await tenantModel('streams', tenantContext(req))
+        .find({ schoolId, classId: existing.classId }).select('id').lean();
+      if (sameClassStreams.length > 0) {
+        return E.badRequest(res, 'This class has streams — a student already assigned to one cannot be cleared to "No stream" here.');
+      }
+    }
+
     // Admission number — reported directly (2026-09): "how do you edit
     // admission number of a student, if the system picks automatically."
     // The Student Profile edit form has always HAD this field, but it

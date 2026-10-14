@@ -6611,6 +6611,41 @@ For each finding, go to Subjects → Curriculum → Enroll Students for the list
 ### Verified
 New test file: 6/6 passing. Full suite: 309/309 suites, 3175/3175 tests. Live dry-run against the production database: 7 findings across Trinitas, matching the table above exactly.
 
+## 121. Student Stream Reassignment Guard, Completed (v5.190.0)
+
+### Reported problem
+Live-data report, with a screenshot: "Not yet in a stream — 1 student in Year 5 hasn't been assigned to a stream yet. Imani Ngibuini." Then, directly: "what makes students who were already assigned in stream leave and now not assigned again."
+
+### Context — this resumes a paused, uncommitted fix from earlier in this same session
+A fix for a related symptom ("a student reassigned to a different class vanished from that class's Markbook/Attendance") had already been drafted — client (`StudentProfile.jsx`) and server (`students.js`) — but was explicitly paused mid-session (architecture discussion took priority) and left uncommitted and untested. This report confirmed it live and gave the reason to finish it properly.
+
+### Confirmed against live data first
+Imani Ngibuini: `classId` = Year 5 (Trinitas, 2 active streams: Diamond, Sapphire), `streamId: null`, `createdAt: 2026-09-07` (the class's original batch), `updatedAt: 2026-10-12` (3 days before the report, same admin as `createdBy`). This is the exact shape the paused fix targeted — a real, recent edit silently zeroed a working stream assignment.
+
+### Root cause — TWO triggers, only one of which the paused draft covered
+1. **Class reassignment** (the draft's original target): `onClassChange` always reset `streamId`/`streamName` to `null`, with nothing requiring a new stream to be picked before save — "No stream" was a silently valid submission even for a multi-stream class.
+2. **Same-class stream clearing** (newly identified while finishing this fix — almost certainly Imani's actual trigger, since nothing suggests her class ever changed): the Stream dropdown always offers "No stream" as an option, and nothing stopped an admin from explicitly clearing an *already-correct* assignment while the student stayed in the exact same class — e.g. touching the field by mistake during an unrelated edit.
+
+Both triggers are invisible from the Classes page (never applies the stream-level roster filter) — only a non-floor teacher scoped to one stream in the Markbook/Attendance encounters the gap.
+
+### Fixed
+- `client/src/pages/students/StudentProfile.jsx`:
+  - (Already drafted) `classReassigned` tracking + auto-pick when the new class has exactly one stream + submit-blocking validation when 2+ streams exist and none is chosen.
+  - (New) A second submit guard: if `!classReassigned` but `student.streamId` (the ORIGINAL value) was truthy and `form.streamId` is now empty while the class has any streams, block with "a student already assigned to one can't be cleared to 'No stream' here."
+- `server/routes/students.js`'s `PUT /:id`:
+  - (Already drafted, now also fixed) When `classId` changes: resolves/requires a real stream for the NEW class exactly as before, but now **also** overwrites `streamName` to the server-resolved canonical name whenever it sets/corrects `streamId` — the draft left `streamName` stale in this path, which on review would have re-introduced a smaller version of the same "two fields disagree" bug this exists to prevent. Confirmed: `streamName` is purely denormalized, never derived from the id elsewhere, so nothing else would have caught a drift between the two.
+  - (New) When `classId` is unchanged but `streamId` is explicitly sent as `null` while the existing record already had a real one: refused outright if the (unchanged) class has any active streams at all. Nothing in this product ever asks for a deliberate "remove from stream while staying in a streamed class," so an explicit null here is always treated as the same mistake, not a feature.
+
+### Deliberately out of scope
+- No retroactive scan/fix for other students who may already be in Imani's exact state (null streamId, multi-stream class, but genuinely legacy/pre-dating any validation) — this guard only prevents the write going forward; identifying every already-affected student would need its own read-only diagnostic, not asked for here.
+
+### Files
+- `client/src/pages/students/StudentProfile.jsx`, `server/routes/students.js`.
+- `server/__tests__/routes/students-class-stream-reassignment.test.js` — new, 8 tests (class-change auto-resolve/block/normalize-streamName/stale-stream-rejected/no-streams-clears, same-class explicit-clear-refused/unrelated-edit-unaffected/legacy-no-stream-unblocked).
+
+### Verified
+New test file: 8/8 passing. Full suite: 310/310 suites, 3183/3183 tests. Live browser walkthrough (demo school, KG class, single stream KG1): clearing the stream while staying in KG is refused inline, zero network requests fired; restoring the stream and saving succeeds (`PUT` → 200).
+
 ## Term billing: transport and extra-curricular on the invoice (v5.169.0)
 
 **Status before this change:** a route's `feePerTerm` was stored but no code read it for billing. `transport_assignments` was read by nothing in finance. Activities had no model. Invoices came only from fee structures.

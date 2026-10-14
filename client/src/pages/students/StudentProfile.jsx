@@ -579,14 +579,46 @@ function OverviewTab({ student, houses, houseName, editing, saving, onSave, onCa
   });
   const streamList = form.classId ? (streamsData?.data ?? []) : [];
 
+  // Reported directly: a student reassigned to a different class via this
+  // form disappeared from that class's Markbook/Attendance for any
+  // non-floor teacher, despite showing up fine on the Classes page. Root
+  // cause — Markbook/Attendance scope a non-floor teacher to their own
+  // assigned STREAM within the class (teaching_assignments requires one
+  // whenever the class has streams at all), but onClassChange above
+  // always resets streamId to null, and "No stream" was a fully valid,
+  // silent choice even when the new class has streams — an admin/floor
+  // role viewing the Classes page never hits that stream filter at all,
+  // so the student looked present everywhere they happened to check.
+  // classReassigned only flips true from an actual class-dropdown change
+  // in THIS editing session — an unrelated edit of an existing student
+  // who already has no stream (legacy data, untouched here) is never
+  // blocked by this.
+  const [classReassigned, setClassReassigned] = useState(false);
+  const [streamError, setStreamError] = useState('');
+
   function onClassChange(classId) {
     const c = classList.find(cl => (cl.id ?? cl._id) === classId);
     setForm(f => ({ ...f, classId, className: c?.name ?? '', streamId: null, streamName: null }));
+    setClassReassigned(true);
+    setStreamError('');
   }
   function onStreamChange(streamId) {
     const s = streamList.find(st => (st.id ?? st._id) === streamId);
     setForm(f => ({ ...f, streamId: streamId || null, streamName: streamId ? (s?.name ?? '') : null }));
+    setStreamError('');
   }
+
+  // The new class has exactly one stream — auto-pick it rather than
+  // leaving an ambiguous "No stream" an admin has to notice and fix.
+  // Only after a genuine reassignment (never overrides an existing,
+  // already-chosen value on an ordinary re-render).
+  useEffect(() => {
+    if (classReassigned && streamList.length === 1 && !form.streamId) {
+      const only = streamList[0];
+      setForm(f => ({ ...f, streamId: only.id ?? only._id, streamName: only.name ?? '' }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [classReassigned, streamList]);
 
   /* ── View mode ── */
   if (!editing) {
@@ -645,7 +677,23 @@ function OverviewTab({ student, houses, houseName, editing, saving, onSave, onCa
 
   /* ── Edit mode ── */
   return (
-    <form onSubmit={e => { e.preventDefault(); onSave(form); }} className="space-y-4">
+    <form onSubmit={e => {
+      e.preventDefault();
+      if (classReassigned && streamList.length > 0 && !form.streamId) {
+        setStreamError('This class has streams — pick one before saving, or the student will be invisible to that stream\'s teacher in the Markbook and Attendance.');
+        return;
+      }
+      // Same gap, different trigger — reported directly: a student already
+      // assigned to a stream was found cleared to "No stream" while still
+      // in the SAME class, after an unrelated edit. Nothing in this form
+      // ever asks for a deliberate "remove from stream" while keeping the
+      // student in a streamed class, so block it the same way.
+      if (!classReassigned && student.streamId && !form.streamId && streamList.length > 0) {
+        setStreamError('This class has streams — a student already assigned to one can\'t be cleared to "No stream" here.');
+        return;
+      }
+      onSave(form);
+    }} className="space-y-4">
       <div className="grid gap-4 md:grid-cols-2">
         {/* Personal */}
         <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
@@ -710,13 +758,14 @@ function OverviewTab({ student, houses, houseName, editing, saving, onSave, onCa
             </select>
           </FField>
           {form.classId && streamList.length > 0 && (
-            <FField label="Stream">
+            <FField label="Stream" hint={streamList.length > 1 ? "Required — this class has more than one stream" : undefined}>
               <select className={iCls()} value={form.streamId ?? ''} onChange={e => onStreamChange(e.target.value)}>
                 <option value="">No stream</option>
                 {streamList.map(s => (
                   <option key={s.id ?? s._id} value={s.id ?? s._id}>{s.name}</option>
                 ))}
               </select>
+              {streamError && <p className="text-[11px] text-red-600 mt-1">{streamError}</p>}
             </FField>
           )}
           <FField label="House">
