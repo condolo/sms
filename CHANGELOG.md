@@ -6,6 +6,32 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.186.0] — 2026-10-15 — diag(exams): Markbook stream-selection logic confirmed correct; new tool to find assignments that predate the rule that enforces it
+
+Reported directly, urgently ("a disturbing call"): "the markbook does not honor the stream, one teacher maybe teaching only one stream, and even if a teacher has two streams in a class, still the stream has to be selected... I thought we implemented this?!"
+
+### Investigated before assuming anything
+Compared the Markbook's stream-selection logic (`ExamsPage.jsx`'s `subjectStreams`/`needsStreamSelection`) line-by-line against Attendance's equivalent, confirmed working. Findings:
+- **The logic itself is correct and already matches Attendance's pattern** — Class and Subject dropdowns are both scoped to the teacher's real assignments (`assessmentScope: true`, same mechanism Attendance's `attendanceScope: true` uses), and the stream picker requires a selection whenever 2+ real per-stream `teaching_assignments` rows exist for that teacher+class+subject, auto-resolves silently at exactly 1, and blocks mark entry until resolved. No regression found in this session's recent commits — confirmed via `git log -p` that none of them touched this code path.
+- **One real design difference from Attendance, not a bug**: the Markbook's stream picker is per-*subject*, not per-class, because a teacher's stream assignment in the Markbook can differ by subject. It only appears after a Subject is also selected — so a screenshot showing Class picked but Subject still blank correctly shows no stream dropdown yet.
+- **The likely real cause, identified by re-reading `teaching-assignments.js`'s own "Stream rule"**: `POST /teaching-assignments` has correctly refused to create a streamless assignment for a compulsory subject in a multi-stream class for some time — but only at creation time, going forward. Any assignment row saved *before* that validation existed can still have no `streamId`, and the Markbook's stream logic only counts rows that actually have one. Such a legacy row looks exactly like a legitimate whole-class grant: no stream prompt ever appears, and the teacher sees the whole class's roster. Same bug class as the `timetabler` responsibility-tag collision closed two days earlier — a rule added later, with no backfill for data that predates it.
+
+### Added
+- `server/scripts/diagnose-stream-ambiguous-assignments.js` — read-only, finds every `teaching_assignments` row matching exactly this condition (compulsory subject, multi-stream class, no `streamId`) and reports it. Deliberately does **not** auto-fix anything — which stream an assignment should actually name is a fact only the admin who knows the real timetable can supply; guessing would risk silently reassigning a teacher to the wrong stream, worse than today's ambiguity.
+
+### Action required (cannot be done from this environment — no database access)
+```
+node server/scripts/diagnose-stream-ambiguous-assignments.js --schoolId=<id>
+```
+For each finding: go to the listed class's Assignments, remove the ambiguous whole-class row, and create the correct per-stream assignment(s) instead.
+
+### Tests
+- `diagnose-stream-ambiguous-assignments.test.js` — new, 7 tests on the pure decision logic.
+
+Full suite: 304/304 suites, 3148/3148 tests.
+
+---
+
 ## [v5.185.0] — 2026-10-14 — fix(report-cards): saving a class teacher remark gave no success or error feedback — it was failing silently
 
 Reported directly: "when saving the class teacher comments under reports there is no success message or the button doesn't change to confirm saved."

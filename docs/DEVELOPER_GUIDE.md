@@ -6454,6 +6454,38 @@ The publish-visibility question: `ReportCardsTab.jsx`'s Publish button is gated 
 ### Verified
 Both files confirmed to compile via a dev-server dynamic import. Client-only change — no server-side logic touched.
 
+## 117. Markbook Stream-Selection: Logic Confirmed Correct; New Tool for Assignments That Predate the Rule Enforcing It (v5.186.0)
+
+### Reported problem
+Raised directly, urgently: "I have just received a disturbing call that the markbook does not honor the stream, one teacher maybe teaching only one stream, and even if a teacher has two streams in a class, still the stream has to be selected- the same way attendance works, I thought we implemented this?! and only the classes and subjects assigned appear in the filters as attendance." A screenshot showed the Markbook's "Mark Entry Context" panel with Class picked but no visible Stream field.
+
+### Investigation, line-by-line against Attendance (confirmed working), before assuming anything was broken
+- **Class/Subject scoping**: `ExamsPage.jsx:639-641`'s class query already uses `assessmentScope: true` — the same server-enforced flag (`server/routes/classes.js`, `server/routes/streams.js`, both branching on `assessmentScope === 'true'`) Attendance's `attendanceScope: true` uses. Subject list, for a teaching-role caller, is built from that teacher's own `teaching_assignments` rows for the selected class — not a school-wide list. Confirmed real, not a no-op.
+- **Stream requirement logic**: `subjectStreams`/`needsStreamSelection` (`ExamsPage.jsx`, around line 699-708) is driven by REAL per-stream `teaching_assignments` rows for this teacher+class+**subject** — `needsStreamSelection = !isElectiveSubject && subjectStreams.length > 1`. It correctly requires a stream at 2+ assigned streams, auto-resolves silently at exactly 1 (`activeStreamId` auto-fills), and the grid/marks queries stay disabled (`canQuery`) until resolved. **No bug in the condition itself.**
+- **One real, deliberate design difference from Attendance** (not a bug): the Markbook's stream picker depends on BOTH class and subject (a teacher's stream assignment can differ by subject), where Attendance's depends only on class. The Stream field renders in "Row 2" alongside Subject, only once a Subject is picked — so the reported screenshot (Subject still blank) correctly shows no Stream field yet; that alone doesn't demonstrate a bug.
+- **No regression**: confirmed via `git log -p` that none of this session's recent commits touching `ExamsPage.jsx` (the Kindergarten Templates relocation, the mark-submission redesign) changed any line of `MarkbookTab`'s class/subject/stream picker code. The per-subject stream logic itself was introduced deliberately in an earlier commit (`e05f06a`), not accidentally.
+- **The likely real cause** — re-reading `teaching-assignments.js`'s own "Stream rule" (§ "Stream rule" comment, `POST /`): it correctly refuses to create a new assignment with no `streamId` when the subject is compulsory for a class that has streams — **but only at creation time, going forward**. Any assignment row saved BEFORE that validation existed can still have `streamId: null`. The Markbook's `subjectStreams` computation only counts rows that actually have a `streamId` — a legacy streamless row is therefore indistinguishable, to the Markbook, from a deliberate whole-class grant: no stream prompt ever appears, and the teacher sees the entire class's roster instead of just their stream's. This is the exact same bug class as §114's `timetabler` responsibility-tag collision, closed two days earlier in this same stretch: a validation rule added later, with no backfill for data that predates it.
+
+### Added, not fixed in place
+`server/scripts/diagnose-stream-ambiguous-assignments.js` — read-only (never writes), finds every `teaching_assignments` row where: the row has no `streamId`, the subject is `isCompulsoryForClass` per `class_subjects` for that class, and the class has 2+ active streams. Pure decision logic (`isStreamAmbiguous`) exported and unit-tested the same way this codebase's other diagnostic/migration scripts are (`migrate-staff-responsibility-rename.js`, `migrate-legacy-deputy-role.js`). Deliberately does **not** auto-fix anything, unlike those lossless-rename scripts — which specific stream an ambiguous assignment should actually name is a fact only the admin who knows the real timetable can supply; auto-guessing risks silently reassigning a teacher to the wrong stream, strictly worse than today's visible ambiguity.
+
+### Deliberately out of scope
+- No code change to the Markbook's stream-selection logic itself — it was confirmed correct, not patched.
+- No automatic data migration — same reasoning as `migrate-legacy-deputy-role.js`'s own "never auto-resolved" findings: this needs a human decision per assignment, not a script's guess.
+
+### Action required (cannot be done from this environment — no database access)
+```
+node server/scripts/diagnose-stream-ambiguous-assignments.js --schoolId=<id>
+```
+For each finding: go to the listed class's Assignments, remove the ambiguous whole-class row, and create the correct per-stream assignment(s) instead.
+
+### Files
+- `server/scripts/diagnose-stream-ambiguous-assignments.js` — new.
+- `server/__tests__/diagnose-stream-ambiguous-assignments.test.js` — new, 7 tests.
+
+### Verified
+New test file: 7/7 passing. Full suite: 304/304 suites, 3148/3148 tests.
+
 ## Term billing: transport and extra-curricular on the invoice (v5.169.0)
 
 **Status before this change:** a route's `feePerTerm` was stored but no code read it for billing. `transport_assignments` was read by nothing in finance. Activities had no model. Invoices came only from fee structures.
