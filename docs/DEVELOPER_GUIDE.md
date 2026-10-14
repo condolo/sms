@@ -6430,6 +6430,30 @@ Raised directly, with a screenshot of the "Select a subject…" dropdown: the pi
 ### Verified
 Both files confirmed to compile via a dev-server dynamic import. Client-only change — no server-side logic touched, so no Jest suite impact.
 
+## 116. Saving a Class Teacher Remark Gave No Success or Error Feedback — It Was Failing Silently (v5.185.0)
+
+### Reported problem
+Raised directly, after asking where a class teacher enters comments: "when saving the class teacher comments under reports there is no success message or the button doesn't change to confirm saved." A second, related question in the same message: why can't a class-teacher account see where to publish the report card.
+
+### Root cause, confirmed before changing anything
+- `StudentReportCard.jsx`'s `handleSave` (numeric report preview — the Class Teacher / Principal remark save, `onSaveComment` threading down from `ReportCardsTab.jsx`'s `mutateAsync: saveComment`) wrapped the save in `try { ... } finally { ... }` with **no `catch`**. `saveComment` itself has no `onError` either (confirmed by reading `ReportCardsTab.jsx`'s mutation definition). So a rejected save — most likely the server's existing `canWriteClassRemark` 403 ("Only this stream's form teacher can write the class teacher remark") if the account isn't actually assigned as that specific stream's Form Teacher — threw straight out of the async function, uncaught. `setSaved(true)` correctly never ran (so the button correctly never confirmed), but nothing surfaced *why*, matching the report exactly: "no success message."
+- `KgStudentReportCard.jsx`'s equivalent (`saveNow`) had the identical missing-catch bug, and on top of that **never had a success-confirmation state at all** — its button only ever rendered "Save remarks" or "Saving…," so even a successful save looked like nothing happened.
+- Confirmed this file already has the correct, established pattern one function away: `saveSubjectComment` (same file, `StudentReportCard.jsx`) already does `try { ... } catch (err) { setSubjectError(err?.message ?? '...') }` and renders it inline. `handleSave` was the one inconsistent outlier — not a new pattern invented here, just extended to match what the file already does correctly elsewhere.
+
+### Fixed
+- Both components now catch and display the server's real error message inline, next to the Save button — the exact 403 reason (or any other failure) is now visible instead of silently swallowed.
+- `KgStudentReportCard.jsx` gained a `saved` state + "Saved ✓" flash, matching `StudentReportCard.jsx`'s existing pattern, since it never had one.
+
+### Separately clarified, not treated as a bug
+The publish-visibility question: `ReportCardsTab.jsx`'s Publish button is gated by a **hardcoded** `['admin','superadmin'].includes(role)` check — client-side only, never consulting Roles & Permissions. The server's own `POST /publish` route is gated by the ordinary, flexible `rbac('grades','create')` — so a school that explicitly granted, say, a Deputy Principal the `grades:create` permission via Roles & Permissions would still never see the button, since the client never checks that grant. This is a real inconsistency (client stricter than server, and not governed by the same permission system everything else in this app uses) but **not fixed here** — whether Publish should ever be grantable to a non-floor role is a product decision, flagged for the user rather than decided unilaterally.
+
+### Files
+- `client/src/pages/grades/components/StudentReportCard.jsx` — `handleSave` gained a `catch` + `commentError` state, rendered inline.
+- `client/src/pages/grades/components/KgStudentReportCard.jsx` — `saveNow` gained a `catch` + `commentError`, and a `saved` confirmation state it never had.
+
+### Verified
+Both files confirmed to compile via a dev-server dynamic import. Client-only change — no server-side logic touched.
+
 ## Term billing: transport and extra-curricular on the invoice (v5.169.0)
 
 **Status before this change:** a route's `feePerTerm` was stored but no code read it for billing. `transport_assignments` was read by nothing in finance. Activities had no model. Invoices came only from fee structures.

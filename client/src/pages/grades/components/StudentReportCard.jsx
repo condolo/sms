@@ -220,6 +220,13 @@ export default function StudentReportCard({
 
   const [saving, setSaving] = useState(false);
   const [saved,  setSaved]  = useState(false);
+  // Reported directly: saving the class teacher remark showed no success
+  // message and the button never changed — handleSave had no catch block
+  // at all, so a rejected save (e.g. 403 "Only this stream's form teacher
+  // can write the class teacher remark") threw silently: setSaved(true)
+  // never ran (correct), but nothing told the caller WHY either. Same
+  // pattern saveSubjectComment below already uses correctly.
+  const [commentError, setCommentError] = useState(null);
   const set = (key) => (val) => setComment(c => ({ ...c, [key]: val }));
 
   // Subject comments are never sent in this bulk save. Each one is saved on its
@@ -227,11 +234,14 @@ export default function StudentReportCard({
   const handleSave = useCallback(async () => {
     if (!onSaveComment) return;
     setSaving(true);
+    setCommentError(null);
     try {
       const { subjectComments: _subjectComments, ...rest } = comment;
       await onSaveComment(rest);
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
+    } catch (err) {
+      setCommentError(err?.message ?? 'Could not save — please try again.');
     } finally {
       setSaving(false);
     }
@@ -463,7 +473,8 @@ export default function StudentReportCard({
           )}
 
           {onSaveComment && (
-            <div className="flex justify-end pt-1">
+            <div className="flex justify-end items-center gap-2 pt-1">
+              {commentError && <p className="text-xs text-red-600">{commentError}</p>}
               <button onClick={handleSave} disabled={saving}
                 className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-60 transition">
                 {saved

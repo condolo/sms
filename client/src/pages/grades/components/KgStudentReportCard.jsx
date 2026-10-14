@@ -47,6 +47,14 @@ export default function KgStudentReportCard({
     principalRemark:    draftComment?.principalRemark    ?? '',
   });
   const [saving, setSaving] = useState(false);
+  const [saved,  setSaved]  = useState(false);
+  // Reported directly: saving a KG class teacher remark showed no success
+  // message and the button never changed — there was no "saved" state at
+  // all here (unlike StudentReportCard.jsx's equivalent), and no catch
+  // block either, so a rejected save (e.g. 403 "Only this stream's form
+  // teacher can write the class teacher remark") failed completely
+  // silently, with nothing telling the caller it had failed, let alone why.
+  const [commentError, setCommentError] = useState(null);
 
   useEffect(() => {
     setComment({
@@ -60,7 +68,16 @@ export default function KgStudentReportCard({
   const saveNow = useCallback(async () => {
     if (!onSaveComment) return;
     setSaving(true);
-    try { await onSaveComment(comment); } finally { setSaving(false); }
+    setCommentError(null);
+    try {
+      await onSaveComment(comment);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch (err) {
+      setCommentError(err?.message ?? 'Could not save — please try again.');
+    } finally {
+      setSaving(false);
+    }
   }, [comment, onSaveComment]);
 
   return (
@@ -153,13 +170,14 @@ export default function KgStudentReportCard({
         <Field label="Class Teacher Remarks" value={comment.classTeacherRemark} onChange={set('classTeacherRemark')} multiline />
         <Field label="Principal / Section Head Remarks" value={comment.principalRemark} onChange={set('principalRemark')} multiline />
       </div>
-      <div className="px-5 pb-3.5 flex justify-end">
+      <div className="px-5 pb-3.5 flex justify-end items-center gap-2">
+        {commentError && <p className="text-[11px] text-red-600">{commentError}</p>}
         <button
           onClick={saveNow}
           disabled={saving}
           className="text-[11px] font-medium text-indigo-600 hover:text-indigo-700 disabled:opacity-50"
         >
-          {saving ? 'Saving…' : 'Save remarks'}
+          {saved ? 'Saved ✓' : saving ? 'Saving…' : 'Save remarks'}
         </button>
       </div>
     </div>

@@ -6,6 +6,29 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.185.0] — 2026-10-14 — fix(report-cards): saving a class teacher remark gave no success or error feedback — it was failing silently
+
+Reported directly: "when saving the class teacher comments under reports there is no success message or the button doesn't change to confirm saved."
+
+### Root cause
+`StudentReportCard.jsx`'s `handleSave` (the numeric report preview's Class Teacher / Principal remark save) had a `try { ... } finally { ... }` with **no `catch` block at all** — a rejected save (most likely the server's existing 403, "Only this stream's form teacher can write the class teacher remark," if the account isn't assigned as that exact stream's Form Teacher) threw straight out of the function uncaught. `setSaved(true)` correctly never ran, but nothing told the caller the save had failed, let alone why — from the user's side this looked exactly like "nothing happened." `KgStudentReportCard.jsx`'s equivalent (`saveNow`) had the same missing-catch bug, and additionally **never had a success state to begin with** — its button only ever showed "Save remarks" or "Saving…," never a confirmation. Confirmed this file already has the correct, established pattern one function away: `saveSubjectComment` in the same file catches and surfaces `err.message` — `handleSave` was the one inconsistent outlier.
+
+### Fixed
+- Both components now catch the error and show the server's real message inline next to the Save button (e.g. the exact 403 reason), instead of failing silently.
+- `KgStudentReportCard.jsx` gained the same "Saved ✓" confirmation flash `StudentReportCard.jsx` already had.
+
+### Separately clarified, not a bug
+Also asked: why a class-teacher account can't see where to publish. Confirmed by reading the code — `ReportCardsTab.jsx`'s Publish button is gated by a hardcoded `['admin','superadmin'].includes(role)` check, client-side only. This is deliberately stricter than the server's own `POST /publish` route, which accepts any role holding the flexible `grades:create` permission (grantable via Roles & Permissions) — a school that wanted to grant Publish to, say, a Deputy Principal via Roles & Permissions couldn't, since the button itself would stay invisible to them regardless. Flagged, not changed — whether to loosen this to match the server's own permission is a product decision, not something to decide unilaterally.
+
+### Files
+- `client/src/pages/grades/components/StudentReportCard.jsx` — `handleSave` gained a catch + inline error.
+- `client/src/pages/grades/components/KgStudentReportCard.jsx` — `saveNow` gained a catch, inline error, and a "saved" confirmation state it never had.
+
+### Verified
+Both files confirmed to compile via a dev-server dynamic import. Client-only change.
+
+---
+
 ## [v5.184.0] — 2026-10-14 — fix(exams): Kindergarten Template's subject picker offered every subject in the school, not just the assigned class's own curriculum
 
 Raised directly, with a screenshot of "Select a subject…" showing a full school-wide list: the subject picker should only ever offer subjects actually in the curriculum of the class(es) this template is assigned to, and the form should ask for the class before asking for subjects, not after.
