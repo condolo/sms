@@ -6577,6 +6577,40 @@ Client: `ExamsPage.jsx`'s `subjectsList` (admin/non-teacher branch) now filters 
 ### Verified
 New test files: 10/10 passing. Full suite: 308/308 suites, 3169/3169 tests. Live browser verification against the demo school as described above.
 
+## 120. Diagnose Missed Elective Enrollment: Attendance vs. Markbook Roster Divergence (v5.189.0)
+
+### Reported problem
+"is there a way a student can appear in the attendance of the teacher but is missing in the teacher's markbook? for this case Maryanne Makena 3D is missing in teachers markbook, find out if there is gap a bug os miscommunication someohere...we already have data in the system, which we cannot afford to corrupt."
+
+### Investigation
+No student named "Maryanne Makena" exists; the only Maryanne in the entire database is **Maryanne Kabui**, Year 3, stream "Diamond" — "3D" reads as shorthand for Year 3 / Diamond (first letter D), at Trinitas International School. Confirmed, not assumed:
+- **Attendance** (`classesApi`/`streamsApi`'s roster routes) has no subject concept at all — any active student in the class/stream always appears, unconditionally.
+- **The Markbook's elective roster** (`classes.js`'s `GET /:id/students?electiveSubjectId=`, backed by `elective-scope.js`'s `enrolledStudentIds`) is deliberately gated by `student_subjects` enrollment — by design, since an elective's whole point is "only the students who take it."
+
+Both are working correctly. The real gap: nothing in the student-admission or class-transfer flow (`students.js` — confirmed via grep, never touches `student_subjects`) auto-enrolls a new or transferred student into their class's elective subjects. Enrollment only ever happens via a separate, manual UI action (`student-subjects.js`'s own routes, the Subjects page's "Enroll" button). When a class's electives get bulk-enrolled once (e.g. at the start of the setup), any student added to that class LATER has no mechanism — automatic or even a reminder — ever enrolling them.
+
+Confirmed directly against live data: Year 3 at Trinitas has 47 active students; 45 are enrolled in the class's one elective (Kiswahili). The 2 not enrolled — Maryanne Kabui and Wren Mwanzia — were both created 2026-09-22/23, well after the rest of the class's apparent baseline enrollment pass (2026-09-07). A full scan across the school found the identical pattern in **7 of 9 classes** that have this elective — 18 students total, each a small minority (1–6 students) within an otherwise 85–96%-enrolled class. Same bug class as every other "one-time manual action, no backfill for data created afterward" finding this session (the `timetabler` rename, the stream-ambiguous assignments, the catalog/curriculum compulsory mismatch).
+
+### Added, not fixed in place
+`server/scripts/diagnose-missed-elective-enrollment.js` — read-only (never writes). Pure decision logic (`findLikelyMissedEnrollments`) flags a class/subject pair only when overall enrollment coverage is already high (≥80% default, `--minCoverage=`) but a few specific students are missing — the statistical signature of an accidental miss, not a genuine low-uptake choice-elective (which this script correctly leaves alone, since forcing enrollment there would override real student choice). Deliberately does **not** auto-enroll anyone, for the same reason the stream-ambiguous and catalog-mismatch diagnostics don't auto-fix: only a human who knows the school's real elective policy can confirm a flagged student was missed rather than deliberately opted out.
+
+### Deliberately out of scope
+- No change to the student-admission/transfer flow to auto-enroll into electives — that's a bigger product decision (should a new student inherit ALL the class's electives, or go through the same opt-in flow as everyone else?) not asked for here.
+- No auto-fix of the 18 already-flagged students — same "human must decide" precedent as every other diagnostic this session.
+
+### Action required
+```
+node server/scripts/diagnose-missed-elective-enrollment.js --schoolId=sch_trinitas-tis_mrrikecu
+```
+For each finding, go to Subjects → Curriculum → Enroll Students for the listed class/subject and confirm whether the named student(s) should be enrolled.
+
+### Files
+- `server/scripts/diagnose-missed-elective-enrollment.js` — new.
+- `server/__tests__/diagnose-missed-elective-enrollment.test.js` — new, 6 tests.
+
+### Verified
+New test file: 6/6 passing. Full suite: 309/309 suites, 3175/3175 tests. Live dry-run against the production database: 7 findings across Trinitas, matching the table above exactly.
+
 ## Term billing: transport and extra-curricular on the invoice (v5.169.0)
 
 **Status before this change:** a route's `feePerTerm` was stored but no code read it for billing. `transport_assignments` was read by nothing in finance. Activities had no model. Invoices came only from fee structures.

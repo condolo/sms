@@ -6,6 +6,33 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.189.0] — 2026-10-15 — diag(subjects): a late-joining student can be silently missed when a class's electives were bulk-enrolled earlier
+
+Reported directly: "is there a way a student can appear in the attendance of the teacher but is missing in the teacher's markbook? Maryanne Makena 3D is missing in teacher's markbook... find out if there is a gap a bug or miscommunication."
+
+### Investigated before assuming anything
+Attendance and the Markbook were both confirmed working exactly as designed — **not a code bug in either**:
+- Attendance's roster is class/stream-scoped only, with no subject concept — an active student always appears there.
+- The Markbook's elective roster is deliberately enrollment-gated (`student_subjects`) — correct for a genuine per-student elective choice.
+
+The real gap, confirmed against live data: assigning a student to a class never auto-enrols them in that class's elective subjects — enrollment is a fully separate, manual step, with no backfill when a student joins after the rest of the class was already bulk-enrolled. Identified student (Maryanne **Kabui**, not Makena — the only Maryanne in the database, Year 3 "Diamond" stream — "3D" was shorthand for Year 3 / Diamond): of Year 3's 47 active students at Trinitas International School, 45 are enrolled in the class's one elective (Kiswahili); the 2 not enrolled were both created 2026-09-22/23, well after the rest of the class's baseline enrollment (2026-09-07) — consistent with "joined after the bulk pass, never individually enrolled afterward." A full scan found the same pattern in **7 of 9 Trinitas classes** with this elective, 18 students total, always a small minority within an otherwise near-fully-enrolled class — the same bug class as every other "one-time action with no backfill" gap found this session.
+
+### Added
+`server/scripts/diagnose-missed-elective-enrollment.js` — read-only, never writes. Finds elective subjects where coverage among a class's active students is high (≥80% by default, `--minCoverage=` to adjust) but a few specific students are missing — the statistical signature of "accidentally skipped," not "genuinely declined." Deliberately does **not** auto-enroll anyone: a low-coverage elective is a real per-student choice, and guessing would risk enrolling a student in something they deliberately opted out of. Every finding needs a human who knows the school's real elective policy to confirm via Subjects → Curriculum → Enroll Students.
+
+### Action required
+```
+node server/scripts/diagnose-missed-elective-enrollment.js --schoolId=sch_trinitas-tis_mrrikecu
+```
+Review each of the 7 flagged class/subject pairs (18 students total) and enroll via the UI whichever are confirmed as missed, not deliberate.
+
+### Tests
+- `diagnose-missed-elective-enrollment.test.js` — new, 6 tests on the pure decision logic.
+
+Full suite: 309/309 suites, 3175/3175 tests.
+
+---
+
 ## [v5.188.0] — 2026-10-15 — fix(exams): a subject never added to a class's curriculum could still be marked for — "integrity" gap
 
 Reported directly, and pointedly: "I selected a class, then subject, then stream, then assessment, and the subject I picked does not appear in the class under curriculum but students in that class still appear — meaning I can enter marks for a subject no student is enrolled for... this is an assumption that kills our integrity."
