@@ -76,10 +76,18 @@ beforeEach(() => {
   mockCurrentUser = { userId: 'u_class_teacher', schoolId: SCHOOL, role: 'teacher', roles: [] };
   mockStores = {
     report_card_draft_comments: makeStore(),
-    students: makeStore([{ id: 'stu_1', schoolId: SCHOOL, classId: 'cls_001', streamId: null }]),
+    students: makeStore([{ id: 'stu_1', schoolId: SCHOOL, classId: 'cls_001', streamId: 'strm_1' }]),
     academic_config: makeStore([
       { schoolId: SCHOOL, showObservationRatings: true, observationCategories: ['Engaged', 'Teamwork', 'Confidence'] },
     ]),
+    // observationRatings is now guarded the same way classTeacherRemark
+    // always was (2026-10-15 fix) — these tests simulate a genuine class
+    // teacher, so canWriteClassRemark must actually resolve true: a real
+    // teachers record for this userId, whose id is this stream's
+    // formTeacherId (resolveHomeroomStreamIds' own lookup path).
+    teachers: makeStore([{ id: 'tch_1', schoolId: SCHOOL, userId: 'u_class_teacher', email: 'teacher@school.test' }]),
+    streams:  makeStore([{ id: 'strm_1', schoolId: SCHOOL, classId: 'cls_001', formTeacherId: 'tch_1' }]),
+    users:    makeStore([{ id: 'u_class_teacher', schoolId: SCHOOL, email: 'teacher@school.test' }]),
   };
 });
 

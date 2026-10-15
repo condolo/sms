@@ -2848,15 +2848,43 @@ router.put('/draft-comments/:studentId', authMiddleware, PLAN, MODGATE, rbac('re
     const classId = placement.classId;
     const existing = await tenantModel('report_card_draft_comments', tenantContext(req))
       .findOne({ schoolId, studentId, termNumber: Number(termNumber) }).lean();
-    if (classTeacherRemark !== undefined && (classTeacherRemark ?? '') !== (existing?.classTeacherRemark ?? '')) {
-      if (!(await canWriteClassRemark(req, placement.streamId))) {
-        return E.forbidden(res, "Only this stream's form teacher can write the class teacher remark.");
-      }
+
+    // Reported directly (2026-10-15), traced to a real, silent data-loss
+    // path: GET /draft-comments (scopeDraftCommentsForCaller) strips this
+    // ENTIRE doc down to only `subjectComments` for any caller who isn't
+    // the stream's form teacher or management — classTeacherName/Remark,
+    // sportsAndTalent, closingDate, nextTermBegin, and observationRatings
+    // are all OMITTED from their response. The client's local state then
+    // has to default those missing fields to '' — and until now, ONLY
+    // classTeacherRemark and principalRemark were guarded against being
+    // written when changed: every other class-teacher-tier field here
+    // was written unconditionally on every save, by anyone holding the
+    // coarse report_cards:update permission (effectively any teacher),
+    // with no check that the value actually changed OR that the caller
+    // was allowed to change it. A subject-only teacher who never loaded
+    // the real sportsAndTalent/closingDate/etc values, then saved the
+    // bulk comment form for ANY reason (e.g. after writing their own
+    // subject comment), would silently blank out already-entered data —
+    // no error, no block, just overwritten with ''. Fixed by extending
+    // the exact same guard already correct for classTeacherRemark to
+    // every class-teacher-tier field, and the same for principalRemark's
+    // admin-only guard to principalName.
+    const classTeacherFieldsChanged =
+      (classTeacherName   !== undefined && (classTeacherName   ?? '') !== (existing?.classTeacherName   ?? '')) ||
+      (classTeacherRemark !== undefined && (classTeacherRemark ?? '') !== (existing?.classTeacherRemark ?? '')) ||
+      (sportsAndTalent    !== undefined && (sportsAndTalent    ?? '') !== (existing?.sportsAndTalent    ?? '')) ||
+      (closingDate        !== undefined && (closingDate        ?? '') !== (existing?.closingDate        ?? '')) ||
+      (nextTermBegin      !== undefined && (nextTermBegin      ?? '') !== (existing?.nextTermBegin      ?? '')) ||
+      (observationRatings !== undefined && JSON.stringify(observationRatings ?? {}) !== JSON.stringify(existing?.observationRatings ?? {}));
+    if (classTeacherFieldsChanged && !(await canWriteClassRemark(req, placement.streamId))) {
+      return E.forbidden(res, "Only this stream's form teacher can write the class teacher's report fields.");
     }
-    if (principalRemark !== undefined && (principalRemark ?? '') !== (existing?.principalRemark ?? '')) {
-      if (!['admin', 'superadmin'].includes(req.jwtUser.role)) {
-        return E.forbidden(res, 'Only admins can set the principal remark');
-      }
+
+    const principalFieldsChanged =
+      (principalName   !== undefined && (principalName   ?? '') !== (existing?.principalName   ?? '')) ||
+      (principalRemark !== undefined && (principalRemark ?? '') !== (existing?.principalRemark ?? ''));
+    if (principalFieldsChanged && !['admin', 'superadmin'].includes(req.jwtUser.role)) {
+      return E.forbidden(res, 'Only admins can set the principal fields');
     }
 
     // Class-teacher observation ratings — validated against THIS school's

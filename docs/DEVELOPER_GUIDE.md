@@ -6721,6 +6721,39 @@ Live-data corroboration (confirms the pattern is real and currently live somewhe
 ### Verified
 New test file: 5/5 passing. Full suite: 313/313 suites, 3209/3209 tests.
 
+## 124. Class-Teacher-Tier Report-Card Fields: Closing the One Un-Guarded Write Path (v5.193.0)
+
+### Reported problem
+Directly, right after the teacher email/gender fix landed: "this kind of data partial loss is not allowed to happen, data entered should be live in db... I hope this cannot happen to any marks and comments entered, confirm."
+
+This was not a request to reassure — it required actually re-deriving the write path for both marks and comments from the code, since the teacher bug had just proven this exact failure shape (a form fed partial/stale data, then saving that partial view back over the full record) is a real, recurring pattern in this codebase, not a one-off.
+
+### Marks — traced and confirmed structurally safe
+`assessment.js`'s `POST /marks`, `POST /marks/bulk`, and `indicator-marks.js`'s bulk write all upsert one document per `{studentId, subjectId, termNumber, assessmentType, instance[, academicYearId]}` (numeric marks) or `{studentId, subjectId, indicatorId, templateId, termNumber[, academicYearId]}` (KG indicator marks). Every field in every `$set` comes directly from that same request's own per-mark payload (`d.rawScore`, `d.markState`, `d.classId`, etc.) — confirmed by reading the exact `$set` blocks, not assumed. There is no shared parent document whose OTHER fields could be defaulted from a stale read the way the teacher-profile and comments bugs both did — a save can only ever touch the one mark it names. Not vulnerable to this bug class by construction.
+
+### Comments — found the same bug class, live, in `report_card_draft_comments`
+`report_card_draft_comments` is a SHARED per-student-per-term document holding 7 class-teacher/principal-tier fields (`classTeacherName`, `classTeacherRemark`, `sportsAndTalent`, `principalName`, `principalRemark`, `closingDate`, `nextTermBegin`) plus `observationRatings` and `subjectComments`. Two of its three write surfaces were already safe:
+- `subjectComments` is written via Mongo dot-notation (`[`subjectComments.${subjectId}`]: comment`) — touches exactly one key, confirmed in §(the per-subject comment route).
+- `GET /draft-comments` (`comment-scope.js`'s `scopeDraftCommentsForCaller`) correctly strips the WHOLE document down to only `subjectComments` for any caller who isn't the stream's form tutor or management, by design — a subject teacher should never see the class teacher's remark.
+
+The gap was the third surface: `PUT /draft-comments/:studentId`'s write side only ever paired that read-side stripping with a matching write-side guard for **2 of the 7** base fields. `classTeacherRemark` and `principalRemark` were checked with "has this value actually changed from what's stored, and is the caller allowed to change it" (`canWriteClassRemark` / admin-only respectively) — but `classTeacherName`, `sportsAndTalent`, `closingDate`, `nextTermBegin`, and `observationRatings` had **no guard of any kind**. They were written unconditionally via `setFields` on every single save, by anyone holding the coarse `report_cards:update` permission (effectively any teacher).
+
+Since a subject-only teacher's client-side `comment` state (`StudentReportCard.jsx`) always initializes these 5 fields to `''` (they were never present in that teacher's own stripped `GET` response to begin with — not merely empty, structurally absent), clicking the single shared "Save Comments" button — which bundles ALL 7+ fields into one `PUT`, regardless of which ones the teacher actually meant to touch — would silently `$set` those 5 fields to `''`, overwriting whatever the real form tutor had already entered. No validation error, no 403, nothing to alert anyone. This is strictly worse than the teacher-profile bug: that one was blocked outright by Zod (an empty string fails `email()`/`enum()` validation), so no write ever reached the database; this one had no such safety net and would have succeeded silently.
+
+### Fixed
+Extended the exact guard pattern already correct for `classTeacherRemark` to the other 4 un-guarded class-teacher-tier fields (checked together as one group — any one of them changing requires `canWriteClassRemark`), and added `principalName` to `principalRemark`'s existing admin-only check. An unchanged value — including one that's already blank — still saves fine; only an actual change by someone not authorized to make it is refused, with the whole request rejected before any write happens (same all-or-nothing shape as the Zod-validation block, just implemented as an explicit permission check instead).
+
+### Honest limit
+This is a going-forward fix. There is no field-level audit history for `report_card_draft_comments` to check against, so whether any real school already lost data this way before today cannot be confirmed or ruled out — only that the path to cause it again is now closed.
+
+### Files
+- `server/routes/report-cards.js` — `PUT /draft-comments/:studentId`'s guard logic.
+- `server/__tests__/routes/report-card-comment-rights.test.js` — 8 new tests, including the exact described scenario (a non-form-tutor's blank view saving over a real, already-set `sportsAndTalent` value — refused outright, value unchanged in the mock store).
+- `server/__tests__/routes/report-cards-observation-ratings.test.js`, `server/__tests__/report-cards-draft-comments.test.js` — two pre-existing files updated: both simulated a generic `teacher`/`admin` caller without wiring up a real stream/form-tutor relationship, which the new guard now actually checks for `observationRatings` and `classTeacherName` respectively (previously ungated, so the gap never mattered to them). Fixed by giving one a genuine form-tutor mock (teacher + stream + `formTeacherId` linkage) and the other `role: 'admin'` (management bypass), matching each file's own existing conventions rather than inventing a new pattern.
+
+### Verified
+Extended test file: 25/25 passing. Full suite: 313/313 suites, 3217/3217 tests.
+
 ## Term billing: transport and extra-curricular on the invoice (v5.169.0)
 
 **Status before this change:** a route's `feePerTerm` was stored but no code read it for billing. `transport_assignments` was read by nothing in finance. Activities had no model. Invoices came only from fee structures.

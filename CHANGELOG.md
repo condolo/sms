@@ -6,6 +6,28 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.193.0] — 2026-10-15 — fix(report-cards): a report-card comment field a teacher never saw could be silently blanked by their own save
+
+Prompted directly, after the teacher email/gender fix: "this kind of data partial loss is not allowed to happen, data entered should be live in db... I hope this cannot happen to any marks and comments entered, confirm."
+
+### Investigated before answering — found a real, live, silent-overwrite gap in comments; marks confirmed safe
+**Marks (numeric CA/HW/MT/ET and Kindergarten indicator marks) — confirmed safe.** Every write (`assessment.js`'s `/marks`, `/marks/bulk`, `indicator-marks.js`'s bulk write) upserts one self-contained document per `{student, subject, term, assessmentType, instance[, academicYearId]}`, with every written field taken directly from that save's own payload. There is no shared parent document whose sibling fields could be defaulted from a stale or partial read — structurally, a save can only ever touch the exact mark it's for.
+
+**Comments — a real, exploitable gap, now fixed.** `GET /draft-comments` (`scopeDraftCommentsForCaller`) correctly strips the shared per-student-per-term draft down to only `subjectComments` for any caller who isn't the stream's form tutor or management — by design, so a subject teacher never sees the class teacher's remark. But `PUT /draft-comments/:studentId`'s own write side only ever guarded 2 of the 7 fields that live in that same document: `classTeacherRemark` and `principalRemark` were checked against "did this actually change, and is the caller allowed to change it" — `classTeacherName`, `sportsAndTalent`, `closingDate`, `nextTermBegin`, and `observationRatings` had no such guard at all, and were written unconditionally on every save by anyone holding the coarse `report_cards:update` permission. Since a subject-only teacher's local form state for those 5 fields always defaults to blank (they're never in that teacher's stripped `GET` response to begin with), saving the bulk comment form for ANY reason — even just alongside their own legitimate subject comment — would silently overwrite a form tutor's already-entered sportsAndTalent/closing-date/etc with empty strings. No error, no block, nothing to undo.
+
+### Fixed
+`server/routes/report-cards.js`'s `PUT /draft-comments/:studentId` — extended the exact same "only guard when the value actually changes" pattern already correct for `classTeacherRemark` to cover `classTeacherName`, `sportsAndTalent`, `closingDate`, `nextTermBegin`, and `observationRatings` together (all class-teacher-tier fields, same form section); `principalName` joins `principalRemark` under the existing admin-only check. An echoed-back unchanged value (including an already-blank one) still succeeds, same as before — only an actual change by someone unauthorized to make it is refused.
+
+### Honest limit of this fix
+This closes the gap going forward. It does **not** retroactively detect or recover any field that may already have been silently blanked at a real school before today — there is no field-level audit history for this collection to check against, so I can't confirm or rule out past loss, only that it can't happen again.
+
+### Tests
+- `report-card-comment-rights.test.js` — 8 new tests: each of the 5 newly-guarded fields refused for a non-form-tutor, the real form tutor can still change all of them, an unchanged echo still succeeds, and the exact described scenario (a subject-only teacher's blank view saving over a real, already-set `sportsAndTalent` value) is refused outright rather than silently written.
+
+Full suite: 313/313 suites, 3217/3217 tests. Confirmed directly: marks writes are structurally self-contained and were never at risk; the comments gap was real, reproduced, and is now closed the same way `classTeacherRemark` always was.
+
+---
+
 ## [v5.192.0] — 2026-10-15 — fix(teachers): editing a teacher's profile silently required re-typing email and gender every time
 
 Reported directly, from a real school: "each time we edit a teacher's profile, we have to re-add the email and gender otherwise the changes will not save. Is there a way that the LMS can retain the basic information so we do not have to input them every time?"

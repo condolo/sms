@@ -79,8 +79,13 @@ beforeEach(() => {
 });
 
 describe('PUT /draft-comments/:studentId — classId is always server-resolved', () => {
+  // role: 'admin' — management, so canWriteClassRemark's bypass applies
+  // without needing to wire up streams/teachers mocks this file doesn't
+  // otherwise use; these tests are about classId resolution, not about
+  // who may write classTeacherName (covered in report-card-comment-
+  // rights.test.js). Same convention the GET tests below already use.
   test('a client-supplied classId that disagrees with the student\'s real placement is ignored', async () => {
-    const app = makeApp({ schoolId: 'sch_1', userId: 'u_1', role: 'teacher' });
+    const app = makeApp({ schoolId: 'sch_1', userId: 'u_1', role: 'admin' });
     const res = await request(app)
       .put('/report-cards/draft-comments/stu_1')
       .send({ classId: 'cls_STALE_WRONG', termNumber: 2, classTeacherName: 'Mrs. Otieno' });
@@ -93,7 +98,7 @@ describe('PUT /draft-comments/:studentId — classId is always server-resolved',
   });
 
   test('omitting classId entirely still resolves and saves the real one', async () => {
-    const app = makeApp({ schoolId: 'sch_1', userId: 'u_1', role: 'teacher' });
+    const app = makeApp({ schoolId: 'sch_1', userId: 'u_1', role: 'admin' });
     const res = await request(app)
       .put('/report-cards/draft-comments/stu_1')
       .send({ termNumber: 2 });
