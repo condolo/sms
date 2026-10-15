@@ -6,6 +6,12 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.194.0] — 2026-10-15 — fix(students): profile Overview showed "Class: —" despite a valid class/stream on record
+
+Reported directly, with a screenshot: an active student's Overview card showed blank Class, while the same student's Edit form correctly showed both class and stream. Confirmed live (Nathaniel Maina, Trinitas): `classId`/`streamId` were intact, but the denormalized `className`/`streamName` fields were blank — Overview printed them as stored; Edit resolves live and was never affected. `GET /api/students/:id` now resolves `className`/`streamName` live from `classId`/`streamId` on every read, so display can't drift from the real reference regardless of how stale the stored copy is — no backfill needed. Tests: 2 new (`students.test.js`). Full suite: 313/313 suites, 3219/3219 tests.
+
+---
+
 ## [v5.193.0] — 2026-10-15 — fix(report-cards): a report-card comment field a teacher never saw could be silently blanked by their own save
 
 Prompted directly, after the teacher email/gender fix: "this kind of data partial loss is not allowed to happen, data entered should be live in db... I hope this cannot happen to any marks and comments entered, confirm."

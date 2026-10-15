@@ -692,6 +692,27 @@ router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('students', 'read'), asyn
     }
 
     if (!doc) return E.notFound(res, 'Student not found');
+
+    // Reported directly: profile Overview showed "Class: —" for a real,
+    // active student, while the SAME record's Edit form correctly showed
+    // both class and stream. Root cause: className/streamName are
+    // denormalized display fields, never derived from classId/streamId
+    // at read time — Edit resolves them live against the real class/
+    // stream lists, Overview just prints whatever's stored. Confirmed
+    // live: some older records have a perfectly valid classId/streamId
+    // but blank className/streamName (never backfilled when those
+    // fields were introduced). Resolved live here so display can never
+    // drift from the real reference, matching what Edit already does —
+    // no migration needed, and it self-heals for every such record.
+    if (doc.classId) {
+      const cls = await tenantModel('classes', tenantContext(req)).findOne({ schoolId, id: doc.classId }).select('name').lean();
+      if (cls?.name) doc.className = cls.name;
+    }
+    if (doc.streamId) {
+      const strm = await tenantModel('streams', tenantContext(req)).findOne({ schoolId, id: doc.streamId }).select('name').lean();
+      if (strm?.name) doc.streamName = strm.name;
+    }
+
     return ok(res, await _attachPortalAccountStatus(req, doc));
   } catch (err) {
     console.error('[students GET/:id]', err);

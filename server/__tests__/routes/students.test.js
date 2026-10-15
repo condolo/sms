@@ -61,6 +61,10 @@ const mockUsersFindOne  = jest.fn().mockReturnValue({
 });
 const mockUsersUpdateOne = jest.fn().mockResolvedValue({});
 const mockUsersCreate    = jest.fn().mockResolvedValue({ id: 'usr_new', schoolId: 'school_test_001', role: 'student' });
+// GET /:id's live className/streamName resolution — default null (no
+// match), overridden per-test to prove the resolution actually happens.
+const mockClassesFindOne = jest.fn().mockReturnValue({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) }) });
+const mockStreamsFindOne = jest.fn().mockReturnValue({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) }) });
 
 jest.mock('../../utils/model', () => ({
   _model: jest.fn((collection) => {
@@ -86,13 +90,18 @@ jest.mock('../../utils/model', () => ({
     if (collection === 'users') {
       return { find: mockUsersFind, findOne: mockUsersFindOne, updateOne: mockUsersUpdateOne, create: mockUsersCreate };
     }
+    if (collection === 'classes') return { findOne: mockClassesFindOne };
+    if (collection === 'streams') return { findOne: mockStreamsFindOne };
     // Default empty mock for any other collection — covers every other
     // studentId-referencing collection student-merge.js walks through
-    // (attendance, exam_results, behaviour_incidents, growth_*, etc.);
-    // these tests don't assert on any one of them individually.
+    // (attendance, exam_results, behaviour_incidents, growth_*, etc.),
+    // and GET /:id's live classes/streams name lookup. .select() chains
+    // before .lean() (same shape as mockUsersFindOne above), since real
+    // Mongoose queries do too; these tests don't assert on any one of
+    // these collections individually, so null/empty is always fine.
     return {
       find:           jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([]) }),
-      findOne:        jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) }),
+      findOne:        jest.fn().mockReturnValue({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) }), lean: jest.fn().mockResolvedValue(null) }),
       countDocuments: jest.fn().mockResolvedValue(0),
       aggregate:      jest.fn().mockResolvedValue([]),
       updateMany:     jest.fn().mockResolvedValue({ modifiedCount: 0 }),
@@ -214,6 +223,34 @@ describe('GET /api/students/:id', () => {
       firstName: 'Jane',
       lastName:  'Doe',
     });
+  });
+
+  // Reported directly: Overview showed "Class: —" for a real, active
+  // student whose Edit form correctly showed both class and stream —
+  // because className/streamName are denormalized display fields never
+  // derived from classId/streamId at read time. Now resolved live.
+  test('resolves className/streamName live, overriding a blank stored value', async () => {
+    const student = makeStudent({ classId: 'cls_001', streamId: 'strm_001', className: '', streamName: null });
+    mockStudentsFindOne.mockReturnValue({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(student) }) });
+    mockClassesFindOne.mockReturnValue({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue({ name: 'Year 5' }) }) });
+    mockStreamsFindOne.mockReturnValue({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue({ name: 'Diamond' }) }) });
+
+    const res = await supertest(buildApp()).get('/api/students/stu_demo_001');
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.className).toBe('Year 5');
+    expect(res.body.data.streamName).toBe('Diamond');
+  });
+
+  test('a student with no classId/streamId at all is unaffected — no lookup attempted', async () => {
+    const student = makeStudent({ classId: undefined, streamId: undefined });
+    mockStudentsFindOne.mockReturnValue({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(student) }) });
+
+    const res = await supertest(buildApp()).get('/api/students/stu_demo_001');
+
+    expect(res.status).toBe(200);
+    expect(mockClassesFindOne).not.toHaveBeenCalled();
+    expect(mockStreamsFindOne).not.toHaveBeenCalled();
   });
 });
 

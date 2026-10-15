@@ -6754,6 +6754,10 @@ This is a going-forward fix. There is no field-level audit history for `report_c
 ### Verified
 Extended test file: 25/25 passing. Full suite: 313/313 suites, 3217/3217 tests.
 
+## 125. Student Overview's "Class: —" Despite a Valid classId (v5.194.0)
+
+Reported with a screenshot: Overview showed blank Class for an active student whose Edit form correctly showed class and stream. Confirmed live (Nathaniel Maina, Trinitas): `classId`/`streamId` were valid, but denormalized `className`/`streamName` were blank — Overview trusts the stored fields as-is; Edit resolves live against the class/stream lists and was unaffected. Fixed in `server/routes/students.js`'s `GET /:id`: resolves `className`/`streamName` live from `classId`/`streamId` whenever present, overriding whatever's stored, so display can never drift from the real reference again — no backfill migration needed, since this self-heals every read. Tests: 2 new in `students.test.js` (resolves a blank stored value; no lookup attempted when classId/streamId are absent). Full suite: 313/313 suites, 3219/3219 tests.
+
 ## Term billing: transport and extra-curricular on the invoice (v5.169.0)
 
 **Status before this change:** a route's `feePerTerm` was stored but no code read it for billing. `transport_assignments` was read by nothing in finance. Activities had no model. Invoices came only from fee structures.
