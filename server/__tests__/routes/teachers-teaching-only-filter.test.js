@@ -63,7 +63,13 @@ let mockTeachers, mockAssignments, mockSubjects;
 jest.mock('../../middleware/auth', () => ({
   authMiddleware: (req, _res, next) => { req.jwtUser = mockJwtUser; next(); },
 }));
-jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => next() }));
+// hasPermission mocked false — matches this file's admissions_officer role,
+// which never had full-data access under the old hardcoded FULL_ACCESS_ROLES
+// gate either; this file tests the teachingOnly filter, not field visibility.
+jest.mock('../../middleware/rbac', () => ({
+  rbac: () => (_req, _res, next) => next(),
+  hasPermission: jest.fn().mockResolvedValue(false),
+}));
 jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) => next() }));
 jest.mock('../../middleware/module-gate', () => ({ moduleGate: () => (_req, _res, next) => next() }));
 jest.mock('../../utils/tenant-model', () => ({

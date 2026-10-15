@@ -10,7 +10,7 @@ const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware }  = require('../middleware/auth');
 const { moduleGate }     = require('../middleware/module-gate');
-const { rbac }            = require('../middleware/rbac');
+const { rbac, hasPermission } = require('../middleware/rbac');
 const { planGate }        = require('../middleware/plan');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { _model } = require('../utils/model');
@@ -118,11 +118,27 @@ function _stripSensitive(doc) {
   return safe;
 }
 
-/* Roles that may see full staff data (contact details, DOB, HR fields, etc.) */
-const FULL_ACCESS_ROLES = new Set(['admin', 'superadmin', 'principal', 'hr']);
+/* Reported directly (2026-10-15): "each time we edit a teacher's
+   profile, we have to re-add the email and gender otherwise the
+   changes will not save." Root cause: full staff data (contact
+   details, DOB, HR fields) was gated by a HARDCODED role list here,
+   completely independent of the real `teachers:update` RBAC
+   permission a school actually grants via Roles & Permissions. A
+   role like `deputy_principal` — treated as management-tier
+   everywhere else in this codebase (subject-scope.js, elective-
+   scope.js, messages.js's broadcast roles) and perfectly able to
+   pass the `rbac('teachers','update')` middleware on this very file —
+   was never in this list, so GET / and GET /:id silently stripped
+   email/gender/phone/etc. before the edit form ever saw them. The
+   edit screen then asked the user to re-type fields it should already
+   have known, and failed validation (gender's enum rejects '', the
+   form's email is HTML-required) unless they did.
 
-/* Returns true when the requesting role is allowed full staff data */
-function _canViewFullData(role) { return FULL_ACCESS_ROLES.has(role); }
+   Fixed: tied to the actual permission instead of a hardcoded role
+   set — anyone who can edit a teacher can see what they're editing,
+   for any role a school grants `teachers:update` to (custom roles
+   included), with no second list to keep in sync. */
+async function _canViewFullData(req) { return hasPermission(req, 'teachers', 'update'); }
 
 /* MongoDB projection for limited view — sensitive fields never leave the DB.
    Includes professional/public info only: name, photo, role, status, and
@@ -201,10 +217,11 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('teachers', 'read'), async (
 
     const filter = { schoolId };
 
-    // Privileged roles (admin/principal/hr) may filter by any status.
-    // All other roles are forced to active-only — ignoring any ?status= they send
-    // so inactive, terminated, or on-leave staff are never exposed via the API.
-    if (_canViewFullData(req.jwtUser.role)) {
+    // Privileged roles (anyone holding teachers:update) may filter by any
+    // status. All other roles are forced to active-only — ignoring any
+    // ?status= they send so inactive, terminated, or on-leave staff are
+    // never exposed via the API.
+    if (await _canViewFullData(req)) {
       if (req.query.status) filter.status = req.query.status;
     } else {
       filter.status = 'active';
@@ -270,7 +287,7 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('teachers', 'read'), async (
       }));
     }
 
-    const viewFull   = _canViewFullData(req.jwtUser.role);
+    const viewFull   = await _canViewFullData(req);
     const projection = viewFull ? FULL_PROJECTION : LIMITED_PROJECTION;
 
     const Teachers = tenantModel('teachers', tenantContext(req));
@@ -351,7 +368,7 @@ router.get('/unlinked-accounts', authMiddleware, PLAN, MODGATE, rbac('teachers',
 router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('teachers', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const projection = _canViewFullData(req.jwtUser.role) ? FULL_PROJECTION : LIMITED_PROJECTION;
+    const projection = (await _canViewFullData(req)) ? FULL_PROJECTION : LIMITED_PROJECTION;
     const Teachers = tenantModel('teachers', tenantContext(req));
     const paramId  = req.params.id;
     let doc = await Teachers.findOne({ id: paramId, schoolId }).select(projection).lean();

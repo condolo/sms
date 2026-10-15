@@ -6692,6 +6692,35 @@ One incidental finding, not a bug in this feature: the demo school has a teacher
 ### Verified
 New test files: 21/21 passing. Full suite: 312/312 suites, 3204/3204 tests. Live end-to-end browser walkthrough as described above.
 
+## 123. Teacher Full-Data Visibility Tied to Permission, Not a Hardcoded Role List (v5.192.0)
+
+### Reported problem
+From a real school, directly: "each time we edit a teacher's profile, we have to re-add the email and gender otherwise the changes will not save. Is there a way that the LMS can retain the basic information so we do not have to input them every time?"
+
+### Root cause
+`server/routes/teachers.js` had a SECOND, independent authorization mechanism living alongside the real RBAC permission system: `FULL_ACCESS_ROLES = new Set(['admin', 'superadmin', 'principal', 'hr'])`, consulted by `GET /` and `GET /:id` to decide between `FULL_PROJECTION` ('-__v', everything) and `LIMITED_PROJECTION` (a fixed field allowlist that excludes `email`, `gender`, `phone`, DOB, and every other contact/HR field — public-profile fields only). This hardcoded set has nothing to do with whether a role can actually edit a teacher — that's `rbac('teachers', 'update')`, checked against the school's own Roles & Permissions configuration.
+
+`deputy_principal` is the clearest casualty: it's treated as management-tier everywhere else already explored this session (`subject-scope.js`'s `MANAGEMENT_ROLES`, `elective-scope.js`, `messages.js`'s `BROADCAST_ROLES`), and can freely hold `teachers:update` and pass the route's own `rbac` middleware — but was never added to this separate `FULL_ACCESS_ROLES` list. So a deputy_principal (or any OTHER role a school grants `teachers:update` to that isn't literally admin/superadmin/principal/hr — including any custom role) could open the edit screen, but the list/detail response backing it had already had email/gender/phone stripped out server-side, before the form ever rendered.
+
+Traced end to end, client side, to confirm this actually produces the reported symptom rather than just being a theoretical gap: `TeacherList.jsx`'s `TeacherDetailSlideOver` (and `HRPage.jsx`'s `StaffFormModal`) initialize their edit form directly from whatever `teacher` object they were handed — `email: teacher?.email ?? ''`, `gender: teacher?.gender ?? ''` — with no separate "fetch full detail before editing" step. With those fields missing from the source data, the form's own `<input required type="email">` blocks the browser's native submit outright, and even if it didn't, `TeacherUpdateSchema`'s `gender: z.enum([...]).optional()` rejects an empty string (it's `.optional()`, not nullable-to-empty-string — `''` isn't a valid enum member), so the `PUT /:id` request would 400 regardless. Either way: no save, unless the admin manually retyped both fields, every single time.
+
+Live-data corroboration (confirms the pattern is real and currently live somewhere, not proof of which specific school reported it): Trinitas International School has an active `deputy_principal` account (Angela Gitau, `lastLogin: 2026-10-14`) — exactly the affected role, at a school already seen this session actively managing teaching assignments.
+
+### Fixed
+`_canViewFullData` changed from a synchronous hardcoded-role check to `async function _canViewFullData(req) { return hasPermission(req, 'teachers', 'update'); }` — imported from `middleware/rbac.js`, the same function every other permission check in this codebase already uses. All three call sites (`GET /`'s status-filter gate, `GET /`'s list projection, `GET /:id`'s detail projection) now `await` it. This removes the hardcoded list entirely rather than just adding `deputy_principal` to it — any role a school grants `teachers:update` to, built-in or custom, now correctly sees what it can edit, with nothing left to fall out of sync the next time a new role needs this.
+
+### Deliberately out of scope
+- No change to `TeacherUpdateSchema`'s validation itself (gender/email staying required-if-present is correct) — the fix is entirely about not handing the edit form bad starting data in the first place.
+- No change to `TeacherList.jsx`/`StaffFormModal.jsx` to add a "fetch full detail before editing" fallback — now unnecessary, since the list/detail routes themselves return full data to anyone who can actually edit.
+
+### Files
+- `server/routes/teachers.js` — `_canViewFullData` and its 3 call sites.
+- `server/__tests__/routes/teachers-full-data-visibility.test.js` — new, 5 tests, including a real Mongoose-`.select()`-accurate mock (inclusive vs. exclusive projection strings) so the test genuinely exercises field stripping, not just a status code.
+- `server/__tests__/routes/teachers-teaching-only-filter.test.js` — mock updated to also export `hasPermission` (the fix's new dependency), resolving `false` to match exactly what its `admissions_officer` fixture got under the old hardcoded gate too — no change to that file's own test intent.
+
+### Verified
+New test file: 5/5 passing. Full suite: 313/313 suites, 3209/3209 tests.
+
 ## Term billing: transport and extra-curricular on the invoice (v5.169.0)
 
 **Status before this change:** a route's `feePerTerm` was stored but no code read it for billing. `transport_assignments` was read by nothing in finance. Activities had no model. Invoices came only from fee structures.

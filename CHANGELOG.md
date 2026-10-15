@@ -6,6 +6,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.192.0] — 2026-10-15 — fix(teachers): editing a teacher's profile silently required re-typing email and gender every time
+
+Reported directly, from a real school: "each time we edit a teacher's profile, we have to re-add the email and gender otherwise the changes will not save. Is there a way that the LMS can retain the basic information so we do not have to input them every time?"
+
+### Root cause, confirmed by reading every call site, not assumed
+`server/routes/teachers.js`'s `GET /` and `GET /:id` stripped email, gender, phone, and other contact/HR fields from the response for any role **not** in a hardcoded list: `FULL_ACCESS_ROLES = {admin, superadmin, principal, hr}`. This list is completely independent of the real `teachers:update` RBAC permission a school actually grants via Roles & Permissions — `deputy_principal`, in particular, is treated as management-tier everywhere else in this codebase (`subject-scope.js`'s `MANAGEMENT_ROLES`, `elective-scope.js`, `messages.js`'s broadcast roles) and can freely pass the `rbac('teachers','update')` middleware guarding this very file, yet was never in this separate hardcoded list. The edit screen (`TeacherList.jsx` / `StaffFormModal.jsx`) initializes its form straight from whatever the list/detail route returned — so for any such role, email and gender arrived blank, and the form's own `<input required type="email">` and the server's `gender: z.enum([...]).optional()` (which rejects an empty string, since `''` isn't a valid enum member) both then refused to save unless the fields were manually re-typed on every single edit.
+
+Live-data corroboration (not proof of which school reported this, but a concrete match): Trinitas International School has an active `deputy_principal` account (Angela Gitau, last login 2026-10-14) — exactly the role this bug affected, at a school already seen this session actively managing teaching assignments and subjects.
+
+### Fixed
+`_canViewFullData` no longer checks a hardcoded role set — it checks `hasPermission(req, 'teachers', 'update')` directly. Any role a school grants edit access to, built-in or custom, now sees exactly the data it's allowed to edit, with no second list to keep in sync as new roles are added.
+
+### Tests
+- `teachers-full-data-visibility.test.js` — new, 5 tests (deputy_principal and a custom role both now see full data; a role without `teachers:update` still gets the limited, sensitive-field-free projection on both `GET /` and `GET /:id`).
+- `teachers-teaching-only-filter.test.js` — existing file's `rbac` mock updated to also export `hasPermission` (previously only `rbac`), which the fix now calls; the test's `admissions_officer` role is mocked to resolve `false`, matching exactly what it would have gotten under the old hardcoded gate too — no change to that file's own test intent.
+
+Full suite: 313/313 suites, 3209/3209 tests. Confirmed live: `deputy_principal` and a custom role both now receive full teacher data; a plain `teacher` role still correctly receives only the public projection.
+
+---
+
 ## [v5.191.0] — 2026-10-15 — feat(messages): parents can now message the school — safe recipient categories, never a fellow parent
 
 Reported directly: "the parent cannot message the school, in the message, I need the parent can select whom they want to message, nurse, discipline, subject teachers etc but not fellow parents." Confirmed: the Parent Portal's Messages page was read-only — no compose feature existed at all.
