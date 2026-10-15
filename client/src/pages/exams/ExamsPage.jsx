@@ -774,24 +774,36 @@ function MarkbookTab({ years }) {
     }));
   }, [selectedEntry, customTypes]);
 
-  /* ── Students — per-stream once this class has 2+ of the teacher's own
-     assigned streams, same reasoning as the picker above; classesApi's own
-     fallback for a single (or no) stream assignment already narrows
-     correctly server-side, so no stream flag is needed there. ── */
+  /* ── Students — per-stream whenever this subject actually resolves to
+     one, whether the teacher had to pick it (needsStreamSelection) or it
+     auto-resolved because they only have one real stream for THIS
+     subject (activeStreamId). Reported directly: a teacher (Ms Annet,
+     Year 2 History) teaching a different subject in a DIFFERENT single
+     stream of the same class saw that other stream's students mixed
+     into her History roster too. Root cause — the comment this replaces
+     was wrong: classesApi's assessmentScope fallback (scopeEngine.js's
+     resolveAssessmentScope) narrows by every stream the teacher is
+     assigned ACROSS ALL SUBJECTS in the class, not just the one relevant
+     to the subject currently selected — correct for a genuine whole-
+     class grant (subjectStreams.length === 0), but wrong the moment a
+     single-stream subject has a sibling assignment elsewhere in the same
+     class. Querying streamsApi directly with the already-resolved
+     activeStreamId (exactly like the 2+-streams case already does)
+     scopes to that one real stream, full stop — no merging possible. ── */
   const { data: studentsData, isLoading: studentsLoading } = useQuery({
     queryKey: isElectiveSubject
       ? ['classes', classId, 'elective', subjectId, 'students']
-      : needsStreamSelection
-        ? ['streams', streamId, 'students']
+      : activeStreamId
+        ? ['streams', activeStreamId, 'students']
         : ['classes', classId, 'students'],
     queryFn: () => isElectiveSubject
       ? classesApi.students(classId, { limit: 500, status: 'active', electiveSubjectId: subjectId })
-      : needsStreamSelection
-      ? streamsApi.students(streamId, { limit: 500, status: 'active' })
-      // assessmentScope=true: closes the same school-level-role-with-a-
-      // real-stream-assignment gap already fixed for Attendance/Lessons —
-      // see classes.js's GET /:id/students and scopeEngine.js's
-      // resolveAssessmentScope.
+      : activeStreamId
+      ? streamsApi.students(activeStreamId, { limit: 500, status: 'active' })
+      // Only reached for a genuine whole-class grant (subjectStreams.length
+      // === 0 — no per-stream assignment for this subject at all).
+      // assessmentScope=true here closes the same school-level-role-with-
+      // a-real-stream-assignment gap already fixed for Attendance/Lessons.
       : classesApi.students(classId, { limit: 500, status: 'active', assessmentScope: true }),
     enabled:  isElectiveSubject ? !!classId && !!subjectId : (needsStreamSelection ? !!streamId : !!classId),
     staleTime: 5 * 60_000,
