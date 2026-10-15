@@ -1134,6 +1134,13 @@ function SchoolTab() {
           <FField label="Country">
             <input value={f.country ?? ''} onChange={e => set('country', e.target.value)} className={iCls()} placeholder="e.g. Kenya" />
           </FField>
+          {/* Reported directly: report cards never show a Principal /
+              Section Head name — root cause was that no field anywhere
+              in Settings ever let a school set it, so it's genuinely
+              blank for every school, not a rendering bug for this one. */}
+          <FField label="Principal / Section Head Name">
+            <input value={f.principalName ?? ''} onChange={e => set('principalName', e.target.value)} className={iCls()} placeholder="Shown on report cards" />
+          </FField>
         </div>
 
         {/* Branding */}

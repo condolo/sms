@@ -251,7 +251,8 @@ function _deriveUserOverridePerms(byUserCell) {
 /* ── Allowed fields for school update ──────────────────────── */
 const SCHOOL_UPDATABLE = [
   'name', 'tagline', 'email', 'phone', 'address', 'website',
-  'country', 'currency', 'timezone', 'academicYear', 'academicYearStartMonth', 'termsPerYear',
+  'country', 'principalName', // principalName — read by report-card cover pages; see SettingsPage.jsx's own field
+  'currency', 'timezone', 'academicYear', 'academicYearStartMonth', 'termsPerYear',
   'termDates',   // [{term,label,startDate,endDate}] — per-term billing trigger dates
   'houses', 'shortName', 'primaryColor', 'accentColor', 'themePreset', 'logoUrl', 'modulePermissions',
   'moduleConfig',

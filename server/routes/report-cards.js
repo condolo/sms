@@ -1667,7 +1667,7 @@ router.get('/bulk-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), s
     // Resolved AFTER the zero-match 404 check above — no point paying
     // for 3 extra queries on a request that's about to 404 anyway.
     const [bulkSchool, bulkCaConfig, bulkAssignments] = await Promise.all([
-      _model('schools').findOne({ id: schoolId }, { logoUrl: 1, tagline: 1, address: 1, phone: 1, email: 1, website: 1, principalSignatureUrl: 1, schoolStampUrl: 1, principalName: 1, timezone: 1 }).lean().catch(() => null),
+      _model('schools').findOne({ id: schoolId }, { logoUrl: 1, tagline: 1, address: 1, phone: 1, email: 1, website: 1, country: 1, principalSignatureUrl: 1, schoolStampUrl: 1, principalName: 1, timezone: 1 }).lean().catch(() => null),
       _getAssessmentConfig(schoolId, req.query.academicYearId || null),
       tenantModel('teaching_assignments', tenantContext(req))
         .find({ schoolId, classId: req.query.classId }).select('subjectId teacherName').lean().catch(() => []),
@@ -2006,7 +2006,7 @@ async function _loadRenderExtras(req, schoolId, snap) {
     // predates this field being frozen at publish time (every snapshot
     // going forward carries its own, see POST /publish's "Load school
     // signature/stamp URLs for snapshotting" step).
-    _model('schools').findOne({ id: schoolId }, { logoUrl: 1, tagline: 1, address: 1, phone: 1, email: 1, website: 1, principalSignatureUrl: 1, schoolStampUrl: 1, principalName: 1, timezone: 1 }).lean().catch(() => null),
+    _model('schools').findOne({ id: schoolId }, { logoUrl: 1, tagline: 1, address: 1, phone: 1, email: 1, website: 1, country: 1, principalSignatureUrl: 1, schoolStampUrl: 1, principalName: 1, timezone: 1 }).lean().catch(() => null),
     behaviourSummary(schoolId, snap.studentId).catch(() => null),
     snap.termNumber > 1
       ? tenantModel('report_card_snapshots', tenantContext(req)).findOne({
@@ -2299,6 +2299,7 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
       schoolPhone:      school?.phone   || '',
       schoolEmail:      school?.email   || '',
       schoolWebsite:    school?.website || '',
+      schoolCountry:    school?.country || '',
       classTeacherName: snap.comments?.classTeacherName || '',
       principalName:    resolvedPrincipalName,
       studentPhotoUrl:  snap.studentPhotoUrl || null,
@@ -2354,6 +2355,7 @@ function _computeKgReportSections(snap, config, extra = {}) {
       schoolPhone:   school?.phone   || '',
       schoolEmail:   school?.email   || '',
       schoolWebsite: school?.website || '',
+      schoolCountry: school?.country || '',
       classTeacherName: snap.comments?.classTeacherName || '',
       principalName:    resolvedPrincipalName,
       studentPhotoUrl:  snap.studentPhotoUrl || null,

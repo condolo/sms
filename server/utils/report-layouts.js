@@ -632,7 +632,8 @@ ${footerHtml}
    cover page controls its own visual arrangement of stream/house/
    class teacher/principal rather than a fixed label/value table. */
 function _schoolContactLine(cover) {
-  return [cover.schoolAddress, cover.schoolPhone, cover.schoolEmail, cover.schoolWebsite].filter(Boolean).join('  •  ');
+  const address = [cover.schoolAddress, cover.schoolCountry].filter(Boolean).join(', ');
+  return [address, cover.schoolPhone, cover.schoolEmail, cover.schoolWebsite].filter(Boolean).join('  •  ');
 }
 
 // Cover-page identity header — redesigned per a shared reference layout:
@@ -645,7 +646,7 @@ function _schoolContactLine(cover) {
 // own inline cover and the subject_paired/marks_then_comments cover so
 // the two can't drift apart.
 function _schoolHeaderHtml(cover, logoHtml) {
-  const addressLine = cover.schoolAddress || '';
+  const addressLine = [cover.schoolAddress, cover.schoolCountry].filter(Boolean).join(', ');
   const contactSubLine = [cover.schoolPhone, cover.schoolEmail].filter(Boolean).join('   ');
   return `
   <div style="display:flex;align-items:center;gap:18px;text-align:left">
@@ -739,10 +740,15 @@ function _drawCoverPdf(doc, s, images) {
     doc.fillColor(INK_SOFT).font(FONTS.sansItalic).fontSize(9).text(cover.tagline, textX, ty, { width: textW });
     ty += 13;
   }
-  const addressLine = cover.schoolAddress || '';
+  // Address line also carries Country, when set — same convention the
+  // HTML cover's _schoolContactLine already uses for combining fields.
+  const addressLine = [cover.schoolAddress, cover.schoolCountry].filter(Boolean).join(', ');
   const contactSubLine = [cover.schoolPhone, cover.schoolEmail].filter(Boolean).join('   ');
   if (addressLine)     { doc.fillColor(INK_SOFT).font(FONTS.sansRegular).fontSize(8).text(addressLine, textX, ty, { width: textW }); ty += 11; }
   if (contactSubLine)  { doc.fillColor(INK_SOFT).font(FONTS.sansRegular).fontSize(8).text(contactSubLine, textX, ty, { width: textW }); ty += 11; }
+  // Website — reported directly as missing from the PDF cover despite
+  // already being fetched/fed into `cover` and drawn in the HTML preview.
+  if (cover.schoolWebsite) { doc.fillColor(INK_SOFT).font(FONTS.sansRegular).fontSize(8).text(cover.schoolWebsite, textX, ty, { width: textW }); ty += 11; }
   y = Math.max(y + LOGO, ty) + 10;
 
   doc.moveTo(X, y).lineTo(X + PAGE_WIDTH, y).lineWidth(1.2).stroke(BRAND);
