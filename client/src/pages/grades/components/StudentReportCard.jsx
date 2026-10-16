@@ -54,9 +54,21 @@ function fmtDev(dev) {
 }
 
 /* ── Editable field ──────────────────────────────────────── */
-/* One subject's comment. Grows with its text; saves on blur, only when changed. */
+/* One subject's comment. Grows with its text; saves on blur, only when changed.
+   Reported directly: a teacher's subject comments were typed and never seen
+   again, with marks for the exact same class/subject saving fine and every
+   permission/curriculum check for it passing — the write path itself works.
+   This field gave NO feedback either way on save: no "saved" confirmation
+   (unlike the class/principal remark save button elsewhere on this card),
+   and its only error display lived on the parent, scoped to whichever
+   section tab happened to be open, generic across every subject field at
+   once — easy to never see at all while moving quickly through many
+   students. A failed save now shows inline, on the exact field it
+   happened to, and a successful one confirms too, so neither can go
+   unnoticed again. */
 function SubjectCommentField({ label, value, onSave }) {
   const [text, setText] = useState(value);
+  const [status, setStatus] = useState(null); // null | 'saving' | 'saved' | 'error'
   const ref = useRef(null);
   useEffect(() => { setText(value); }, [value]);
   useEffect(() => {
@@ -64,19 +76,39 @@ function SubjectCommentField({ label, value, onSave }) {
     ref.current.style.height = 'auto';
     ref.current.style.height = `${ref.current.scrollHeight}px`;
   }, [text]);
+
+  async function handleBlur() {
+    if (text === value) return;
+    setStatus('saving');
+    try {
+      await onSave(text);
+      setStatus('saved');
+      setTimeout(() => setStatus(s => (s === 'saved' ? null : s)), 2500);
+    } catch {
+      setStatus('error');
+    }
+  }
+
   return (
     <div className="flex gap-3 items-start rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2">
       <span className="text-xs font-semibold text-slate-700 min-w-[120px] shrink-0 pt-1">{label}</span>
-      <textarea
-        ref={ref}
-        rows={1}
-        maxLength={500}
-        value={text}
-        onChange={e => setText(e.target.value)}
-        onBlur={() => { if (text !== value) onSave(text); }}
-        placeholder="No comment entered"
-        className="flex-1 min-w-0 text-xs text-slate-700 bg-white border border-slate-200 rounded-md px-2.5 py-1.5 resize-none overflow-hidden focus:outline-none focus:ring-1 focus:ring-indigo-400"
-      />
+      <div className="flex-1 min-w-0">
+        <textarea
+          ref={ref}
+          rows={1}
+          maxLength={500}
+          value={text}
+          onChange={e => setText(e.target.value)}
+          onBlur={handleBlur}
+          placeholder="No comment entered"
+          className={`w-full text-xs text-slate-700 bg-white border rounded-md px-2.5 py-1.5 resize-none overflow-hidden focus:outline-none focus:ring-1 focus:ring-indigo-400 ${status === 'error' ? 'border-red-300' : 'border-slate-200'}`}
+        />
+        {status === 'saving' && <p className="text-[10px] text-slate-400 mt-1">Saving…</p>}
+        {status === 'saved' && <p className="text-[10px] text-emerald-600 mt-1">Saved</p>}
+        {status === 'error' && (
+          <p className="text-[10px] text-red-600 mt-1">Could not save this comment — please try again.</p>
+        )}
+      </div>
     </div>
   );
 }
@@ -162,7 +194,7 @@ export default function StudentReportCard({
   customTypes, gradeScale, instanceMarks,
   draftComment, onSaveComment, onSaveSubjectComment, termNum, school, academicYear,
   studentDeviations, behaviourSummary, snapshot,
-  observationConfig,
+  observationConfig, showRanking,
 }) {
   const types      = customTypes ?? DEFAULT_CUSTOM_TYPES;
   // No local fallback — the server always returns the exact bands it used
@@ -180,9 +212,18 @@ export default function StudentReportCard({
     .map(([subId, data]) => ({ subId, data, name: subjectMap?.[subId]?.name ?? subId }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
-  const classRank = student.rankings?.class
-    ? `${student.rankings.class.rank}/${student.rankings.class.total}`
-    : '—';
+  // Reported directly: "Rank 1/undefined" on screen, and still showing
+  // after the school turned Ranking off in Report Card settings. Two
+  // separate bugs — the field read here was .total, but ranking.js's
+  // mergeRankings always writes .outOf, so this was never populated; and
+  // nothing here checked the config the PDF already respects (rankings
+  // are still computed/attached by /generate whenever Class Ranking is
+  // on even if "Show Rank on Report Card" is off, since other, non-report
+  // uses of ranking still need the data) — so a school using that exact
+  // combination still saw it here.
+  const classRank = (showRanking && student.rankings?.class)
+    ? `${student.rankings.class.rank}/${student.rankings.class.outOf}`
+    : null;
 
   const meanDev = studentDeviations?.mean ?? null;
 
@@ -247,16 +288,13 @@ export default function StudentReportCard({
     }
   }, [comment, onSaveComment]);
 
-  const [subjectError, setSubjectError] = useState(null);
+  // Rethrows on failure — SubjectCommentField catches it to show its OWN
+  // inline saved/error state, right on the field that failed, instead of
+  // one shared banner easy to miss while moving through many fields.
   const saveSubjectComment = useCallback(async (subjectId, text) => {
     if (!onSaveSubjectComment) return;
-    setSubjectError(null);
-    try {
-      await onSaveSubjectComment(subjectId, text);
-      setComment(c => ({ ...c, subjectComments: { ...c.subjectComments, [subjectId]: text } }));
-    } catch (err) {
-      setSubjectError(err?.message ?? 'Could not save this comment');
-    }
+    await onSaveSubjectComment(subjectId, text);
+    setComment(c => ({ ...c, subjectComments: { ...c.subjectComments, [subjectId]: text } }));
   }, [onSaveSubjectComment]);
 
   /* ── Print (RC3) — renders through the shared server-side IR +
@@ -305,8 +343,8 @@ export default function StudentReportCard({
           <p className="text-xs text-slate-400">
             {admNo && `ADM: ${admNo} · `}
             {className && `${className} · `}
-            Rank {classRank}
-            {autoClassTeacherName && ` · Class Teacher: ${autoClassTeacherName}`}
+            {classRank && `Rank ${classRank} · `}
+            {autoClassTeacherName && `Class Teacher: ${autoClassTeacherName}`}
           </p>
         </div>
         <div className="flex items-center gap-3 shrink-0">
@@ -424,7 +462,6 @@ export default function StudentReportCard({
           {/* Subject teacher comments — one per subject, written by whoever teaches it */}
           <div>
             <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2">Subject Teacher Comments</p>
-            {subjectError && <p className="text-xs text-red-600 mb-2">{subjectError}</p>}
             <div className="space-y-1.5">
               {subjectEntries.map(({ subId, name: sName }) => (
                 <SubjectCommentField

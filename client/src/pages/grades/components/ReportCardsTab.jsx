@@ -99,9 +99,17 @@ export default function ReportCardsTab() {
   });
   const yearsList = yearsData?.data ?? yearsData ?? [];
 
+  // Reported directly: a student showed as a raw UUID instead of their
+  // name, and vanished entirely once a stream filter was applied — both
+  // traced to this call sending no limit, so the server's default page
+  // size (50) silently truncated this lookup map for any class with more
+  // than 50 active students. The actual report batch below (classesApi/
+  // academic-calc's own generate query) has no such cap — it's only this
+  // name/admission-number/streamId lookup that was quietly incomplete.
+  // 500 matches the same ceiling the Markbook's own roster fetch uses.
   const { data: studentsData } = useQuery({
     queryKey: ['classes', classId, 'students'],
-    queryFn:  () => classesApi.students(classId),
+    queryFn:  () => classesApi.students(classId, { limit: 500 }),
     enabled:  !!classId,
     staleTime: 5 * 60_000,
   });
@@ -558,6 +566,7 @@ export default function ReportCardsTab() {
               behaviourSummary={behaviourMap?.[student.studentId] ?? null}
               snapshot={snapshotsMap?.[student.studentId] ?? null}
               observationConfig={{ enabled: !!config.showObservationRatings, categories: config.observationCategories ?? [] }}
+              showRanking={!!config.rankingEnabled && config.showRankOnReport !== false}
             />
           ))}
         </div>
