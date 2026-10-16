@@ -2381,6 +2381,18 @@ function _computeKgReportSections(snap, config, extra = {}) {
     comments: {
       classTeacherRemark: snap.comments?.classTeacherRemark || '',
       principalRemark:    snap.comments?.principalRemark    || '',
+      // Reported directly: turning Ranking or Principal's Comment off in
+      // Report Card settings should mean the block never appears, not
+      // even blank — the non-KG path already does this via these same two
+      // flags (see _computeReportSections below). The KG path never read
+      // them at all: a KG report only ever hid a remark block when the
+      // text happened to be empty, so an already-written principal
+      // comment kept showing even after the school turned the setting
+      // off. Ranking has no KG equivalent to begin with (no rank/GPA
+      // concept for a competency-band report), so there's nothing to gate
+      // there.
+      showClassTeacherRemark: config.showClassTeacherRemark !== false,
+      showPrincipalRemark:    config.showPrincipalRemark    !== false,
     },
     signatures: {
       classTeacherLabel: config.classTeacherSignatureLabel || 'Class Teacher',
@@ -3126,6 +3138,7 @@ router._normalizeGradeScaleBands = _normalizeGradeScaleBands;
 router._buildPDFPage = _buildPDFPage;
 router._loadRenderExtras = _loadRenderExtras;
 router._computeReportSections = _computeReportSections;
+router._computeKgReportSections = _computeKgReportSections;
 router._resolveSnapComments = _resolveSnapComments;
 // RCE2 — _computeReportHTML moved to server/utils/report-layouts.js as
 // legacy_tabular's renderHtml; re-exported under its original name so

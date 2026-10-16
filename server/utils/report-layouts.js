@@ -1896,7 +1896,7 @@ function _renderKindergartenPdf(doc, s, images, isFirstPage) {
   }
 
   /* SIGN-OFFS — same shared component subject_paired uses. */
-  if (s.comments.classTeacherRemark) {
+  if (s.comments.showClassTeacherRemark && s.comments.classTeacherRemark) {
     ensureSpaceAfterResults(_measureSignOffPdf(doc, PAGE_WIDTH, s.comments.classTeacherRemark));
     rowY = _drawSignOffPdf(doc, X, rowY, PAGE_WIDTH, {
       roleLabel: s.signatures.classTeacherLabel, personName: s.cover.classTeacherName,
@@ -1904,7 +1904,7 @@ function _renderKindergartenPdf(doc, s, images, isFirstPage) {
       signDate: s.footer.signDate,
     }) + 10;
   }
-  if (s.comments.principalRemark) {
+  if (s.comments.showPrincipalRemark && s.comments.principalRemark) {
     ensureSpaceAfterResults(_measureSignOffPdf(doc, PAGE_WIDTH, s.comments.principalRemark));
     rowY = _drawSignOffPdf(doc, X, rowY, PAGE_WIDTH, {
       roleLabel: s.signatures.principalLabel, personName: s.cover.principalName,
@@ -1970,7 +1970,7 @@ function _renderKindergartenHtml(s) {
       ` : ''}
     </div>` : '';
 
-  const remarkBlock = (roleLabel, personName, remarkText, signDate) => !remarkText ? '' : `
+  const remarkBlock = (roleLabel, personName, remarkText, signDate, show) => (!show || !remarkText) ? '' : `
     <div style="border:1px solid #d8d6d0;border-radius:5px;margin-bottom:12px;overflow:hidden">
       <div style="background:#1f2d3d;color:#fff;font-weight:600;font-size:10px;text-align:center;padding:7px;text-transform:uppercase">${_esc(roleLabel)}'s General Comment</div>
       <div style="padding:12px 16px;font-size:11px;color:#5b5f68">${_esc(remarkText)}</div>
@@ -1980,8 +1980,8 @@ function _renderKindergartenHtml(s) {
       </div>
     </div>`;
   const remarksHtml =
-    remarkBlock(s.signatures.classTeacherLabel, s.cover.classTeacherName, s.comments.classTeacherRemark, s.footer.signDate) +
-    remarkBlock(s.signatures.principalLabel, s.cover.principalName, s.comments.principalRemark, s.footer.signDate);
+    remarkBlock(s.signatures.classTeacherLabel, s.cover.classTeacherName, s.comments.classTeacherRemark, s.footer.signDate, s.comments.showClassTeacherRemark) +
+    remarkBlock(s.signatures.principalLabel, s.cover.principalName, s.comments.principalRemark, s.footer.signDate, s.comments.showPrincipalRemark);
 
   const footerHtml = `
     <div style="text-align:center;font-size:9px;color:#9195a0;margin-top:14px">
