@@ -2710,6 +2710,22 @@ router.post('/preview-html', authMiddleware, PLAN, MODGATE, rbac('grades', 'read
     const { student, studentInfo, classId, className, termNum, academicYear, school, draftComment, studentDeviations, behaviourSummary: beh, config: clientConfig } = data;
     const { schoolId } = req.jwtUser;
 
+    // Reported directly: "why is the report not pulling and rendering
+    // class and stream?" — streamName was never part of this route's
+    // snap construction at all (className was, stream never). Resolved
+    // live from streamId via the streams collection (not the student's
+    // own possibly-stale denormalized streamName — same gap just fixed
+    // for GET /api/students/:id), same reasoning as every other live
+    // lookup already in this route — the one source that can't drift.
+    const previewStudentDoc = await tenantModel('students', tenantContext(req))
+      .findOne({ schoolId, id: student.studentId }).select('streamId').lean().catch(() => null);
+    let previewStreamName = '';
+    if (previewStudentDoc?.streamId) {
+      const strm = await tenantModel('streams', tenantContext(req))
+        .findOne({ schoolId, id: previewStudentDoc.streamId }).select('name').lean().catch(() => null);
+      previewStreamName = strm?.name || '';
+    }
+
     const gradingSchema = clientConfig?.gradeScale?.bands ?? [];
 
     // Denormalise into the exact snap-shape _computeReportSections
@@ -2722,6 +2738,7 @@ router.post('/preview-html', authMiddleware, PLAN, MODGATE, rbac('grades', 'read
       admissionNo: studentInfo?.admissionNumber || '',
       studentPhotoUrl: studentInfo?.photo || null,
       className: className || '',
+      streamName: previewStreamName,
       termNumber: termNum ?? null, academicYear: academicYear || '',
       schoolName: school?.name || '',
       gradingSchema,
@@ -2778,13 +2795,27 @@ router.post('/preview-html', authMiddleware, PLAN, MODGATE, rbac('grades', 'read
     // so without this live lookup, a draft preview could never show the
     // sign-off images even though a published copy of the same report
     // (which snapshots them at publish time) would.
-    const signOffDoc = await _model('schools').findOne({ id: schoolId }, { principalSignatureUrl: 1, schoolStampUrl: 1, principalName: 1, timezone: 1 }).lean().catch(() => null);
+    // Reported directly: school Address/Tagline/Email/Phone/Website/
+    // Country never rendered on this preview either — root cause: this
+    // route trusted the CLIENT-supplied `school` (the auth session's
+    // cached object, built for sidebar/branding use — name/logo/colors
+    // only, never the full profile) instead of a live fetch, the same
+    // mistake the published PDF/HTML routes don't make. Extended this
+    // existing live lookup to the same full field set those use rather
+    // than adding a second, separate one.
+    const signOffDoc = await _model('schools').findOne({ id: schoolId }, { principalSignatureUrl: 1, schoolStampUrl: 1, principalName: 1, timezone: 1, address: 1, tagline: 1, email: 1, phone: 1, website: 1, country: 1 }).lean().catch(() => null);
     const schoolWithSignOff = {
       ...school,
       principalSignatureUrl: signOffDoc?.principalSignatureUrl || null,
       schoolStampUrl:        signOffDoc?.schoolStampUrl        || null,
       principalName:         signOffDoc?.principalName         || null,
       timezone:              signOffDoc?.timezone              || null,
+      address:                signOffDoc?.address  || school?.address  || '',
+      tagline:                signOffDoc?.tagline  || school?.tagline  || '',
+      email:                  signOffDoc?.email    || school?.email    || '',
+      phone:                  signOffDoc?.phone    || school?.phone    || '',
+      website:                signOffDoc?.website  || school?.website  || '',
+      country:                signOffDoc?.country  || '',
     };
 
     // Same reasoning as the config fix above — subjectTeacherCommentsEnabled
