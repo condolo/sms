@@ -587,6 +587,19 @@ function MarkbookTab({ years }) {
   // Populated from GET /marks (every mark now carries _v), sent back on
   // save so the server can detect a stale overwrite.
   const [versions,   setVersions]   = useState({});
+  // Reported directly: a teacher entered marks for one of her two streams,
+  // switched the Stream (or Subject/Class/Assessment) selector to move to
+  // the other one — same as always, no error, no save button pressed in
+  // between — and found the first stream's marks "disappeared". Root
+  // cause: the grid's local scores/markStates reset on EVERY one of these
+  // selectors changing (see the effect below), with nothing checking
+  // whether there was unsaved work to lose first. The marks were never
+  // silently deleted server-side — they were silently never SENT at all.
+  // Every selector that feeds that reset now confirms first.
+  function confirmDiscardIfDirty() {
+    if (!dirty) return true;
+    return window.confirm('You have unsaved marks that have not been saved yet. Switching now will discard them — Save marks first if you want to keep them. Continue without saving?');
+  }
   // Cells the last save rejected because someone else edited them first.
   // The typed value stays in `scores` (never silently cleared) until the
   // teacher dismisses the banner or a later save for that cell succeeds.
@@ -1171,7 +1184,7 @@ function MarkbookTab({ years }) {
             <label className="block text-xs font-medium text-slate-600 mb-1.5">Academic Year</label>
             <select
               value={yearId}
-              onChange={e => { setYearId(e.target.value); setTermNumber(''); setScheduleId(''); }}
+              onChange={e => { if (!confirmDiscardIfDirty()) return; setYearId(e.target.value); setTermNumber(''); setScheduleId(''); }}
               className={selCls}
             >
               <option value="">All years</option>
@@ -1184,7 +1197,7 @@ function MarkbookTab({ years }) {
             <label className="block text-xs font-medium text-slate-600 mb-1.5">Term</label>
             <select
               value={termNumber}
-              onChange={e => { setTermNumber(e.target.value); setScheduleId(''); }}
+              onChange={e => { if (!confirmDiscardIfDirty()) return; setTermNumber(e.target.value); setScheduleId(''); }}
               disabled={!yearId}
               className={`${selCls} disabled:opacity-50`}
             >
@@ -1201,7 +1214,7 @@ function MarkbookTab({ years }) {
             </label>
             <select
               value={classId}
-              onChange={e => { setClassId(e.target.value); setStreamId(''); setSubjectId(''); }}
+              onChange={e => { if (!confirmDiscardIfDirty()) return; setClassId(e.target.value); setStreamId(''); setSubjectId(''); }}
               className={selCls}
             >
               <option value="">Select class…</option>
@@ -1219,7 +1232,7 @@ function MarkbookTab({ years }) {
             </label>
             <select
               value={subjectId}
-              onChange={e => { setSubjectId(e.target.value); setStreamId(''); }}
+              onChange={e => { if (!confirmDiscardIfDirty()) return; setSubjectId(e.target.value); setStreamId(''); }}
               disabled={!classId}
               className={`${selCls} disabled:opacity-50`}
             >
@@ -1230,7 +1243,7 @@ function MarkbookTab({ years }) {
           {needsStreamSelection && (
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1.5">Stream</label>
-              <select value={streamId} onChange={e => setStreamId(e.target.value)} className={selCls}>
+              <select value={streamId} onChange={e => { if (!confirmDiscardIfDirty()) return; setStreamId(e.target.value); }} className={selCls}>
                 <option value="">Select stream…</option>
                 {subjectStreams.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
@@ -1240,7 +1253,7 @@ function MarkbookTab({ years }) {
             <label className="block text-xs font-medium text-slate-600 mb-1.5">
               Assessment {filteredSchedule.length === 0 && yearId && <span className="text-amber-600 font-normal">(none scheduled — set up in Configuration)</span>}
             </label>
-            <select value={scheduleId} onChange={e => setScheduleId(e.target.value)} className={selCls}>
+            <select value={scheduleId} onChange={e => { if (!confirmDiscardIfDirty()) return; setScheduleId(e.target.value); }} className={selCls}>
               <option value="">Select assessment…</option>
               {filteredSchedule.map(entry => {
                 const st = entryStatus(entry);
