@@ -19,10 +19,16 @@ const mockAuditLog = jest.fn();
 jest.mock('../../middleware/auth', () => ({
   authMiddleware: (req, _res, next) => { req.jwtUser = { ...mockUser }; next(); },
 }));
+// hasPermission defaults to false — none of this file's fixture roles
+// (a plain teacher, or admin via the separate isManagement bypass) rely on
+// an explicit report_cards grant. A dedicated test below sets this true to
+// cover the one case that does: a non-management role an admin explicitly
+// granted full report_cards access to.
+const mockHasPermission = jest.fn(async () => false);
 jest.mock('../../middleware/rbac', () => ({
   rbac: () => (_req, _res, next) => next(),
   hasExplicitSubGrant: jest.fn(async () => true),
-  hasPermission: () => true,
+  hasPermission: (...args) => mockHasPermission(...args),
 }));
 jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) => next() }));
 jest.mock('../../middleware/module-gate', () => ({ moduleGate: () => (_req, _res, next) => next() }));
@@ -103,6 +109,8 @@ beforeEach(() => {
   mockUser = { ...TEACHER };
   mockFormStreamIds = ['st_A'];
   mockAuditLog.mockClear();
+  mockHasPermission.mockClear();
+  mockHasPermission.mockImplementation(async () => false);
   mockDb = {
     students: [
       { id: 'stu1', schoolId: SCHOOL, classId: 'c8a', streamId: 'st_A' },
@@ -332,5 +340,29 @@ describe('reading draft comments', () => {
     const res = await supertest(buildApp()).get('/api/report-cards/draft-comments?termNumber=3');
     expect(res.body.data).toHaveLength(2);
     expect(res.body.data.find(d => d.studentId === 'stu2').classTeacherRemark).toBe('Other stream note');
+  });
+
+  /* Reported directly: a role outside MANAGEMENT_ROLES (e.g. exams_officer)
+     explicitly granted full report_cards access via Settings' Role
+     Permissions editor saw every comment filtered out — the hardcoded
+     management list, not the school's own RBAC grant, decided visibility.
+     Confirmed root cause and fixed in comment-scope.js. */
+  test('a non-management role explicitly granted full report_cards access sees every draft unchanged, same as management', async () => {
+    mockUser = { userId: 'exo1', schoolId: SCHOOL, role: 'exams_officer', roles: ['exams_officer'] };
+    mockFormStreamIds = []; // not a form tutor
+    mockDb.teaching_assignments = []; // not a teacher of anything — the exact shape of the real bug
+    mockHasPermission.mockImplementation(async (_req, mod, action) => mod === 'report_cards' && action === 'update');
+    const res = await supertest(buildApp()).get('/api/report-cards/draft-comments?termNumber=3');
+    expect(res.body.data).toHaveLength(2);
+    expect(res.body.data.find(d => d.studentId === 'stu2').classTeacherRemark).toBe('Other stream note');
+  });
+
+  test('a role with only report_cards:read (not update) is still scoped down like an ordinary caller', async () => {
+    mockUser = { userId: 'exo1', schoolId: SCHOOL, role: 'exams_officer', roles: ['exams_officer'] };
+    mockFormStreamIds = [];
+    mockDb.teaching_assignments = [];
+    mockHasPermission.mockImplementation(async (_req, mod, action) => mod === 'report_cards' && action === 'read');
+    const res = await supertest(buildApp()).get('/api/report-cards/draft-comments?termNumber=3');
+    expect(res.body.data).toEqual([]);
   });
 });

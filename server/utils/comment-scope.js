@@ -45,6 +45,25 @@
 const { tenantModel, tenantContext } = require('./tenant-model');
 const { resolveHomeroomStreamIds } = require('./scopeEngine');
 const { isManagement } = require('./subject-scope');
+const { hasPermission } = require('../middleware/rbac');
+
+/* Reported directly: a role (e.g. exams_officer) explicitly granted full
+   report_cards access via Settings' Role Permissions editor — "assigned
+   full access to exam and report card" — still saw every draft comment
+   filtered out, because this file's bypass only ever checked a hardcoded
+   MANAGEMENT_ROLES list (subject-scope.js), completely independent of
+   what the school actually granted. Someone outside that list with zero
+   rows in teaching_assignments (not a classroom teacher at all, like an
+   exams officer) fell through to the per-subject-taught filter below,
+   which found nothing to show them — not "fewer comments", literally
+   every doc dropped. Checking the real report_cards grant here means a
+   role an admin has genuinely given full report-card access reads
+   comments like management does, without widening MANAGEMENT_ROLES
+   itself (which also gates assessment-mark-entry bypasses elsewhere —
+   out of scope for this fix). */
+async function _hasElevatedReportCardAccess(req) {
+  return isManagement(req) || (await hasPermission(req, 'report_cards', 'update'));
+}
 
 /** The student's class and stream — the unit every comment right is scoped to. */
 async function studentPlacement(req, studentId) {
@@ -56,7 +75,7 @@ async function studentPlacement(req, studentId) {
 
 /** Whether the caller may write the class teacher remark for a student in this stream. */
 async function canWriteClassRemark(req, streamId) {
-  if (isManagement(req)) return true;
+  if (await _hasElevatedReportCardAccess(req)) return true;
   if (!streamId) return false;
   const formStreamIds = await resolveHomeroomStreamIds(req);
   return formStreamIds.includes(streamId);
@@ -69,7 +88,7 @@ async function canWriteClassRemark(req, streamId) {
  * of the subjects they teach there, nothing else.
  */
 async function scopeDraftCommentsForCaller(req, docs) {
-  if (isManagement(req)) return docs;
+  if (await _hasElevatedReportCardAccess(req)) return docs;
   const { schoolId, userId } = req.jwtUser;
   const formStreamIds = new Set(await resolveHomeroomStreamIds(req));
 

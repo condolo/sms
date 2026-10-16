@@ -54,7 +54,7 @@ let mockCurrentUser;
 jest.mock('../../middleware/auth', () => ({
   authMiddleware: (req, _res, next) => { req.jwtUser = mockCurrentUser; next(); },
 }));
-jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => next() }));
+jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => next(), hasPermission: async () => false }));
 jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) => next() }));
 jest.mock('../../utils/model', () => ({ _model: jest.fn((col) => mockStores[col]) }));
 
