@@ -92,6 +92,13 @@ jest.mock('../../utils/model', () => ({
     }
     if (collection === 'classes') return { findOne: mockClassesFindOne };
     if (collection === 'streams') return { findOne: mockStreamsFindOne };
+    // A real school doc (not null) — bulk portal/parent-account routes read
+    // school.name/plan directly (no optional chaining) once they actually
+    // reach the welcome-email step, which they only do once eligibility
+    // matches something.
+    if (collection === 'schools') {
+      return { findOne: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue({ id: 'school_test_001', name: 'Test School', plan: 'enterprise' }) }) };
+    }
     // Default empty mock for any other collection — covers every other
     // studentId-referencing collection student-merge.js walks through
     // (attendance, exam_results, behaviour_incidents, growth_*, etc.),
@@ -1103,5 +1110,64 @@ describe('POST /api/students/bulk-portal-accounts', () => {
       .send({});
 
     expect(res.status).toBe(400);
+  });
+
+  /* Reported directly: bulk actions only ever read student.parentEmail —
+     the legacy single-guardian field — so a student whose guardian was
+     only entered via Mother's/Father's own email (the 2026-09 guardian
+     split) was silently invisible to every bulk action, even though their
+     single-student profile offered to create that exact account.
+     Confirmed live: 111 active students at one school alone. */
+  test('a student with only a Mother\'s email (no legacy parentEmail) still gets her portal account created', async () => {
+    mockStudentsFind.mockReturnValue({
+      lean: jest.fn().mockResolvedValue([
+        makeStudent({ hasPortalAccount: true, motherEmail: 'mum@example.com', motherName: 'Mum Doe' }),
+      ]),
+    });
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/students/bulk-portal-accounts')
+      .set('Authorization', 'Bearer fake-token')
+      .send({ studentIds: ['stu_demo_001'] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.parentsCreated).toBe(1);
+    expect(mockUsersCreate).toHaveBeenCalledWith(expect.objectContaining({ role: 'parent', email: 'mum@example.com', name: 'Mum Doe' }));
+    expect(mockStudentsUpdateOne).toHaveBeenCalledWith(
+      expect.objectContaining({ _id: '507f1f77bcf86cd799439011' }),
+      { $set: expect.objectContaining({ hasMotherAccount: true }) },
+    );
+  });
+
+  test('a student with BOTH Mother\'s and Father\'s email gets two independent accounts, not one overwriting the other', async () => {
+    mockStudentsFind.mockReturnValue({
+      lean: jest.fn().mockResolvedValue([
+        makeStudent({
+          hasPortalAccount: true,
+          motherEmail: 'mum@example.com', motherName: 'Mum Doe',
+          fatherEmail: 'dad@example.com', fatherName: 'Dad Doe',
+        }),
+      ]),
+    });
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/students/bulk-portal-accounts')
+      .set('Authorization', 'Bearer fake-token')
+      .send({ studentIds: ['stu_demo_001'] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.parentsCreated).toBe(2);
+    expect(mockUsersCreate).toHaveBeenCalledWith(expect.objectContaining({ email: 'mum@example.com' }));
+    expect(mockUsersCreate).toHaveBeenCalledWith(expect.objectContaining({ email: 'dad@example.com' }));
+    expect(mockStudentsUpdateOne).toHaveBeenCalledWith(
+      expect.anything(), { $set: expect.objectContaining({ hasMotherAccount: true }) },
+    );
+    expect(mockStudentsUpdateOne).toHaveBeenCalledWith(
+      expect.anything(), { $set: expect.objectContaining({ hasFatherAccount: true }) },
+    );
+    // Neither guardian's credentials silently overwrite the other's row.
+    expect(res.body.data.credentials).toHaveLength(2);
   });
 });

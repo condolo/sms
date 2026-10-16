@@ -1363,38 +1363,44 @@ router.post('/bulk-portal-accounts', authMiddleware, PLAN, MODGATE, rbac('studen
     // still gets its parent processed.
     let parentsCreated = 0, parentsSkipped = 0;
     const parentErrors = [];
-    const parentCredentials = []; // one row per sibling — see grouping below
+    const parentCredentials = []; // one row per (student, guardian account) — see grouping below
     const parentPortalAllowed = _portalAllowed(school, 'parent');
 
     if (parentPortalAllowed) {
+      // Walks all three guardian slots (legacy parentEmail, motherEmail,
+      // fatherEmail) via _eligibleGuardianContacts — see its comment above
+      // for why reading parentEmail alone silently missed real accounts.
       const parentDocs = all
         ? await Students.find({
             schoolId,
             status: { $nin: ['withdrawn', 'graduated', 'transferred'] },
-            hasParentAccount: { $ne: true },
-            parentEmail: { $exists: true, $nin: [null, ''] },
+            $or: [
+              { parentEmail: { $exists: true, $nin: [null, ''] }, hasParentAccount: { $ne: true } },
+              { motherEmail: { $exists: true, $nin: [null, ''] }, hasMotherAccount: { $ne: true } },
+              { fatherEmail: { $exists: true, $nin: [null, ''] }, hasFatherAccount: { $ne: true } },
+            ],
           }).lean()
-        : docs.filter(d => d.parentEmail && !d.hasParentAccount && !['withdrawn', 'graduated', 'transferred'].includes(d.status));
+        : docs.filter(d => !['withdrawn', 'graduated', 'transferred'].includes(d.status) && _eligibleGuardianContacts(d).length > 0);
 
-      // Group by normalized parent email first — siblings share ONE parent
-      // account. Processing per-student (like the single-student route
-      // does, safely, one call at a time) would reset the SAME account's
-      // password once per sibling within this one batch, leaving every
-      // password but the last one handed out invalid.
+      // Group by normalized guardian email first — siblings (or a mother AND
+      // father who happen to share one email) share ONE parent account.
+      // Processing per-student (like the single-student route does, safely,
+      // one call at a time) would reset the SAME account's password once per
+      // match within this one batch, leaving every password but the last one
+      // handed out invalid.
       const byEmail = new Map();
       for (const stu of parentDocs) {
-        if (!stu.parentEmail) continue; // defensive — the query above should already exclude these
-        const email = stu.parentEmail.toLowerCase().trim();
-        if (!email) continue;
-        if (!byEmail.has(email)) byEmail.set(email, []);
-        byEmail.get(email).push(stu);
+        for (const contact of _eligibleGuardianContacts(stu)) {
+          if (!byEmail.has(contact.email)) byEmail.set(contact.email, []);
+          byEmail.get(contact.email).push({ student: stu, ...contact });
+        }
       }
 
       const emailUtil = require('../utils/email');
-      await Promise.all([...byEmail.entries()].map(async ([parentEmail, siblings]) => {
+      await Promise.all([...byEmail.entries()].map(async ([parentEmail, entries]) => {
         try {
-          const parentName = siblings[0].parentName || 'Parent';
-          const siblingIds = siblings.map(s => s.id || String(s._id));
+          const parentName = entries[0].name;
+          const studentIds = entries.map(e => e.student.id || String(e.student._id));
           const tempPassword = _genTempPassword();
           const hash = await bcrypt.hash(tempPassword, 12);
 
@@ -1402,12 +1408,12 @@ router.post('/bulk-portal-accounts', authMiddleware, PLAN, MODGATE, rbac('studen
           if (existingParent) {
             await Users.updateOne({ _id: existingParent._id }, {
               $set:      { password: hash, isActive: true, updatedAt: now },
-              $addToSet: { studentIds: { $each: siblingIds }, guardianOf: { $each: siblingIds } },
+              $addToSet: { studentIds: { $each: studentIds }, guardianOf: { $each: studentIds } },
             });
           } else {
             const createdUser = await Users.create({
               id: uuidv4(), schoolId, role: 'parent', name: parentName, email: parentEmail,
-              password: hash, studentIds: siblingIds, guardianOf: siblingIds,
+              password: hash, studentIds, guardianOf: studentIds,
               isActive: true, mustChangePassword: false, createdAt: now, updatedAt: now, createdBy: userId,
             });
             try {
@@ -1417,50 +1423,42 @@ router.post('/bulk-portal-accounts', authMiddleware, PLAN, MODGATE, rbac('studen
             }
           }
 
-          await Students.updateMany(
-            { _id: { $in: siblings.map(s => s._id) } },
-            { $set: { hasParentAccount: true, updatedAt: now } }
-          );
+          // Each entry sets ITS OWN guardian flag on ITS OWN student doc —
+          // a student eligible on both mother and father slots gets both
+          // flags set independently, never collapsed into one.
+          await Promise.all(entries.map(e =>
+            Students.updateOne({ _id: e.student._id }, { $set: { [e.flagField]: true, updatedAt: now } })
+          ));
 
           emailUtil.sendWelcomeCredentials({
             name: parentName, email: parentEmail, tempPassword,
             schoolName: school.name, schoolEmail: school.systemEmail || '', role: 'Parent', slug: school.slug,
           }).catch(err => console.error('[bulk-portal-accounts] parent email send failed:', err.message));
 
-          for (const stu of siblings) {
+          for (const e of entries) {
             parentCredentials.push({
-              studentId:          stu.id || String(stu._id),
-              studentName:        `${stu.firstName} ${stu.lastName}`,
+              studentId:          e.student.id || String(e.student._id),
+              studentName:        `${e.student.firstName} ${e.student.lastName}`,
               parentName,
               parentEmail,
               parentTempPassword: tempPassword,
               parentAction:       existingParent ? 'reset' : 'created',
             });
           }
-          parentsCreated += siblings.length;
+          parentsCreated += entries.length;
         } catch (e) {
           parentErrors.push({ parentEmail, message: e.message });
-          parentsSkipped += siblings.length;
+          parentsSkipped += entries.length;
         }
       }));
     }
 
     // Merge into one row per student — every student in this batch who got
     // EITHER a student account, a parent account, or both, as one CSV-
-    // ready row (siblings repeat the same parentEmail/parentTempPassword,
-    // by design — it's the same account).
-    const rowsByStudent = new Map(credentials.map(c => [c.studentId, { ...c }]));
-    for (const p of parentCredentials) {
-      const row = rowsByStudent.get(p.studentId) || {
-        studentId: p.studentId, name: p.studentName, admissionNumber: '', username: '', tempPassword: '', action: '',
-      };
-      row.parentName          = p.parentName;
-      row.parentEmail         = p.parentEmail;
-      row.parentTempPassword  = p.parentTempPassword;
-      row.parentAction        = p.parentAction;
-      rowsByStudent.set(p.studentId, row);
-    }
-    const mergedCredentials = [...rowsByStudent.values()];
+    // ready row. A student with more than one guardian account processed
+    // (e.g. both Mother's and Father's) gets an extra row rather than one
+    // guardian's credentials silently overwriting the other's.
+    const mergedCredentials = _mergeCredentialRows(credentials, parentCredentials);
 
     console.log(`[students] Bulk portal accounts: ${created} student created, ${skipped} skipped, ${errors.length} errors; ${parentsCreated} parent accounts created/reset, ${parentErrors.length} parent errors — by ${userId}`);
     return ok(res, {
@@ -1541,13 +1539,17 @@ router.post('/bulk-reset-portal-passwords', authMiddleware, PLAN, MODGATE, rbac(
       const studentEligible   = classDocs.filter(s => !!s.admissionNumber);
       const studentIneligible = classDocs.filter(s => !s.admissionNumber);
 
-      const parentGroups = new Map(); // email -> students in THIS class
+      // Walks all three guardian slots (legacy parentEmail, motherEmail,
+      // fatherEmail) via _guardianContacts — see its comment above for why
+      // reading parentEmail alone silently missed real guardian accounts.
+      // Unconditional (not _eligibleGuardianContacts) because Reset means
+      // to touch every guardian on file regardless of current status.
+      const parentGroups = new Map(); // email -> [{student, name}] in THIS class
       for (const stu of classDocs) {
-        if (!stu.parentEmail) continue;
-        const email = stu.parentEmail.toLowerCase().trim();
-        if (!email) continue;
-        if (!parentGroups.has(email)) parentGroups.set(email, []);
-        parentGroups.get(email).push(stu);
+        for (const contact of _guardianContacts(stu)) {
+          if (!parentGroups.has(contact.email)) parentGroups.set(contact.email, []);
+          parentGroups.get(contact.email).push({ student: stu, name: contact.name });
+        }
       }
 
       let siblingOverlap = [];
@@ -1557,14 +1559,19 @@ router.post('/bulk-reset-portal-passwords', authMiddleware, PLAN, MODGATE, rbac(
           schoolId,
           classId: { $ne: classId },
           status: { $nin: ['withdrawn', 'graduated', 'transferred'] },
-          parentEmail: { $exists: true, $nin: [null, ''] },
-        }).select('classId parentEmail').lean();
+          $or: [
+            { parentEmail: { $exists: true, $nin: [null, ''] } },
+            { motherEmail: { $exists: true, $nin: [null, ''] } },
+            { fatherEmail: { $exists: true, $nin: [null, ''] } },
+          ],
+        }).select('classId parentEmail motherEmail fatherEmail').lean();
         const otherClassIdsByEmail = new Map();
         for (const stu of otherStudents) {
-          const email = stu.parentEmail.toLowerCase().trim();
-          if (!emails.includes(email)) continue;
-          if (!otherClassIdsByEmail.has(email)) otherClassIdsByEmail.set(email, new Set());
-          otherClassIdsByEmail.get(email).add(stu.classId);
+          for (const contact of _guardianContacts(stu)) {
+            if (!emails.includes(contact.email)) continue;
+            if (!otherClassIdsByEmail.has(contact.email)) otherClassIdsByEmail.set(contact.email, new Set());
+            otherClassIdsByEmail.get(contact.email).add(stu.classId);
+          }
         }
         if (otherClassIdsByEmail.size > 0) {
           const otherClassIds = [...new Set([...otherClassIdsByEmail.values()].flatMap(s => [...s]))];
@@ -1575,7 +1582,7 @@ router.post('/bulk-reset-portal-passwords', authMiddleware, PLAN, MODGATE, rbac(
             const siblingsHere = parentGroups.get(email);
             return {
               parentEmail: email,
-              parentName:  siblingsHere[0].parentName || 'Parent',
+              parentName:  siblingsHere[0].name,
               otherClasses: [...classIdSet].map(cid => ({ classId: cid, className: classNameById[cid] || cid })),
             };
           });
@@ -1658,19 +1665,21 @@ router.post('/bulk-reset-portal-passwords', authMiddleware, PLAN, MODGATE, rbac(
     const parentCredentials = [];
 
     if (parentPortalAllowed) {
+      // Unconditional (_guardianContacts, not _eligibleGuardianContacts) —
+      // Reset touches every guardian on file regardless of current status,
+      // across all three slots. See _guardianContacts' comment above.
       const byEmail = new Map();
       for (const stu of classDocs) {
-        if (!stu.parentEmail) continue;
-        const email = stu.parentEmail.toLowerCase().trim();
-        if (!email) continue;
-        if (!byEmail.has(email)) byEmail.set(email, []);
-        byEmail.get(email).push(stu);
+        for (const contact of _guardianContacts(stu)) {
+          if (!byEmail.has(contact.email)) byEmail.set(contact.email, []);
+          byEmail.get(contact.email).push({ student: stu, ...contact });
+        }
       }
 
-      await Promise.all([...byEmail.entries()].map(async ([parentEmail, siblings]) => {
+      await Promise.all([...byEmail.entries()].map(async ([parentEmail, entries]) => {
         try {
-          const parentName = siblings[0].parentName || 'Parent';
-          const siblingIds = siblings.map(s => s.id || String(s._id));
+          const parentName = entries[0].name;
+          const studentIds = entries.map(e => e.student.id || String(e.student._id));
           const tempPassword = _genTempPassword();
           const hash = await bcrypt.hash(tempPassword, 12);
 
@@ -1678,7 +1687,7 @@ router.post('/bulk-reset-portal-passwords', authMiddleware, PLAN, MODGATE, rbac(
           if (existingParent) {
             await Users.updateOne({ _id: existingParent._id }, {
               $set:      { password: hash, isActive: true, updatedAt: now },
-              $addToSet: { studentIds: { $each: siblingIds }, guardianOf: { $each: siblingIds } },
+              $addToSet: { studentIds: { $each: studentIds }, guardianOf: { $each: studentIds } },
             });
             const existingParentId = existingParent.id || String(existingParent._id);
             revokeUserTokens(existingParentId).catch(err => console.error('[bulk-reset-portal-passwords] parent token revocation failed:', err.message));
@@ -1686,7 +1695,7 @@ router.post('/bulk-reset-portal-passwords', authMiddleware, PLAN, MODGATE, rbac(
           } else {
             const createdUser = await Users.create({
               id: uuidv4(), schoolId, role: 'parent', name: parentName, email: parentEmail,
-              password: hash, studentIds: siblingIds, guardianOf: siblingIds,
+              password: hash, studentIds, guardianOf: studentIds,
               isActive: true, mustChangePassword: false, createdAt: now, updatedAt: now, createdBy: userId,
             });
             try {
@@ -1696,39 +1705,35 @@ router.post('/bulk-reset-portal-passwords', authMiddleware, PLAN, MODGATE, rbac(
             }
           }
 
-          await Students.updateMany({ _id: { $in: siblings.map(s => s._id) } }, { $set: { hasParentAccount: true, updatedAt: now } });
+          // Each entry sets its own guardian flag on its own student doc —
+          // never collapses mother/father into the same hasParentAccount flag.
+          await Promise.all(entries.map(e =>
+            Students.updateOne({ _id: e.student._id }, { $set: { [e.flagField]: true, updatedAt: now } })
+          ));
 
           emailUtil.sendWelcomeCredentials({
             name: parentName, email: parentEmail, tempPassword,
             schoolName: school.name, schoolEmail: school.systemEmail || '', role: 'Parent', slug: school.slug,
           }).catch(err => console.error('[bulk-reset-portal-passwords] parent email send failed:', err.message));
 
-          for (const stu of siblings) {
+          for (const e of entries) {
             parentCredentials.push({
-              studentId:          stu.id || String(stu._id),
-              studentName:        `${stu.firstName} ${stu.lastName}`,
+              studentId:          e.student.id || String(e.student._id),
+              studentName:        `${e.student.firstName} ${e.student.lastName}`,
               parentName, parentEmail, parentTempPassword: tempPassword,
             });
           }
-          parentsReset += siblings.length;
+          parentsReset += entries.length;
         } catch (e) {
           parentErrors.push({ parentEmail, message: e.message });
         }
       }));
     }
 
-    // Same merge-into-one-row-per-student shape as bulk-portal-accounts.
-    const rowsByStudent = new Map(credentials.map(c => [c.studentId, { ...c }]));
-    for (const p of parentCredentials) {
-      const row = rowsByStudent.get(p.studentId) || {
-        studentId: p.studentId, name: p.studentName, admissionNumber: '', username: '', tempPassword: '', action: '',
-      };
-      row.parentName         = p.parentName;
-      row.parentEmail        = p.parentEmail;
-      row.parentTempPassword = p.parentTempPassword;
-      rowsByStudent.set(p.studentId, row);
-    }
-    const mergedCredentials = [...rowsByStudent.values()];
+    // Same merge-into-one-row-per-student shape as bulk-portal-accounts —
+    // an extra row per student only when more than one guardian account
+    // was processed for them this run.
+    const mergedCredentials = _mergeCredentialRows(credentials, parentCredentials);
 
     AuditService.log({
       action: 'student.bulk_password_reset', actor: req.jwtUser, schoolId,
@@ -1778,6 +1783,70 @@ function _portalAllowed(school, portalType) {
   if (portalType === 'student') return ['student', 'family'].includes(tier);
   if (portalType === 'parent')  return tier === 'family';
   return false;
+}
+
+/* ── Guardian-contact resolution (shared by every bulk parent action) ──
+   Reported directly: bulk "Activate All Portals" / "Grant Portal Access" /
+   "Reset Passwords (by Class)" all only ever read student.parentEmail —
+   the legacy single-guardian field. The 2026-09 guardian split added
+   independent motherEmail/motherName (hasMotherAccount) and
+   fatherEmail/fatherName (hasFatherAccount) slots, used by the
+   single-student /:id/parent-account route — but every BULK route kept
+   reading only the legacy field, so any student whose guardian was only
+   entered via Mother/Father (not the legacy field) was silently invisible
+   to every bulk action, even though their single-student profile offered
+   to create that exact account. Confirmed live at one school: 111 active
+   students with a mother/father email on file but no legacy parentEmail.
+   Every bulk parent code path must resolve all three slots through here,
+   never read student.parentEmail directly. */
+function _guardianContacts(student) {
+  return [
+    { email: student.parentEmail, name: student.parentName, flagField: 'hasParentAccount' },
+    { email: student.motherEmail, name: student.motherName, flagField: 'hasMotherAccount' },
+    { email: student.fatherEmail, name: student.fatherName, flagField: 'hasFatherAccount' },
+  ]
+    .filter(g => g.email && g.email.trim())
+    .map(g => ({ email: g.email.toLowerCase().trim(), name: g.name || 'Parent', flagField: g.flagField }));
+}
+// Same, but only the guardian slots that don't already have THEIR OWN
+// account — for "activate what's missing" actions. A reset action that
+// means to touch every guardian regardless of status uses _guardianContacts
+// directly instead.
+function _eligibleGuardianContacts(student) {
+  return _guardianContacts(student).filter(g => !student[g.flagField]);
+}
+
+// One row per student in the common case (one guardian processed) — same
+// shape every caller already relied on. A student with MORE than one
+// guardian processed in this run (e.g. both Mother's and Father's accounts)
+// gets an additional row per extra guardian instead of the second guardian
+// silently overwriting the first's columns.
+function _mergeCredentialRows(studentCredentials, parentCredentials) {
+  const rowsByStudent = new Map(studentCredentials.map(c => [c.studentId, { ...c }]));
+  const usedBaseForParent = new Set();
+  const extraRows = [];
+  for (const p of parentCredentials) {
+    const hasBase = rowsByStudent.has(p.studentId);
+    if (!usedBaseForParent.has(p.studentId)) {
+      const row = hasBase ? rowsByStudent.get(p.studentId) : {
+        studentId: p.studentId, name: p.studentName, admissionNumber: '', username: '', tempPassword: '', action: '',
+      };
+      row.parentName = p.parentName;
+      row.parentEmail = p.parentEmail;
+      row.parentTempPassword = p.parentTempPassword;
+      row.parentAction = p.parentAction;
+      rowsByStudent.set(p.studentId, row);
+      usedBaseForParent.add(p.studentId);
+    } else {
+      const base = rowsByStudent.get(p.studentId);
+      extraRows.push({
+        ...base,
+        parentName: p.parentName, parentEmail: p.parentEmail,
+        parentTempPassword: p.parentTempPassword, parentAction: p.parentAction,
+      });
+    }
+  }
+  return [...rowsByStudent.values(), ...extraRows];
 }
 
 /* ── POST /api/students/:id/portal-account ───────────────────────

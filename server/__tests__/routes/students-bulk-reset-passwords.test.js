@@ -58,6 +58,10 @@ const STUDENTS_SEED = [
 
 function matches(doc, filter) {
   for (const [key, cond] of Object.entries(filter)) {
+    if (key === '$or') {
+      if (!cond.some(sub => matches(doc, sub))) return false;
+      continue;
+    }
     const val = doc[key];
     if (cond && typeof cond === 'object' && !Array.isArray(cond)) {
       if ('$nin' in cond && (cond.$nin.includes(val) || (val == null && cond.$nin.some(v => v == null)))) return false;
@@ -177,5 +181,32 @@ describe('POST /api/students/bulk-reset-portal-passwords — dryRun counts and s
     expect(res.body.data.siblingOverlap).toEqual([
       { parentEmail: 'p1@x.com', parentName: 'Mr Osei', otherClasses: [{ classId: 'classA', className: 'Class A' }] },
     ]);
+  });
+});
+
+/* Reported directly: a school ran this reset and only 2 of many parents
+   were touched. Root cause — every guardian lookup here only ever read
+   student.parentEmail, the legacy single-guardian field. The 2026-09
+   guardian split added independent motherEmail/fatherEmail slots used by
+   the single-student /:id/parent-account route; this bulk route never
+   learned about them, so any student whose guardian was only entered via
+   Mother's/Father's own email was silently invisible to it — confirmed
+   live at one school: 111 active students affected. */
+describe('POST /api/students/bulk-reset-portal-passwords — mother/father guardian slots (2026-10)', () => {
+  beforeAll(() => {
+    STUDENTS_SEED.push(
+      { id: 's6', _id: 'oid_s6', schoolId: SCHOOL_A, classId: 'classC', firstName: 'Mara', lastName: 'Niko', status: 'active', admissionNumber: 'ADM-006', motherEmail: 'mum6@x.com', motherName: 'Mrs Niko' },
+      { id: 's7', _id: 'oid_s7', schoolId: SCHOOL_A, classId: 'classC', firstName: 'Ben',  lastName: 'Niko', status: 'active', admissionNumber: 'ADM-007', fatherEmail: 'dad7@x.com', fatherName: 'Mr Niko' },
+    );
+  });
+
+  test('students whose only guardian contact is Mother\'s or Father\'s email are still counted, not silently skipped', async () => {
+    mockRolePerms = { students: ['read', 'update'] };
+    const res = await supertest(buildApp(ADMIN)).post('/api/students/bulk-reset-portal-passwords').send({ classId: 'classC', dryRun: true });
+    expect(res.status).toBe(200);
+    expect(res.body.data.studentCount).toBe(2);
+    // mum6@x.com and dad7@x.com — two distinct guardian accounts, neither of
+    // which was ever visible to this route before this fix.
+    expect(res.body.data.parentCount).toBe(2);
   });
 });
