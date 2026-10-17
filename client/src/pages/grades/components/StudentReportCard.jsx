@@ -30,7 +30,7 @@
      behaviourSummary — { merits, demerits, points, total } | null
    ============================================================ */
 import { Fragment, useState, useCallback, useEffect, useRef } from 'react';
-import { Printer, Save, Check, BarChart2, MessageSquare, Award, CheckCircle, Loader2 } from 'lucide-react';
+import { Printer, Save, Check, BarChart2, MessageSquare, Award, CheckCircle, Loader2, CalendarCheck } from 'lucide-react';
 import { DEFAULT_CUSTOM_TYPES, _gradeFromScale } from '../constants.js';
 import { reportCards as reportCardsApi } from '@/api/client.js';
 
@@ -195,6 +195,7 @@ export default function StudentReportCard({
   draftComment, onSaveComment, onSaveSubjectComment, termNum, school, academicYear,
   studentDeviations, behaviourSummary, snapshot,
   observationConfig, showRanking,
+  attendanceSummary, showAttendance,
 }) {
   const types      = customTypes ?? DEFAULT_CUSTOM_TYPES;
   // No local fallback — the server always returns the exact bands it used
@@ -391,6 +392,9 @@ export default function StudentReportCard({
         <SectionTab active={section === 'marks'}    onClick={() => setSection('marks')}    icon={BarChart2}     label="Marks" />
         <SectionTab active={section === 'comments'} onClick={() => setSection('comments')} icon={MessageSquare} label="Comments" />
         <SectionTab active={section === 'behaviour'} onClick={() => setSection('behaviour')} icon={Award}       label="Behaviour" />
+        {showAttendance !== false && (
+          <SectionTab active={section === 'attendance'} onClick={() => setSection('attendance')} icon={CalendarCheck} label="Attendance" />
+        )}
       </div>
 
       {/* ── MARKS SECTION ─────────────────────────────────── */}
@@ -546,6 +550,35 @@ export default function StudentReportCard({
             <div className="flex flex-col items-center gap-2 py-10">
               <Award size={28} className="text-slate-300" />
               <p className="text-sm text-slate-400 italic">No behaviour data for this student / term.</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── ATTENDANCE SECTION ────────────────────────────── */}
+      {/* Reported directly: "attendance summary is on but I'm not seeing
+          it" — this screen never fetched attendance at all before now,
+          only the published PDF did. Mirrors the Behaviour section above. */}
+      {section === 'attendance' && showAttendance !== false && (
+        <div className="p-5">
+          {attendanceSummary ? (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              {[
+                { label: 'Present',  value: attendanceSummary.present ?? 0, cls: 'text-emerald-600' },
+                { label: 'Absent',   value: attendanceSummary.absent  ?? 0, cls: 'text-red-500' },
+                { label: 'Total Days', value: attendanceSummary.total ?? 0, cls: 'text-slate-700' },
+                { label: 'Attendance Rate', value: attendanceSummary.attendanceRate != null ? `${attendanceSummary.attendanceRate}%` : '—', cls: 'text-indigo-600' },
+              ].map(({ label, value, cls }) => (
+                <div key={label} className="rounded-xl border border-slate-200 p-4 text-center">
+                  <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">{label}</p>
+                  <p className={`text-3xl font-black ${cls}`}>{value}</p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="flex flex-col items-center gap-2 py-10">
+              <CalendarCheck size={28} className="text-slate-300" />
+              <p className="text-sm text-slate-400 italic">No attendance data for this student / term.</p>
             </div>
           )}
         </div>

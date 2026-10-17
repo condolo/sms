@@ -1,18 +1,21 @@
 /* ============================================================
    server/utils/report-layouts.js — kindergarten renderer
 
-   Reported directly: turning off Ranking or Principal's Comment in
-   Report Card settings should mean the block never appears, not even
-   blank. The non-KG layouts (legacy_tabular, subject_paired, marks_
-   then_comments) already honour showClassTeacherRemark/showPrincipal
-   Remark via _computeReportSections — the KG path never read either
-   flag at all. _computeKgReportSections only ever hid a remark block
-   when its text happened to be empty, so a KG report with an already-
-   written principal comment kept showing it even after the school
-   turned the setting off. Ranking has no KG equivalent to begin with
-   (no rank/GPA concept for a competency-band report) — nothing to gate
-   there, confirmed by _computeKgReportSections never emitting a rank
-   field at all.
+   Reported directly, in two rounds:
+   1. Turning off Ranking or Principal's Comment in Report Card settings
+      should mean the block never appears, not even blank. The non-KG
+      layouts (legacy_tabular, subject_paired, marks_then_comments)
+      already honoured showClassTeacherRemark/showPrincipalRemark via
+      _computeReportSections — the KG path never read either flag at
+      all, only ever hiding a remark block when its text happened to be
+      empty. Ranking has no KG equivalent to begin with (no rank/GPA
+      concept for a competency-band report) — nothing to gate there.
+   2. Turning the comment off then also hid the person's NAME and
+      SIGNATURE — a separate School Settings concept (who the principal
+      is, their uploaded signature) that must not depend on a Report
+      Card comment toggle. The toggle now gates ONLY the "General
+      Comment" banner + text; the name/signature row renders whenever
+      there's a name to attribute it to, regardless of the toggle.
    ============================================================ */
 'use strict';
 
@@ -62,58 +65,76 @@ function computeSections(snapOverrides = {}, config = {}, extra = {}) {
   return reportCardsRouter._computeKgReportSections(baseSnap(snapOverrides), config, extra);
 }
 
-describe('kindergarten.renderPdf — remark boxes honour their toggles, not just text presence', () => {
+describe('kindergarten.renderPdf — remark text honours its toggle; name/signature do not', () => {
   test('both boxes draw by default (showClassTeacherRemark/showPrincipalRemark default true)', () => {
     const { spy, calls } = makeSpyDoc();
     LAYOUTS.kindergarten.renderPdf(spy, computeSections(), {}, true);
     const texts = calls.filter(c => c.method === 'text').map(c => c.args[0]);
     expect(texts).toContain('Settling in well.');
     expect(texts).toContain('A pleasure to have in school.');
+    expect(texts).toContain('Mrs. Otieno');
+    expect(texts).toContain('Dr. Kariuki');
   });
 
-  test('turning Principal\'s Comment off removes it even though real text was already written', () => {
+  test('turning Principal\'s Comment off removes the text but keeps the name', () => {
     const { spy, calls } = makeSpyDoc();
     const sections = computeSections({}, { showPrincipalRemark: false });
     LAYOUTS.kindergarten.renderPdf(spy, sections, {}, true);
     const texts = calls.filter(c => c.method === 'text').map(c => c.args[0]);
     expect(texts).not.toContain('A pleasure to have in school.');
+    expect(texts).toContain('Dr. Kariuki');
     // Class teacher's box is untouched by the other toggle.
     expect(texts).toContain('Settling in well.');
   });
 
-  test('turning Class Teacher\'s Remark off removes only that box', () => {
+  test('turning Class Teacher\'s Remark off removes only that text, keeping their name', () => {
     const { spy, calls } = makeSpyDoc();
     const sections = computeSections({}, { showClassTeacherRemark: false });
     LAYOUTS.kindergarten.renderPdf(spy, sections, {}, true);
     const texts = calls.filter(c => c.method === 'text').map(c => c.args[0]);
     expect(texts).not.toContain('Settling in well.');
+    expect(texts).toContain('Mrs. Otieno');
     expect(texts).toContain('A pleasure to have in school.');
   });
 });
 
-describe('kindergarten.renderHtml — remark boxes honour their toggles, not just text presence', () => {
+describe('kindergarten.renderHtml — remark text honours its toggle; name/signature do not', () => {
   test('both render by default', () => {
     const html = LAYOUTS.kindergarten.renderHtml(computeSections());
     expect(html).toContain('Settling in well.');
     expect(html).toContain('A pleasure to have in school.');
   });
 
-  test('each toggle independently removes its own block, not both, with no blank box left behind', () => {
-    const onlyPrincipal = LAYOUTS.kindergarten.renderHtml(computeSections({}, { showClassTeacherRemark: false }));
-    expect(onlyPrincipal).not.toContain('Settling in well.');
-    expect(onlyPrincipal).toContain('A pleasure to have in school.');
+  test('each toggle independently removes its own TEXT, not the other\'s, and not either name', () => {
+    const onlyPrincipalText = LAYOUTS.kindergarten.renderHtml(computeSections({}, { showClassTeacherRemark: false }));
+    expect(onlyPrincipalText).not.toContain('Settling in well.');
+    expect(onlyPrincipalText).toContain('A pleasure to have in school.');
+    expect(onlyPrincipalText).toContain('Mrs. Otieno');
 
-    const onlyClassTeacher = LAYOUTS.kindergarten.renderHtml(computeSections({}, { showPrincipalRemark: false }));
-    expect(onlyClassTeacher).toContain('Settling in well.');
-    expect(onlyClassTeacher).not.toContain('A pleasure to have in school.');
+    const onlyClassTeacherText = LAYOUTS.kindergarten.renderHtml(computeSections({}, { showPrincipalRemark: false }));
+    expect(onlyClassTeacherText).toContain('Settling in well.');
+    expect(onlyClassTeacherText).not.toContain('A pleasure to have in school.');
+    expect(onlyClassTeacherText).toContain('Dr. Kariuki');
   });
 
-  test('both off removes both blocks entirely, text that was already written included', () => {
+  test('both off removes both comment texts and banners, but both names still show', () => {
     const html = LAYOUTS.kindergarten.renderHtml(
       computeSections({}, { showClassTeacherRemark: false, showPrincipalRemark: false })
     );
     expect(html).not.toContain('Settling in well.');
     expect(html).not.toContain('A pleasure to have in school.');
+    expect(html).not.toContain("'s General Comment");
+    expect(html).toContain('Mrs. Otieno');
+    expect(html).toContain('Dr. Kariuki');
+  });
+
+  test('no name and both toggles off means no block at all — nothing to attribute it to and nothing enabled', () => {
+    const html = LAYOUTS.kindergarten.renderHtml(
+      computeSections(
+        { comments: { classTeacherName: '', principalName: '', classTeacherRemark: '', principalRemark: '' } },
+        { showClassTeacherRemark: false, showPrincipalRemark: false },
+      )
+    );
     expect(html).not.toContain("'s General Comment");
   });
 });

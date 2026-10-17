@@ -1710,7 +1710,9 @@ router.get('/bulk-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), s
           : attendanceSummary(schoolId, s.studentId, s.classId, s.termId, s.academicYearId)
         )),
         // Fetch each student's photo individually — different per student
-        Promise.all(chunk.map(s => _fetchImageBuf(s.studentPhotoUrl).catch(() => null))),
+        config.showStudentPhoto !== false
+          ? Promise.all(chunk.map(s => _fetchImageBuf(s.studentPhotoUrl).catch(() => null)))
+          : Promise.resolve(chunk.map(() => null)),
       ]);
       chunk.forEach((snap, i) => {
         const isAdmin = ['admin', 'superadmin'].includes(role);
@@ -2302,7 +2304,7 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
       schoolCountry:    school?.country || '',
       classTeacherName: snap.comments?.classTeacherName || '',
       principalName:    resolvedPrincipalName,
-      studentPhotoUrl:  snap.studentPhotoUrl || null,
+      studentPhotoUrl:  config.showStudentPhoto !== false ? (snap.studentPhotoUrl || null) : null,
     },
     gradingKey: gradeBands.map((b, i) => ({
       grade:  b.grade,
@@ -2331,7 +2333,10 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
 function _computeKgReportSections(snap, config, extra = {}) {
   const { school = null } = extra;
   const isDraft = snap.status !== 'published' || snap.superseded;
-  const resolvedPrincipalName = snap.schoolPrincipalName || school?.principalName || '';
+  // Same fallback chain as _computeReportSections' own resolvedPrincipalName
+  // — this one was missing the snap.comments?.principalName check, so a
+  // draft-entered principal name never showed on a KG report at all.
+  const resolvedPrincipalName = snap.comments?.principalName || snap.schoolPrincipalName || school?.principalName || '';
 
   const gradeBands = _normalizeGradeScaleBands(snap.gradingSchema).sort((a, b) => b.min - a.min);
   const display = snap.kgDisplay || {};
@@ -2358,7 +2363,7 @@ function _computeKgReportSections(snap, config, extra = {}) {
       schoolCountry: school?.country || '',
       classTeacherName: snap.comments?.classTeacherName || '',
       principalName:    resolvedPrincipalName,
-      studentPhotoUrl:  snap.studentPhotoUrl || null,
+      studentPhotoUrl:  config.showStudentPhoto !== false ? (snap.studentPhotoUrl || null) : null,
     },
     templateName: snap.templateName || '',
     display: {
@@ -2599,7 +2604,9 @@ router.get('/:id/pdf', authMiddleware, PLAN, MODGATE, _pdfAccess, scopeMiddlewar
     });
 
     const pdfImages = await _fetchSignatureImages(snap);
-    pdfImages.studentPhoto = await _fetchImageBuf(snap.studentPhotoUrl).catch(() => null);
+    pdfImages.studentPhoto = config.showStudentPhoto !== false
+      ? await _fetchImageBuf(snap.studentPhotoUrl).catch(() => null)
+      : null;
     // RCE8 — the school's real logo, drawn by _drawCoverPdf when present;
     // falls back to the same letter-avatar the HTML renderer already used
     // when a school hasn't uploaded one.
@@ -2835,7 +2842,17 @@ router.post('/preview-html', authMiddleware, PLAN, MODGATE, rbac('grades', 'read
     // live lookup rather than trusting whatever the client happened to send.
     const subjectTeacherCommentsLive = (await _getAssessmentConfig(schoolId, null).catch(() => null))?.subjectTeacherCommentsEnabled;
 
-    const sections = _buildReportSections(snap, config, null, {
+    // Reported directly: "attendance summary is on but I'm not seeing it
+    // on the report card" — this route hard-passed null for attendance
+    // unconditionally (every OTHER draft/published path fetches it), so
+    // a draft report could never show it before being published, no
+    // matter the setting. Same live-fetch pattern as the sign-off/
+    // comments lookups above, scoped by the class the toggle already
+    // showed (whole-history totals when no specific term is resolvable
+    // here — same simplicity level draft behaviour summaries already use).
+    const attData = await attendanceSummary(schoolId, student.studentId, classId).catch(() => null);
+
+    const sections = _buildReportSections(snap, config, attData, {
       school: schoolWithSignOff, behaviour: beh ?? null, deviations: studentDeviations ?? null,
       subjectTeacherCommentsEnabled: subjectTeacherCommentsLive !== false,
       subjectNames, subjectTeacherNames,

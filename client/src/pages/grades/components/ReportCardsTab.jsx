@@ -12,6 +12,7 @@ import {
   reportCards as reportCardsApi,
   rcTemplates as rcTemplatesApi,
   behaviour as behaviourApi,
+  attendance as attendanceApi,
   academicConfig as academicConfigApi,
 } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
@@ -206,6 +207,18 @@ export default function ReportCardsTab() {
     enabled:  !!classId,
     staleTime: 5 * 60_000,
     select: (res) => Object.fromEntries((res?.data ?? []).map(b => [b._id, b])),
+  });
+
+  // Attendance summary indexed by studentId for this class — reported
+  // directly: "attendance summary is on but I'm not seeing it", traced to
+  // this screen never fetching attendance at all (only the published PDF
+  // did). Mirrors behaviourMap above exactly.
+  const { data: attendanceMap } = useQuery({
+    queryKey: ['attendance', 'summary', { classId }],
+    queryFn:  () => attendanceApi.summary({ classId }),
+    enabled:  !!classId,
+    staleTime: 5 * 60_000,
+    select: (res) => Object.fromEntries((res?.data ?? []).map(a => [a._id, a])),
   });
 
   // Published snapshots for this class/term/year — keyed by studentId
@@ -564,6 +577,8 @@ export default function ReportCardsTab() {
               academicYear={displayAcademicYear}
               studentDeviations={deviationMap[student.studentId] ?? null}
               behaviourSummary={behaviourMap?.[student.studentId] ?? null}
+              attendanceSummary={attendanceMap?.[student.studentId] ?? null}
+              showAttendance={config.showAttendanceSummary !== false}
               snapshot={snapshotsMap?.[student.studentId] ?? null}
               observationConfig={{ enabled: !!config.showObservationRatings, categories: config.observationCategories ?? [] }}
               showRanking={!!config.rankingEnabled && config.showRankOnReport !== false}

@@ -284,10 +284,16 @@ describe('marks_then_comments.renderHtml — principal signature & school stamp 
     expect(html).toContain('<img src="data:image/png;base64,DDDD"');
   });
 
-  test('turning off Principal\'s Comment removes the signature image too — it has nowhere left to sit', () => {
+  // Reported directly: turning Principal's Comment off also hid the
+  // principal's name AND signature — a separate School Settings concept
+  // that shouldn't depend on a Report Card comment toggle. Revised from
+  // this test's original intent — the image/name now stay; only the
+  // comment banner + text go.
+  test('turning off Principal\'s Comment keeps the signature image — only the comment banner/text goes', () => {
     const html = LAYOUTS.marks_then_comments.renderHtml(
       computeSections({ principalSignatureUrl: 'data:image/png;base64,AAAA' }, { showPrincipalRemark: false })
     );
-    expect(html).not.toContain('<img');
+    expect(html).toContain('<img src="data:image/png;base64,AAAA"');
+    expect(html).not.toContain("Principal's General Comment");
   });
 });

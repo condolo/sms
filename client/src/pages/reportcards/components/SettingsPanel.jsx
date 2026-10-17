@@ -131,6 +131,7 @@ function ToggleRow({ label, description, checked, onToggle }) {
 const GENERAL_TOGGLES = [
   { key: 'rankingEnabled',        label: 'Class Ranking',                description: 'Compute and rank students within their class by average score.' },
   { key: 'showRankOnReport',      label: 'Show Rank on Report Card',      description: "Display the student's class rank on their report card (only when ranking is enabled)." },
+  { key: 'showStudentPhoto',      label: "Show Student's Photo",         description: "Display the student's profile photo on the report card cover." },
   { key: 'showAttendanceSummary', label: 'Show Attendance Summary',       description: 'Display a Present / Absent / Total Days summary block.' },
   { key: 'showGPA',                label: 'Show GPA',                     description: 'Display a computed GPA alongside the average score.' },
   { key: 'showClassAverage',      label: 'Show Average Score',            description: "Display the student's average score in the summary bar." },

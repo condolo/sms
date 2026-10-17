@@ -325,11 +325,19 @@ describe('legacy_tabular.renderHtml — principal signature & school stamp (repo
     expect(html).not.toContain('CHANGED_SINCE');
   });
 
-  test('turning off Principal\'s Comment removes the signature image too — it has nowhere left to sit', () => {
+  // Reported directly: turning Principal's Comment off also hid the
+  // principal's name AND signature — a separate School Settings concept
+  // (who the principal is, their uploaded signature) that shouldn't
+  // depend on a Report Card comment toggle. Revised from this test's
+  // original intent (removing the image along with the comment box) —
+  // the image/name now stay; only the comment banner + text go.
+  test('turning off Principal\'s Comment keeps the signature image — only the comment banner/text goes', () => {
     const html = LAYOUTS.legacy_tabular.renderHtml(
       computeSections({ principalSignatureUrl: 'data:image/png;base64,AAAA', schoolStampUrl: 'data:image/png;base64,BBBB' }, { showPrincipalRemark: false })
     );
-    expect(html).not.toContain('<img');
+    expect(html).toContain('<img src="data:image/png;base64,AAAA"');
+    expect(html).toContain('<img src="data:image/png;base64,BBBB"');
+    expect(html).not.toContain("Principal's General Comment");
   });
 
   test('same fix applies to the PDF path', () => {

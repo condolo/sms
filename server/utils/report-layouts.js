@@ -157,13 +157,24 @@ function _sportsAndTalentHtml(s) {
 // date at all). Used for both Class Teacher and Principal — stampUrl is
 // only ever passed for the Principal's block (there's no "class teacher
 // stamp" concept), matching every prior fix's "only Principal/stamp" posture.
-function _remarkSignOffHtml({ roleLabel, personName, remarkText, signatureUrl, stampUrl, signDate }) {
+// Reported directly: turning off "Show Principal's Comment" also hid the
+// principal's own NAME and SIGNATURE — the two were never independent
+// concepts here, even though the comment text and the fact of who signed
+// the report are different things a school may want to control separately
+// (the name/signature are configured in main School Settings, under a
+// completely different save button, and should not depend on a Report
+// Card toggle). `showRemark` (default true, so every existing caller is
+// unaffected) now gates ONLY the "General Comment" banner + text; the
+// signature row (image, name, role label, stamp, date) always renders
+// when this function is called at all.
+function _remarkSignOffHtml({ roleLabel, personName, remarkText, signatureUrl, stampUrl, signDate, showRemark = true }) {
   return `
     <div style="position:relative">
       ${stampUrl ? `<img src="${_esc(stampUrl)}" alt="" style="position:absolute;top:28px;right:0;height:50px;width:50px;object-fit:contain;opacity:0.85" />` : ''}
+      ${showRemark ? `
       <div style="background:#1e293b;color:#fff;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;text-align:center;padding:7px;border-radius:4px 4px 0 0">${_esc(roleLabel)}'s General Comment</div>
-      <div style="border:1px solid #e2e8f0;border-top:none;border-radius:0 0 4px 4px;padding:10px 12px;min-height:66px;font-size:11px;color:#475569">${_esc(remarkText)}</div>
-      <div style="margin-top:18px;display:flex;align-items:flex-end;justify-content:space-between;gap:16px">
+      <div style="border:1px solid #e2e8f0;border-top:none;border-radius:0 0 4px 4px;padding:10px 12px;min-height:66px;font-size:11px;color:#475569">${_esc(remarkText)}</div>` : ''}
+      <div style="margin-top:${showRemark ? '18px' : '4px'};display:flex;align-items:flex-end;justify-content:space-between;gap:16px">
         <div>
           ${signatureUrl ? `<img src="${_esc(signatureUrl)}" alt="" style="height:32px;max-width:160px;object-fit:contain;display:block;margin-bottom:4px" />` : '<div style="height:32px"></div>'}
           <div style="border-top:1px solid #1e293b;width:170px;padding-top:4px">
@@ -546,14 +557,16 @@ function _renderLegacyTabularHtml(s) {
     </div>`).join('')}
   </div>` : `
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
-    ${s.comments.showClassTeacherRemark ? _remarkSignOffHtml({
+    ${(s.comments.showClassTeacherRemark || s.comments.classTeacherName) ? _remarkSignOffHtml({
       roleLabel: s.signatures.classTeacherLabel, personName: s.comments.classTeacherName,
       remarkText: s.comments.classTeacherRemark, signDate: s.footer.signDate,
+      showRemark: s.comments.showClassTeacherRemark,
     }) : ''}
-    ${s.comments.showPrincipalRemark ? _remarkSignOffHtml({
+    ${(s.comments.showPrincipalRemark || s.comments.principalName || s.signatures.principalSignatureUrl) ? _remarkSignOffHtml({
       roleLabel: s.signatures.principalLabel, personName: s.comments.principalName,
       remarkText: s.comments.principalRemark, signatureUrl: s.signatures.principalSignatureUrl,
       stampUrl: s.signatures.schoolStampUrl, signDate: s.footer.signDate,
+      showRemark: s.comments.showPrincipalRemark,
     }) : ''}
   </div>`;
 
@@ -925,10 +938,11 @@ function _drawObservationRatingsPdf(doc, s, x, width, y) {
   return y + 6;
 }
 
-function _measureSignOffPdf(doc, width, remarkText) {
+function _measureSignOffPdf(doc, width, remarkText, showRemark = true) {
   _registerReportFonts(doc);
   const PAD_X = 16, BANNER_H = 24, BODY_GAP = 10, SIGROW_H = 46;
   doc.font(FONTS.sansRegular).fontSize(9.5);
+  if (!showRemark) return SIGROW_H + 14;
   const textH = doc.heightOfString(remarkText || '', { width: width - PAD_X * 2 });
   return BANNER_H + BODY_GAP + textH + SIGROW_H + 10;
 }
@@ -940,21 +954,29 @@ function _measureSignOffPdf(doc, width, remarkText) {
 // stamp" concept), same posture the HTML renderer's _remarkSignOffHtml
 // already follows. Always one atomic block (ensureSpace the full
 // _measureSignOffPdf height before calling this).
-function _drawSignOffPdf(doc, x, y, width, { roleLabel, personName, remarkText, signatureImg, stampImg, signDate }) {
+//
+// `showRemark` (default true — every existing caller unaffected) gates
+// ONLY the banner + comment text, same split as _remarkSignOffHtml's own
+// — reported directly: turning the comment off also hid the principal's
+// name and signature, which are a separate School Settings concept and
+// should keep showing regardless.
+function _drawSignOffPdf(doc, x, y, width, { roleLabel, personName, remarkText, signatureImg, stampImg, signDate, showRemark = true }) {
   _registerReportFonts(doc);
   const PAD_X = 16, BANNER_H = 24, SIGROW_H = 46;
   doc.font(FONTS.sansRegular).fontSize(9.5);
-  const textH = doc.heightOfString(remarkText || '', { width: width - PAD_X * 2 });
-  const totalH = BANNER_H + 10 + textH + SIGROW_H + 10;
+  const textH = showRemark ? doc.heightOfString(remarkText || '', { width: width - PAD_X * 2 }) : 0;
+  const totalH = showRemark ? (BANNER_H + 10 + textH + SIGROW_H + 10) : (SIGROW_H + 14);
 
   doc.lineWidth(1).roundedRect(x, y, width, totalH, 5).stroke(RULE);
-  doc.rect(x, y, width, BANNER_H).fill(BRAND);
-  doc.fillColor('white').font(FONTS.sansSemibold).fontSize(9)
-     .text(`${roleLabel}'s General Comment`.toUpperCase(), x, y + 8, { width, align: 'center' });
-
-  let ty = y + BANNER_H + 10;
-  doc.fillColor(INK_SOFT).font(FONTS.sansRegular).fontSize(9.5).text(remarkText || '', x + PAD_X, ty, { width: width - PAD_X * 2 });
-  ty += textH + 12;
+  let ty = y + 10;
+  if (showRemark) {
+    doc.rect(x, y, width, BANNER_H).fill(BRAND);
+    doc.fillColor('white').font(FONTS.sansSemibold).fontSize(9)
+       .text(`${roleLabel}'s General Comment`.toUpperCase(), x, y + 8, { width, align: 'center' });
+    ty = y + BANNER_H + 10;
+    doc.fillColor(INK_SOFT).font(FONTS.sansRegular).fontSize(9.5).text(remarkText || '', x + PAD_X, ty, { width: width - PAD_X * 2 });
+    ty += textH + 12;
+  }
 
   const sigW = 150;
   if (signatureImg) {
@@ -1174,20 +1196,22 @@ function _renderSubjectPairedPdf(doc, s, images, isFirstPage) {
       rowY += h + 6;
     });
   } else {
-    if (s.comments.showClassTeacherRemark) {
-      ensureSpaceAfterResults(_measureSignOffPdf(doc, PAGE_WIDTH, s.comments.classTeacherRemark));
+    // show* gates ONLY the comment banner + text (showRemark) — the name/
+    // signature row shows whenever there's a name to attribute it to.
+    if (s.comments.showClassTeacherRemark || s.cover.classTeacherName) {
+      ensureSpaceAfterResults(_measureSignOffPdf(doc, PAGE_WIDTH, s.comments.classTeacherRemark, s.comments.showClassTeacherRemark));
       rowY = _drawSignOffPdf(doc, X, rowY, PAGE_WIDTH, {
         roleLabel: s.signatures.classTeacherLabel, personName: s.cover.classTeacherName,
         remarkText: s.comments.classTeacherRemark, signatureImg: null, stampImg: null,
-        signDate: s.footer.signDate,
+        signDate: s.footer.signDate, showRemark: s.comments.showClassTeacherRemark,
       }) + 10;
     }
-    if (s.comments.showPrincipalRemark) {
-      ensureSpaceAfterResults(_measureSignOffPdf(doc, PAGE_WIDTH, s.comments.principalRemark));
+    if (s.comments.showPrincipalRemark || s.cover.principalName || images.principalSignature) {
+      ensureSpaceAfterResults(_measureSignOffPdf(doc, PAGE_WIDTH, s.comments.principalRemark, s.comments.showPrincipalRemark));
       rowY = _drawSignOffPdf(doc, X, rowY, PAGE_WIDTH, {
         roleLabel: s.signatures.principalLabel, personName: s.cover.principalName,
         remarkText: s.comments.principalRemark, signatureImg: images.principalSignature || null,
-        stampImg: images.schoolStamp || null, signDate: s.footer.signDate,
+        stampImg: images.schoolStamp || null, signDate: s.footer.signDate, showRemark: s.comments.showPrincipalRemark,
       }) + 10;
     }
   }
@@ -1569,20 +1593,22 @@ function _renderMarksThenCommentsPdf(doc, s, images, isFirstPage) {
       rowY += h + 6;
     });
   } else {
-    if (s.comments.showClassTeacherRemark) {
-      ensureCommentsSpace(_measureSignOffPdf(doc, PAGE_WIDTH, s.comments.classTeacherRemark));
+    // show* gates ONLY the comment banner + text (showRemark) — the name/
+    // signature row shows whenever there's a name to attribute it to.
+    if (s.comments.showClassTeacherRemark || s.cover.classTeacherName) {
+      ensureCommentsSpace(_measureSignOffPdf(doc, PAGE_WIDTH, s.comments.classTeacherRemark, s.comments.showClassTeacherRemark));
       rowY = _drawSignOffPdf(doc, X, rowY, PAGE_WIDTH, {
         roleLabel: s.signatures.classTeacherLabel, personName: s.cover.classTeacherName,
         remarkText: s.comments.classTeacherRemark, signatureImg: null, stampImg: null,
-        signDate: s.footer.signDate,
+        signDate: s.footer.signDate, showRemark: s.comments.showClassTeacherRemark,
       }) + 10;
     }
-    if (s.comments.showPrincipalRemark) {
-      ensureCommentsSpace(_measureSignOffPdf(doc, PAGE_WIDTH, s.comments.principalRemark));
+    if (s.comments.showPrincipalRemark || s.cover.principalName || images.principalSignature) {
+      ensureCommentsSpace(_measureSignOffPdf(doc, PAGE_WIDTH, s.comments.principalRemark, s.comments.showPrincipalRemark));
       rowY = _drawSignOffPdf(doc, X, rowY, PAGE_WIDTH, {
         roleLabel: s.signatures.principalLabel, personName: s.cover.principalName,
         remarkText: s.comments.principalRemark, signatureImg: images.principalSignature || null,
-        stampImg: images.schoolStamp || null, signDate: s.footer.signDate,
+        stampImg: images.schoolStamp || null, signDate: s.footer.signDate, showRemark: s.comments.showPrincipalRemark,
       }) + 10;
     }
   }
@@ -1692,14 +1718,16 @@ function _renderMarksThenCommentsHtml(s) {
     </div>`).join('')}
   </div>` : `
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
-    ${s.comments.showClassTeacherRemark ? _remarkSignOffHtml({
+    ${(s.comments.showClassTeacherRemark || s.comments.classTeacherName) ? _remarkSignOffHtml({
       roleLabel: s.signatures.classTeacherLabel, personName: s.comments.classTeacherName,
       remarkText: s.comments.classTeacherRemark, signDate: s.footer.signDate,
+      showRemark: s.comments.showClassTeacherRemark,
     }) : ''}
-    ${s.comments.showPrincipalRemark ? _remarkSignOffHtml({
+    ${(s.comments.showPrincipalRemark || s.comments.principalName || s.signatures.principalSignatureUrl) ? _remarkSignOffHtml({
       roleLabel: s.signatures.principalLabel, personName: s.comments.principalName,
       remarkText: s.comments.principalRemark, signatureUrl: s.signatures.principalSignatureUrl,
       stampUrl: s.signatures.schoolStampUrl, signDate: s.footer.signDate,
+      showRemark: s.comments.showPrincipalRemark,
     }) : ''}
   </div>`;
 
@@ -1895,21 +1923,24 @@ function _renderKindergartenPdf(doc, s, images, isFirstPage) {
     }
   }
 
-  /* SIGN-OFFS — same shared component subject_paired uses. */
-  if (s.comments.showClassTeacherRemark && s.comments.classTeacherRemark) {
-    ensureSpaceAfterResults(_measureSignOffPdf(doc, PAGE_WIDTH, s.comments.classTeacherRemark));
+  /* SIGN-OFFS — same shared component subject_paired uses. The show*
+     toggles gate ONLY the comment banner + text (showRemark, passed
+     through) — the name/signature row shows whenever there's a name to
+     attribute it to, independent of whether a comment is shown. */
+  if (s.comments.showClassTeacherRemark || s.cover.classTeacherName) {
+    ensureSpaceAfterResults(_measureSignOffPdf(doc, PAGE_WIDTH, s.comments.classTeacherRemark, s.comments.showClassTeacherRemark));
     rowY = _drawSignOffPdf(doc, X, rowY, PAGE_WIDTH, {
       roleLabel: s.signatures.classTeacherLabel, personName: s.cover.classTeacherName,
       remarkText: s.comments.classTeacherRemark, signatureImg: null, stampImg: null,
-      signDate: s.footer.signDate,
+      signDate: s.footer.signDate, showRemark: s.comments.showClassTeacherRemark,
     }) + 10;
   }
-  if (s.comments.showPrincipalRemark && s.comments.principalRemark) {
-    ensureSpaceAfterResults(_measureSignOffPdf(doc, PAGE_WIDTH, s.comments.principalRemark));
+  if (s.comments.showPrincipalRemark || s.cover.principalName || images.principalSignature) {
+    ensureSpaceAfterResults(_measureSignOffPdf(doc, PAGE_WIDTH, s.comments.principalRemark, s.comments.showPrincipalRemark));
     rowY = _drawSignOffPdf(doc, X, rowY, PAGE_WIDTH, {
       roleLabel: s.signatures.principalLabel, personName: s.cover.principalName,
       remarkText: s.comments.principalRemark, signatureImg: images.principalSignature || null,
-      stampImg: images.schoolStamp || null, signDate: s.footer.signDate,
+      stampImg: images.schoolStamp || null, signDate: s.footer.signDate, showRemark: s.comments.showPrincipalRemark,
     }) + 10;
   }
 
@@ -1970,11 +2001,18 @@ function _renderKindergartenHtml(s) {
       ` : ''}
     </div>` : '';
 
-  const remarkBlock = (roleLabel, personName, remarkText, signDate, show) => (!show || !remarkText) ? '' : `
+  // `show` (Show Class Teacher's Remark / Show Principal's Comment) gates
+  // ONLY the banner + comment text — reported directly: turning the
+  // comment off also hid the person's name, which is a separate School
+  // Settings concept (who the principal is, their signature) and should
+  // keep showing regardless. The block itself shows whenever there's a
+  // name to attribute it to.
+  const remarkBlock = (roleLabel, personName, remarkText, signDate, show) => (!show && !personName) ? '' : `
     <div style="border:1px solid #d8d6d0;border-radius:5px;margin-bottom:12px;overflow:hidden">
+      ${show ? `
       <div style="background:#1f2d3d;color:#fff;font-weight:600;font-size:10px;text-align:center;padding:7px;text-transform:uppercase">${_esc(roleLabel)}'s General Comment</div>
-      <div style="padding:12px 16px;font-size:11px;color:#5b5f68">${_esc(remarkText)}</div>
-      <div style="display:flex;justify-content:space-between;padding:0 16px 12px;font-size:10px;color:#5b5f68">
+      <div style="padding:12px 16px;font-size:11px;color:#5b5f68">${_esc(remarkText)}</div>` : ''}
+      <div style="display:flex;justify-content:space-between;padding:${show ? '0' : '10px'} 16px 12px;font-size:10px;color:#5b5f68">
         <span>${_esc(personName || '—')}<br/><span style="font-size:8.5px;color:#9195a0">${_esc(roleLabel)}</span></span>
         <span style="color:#9195a0">Date: ${_esc(signDate)}</span>
       </div>
