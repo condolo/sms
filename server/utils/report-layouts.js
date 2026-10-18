@@ -84,42 +84,32 @@ function _observationRatingsHtml(s) {
   const LEVELS = [['excellent', 'Excellent'], ['good', 'Good'], ['improve', 'Improve']];
   const cards = s.comments.observationRatings.map(({ category, rating }) => `
     <div style="border:1px solid #cbd5e1;border-radius:6px;overflow:hidden">
-      <div style="background:#1e293b;color:#fff;text-align:center;font-weight:700;font-size:10px;letter-spacing:.6px;padding:6px 4px;text-transform:uppercase">${_esc(category)}</div>
+      <div style="background:${BRAND};color:#fff;text-align:center;font-weight:700;font-size:10px;letter-spacing:.6px;padding:6px 4px;text-transform:uppercase">${_esc(category)}</div>
       <table style="width:100%;border-collapse:collapse;table-layout:fixed">
         <tr>${LEVELS.map(([, label], i) => `
           <td style="text-align:center;font-size:8px;font-weight:700;letter-spacing:.3px;color:#475569;padding:5px 2px;${i < 2 ? 'border-right:1px solid #e2e8f0;' : ''}">${label.toUpperCase()}</td>`).join('')}
         </tr>
         <tr>${LEVELS.map(([v], i) => `
           <td style="text-align:center;padding:7px 2px;border-top:1px solid #e2e8f0;${i < 2 ? 'border-right:1px solid #e2e8f0;' : ''}">
-            <span style="display:inline-block;width:12px;height:12px;border:1.5px solid #475569;border-radius:2px;${rating === v ? 'background:#1e293b' : ''}"></span>
+            <span style="display:inline-block;width:12px;height:12px;border:1.5px solid #475569;border-radius:2px;${rating === v ? `background:${BRAND}` : ''}"></span>
           </td>`).join('')}
         </tr>
       </table>
     </div>`).join('');
+  // Reported directly, with a screenshot: the heading printed on one
+  // page while the category grid (6 cards, wraps to 2 rows of 3) split
+  // across the page boundary, leaving the second row with no heading at
+  // all above it on its own page. page-break-inside:avoid (+ the
+  // unprefixed break-inside for modern engines) keeps heading and grid
+  // as one atomic unit — a browser that can't fit it on the current
+  // page moves the WHOLE block to the next one instead of splitting it.
   return `
-  <div style="margin:16px 0">
+  <div style="margin:16px 0;page-break-inside:avoid;break-inside:avoid">
     <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 8px">Class Teacher Observations</p>
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">${cards}</div>
   </div>`;
 }
 
-/* Sign-off images for the HTML renderers — reported directly: "the stamp
-   and principal's signature didn't show." These were only ever drawn in
-   the PDFKit path (images.principalSignature/schoolStamp, Buffers fetched
-   server-side by _fetchSignatureImages for the native-PDF route);
-   s.signatures.principalSignatureUrl/schoolStampUrl are the same URLs
-   (data: URI or http(s) — see report-cards.js's _fetchImageBuf) as plain
-   strings a browser can load directly in an <img>, with no server-side
-   fetch needed here. Empty string when the school hasn't uploaded one —
-   same "zero trace" rule as every other optional block in this file. */
-function _principalSignatureImgHtml(s) {
-  if (!s.signatures.principalSignatureUrl) return '';
-  return `<img src="${_esc(s.signatures.principalSignatureUrl)}" alt="" style="display:block;height:30px;max-width:170px;object-fit:contain;margin:10px 0 2px" />`;
-}
-function _schoolStampImgHtml(s) {
-  if (!s.signatures.schoolStampUrl) return '';
-  return `<img src="${_esc(s.signatures.schoolStampUrl)}" alt="" style="position:absolute;top:0;right:0;height:52px;width:52px;object-fit:contain;opacity:0.85" />`;
-}
 
 // Reported directly: "I need... the footer see" (a reference design's
 // prominent term-dates bar). closingDate/nextTermBegin already existed
@@ -172,13 +162,13 @@ function _remarkSignOffHtml({ roleLabel, personName, remarkText, signatureUrl, s
     <div style="position:relative">
       ${stampUrl ? `<img src="${_esc(stampUrl)}" alt="" style="position:absolute;top:28px;right:0;height:50px;width:50px;object-fit:contain;opacity:0.85" />` : ''}
       ${showRemark ? `
-      <div style="background:#1e293b;color:#fff;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;text-align:center;padding:7px;border-radius:4px 4px 0 0">${_esc(roleLabel)}'s General Comment</div>
+      <div style="background:${BRAND};color:#fff;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;text-align:center;padding:7px;border-radius:4px 4px 0 0">${_esc(roleLabel)}'s General Comment</div>
       <div style="border:1px solid #e2e8f0;border-top:none;border-radius:0 0 4px 4px;padding:10px 12px;min-height:66px;font-size:11px;color:#475569">${_esc(remarkText)}</div>` : ''}
       <div style="margin-top:${showRemark ? '18px' : '4px'};display:flex;align-items:flex-end;justify-content:space-between;gap:16px">
         <div>
           ${signatureUrl ? `<img src="${_esc(signatureUrl)}" alt="" style="height:32px;max-width:160px;object-fit:contain;display:block;margin-bottom:4px" />` : '<div style="height:32px"></div>'}
-          <div style="border-top:1px solid #1e293b;width:170px;padding-top:4px">
-            <p style="margin:0;font-size:11px;color:#1e293b">${_esc(personName) || '—'}</p>
+          <div style="border-top:1px solid ${BRAND};width:170px;padding-top:4px">
+            <p style="margin:0;font-size:11px;color:${BRAND}">${_esc(personName) || '—'}</p>
             <p style="margin:0;font-size:10px;font-weight:700;color:#475569">${_esc(roleLabel)}</p>
           </div>
         </div>
@@ -481,7 +471,7 @@ function _renderLegacyTabularHtml(s) {
         ${markCells}
         <td style="${tdC};font-weight:700">${_esc(row.scoreText)}</td>
         <td style="${tdC};font-weight:700">${_esc(row.gradeText)}</td>
-        <td style="${tdC};color:${devColor};font-weight:600">${row.deviationText == null ? '—' : _esc(row.deviationText)}</td>
+        <td style="${tdC};color:${devColor};font-weight:600">${row.deviationText == null ? '' : _esc(row.deviationText)}</td>
         <td style="${tdS};font-size:9px;color:#64748b">${_esc(row.remarksText)}</td>
       </tr>`;
   }).join('');
@@ -518,11 +508,13 @@ function _renderLegacyTabularHtml(s) {
   </table>
   ${s.resultsTable.rankingNote ? `<p style="font-size:9px;color:#64748b;margin:0 0 14px">${_esc(s.resultsTable.rankingNote)}</p>` : ''}
   ${s.attendance ? `<p style="font-size:11px;color:#475569;margin:0 0 14px"><b>Attendance:</b> ${_esc(s.attendance.text)}</p>` : ''}
-  <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">Grading Key</p>
-  <table style="width:100%;border-collapse:collapse;font-size:10px;max-width:480px">
-    <thead><tr><th style="${thS}">Grade</th><th style="${thS}">Range</th><th style="${thS}">Points</th><th style="${thS};text-align:left">Description</th></tr></thead>
-    <tbody>${gradingRows}</tbody>
-  </table>
+  <div style="page-break-inside:avoid;break-inside:avoid">
+    <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">Grading Key</p>
+    <table style="width:100%;border-collapse:collapse;font-size:10px;max-width:480px">
+      <thead><tr><th style="${thS}">Grade</th><th style="${thS}">Range</th><th style="${thS}">Points</th><th style="${thS};text-align:left">Description</th></tr></thead>
+      <tbody>${gradingRows}</tbody>
+    </table>
+  </div>
 </div>`;
 
   // Reported directly: "no subject teachers name" — this table never
@@ -624,7 +616,12 @@ function _renderLegacyTabularHtml(s) {
 <html><head><meta charset="UTF-8">
 <title>Report Card — ${_esc(s.studentInfo.studentName)}</title>
 <style>
-  *{box-sizing:border-box}
+  /* Reported directly, with a screenshot: table header text was
+     white-on-navy in source but printed as near-invisible pale text —
+     browsers drop background-color by default when printing/exporting
+     to PDF unless told otherwise, leaving the white text with nothing
+     behind it. */
+  *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact;color-adjust:exact}
   body{font-family:Arial,Helvetica,sans-serif;max-width:1050px;margin:20px auto;color:#0f172a;padding:0 16px}
   @media print{@page{margin:1.5cm;size:A4}button{display:none!important}}
 </style>
@@ -702,7 +699,7 @@ function _renderCoverHtml(s) {
 <div style="min-height:260mm;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;text-align:center">
   ${_schoolHeaderHtml(cover, logoHtml)}
   <div>
-    <div style="display:inline-block;background:#1e293b;color:#fff;padding:8px 28px;border-radius:6px;font-size:14px;font-weight:700;letter-spacing:1.5px">
+    <div style="display:inline-block;background:${BRAND};color:#fff;padding:8px 28px;border-radius:6px;font-size:14px;font-weight:700;letter-spacing:1.5px">
       ${_esc(cover.title)}
     </div>
     <p style="font-size:11px;color:#64748b;margin:8px 0 0">Academic Year ${_esc(cover.academicYear)} &middot; Term ${_esc(cover.termNumber ?? '—')}</p>
@@ -1099,7 +1096,7 @@ function _renderSubjectPairedPdf(doc, s, images, isFirstPage) {
     if (showDev) {
       const devColor = row.deviationText == null ? INK_FAINT : (row.deviationText.startsWith('-') ? FAIL_RED : PASS_GREEN);
       doc.font(FONTS.monoRegular).fontSize(8).fillColor(devColor)
-         .text(row.deviationText ?? '—', colX[devIdx] + 3, rowY + 5, { width: colWidths[devIdx] - 3, align: 'center' });
+         .text(row.deviationText ?? '', colX[devIdx] + 3, rowY + 5, { width: colWidths[devIdx] - 3, align: 'center' });
     }
     rowY += 18;
 
@@ -1237,7 +1234,12 @@ function _renderSubjectPairedHtml(s) {
     : '';
   const coverHtml = _renderCoverHtml(s);
 
-  const thS = 'border:1px solid #cbd5e1;padding:5px 8px;background:#1e293b;color:#fff;font-size:9px;text-transform:uppercase;letter-spacing:.5px;text-align:center';
+  // Reported directly: the report card "is very dull... colored table
+  // avoid this dark grey colour" — this HTML renderer hardcoded its own
+  // #1e293b instead of using BRAND, the same navy this exact layout's
+  // PDF renderer already uses, so the two diverged in a way nobody
+  // intended. Now the one color, everywhere.
+  const thS = `border:1px solid #cbd5e1;padding:5px 8px;background:${BRAND};color:#fff;font-size:9px;text-transform:uppercase;letter-spacing:.5px;text-align:center`;
   const tdS = 'border:1px solid #e2e8f0;padding:5px 8px';
   const tdC = `${tdS};text-align:center`;
 
@@ -1259,7 +1261,7 @@ function _renderSubjectPairedHtml(s) {
     const devCell = s.resultsTable.showDeviation
       ? (() => {
           const devColor = row.deviationText == null ? '#94a3b8' : row.deviationText.startsWith('-') ? '#dc2626' : '#16a34a';
-          return `<td style="${tdC};color:${devColor};font-weight:600">${row.deviationText == null ? '—' : _esc(row.deviationText)}</td>`;
+          return `<td style="${tdC};color:${devColor};font-weight:600">${row.deviationText == null ? '' : _esc(row.deviationText)}</td>`;
         })()
       : '';
     const commentEnabled = s.comments.subjectTeacherCommentsEnabled;
@@ -1269,7 +1271,7 @@ function _renderSubjectPairedHtml(s) {
     // teaching_assignments by the caller), else a generic fallback.
     const commentLabel   = commentEntry?.teacherName ? _esc(commentEntry.teacherName) + ':' : 'Subject Teacher:';
     return `
-    <table style="width:100%;border-collapse:collapse;margin-bottom:8px;font-size:11px">
+    <table style="width:100%;border-collapse:collapse;margin-bottom:8px;font-size:11px;page-break-inside:avoid;break-inside:avoid">
       <tr${row.failed ? ' style="color:#dc2626"' : ''}>
         <td style="${tdS};font-weight:700;min-width:120px">${_esc(row.nameLine)}</td>
         ${markCells}
@@ -1292,29 +1294,8 @@ function _renderSubjectPairedHtml(s) {
     <tr><td style="${tdC};font-weight:700">${_esc(b.grade)}</td><td style="${tdC}">${_esc(b.range)}</td>
         <td style="${tdC}">${_esc(b.points)}</td><td style="${tdS}">${_esc(b.label)}</td></tr>`).join('');
 
-  const remarksHtml = s.comments.reportRemarks.length > 0 ? `
-  <div style="margin:16px 0">
-    ${s.comments.reportRemarks.map(r => `
-    <div style="margin-bottom:12px">
-      <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">${_esc(r.label)}</p>
-      <div style="border:1px solid #e2e8f0;border-radius:4px;padding:8px 12px;min-height:50px;font-size:11px;color:#475569">${_esc(r.text)}</div>
-    </div>`).join('')}
-  </div>` : `
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:16px 0">
-    ${s.comments.showClassTeacherRemark ? `
-    <div>
-      <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">${_esc(s.signatures.classTeacherLabel)}'s Remark</p>
-      <div style="border:1px solid #e2e8f0;border-radius:4px;padding:8px 12px;min-height:60px;font-size:11px;color:#475569">${_esc(s.comments.classTeacherRemark)}</div>
-    </div>` : ''}
-    ${s.comments.showPrincipalRemark ? `
-    <div>
-      <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">${_esc(s.signatures.principalLabel)}'s Comment</p>
-      <div style="border:1px solid #e2e8f0;border-radius:4px;padding:8px 12px;min-height:60px;font-size:11px;color:#475569">${_esc(s.comments.principalRemark)}</div>
-    </div>` : ''}
-  </div>`;
-
   const behHtml = s.behaviour ? `
-  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:16px 0">
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:16px 0;page-break-inside:avoid;break-inside:avoid">
     ${[
       { label: 'Merits', value: s.behaviour.merits, color: '#16a34a' },
       { label: 'Demerits', value: s.behaviour.demerits, color: '#dc2626' },
@@ -1327,27 +1308,42 @@ function _renderSubjectPairedHtml(s) {
     </div>`).join('')}
   </div>` : '';
 
-  // SIGNATURES — this layout's HTML had no equivalent of its own PDF's
-  // unconditional signature line at all (reported directly: the stamp
-  // and principal's signature didn't show — for this template there
-  // wasn't even a line to put them on). Unconditional like the PDF
-  // (sigY in _renderSubjectPairedPdf is never gated by either remark
-  // toggle), not tied to showClassTeacherRemark/showPrincipalRemark.
-  const signaturesHtml = `
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:20px 0 0">
-    <div>
-      <div style="border-top:1px solid #1e293b;width:180px;padding-top:4px;font-size:10px;color:#475569">${_esc(s.signatures.classTeacherLabel)}</div>
-    </div>
-    <div style="position:relative">
-      ${_schoolStampImgHtml(s)}
-      ${_principalSignatureImgHtml(s)}
-      <div style="margin-top:${s.signatures.principalSignatureUrl ? '2px' : '0'};border-top:1px solid #1e293b;width:180px;padding-top:4px;font-size:10px;color:#475569">${_esc(s.signatures.principalLabel)}</div>
-    </div>
+  // SIGN-OFF — reported directly, twice: (1) this layout's HTML had no
+  // equivalent of its own PDF's signature line at all (the stamp and
+  // principal's signature had nowhere to sit); (2) the comment box and
+  // the bare signature line used to be two separate blocks in two
+  // different places in the page, with Behaviour printed between the
+  // comment and the actual signature — "the class teacher and
+  // principal's comment and their signature should be the last thing on
+  // the report card... I have seen Behaviour Summary coming last." One
+  // unified block per signer (comment + name + signature + stamp + date
+  // together, same shared component every other layout uses), placed
+  // after Behaviour so it's genuinely the last content on the page.
+  const signOffHtml = s.comments.reportRemarks.length > 0 ? `
+  <div style="margin:16px 0;page-break-inside:avoid;break-inside:avoid">
+    ${s.comments.reportRemarks.map(r => `
+    <div style="margin-bottom:12px">
+      <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">${_esc(r.label)}</p>
+      <div style="border:1px solid #e2e8f0;border-radius:4px;padding:8px 12px;min-height:50px;font-size:11px;color:#475569">${_esc(r.text)}</div>
+    </div>`).join('')}
+  </div>` : `
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:16px 0;page-break-inside:avoid;break-inside:avoid">
+    ${(s.comments.showClassTeacherRemark || s.comments.classTeacherName) ? _remarkSignOffHtml({
+      roleLabel: s.signatures.classTeacherLabel, personName: s.comments.classTeacherName,
+      remarkText: s.comments.classTeacherRemark, signDate: s.footer.signDate,
+      showRemark: s.comments.showClassTeacherRemark,
+    }) : ''}
+    ${(s.comments.showPrincipalRemark || s.comments.principalName || s.signatures.principalSignatureUrl) ? _remarkSignOffHtml({
+      roleLabel: s.signatures.principalLabel, personName: s.comments.principalName,
+      remarkText: s.comments.principalRemark, signatureUrl: s.signatures.principalSignatureUrl,
+      stampUrl: s.signatures.schoolStampUrl, signDate: s.footer.signDate,
+      showRemark: s.comments.showPrincipalRemark,
+    }) : ''}
   </div>`;
 
   const academicHtml = `
 <div style="page-break-before:always">
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;border-bottom:2px solid #1e293b;padding-bottom:8px">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;border-bottom:2px solid ${BRAND};padding-bottom:8px">
     <h2 style="margin:0;font-size:15px;font-weight:800">${_esc(s.header.schoolName)}</h2>
     <p style="margin:0;font-size:10px;color:#64748b">${_esc(s.studentInfo.studentName)} — ${_esc(s.studentInfo.className)} — ${_esc(s.studentInfo.termLine)}</p>
   </div>
@@ -1364,17 +1360,18 @@ function _renderSubjectPairedHtml(s) {
   </table>
   ${s.attendance ? `<p style="font-size:11px;color:#475569;margin:0 0 12px"><b>Attendance:</b> ${_esc(s.attendance.text)}</p>` : ''}
   ${s.gradingKey.length ? `
-  <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">Grading Key</p>
-  <table style="width:100%;border-collapse:collapse;font-size:10px;max-width:480px;margin-bottom:12px">
-    <thead><tr><th style="${thS}">Grade</th><th style="${thS}">Range</th><th style="${thS}">Points</th><th style="${thS};text-align:left">Description</th></tr></thead>
-    <tbody>${gradingRows}</tbody>
-  </table>` : ''}
-  ${remarksHtml}
+  <div style="page-break-inside:avoid;break-inside:avoid">
+    <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">Grading Key</p>
+    <table style="width:100%;border-collapse:collapse;font-size:10px;max-width:480px;margin-bottom:12px">
+      <thead><tr><th style="${thS}">Grade</th><th style="${thS}">Range</th><th style="${thS}">Points</th><th style="${thS};text-align:left">Description</th></tr></thead>
+      <tbody>${gradingRows}</tbody>
+    </table>
+  </div>` : ''}
   ${_observationRatingsHtml(s)}
   ${behHtml}
-  ${signaturesHtml}
   ${_sportsAndTalentHtml(s)}
   ${_termDatesFooterHtml(s)}
+  ${signOffHtml}
   <p style="text-align:center;font-size:9px;color:#94a3b8;margin-top:16px">${_esc(s.footer.footerNote)} — ${_esc(s.footer.genLine)}${s.footer.reportId ? ` — Report ID: ${_esc(s.footer.reportId)}` : ''}</p>
 </div>`;
 
@@ -1382,7 +1379,12 @@ function _renderSubjectPairedHtml(s) {
 <html><head><meta charset="UTF-8">
 <title>Report Card — ${_esc(s.studentInfo.studentName)}</title>
 <style>
-  *{box-sizing:border-box}
+  /* Reported directly, with a screenshot: table header text was
+     white-on-navy in source but printed as near-invisible pale text —
+     browsers drop background-color by default when printing/exporting
+     to PDF unless told otherwise, leaving the white text with nothing
+     behind it. */
+  *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact;color-adjust:exact}
   body{font-family:Arial,Helvetica,sans-serif;max-width:1050px;margin:20px auto;color:#0f172a;padding:0 16px}
   @media print{@page{margin:1.5cm;size:A4}button{display:none!important}}
 </style>
@@ -1483,7 +1485,7 @@ function _renderMarksThenCommentsPdf(doc, s, images, isFirstPage) {
     if (showDev) {
       const devColor = row.deviationText == null ? INK_FAINT : (row.deviationText.startsWith('-') ? FAIL_RED : PASS_GREEN);
       doc.font(FONTS.monoRegular).fontSize(8).fillColor(devColor)
-         .text(row.deviationText ?? '—', colX[devIdx] + 3, rowY + 5, { width: colWidths[devIdx] - 3, align: 'center' });
+         .text(row.deviationText ?? '', colX[devIdx] + 3, rowY + 5, { width: colWidths[devIdx] - 3, align: 'center' });
     }
     rowY += 18;
   });
@@ -1630,16 +1632,17 @@ function _renderMarksThenCommentsHtml(s) {
     : '';
   const coverHtml = _renderCoverHtml(s);
 
-  const thS = 'border:1px solid #cbd5e1;padding:5px 8px;background:#1e293b;color:#fff;font-size:10px;text-transform:uppercase;letter-spacing:.5px;text-align:center';
+  // Same BRAND-consistency fix as subject_paired's identical HTML gap above.
+  const thS = `border:1px solid #cbd5e1;padding:5px 8px;background:${BRAND};color:#fff;font-size:10px;text-transform:uppercase;letter-spacing:.5px;text-align:center`;
   const tdS = 'border:1px solid #e2e8f0;padding:5px 8px';
   const tdC = `${tdS};text-align:center`;
 
   const pageHeaderHtml = (title) => `
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;border-bottom:2px solid #1e293b;padding-bottom:8px">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;border-bottom:2px solid ${BRAND};padding-bottom:8px">
     <h2 style="margin:0;font-size:15px;font-weight:800">${_esc(s.header.schoolName)}</h2>
     <p style="margin:0;font-size:10px;color:#64748b">${_esc(s.studentInfo.studentName)} — ${_esc(s.studentInfo.className)} — ${_esc(s.studentInfo.termLine)}</p>
   </div>
-  <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#1e293b;margin:0 0 10px">${_esc(title)}</p>`;
+  <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:${BRAND};margin:0 0 10px">${_esc(title)}</p>`;
 
   const colHeaders = s.resultsTable.typeEntries.map(t => `<th style="${thS}">${_esc(t.key)}</th>`).join('');
   const devHeader = s.resultsTable.showDeviation ? `<th style="${thS}">Dev</th>` : '';
@@ -1648,7 +1651,7 @@ function _renderMarksThenCommentsHtml(s) {
     const devCell = s.resultsTable.showDeviation
       ? (() => {
           const devColor = row.deviationText == null ? '#94a3b8' : row.deviationText.startsWith('-') ? '#dc2626' : '#16a34a';
-          return `<td style="${tdC};color:${devColor};font-weight:600">${row.deviationText == null ? '—' : _esc(row.deviationText)}</td>`;
+          return `<td style="${tdC};color:${devColor};font-weight:600">${row.deviationText == null ? '' : _esc(row.deviationText)}</td>`;
         })()
       : '';
     return `
@@ -1686,11 +1689,13 @@ function _renderMarksThenCommentsHtml(s) {
   ${s.resultsTable.rankingNote ? `<p style="font-size:9px;color:#64748b;margin:0 0 14px">${_esc(s.resultsTable.rankingNote)}</p>` : ''}
   ${s.attendance ? `<p style="font-size:11px;color:#475569;margin:0 0 14px"><b>Attendance:</b> ${_esc(s.attendance.text)}</p>` : ''}
   ${s.gradingKey.length ? `
-  <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">Grading Key</p>
-  <table style="width:100%;border-collapse:collapse;font-size:10px;max-width:480px">
-    <thead><tr><th style="${thS}">Grade</th><th style="${thS}">Range</th><th style="${thS}">Points</th><th style="${thS};text-align:left">Description</th></tr></thead>
-    <tbody>${gradingRows}</tbody>
-  </table>` : ''}
+  <div style="page-break-inside:avoid;break-inside:avoid">
+    <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">Grading Key</p>
+    <table style="width:100%;border-collapse:collapse;font-size:10px;max-width:480px">
+      <thead><tr><th style="${thS}">Grade</th><th style="${thS}">Range</th><th style="${thS}">Points</th><th style="${thS};text-align:left">Description</th></tr></thead>
+      <tbody>${gradingRows}</tbody>
+    </table>
+  </div>` : ''}
 </div>`;
 
   // RCE4 — comments shown as a Subject | Teacher | Comment table (not
@@ -1717,7 +1722,7 @@ function _renderMarksThenCommentsHtml(s) {
       <div style="border:1px solid #e2e8f0;border-radius:4px;padding:8px 12px;min-height:50px;font-size:11px;color:#475569">${_esc(r.text)}</div>
     </div>`).join('')}
   </div>` : `
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;page-break-inside:avoid;break-inside:avoid">
     ${(s.comments.showClassTeacherRemark || s.comments.classTeacherName) ? _remarkSignOffHtml({
       roleLabel: s.signatures.classTeacherLabel, personName: s.comments.classTeacherName,
       remarkText: s.comments.classTeacherRemark, signDate: s.footer.signDate,
@@ -1733,7 +1738,7 @@ function _renderMarksThenCommentsHtml(s) {
 
   const beh = s.behaviour;
   const behHtml = beh ? `
-  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px">
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px;page-break-inside:avoid;break-inside:avoid">
     ${[
       { label: 'Merits', value: beh.merits, color: '#16a34a' },
       { label: 'Demerits', value: beh.demerits, color: '#dc2626' },
@@ -1746,15 +1751,22 @@ function _renderMarksThenCommentsHtml(s) {
     </div>`).join('')}
   </div>` : '';
 
+  // Order matches this layout's own PDF exactly (reported directly: the
+  // observation-ratings heading printed detached from its own grid, and
+  // separately, the sign-off printed BEFORE Behaviour instead of after
+  // it — "the class teacher and principal's comment and their signature
+  // should be the last thing... I have seen Behaviour Summary coming
+  // last"): subject comments, then observations, then Behaviour, then
+  // the sign-off genuinely last.
   const commentsHtml = `
 <div style="page-break-before:always">
   ${pageHeaderHtml('Teacher Comments')}
-  ${_observationRatingsHtml(s)}
   ${subjectCommentsSectionHtml}
-  ${remarksSectionHtml}
+  ${_observationRatingsHtml(s)}
   ${behHtml}
   ${_sportsAndTalentHtml(s)}
   ${_termDatesFooterHtml(s)}
+  ${remarksSectionHtml}
   <p style="text-align:center;font-size:9px;color:#94a3b8;margin-top:16px">${_esc(s.footer.footerNote)} — ${_esc(s.footer.genLine)}${s.footer.reportId ? ` — Report ID: ${_esc(s.footer.reportId)}` : ''}</p>
 </div>`;
 
@@ -1762,7 +1774,12 @@ function _renderMarksThenCommentsHtml(s) {
 <html><head><meta charset="UTF-8">
 <title>Report Card — ${_esc(s.studentInfo.studentName)}</title>
 <style>
-  *{box-sizing:border-box}
+  /* Reported directly, with a screenshot: table header text was
+     white-on-navy in source but printed as near-invisible pale text —
+     browsers drop background-color by default when printing/exporting
+     to PDF unless told otherwise, leaving the white text with nothing
+     behind it. */
+  *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact;color-adjust:exact}
   body{font-family:Arial,Helvetica,sans-serif;max-width:1050px;margin:20px auto;color:#0f172a;padding:0 16px}
   @media print{@page{margin:1.5cm;size:A4}button{display:none!important}}
 </style>
@@ -2029,6 +2046,7 @@ function _renderKindergartenHtml(s) {
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8" />
 <style>
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact;color-adjust:exact}
   body{font-family:'Helvetica Neue',Arial,sans-serif;color:#15171c;max-width:800px;margin:0 auto;padding:24px}
   @page{margin:1.5cm;size:A4}
   @media print{button{display:none!important}}

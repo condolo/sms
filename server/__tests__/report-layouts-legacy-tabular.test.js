@@ -197,7 +197,10 @@ describe('legacy_tabular.renderHtml — Observation Ratings now actually appear'
     expect(html).toContain('GOOD');
     expect(html).toContain('IMPROVE');
     // Exactly one of the three checkbox spans for this category is filled.
-    const filled = (html.match(/background:#1e293b"><\/span>/g) || []).length;
+    // #1f2d3d (BRAND) — this shared helper now matches the same navy
+    // report-layouts.js's PDF renderers already used, instead of its own
+    // separately-hardcoded #1e293b that only the HTML path had.
+    const filled = (html.match(/background:#1f2d3d"><\/span>/g) || []).length;
     expect(filled).toBe(1);
   });
 

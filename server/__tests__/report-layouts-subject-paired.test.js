@@ -309,3 +309,37 @@ describe('subject_paired.renderHtml — signature line (reported: "the stamp and
     expect(html).toContain('<img src="data:image/png;base64,DDDD"');
   });
 });
+
+describe('subject_paired — a missing mark or deviation is left blank, not shown as a dash', () => {
+  test('a subject with no score for one assessment type leaves that cell empty', () => {
+    const sections = computeSections({
+      subjects: { math: { finalScore: 85, grade: 'A', breakdown: { cat: 80 } } }, // exam never entered
+    });
+    const html = LAYOUTS.subject_paired.renderHtml(sections);
+    // The CAT cell has its real value; the Exam cell is an empty <td>, not an em-dash.
+    expect(html).toContain('<td style="border:1px solid #e2e8f0;padding:5px 8px;text-align:center">80.0</td>');
+    expect(html).toMatch(/<td style="border:1px solid #e2e8f0;padding:5px 8px;text-align:center"><\/td>/);
+  });
+
+  test('no prior-term deviation leaves the Dev cell empty, not an em-dash', () => {
+    const html = LAYOUTS.subject_paired.renderHtml(computeSections());
+    // deviation is null by default in this fixture (no deviations passed in) —
+    // the Dev column must render with nothing in it, not '—'.
+    expect(html).not.toMatch(/font-weight:600">—<\/td>/);
+  });
+});
+
+describe('subject_paired — HTML colors match this layout\'s own PDF palette (BRAND), not a separately-hardcoded value', () => {
+  test('table headers and section rules use #1f2d3d, never the old #1e293b', () => {
+    const html = LAYOUTS.subject_paired.renderHtml(computeSections());
+    expect(html).toContain('#1f2d3d');
+    expect(html).not.toContain('#1e293b');
+  });
+});
+
+describe('subject_paired — printed backgrounds are not silently dropped', () => {
+  test('the page declares print-color-adjust so a browser keeps header backgrounds on print/PDF export', () => {
+    const html = LAYOUTS.subject_paired.renderHtml(computeSections());
+    expect(html).toContain('print-color-adjust:exact');
+  });
+});

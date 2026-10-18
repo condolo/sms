@@ -297,3 +297,16 @@ describe('marks_then_comments.renderHtml — principal signature & school stamp 
     expect(html).not.toContain("Principal's General Comment");
   });
 });
+
+describe('marks_then_comments — colors match this layout\'s own PDF palette (BRAND), and prints keep their backgrounds', () => {
+  test('table headers use #1f2d3d, never the old separately-hardcoded #1e293b', () => {
+    const html = LAYOUTS.marks_then_comments.renderHtml(computeSections());
+    expect(html).toContain('#1f2d3d');
+    expect(html).not.toContain('#1e293b');
+  });
+
+  test('declares print-color-adjust so a browser keeps header backgrounds on print/PDF export', () => {
+    const html = LAYOUTS.marks_then_comments.renderHtml(computeSections());
+    expect(html).toContain('print-color-adjust:exact');
+  });
+});
