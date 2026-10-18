@@ -53,6 +53,9 @@ function fmtDev(dev) {
   return n >= 0 ? `+${n}` : String(n);
 }
 
+// Matches CommentSchema.subjectComments' cap in report-cards.js — keep in sync.
+const SUBJECT_COMMENT_MAX = 1000;
+
 /* ── Editable field ──────────────────────────────────────── */
 /* One subject's comment. Grows with its text; saves on blur, only when changed.
    Reported directly: a teacher's subject comments were typed and never seen
@@ -96,18 +99,29 @@ function SubjectCommentField({ label, value, onSave }) {
         <textarea
           ref={ref}
           rows={1}
-          maxLength={500}
+          maxLength={SUBJECT_COMMENT_MAX}
           value={text}
           onChange={e => setText(e.target.value)}
           onBlur={handleBlur}
           placeholder="No comment entered"
           className={`w-full text-xs text-slate-700 bg-white border rounded-md px-2.5 py-1.5 resize-none overflow-hidden focus:outline-none focus:ring-1 focus:ring-indigo-400 ${status === 'error' ? 'border-red-300' : 'border-slate-200'}`}
         />
-        {status === 'saving' && <p className="text-[10px] text-slate-400 mt-1">Saving…</p>}
-        {status === 'saved' && <p className="text-[10px] text-emerald-600 mt-1">Saved</p>}
-        {status === 'error' && (
-          <p className="text-[10px] text-red-600 mt-1">Could not save this comment — please try again.</p>
-        )}
+        <div className="flex items-center justify-between mt-1">
+          <p className="text-[10px]">
+            {status === 'saving' && <span className="text-slate-400">Saving…</span>}
+            {status === 'saved' && <span className="text-emerald-600">Saved</span>}
+            {status === 'error' && <span className="text-red-600">Could not save this comment — please try again.</span>}
+          </p>
+          {/* Reported directly: "my 85-word comment won't fit, only 73
+              words accepted" — nothing told the teacher a limit existed
+              until typing simply stopped doing anything. Warns well
+              before the cap, not just at it. */}
+          {text.length > SUBJECT_COMMENT_MAX - 100 && (
+            <p className={`text-[10px] shrink-0 ${text.length >= SUBJECT_COMMENT_MAX ? 'text-red-600 font-semibold' : 'text-amber-600'}`}>
+              {text.length}/{SUBJECT_COMMENT_MAX}
+            </p>
+          )}
+        </div>
       </div>
     </div>
   );

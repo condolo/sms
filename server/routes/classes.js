@@ -280,8 +280,13 @@ router.get('/:id/students', authMiddleware, PLAN, MODGATE, rbac('students', 'rea
     // real stream assignment sees the whole class" gap Attendance/Lessons
     // already had fixed, now for Grades/Assessment too (ScopeEngine.
     // resolveAssessmentScope).
-    // Elective roster: the class's students enrolled in this subject, across all streams.
-    // Only the Markbook asks for it, and only for an elective (see elective-scope.js).
+    // Elective roster: the class's students enrolled in this subject, across all streams
+    // — UNLESS the caller also narrows to one streamId (below), for a teacher who has
+    // their own stream-specific assignment for this elective (a different teacher per
+    // stream, even though the subject itself is school-wide optional). Reported
+    // directly: "the list is general, can you separate it per class" — that teacher's
+    // roster was always the full merged list with no way to narrow it. Only the Markbook
+    // asks for electiveSubjectId at all (see elective-scope.js).
     let electiveIds = null;
     if (req.query.electiveSubjectId) {
       const subjectId = String(req.query.electiveSubjectId);
@@ -344,6 +349,11 @@ router.get('/:id/students', authMiddleware, PLAN, MODGATE, rbac('students', 'rea
     const filter   = { schoolId, classId: { $in: classIdForms } };
     if (electiveIds) {
       filter.id = { $in: electiveIds };
+      // Narrows the merged, every-stream elective list down to one stream —
+      // a strict subset of what this caller can already see via the
+      // unfiltered list above (no privilege widening), just scoped the way
+      // a teacher assigned one specific stream for this elective expects.
+      if (req.query.streamId) filter.streamId = String(req.query.streamId);
     } else if (!inWholeClassScope) {
       // Stream-scoped only: narrow to just the caller's own stream(s) within
       // this class.

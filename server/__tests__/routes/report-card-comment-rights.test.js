@@ -155,9 +155,18 @@ describe('subject comment — same rights as marks', () => {
     expect(res.status).toBe(403);
   });
 
-  test('a comment over 500 characters is refused', async () => {
-    const res = await supertest(buildApp()).put(subjectUrl('stu1', 'bio')).send({ termNumber: 3, comment: 'x'.repeat(501) });
+  // Reported directly: "my 85-word comment won't fit, only 73 words
+  // accepted" — raised from 500 to 1000, matching every other report-card
+  // comment field (class teacher's/principal's remark) for no principled
+  // reason this one alone was half the room.
+  test('a comment over 1000 characters is refused', async () => {
+    const res = await supertest(buildApp()).put(subjectUrl('stu1', 'bio')).send({ termNumber: 3, comment: 'x'.repeat(1001) });
     expect(res.status).toBe(400);
+  });
+
+  test('a comment of exactly 1000 characters is accepted', async () => {
+    const res = await supertest(buildApp()).put(subjectUrl('stu1', 'bio')).send({ termNumber: 3, comment: 'x'.repeat(1000) });
+    expect(res.status).toBe(200);
   });
 });
 

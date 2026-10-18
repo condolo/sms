@@ -394,7 +394,12 @@ const PublishSchema = z.object({
 });
 
 const CommentSchema = z.object({
-  subjectComments:    z.record(z.string().max(500)).optional(),
+  // Reported directly: "my 85-word comment won't fit, only 73 words
+  // accepted" — 500 characters was roughly 70-85 words depending on word
+  // length, noticeably tighter than the 1000-character room given to the
+  // class teacher's and principal's remarks for no principled reason.
+  // Matched to the same 1000 every other report-card comment field uses.
+  subjectComments:    z.record(z.string().max(1000)).optional(),
   classTeacherRemark: z.string().max(1000).optional(),
   principalRemark:    z.string().max(1000).optional(),
 });
@@ -2114,9 +2119,11 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
       subjectId,
       nameLine:    (isBest ? '★ ' : '') + (subjectNames[subjectId] || subjectId) + (isUsed && snap.rankingSubjectStrategy !== 'all' ? ' ●' : ''),
       failed,
+      // Reported directly: a missing mark should leave the cell blank,
+      // not show a dash — the dash read as "0" or "failed" at a glance.
       typeValues:  typeEntries.map(te => {
         const val = sub.breakdown?.[te.key];
-        return val != null ? val.toFixed(1) : '—';
+        return val != null ? val.toFixed(1) : '';
       }),
       scoreText:   sub.finalScore?.toFixed(1) ?? '—',
       hasGrade:    !!sub.grade,
@@ -3004,7 +3011,7 @@ router.put('/draft-comments/:studentId/subject/:subjectId', authMiddleware, PLAN
     const { termNumber, comment } = req.body;
     if (!termNumber) return E.badRequest(res, 'termNumber is required');
     if (typeof comment !== 'string') return E.badRequest(res, 'comment must be a string');
-    if (comment.length > 500) return E.badRequest(res, 'comment must be 500 characters or fewer');
+    if (comment.length > 1000) return E.badRequest(res, 'comment must be 1000 characters or fewer');
 
     // Same rights as marks: the caller must teach this subject in this student's stream.
     // Class and stream come from the student record, never from the request body.

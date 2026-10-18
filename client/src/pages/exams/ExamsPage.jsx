@@ -587,18 +587,39 @@ function MarkbookTab({ years }) {
   // Populated from GET /marks (every mark now carries _v), sent back on
   // save so the server can detect a stale overwrite.
   const [versions,   setVersions]   = useState({});
-  // Reported directly: a teacher entered marks for one of her two streams,
-  // switched the Stream (or Subject/Class/Assessment) selector to move to
-  // the other one — same as always, no error, no save button pressed in
-  // between — and found the first stream's marks "disappeared". Root
-  // cause: the grid's local scores/markStates reset on EVERY one of these
-  // selectors changing (see the effect below), with nothing checking
-  // whether there was unsaved work to lose first. The marks were never
-  // silently deleted server-side — they were silently never SENT at all.
-  // Every selector that feeds that reset now confirms first.
-  function confirmDiscardIfDirty() {
+  // Reported directly, twice: first, a teacher entered marks for one of
+  // her two streams, switched the Stream (or Subject/Class/Assessment)
+  // selector to move to the other one — same as always, no error, no
+  // save button pressed in between — and found the first stream's marks
+  // "disappeared". Root cause: the grid's local scores/markStates reset
+  // on EVERY one of these selectors changing, with nothing checking
+  // whether there was unsaved work to lose first — never silently
+  // deleted server-side, silently never SENT at all. A confirm-before-
+  // discard dialog closed that once, but teachers kept reporting the
+  // exact same loss afterward — a dismissable dialog is exactly the kind
+  // of thing that gets clicked through on autopilot when you're moving
+  // fast through dozens of students, so the actual fix is to never put
+  // the choice in front of them at all: save automatically before any
+  // of these selectors is allowed to change, the same "Save marks" the
+  // button already does, and only block the switch (with a visible
+  // reason) if that save itself fails or hits a real conflict.
+  async function saveBeforeSwitch() {
     if (!dirty) return true;
-    return window.confirm('You have unsaved marks that have not been saved yet. Switching now will discard them — Save marks first if you want to keep them. Continue without saving?');
+    try {
+      const res = await saveAllAsync();
+      const conflicts = res?.data?.conflicts ?? [];
+      if (conflicts.length > 0) {
+        setToast({
+          msg: `${conflicts.length} mark${conflicts.length === 1 ? '' : 's'} couldn't be saved automatically — someone else edited ${conflicts.length === 1 ? 'it' : 'them'} first. Review the highlighted cell${conflicts.length === 1 ? '' : 's'} before switching.`,
+          type: 'error',
+        });
+        return false;
+      }
+      return true;
+    } catch (err) {
+      setToast({ msg: err?.message ?? 'Could not save your marks before switching — nothing was changed, please try Save marks again.', type: 'error' });
+      return false;
+    }
   }
   // Cells the last save rejected because someone else edited them first.
   // The typed value stays in `scores` (never silently cleared) until the
@@ -707,8 +728,17 @@ function MarkbookTab({ years }) {
   // in this class is not asked to pick it, but the roster is already scoped to it, so
   // submissions must carry it too. Without this a submission had no stream and locked
   // every stream of the class, including marks another teacher entered.
-  // Order is class, then subject, then stream. The stream is asked only for a compulsory
-  // subject the teacher teaches in 2+ streams of this class. Electives are one group: no stream.
+  // Reported directly: "the list is general, can you separate it per class" — a
+  // teacher assigned a SPECIFIC stream for an elective (Kiswahili taught by a
+  // different teacher per stream, even though the subject itself is optional
+  // school-wide) still got every enrolled student across every stream merged
+  // into one roster, because isElectiveSubject used to force activeStreamId to
+  // '' unconditionally, ignoring subjectStreams entirely. subjectStreams is
+  // already derived purely from THIS teacher's own assignments regardless of
+  // elective status, so it's computed and used identically either way now —
+  // only a teacher with NO stream-specific assignment at all for this elective
+  // (a genuine whole-subject grant) falls back to the merged, enrollment-only
+  // roster below.
   const subjectStreams = useMemo(() => {
     if (!classId || !subjectId) return [];
     if (!isTeacher) return myStreamsForClass;
@@ -718,8 +748,8 @@ function MarkbookTab({ years }) {
       .map(a => ({ id: a.streamId, name: a.streamName }))
       .filter(x => !seen.has(x.id) && seen.add(x.id));
   }, [isTeacher, assignments, classId, subjectId, myStreamsForClass]);
-  const needsStreamSelection = !isElectiveSubject && subjectStreams.length > 1;
-  const activeStreamId = isElectiveSubject ? '' : (streamId || (subjectStreams.length === 1 ? subjectStreams[0].id : ''));
+  const needsStreamSelection = subjectStreams.length > 1;
+  const activeStreamId = streamId || (subjectStreams.length === 1 ? subjectStreams[0].id : '');
 
   // Reported directly (2026-10-15): logged in as admin, picking a class then a
   // subject the class's curriculum never offered, the roster still loaded (the
@@ -805,12 +835,18 @@ function MarkbookTab({ years }) {
      scopes to that one real stream, full stop — no merging possible. ── */
   const { data: studentsData, isLoading: studentsLoading } = useQuery({
     queryKey: isElectiveSubject
-      ? ['classes', classId, 'elective', subjectId, 'students']
+      ? ['classes', classId, 'elective', subjectId, activeStreamId || 'all', 'students']
       : activeStreamId
         ? ['streams', activeStreamId, 'students']
         : ['classes', classId, 'students'],
     queryFn: () => isElectiveSubject
-      ? classesApi.students(classId, { limit: 500, status: 'active', electiveSubjectId: subjectId })
+      // activeStreamId here means this teacher has their OWN stream-specific
+      // assignment for this elective — narrow to that stream's enrolled
+      // students, not every stream's. classes.js's own roster route is the
+      // only one that understands electiveSubjectId, so a stream-specific
+      // elective still goes through it (with streamId) rather than
+      // streamsApi, which has no elective concept at all.
+      ? classesApi.students(classId, { limit: 500, status: 'active', electiveSubjectId: subjectId, ...(activeStreamId ? { streamId: activeStreamId } : {}) })
       : activeStreamId
       ? streamsApi.students(activeStreamId, { limit: 500, status: 'active' })
       // Only reached for a genuine whole-class grant (subjectStreams.length
@@ -818,12 +854,12 @@ function MarkbookTab({ years }) {
       // assessmentScope=true here closes the same school-level-role-with-
       // a-real-stream-assignment gap already fixed for Attendance/Lessons.
       : classesApi.students(classId, { limit: 500, status: 'active', assessmentScope: true }),
-    enabled:  isElectiveSubject ? !!classId && !!subjectId : (needsStreamSelection ? !!streamId : !!classId),
+    enabled:  !!classId && !!subjectId && (!needsStreamSelection || !!streamId),
     staleTime: 5 * 60_000,
   });
   const students = studentsData?.data ?? [];
 
-  const canQuery = !!(classId && (!needsStreamSelection || streamId || isElectiveSubject) && subjectId && selectedEntry);
+  const canQuery = !!(classId && (!needsStreamSelection || streamId) && subjectId && selectedEntry);
 
   /* ── Kindergarten / competency-band indicator mode ──
      A class resolves to AT MOST one rc_template (explicit classIds
@@ -1023,7 +1059,7 @@ function MarkbookTab({ years }) {
   }, [scores, students, cols]);
 
   /* ── Save ── */
-  const { mutate: saveAll, isPending: saving } = useMutation({
+  const { mutate: saveAll, mutateAsync: saveAllAsync, isPending: saving } = useMutation({
     mutationFn: () => {
       const marksToSave = [];
       for (const s of students) {
@@ -1184,7 +1220,7 @@ function MarkbookTab({ years }) {
             <label className="block text-xs font-medium text-slate-600 mb-1.5">Academic Year</label>
             <select
               value={yearId}
-              onChange={e => { if (!confirmDiscardIfDirty()) return; setYearId(e.target.value); setTermNumber(''); setScheduleId(''); }}
+              onChange={async e => { const v = e.target.value; if (!(await saveBeforeSwitch())) return; setYearId(v); setTermNumber(''); setScheduleId(''); }}
               className={selCls}
             >
               <option value="">All years</option>
@@ -1197,7 +1233,7 @@ function MarkbookTab({ years }) {
             <label className="block text-xs font-medium text-slate-600 mb-1.5">Term</label>
             <select
               value={termNumber}
-              onChange={e => { if (!confirmDiscardIfDirty()) return; setTermNumber(e.target.value); setScheduleId(''); }}
+              onChange={async e => { const v = e.target.value; if (!(await saveBeforeSwitch())) return; setTermNumber(v); setScheduleId(''); }}
               disabled={!yearId}
               className={`${selCls} disabled:opacity-50`}
             >
@@ -1214,7 +1250,7 @@ function MarkbookTab({ years }) {
             </label>
             <select
               value={classId}
-              onChange={e => { if (!confirmDiscardIfDirty()) return; setClassId(e.target.value); setStreamId(''); setSubjectId(''); }}
+              onChange={async e => { const v = e.target.value; if (!(await saveBeforeSwitch())) return; setClassId(v); setStreamId(''); setSubjectId(''); }}
               className={selCls}
             >
               <option value="">Select class…</option>
@@ -1232,7 +1268,7 @@ function MarkbookTab({ years }) {
             </label>
             <select
               value={subjectId}
-              onChange={e => { if (!confirmDiscardIfDirty()) return; setSubjectId(e.target.value); setStreamId(''); }}
+              onChange={async e => { const v = e.target.value; if (!(await saveBeforeSwitch())) return; setSubjectId(v); setStreamId(''); }}
               disabled={!classId}
               className={`${selCls} disabled:opacity-50`}
             >
@@ -1243,7 +1279,7 @@ function MarkbookTab({ years }) {
           {needsStreamSelection && (
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1.5">Stream</label>
-              <select value={streamId} onChange={e => { if (!confirmDiscardIfDirty()) return; setStreamId(e.target.value); }} className={selCls}>
+              <select value={streamId} onChange={async e => { const v = e.target.value; if (!(await saveBeforeSwitch())) return; setStreamId(v); }} className={selCls}>
                 <option value="">Select stream…</option>
                 {subjectStreams.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
@@ -1253,7 +1289,7 @@ function MarkbookTab({ years }) {
             <label className="block text-xs font-medium text-slate-600 mb-1.5">
               Assessment {filteredSchedule.length === 0 && yearId && <span className="text-amber-600 font-normal">(none scheduled — set up in Configuration)</span>}
             </label>
-            <select value={scheduleId} onChange={e => { if (!confirmDiscardIfDirty()) return; setScheduleId(e.target.value); }} className={selCls}>
+            <select value={scheduleId} onChange={async e => { const v = e.target.value; if (!(await saveBeforeSwitch())) return; setScheduleId(v); }} className={selCls}>
               <option value="">Select assessment…</option>
               {filteredSchedule.map(entry => {
                 const st = entryStatus(entry);
