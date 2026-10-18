@@ -508,6 +508,54 @@ function _lockYearFilterPart(academicYearId) {
     : { $or: [{ academicYearId: null }, { academicYearId: { $exists: false } }] };
 }
 
+/* Shared by /publish's and /kg/publish's Step 9b auto-lock. mark_submissions'
+   only unique index is {schoolId, classId, subjectId, termNumber,
+   assessmentType, instance} (indexes.js's 'mksub_composite') — streamId is
+   NOT part of a submission's identity, so a compulsory subject taught
+   across 2+ streams still has exactly ONE submission doc for the whole
+   class. The previous version of this step conditionally added streamId
+   to its own lookup filter; that filter then can't find a pre-existing
+   stream-naive doc, falls through to create(), and throws a duplicate-key
+   error against this same index — which the caller's single outer
+   try/catch logs once and then silently abandons every combo still left
+   in the loop. Confirmed live against sch_demo: 4 of 11 real combos in an
+   already-published, already-locked class never got their submission
+   doc flipped to 'locked' because an earlier combo in the same run hit
+   exactly this collision. Per-combo try/catch here means one failure
+   (this one, or any other) can no longer take out every combo after it. */
+async function _lockSubmissionCombos(Submissions, { schoolId, classId, termNumber, academicYearId, combos, userId, now, yearFilter, routeTag }) {
+  for (const combo of combos) {
+    try {
+      const subKey = {
+        schoolId, classId, subjectId: combo.subjectId, termNumber,
+        assessmentType: combo.assessmentType, instance: combo.instance,
+        ...yearFilter,
+      };
+      const existingSub = await Submissions.findOne(subKey).lean();
+      if (existingSub) {
+        if (existingSub.status !== 'locked') {
+          await Submissions.updateOne({ id: existingSub.id }, {
+            $set: {
+              status: 'locked', lockedBy: userId, lockedAt: now, updatedAt: now,
+              ...(combo.streamId ? { streamId: combo.streamId } : {}),
+            },
+          });
+        }
+      } else {
+        await Submissions.create({
+          id: uuidv4(), schoolId, classId, subjectId: combo.subjectId, termNumber,
+          academicYearId, assessmentType: combo.assessmentType, instance: combo.instance,
+          streamId: combo.streamId || null,
+          status: 'locked', lockedBy: userId, lockedAt: now,
+          createdAt: now, updatedAt: now,
+        });
+      }
+    } catch (lockErr) {
+      console.error(`[${routeTag}] auto-lock failed for one combo (publish itself succeeded):`, combo, lockErr);
+    }
+  }
+}
+
 async function _resolveTermScope(schoolId, ctx, { academicYearId, termId, termNumber }) {
   if (termId && academicYearId) return { academicYearId, termId };
 
@@ -1147,50 +1195,33 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
     //    redesign) — publishing now locks every mark it was built from,
     //    instead of requiring each subject to already be individually
     //    submitted+approved+manually-locked beforehand. The per-
-    //    {classId,subjectId,termNumber,assessmentType,instance,streamId}
+    //    {classId,subjectId,termNumber,assessmentType,instance}
     //    mark_submissions docs created here directly in 'locked' state
     //    (skipping draft/submitted/approved entirely) are what the
     //    EXISTING unlock-request/approve/24h-auto-relock flow
     //    (mark-submissions.js, unchanged) still operates on for a rare
     //    post-publish correction. Non-fatal: the publish itself already
-    //    succeeded above; a lock failure here is logged, not surfaced
-    //    as a publish failure.
+    //    succeeded above; a per-combo lock failure is logged by
+    //    _lockSubmissionCombos, never surfaced as a publish failure.
     try {
       const yearFilter = _lockYearFilterPart(scope.academicYearId);
       const Marks = tenantModel('assessment_marks', ctx);
       const lockFilter = { schoolId, classId, termNumber: termNum, ...yearFilter };
       const combos = await Marks.find(lockFilter).select('subjectId assessmentType instance streamId').lean();
+      // Deduped WITHOUT streamId — matches mark_submissions' real unique
+      // index (see _lockSubmissionCombos). Whichever stream's row happens
+      // to survive the dedup is only used as display metadata below.
       const distinctCombos = [...new Map(
-        combos.map(c => [`${c.subjectId}::${c.assessmentType}::${c.instance}::${c.streamId ?? ''}`, c])
+        combos.map(c => [`${c.subjectId}::${c.assessmentType}::${c.instance}`, c])
       ).values()];
 
       await Marks.updateMany(lockFilter, { $set: { isLocked: true, lockedAt: now } });
 
       const Submissions = tenantModel('mark_submissions', ctx);
-      for (const combo of distinctCombos) {
-        const subKey = {
-          schoolId, classId, subjectId: combo.subjectId, termNumber: termNum,
-          assessmentType: combo.assessmentType, instance: combo.instance,
-          ...(combo.streamId ? { streamId: combo.streamId } : {}),
-          ...yearFilter,
-        };
-        const existingSub = await Submissions.findOne(subKey).lean();
-        if (existingSub) {
-          if (existingSub.status !== 'locked') {
-            await Submissions.updateOne({ id: existingSub.id }, {
-              $set: { status: 'locked', lockedBy: userId, lockedAt: now, updatedAt: now },
-            });
-          }
-        } else {
-          await Submissions.create({
-            id: uuidv4(), schoolId, classId, subjectId: combo.subjectId, termNumber: termNum,
-            academicYearId: scope.academicYearId, assessmentType: combo.assessmentType, instance: combo.instance,
-            streamId: combo.streamId || null,
-            status: 'locked', lockedBy: userId, lockedAt: now,
-            createdAt: now, updatedAt: now,
-          });
-        }
-      }
+      await _lockSubmissionCombos(Submissions, {
+        schoolId, classId, termNumber: termNum, academicYearId: scope.academicYearId,
+        combos: distinctCombos, userId, now, yearFilter, routeTag: 'report-cards/publish',
+      });
     } catch (lockErr) {
       console.error('[report-cards/publish] auto-lock failed (publish itself succeeded):', lockErr);
     }
@@ -1542,37 +1573,19 @@ router.post('/kg/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
       const IndicatorMarks = tenantModel('indicator_marks', ctx);
       const lockFilter = { schoolId, classId, termNumber: termNum, ...yearFilter };
       const combos = await IndicatorMarks.find(lockFilter).select('subjectId streamId').lean();
+      // Deduped by subjectId alone — see _lockSubmissionCombos for why
+      // streamId isn't part of mark_submissions' real identity.
       const distinctCombos = [...new Map(
-        combos.map(c => [`${c.subjectId}::${c.streamId ?? ''}`, c])
+        combos.map(c => [c.subjectId, { ...c, assessmentType: KG_INDICATORS_TYPE, instance: 1 }])
       ).values()];
 
       await IndicatorMarks.updateMany(lockFilter, { $set: { isLocked: true, lockedAt: now } });
 
       const Submissions = tenantModel('mark_submissions', ctx);
-      for (const combo of distinctCombos) {
-        const subKey = {
-          schoolId, classId, subjectId: combo.subjectId, termNumber: termNum,
-          assessmentType: KG_INDICATORS_TYPE,
-          ...(combo.streamId ? { streamId: combo.streamId } : {}),
-          ...yearFilter,
-        };
-        const existingSub = await Submissions.findOne(subKey).lean();
-        if (existingSub) {
-          if (existingSub.status !== 'locked') {
-            await Submissions.updateOne({ id: existingSub.id }, {
-              $set: { status: 'locked', lockedBy: userId, lockedAt: now, updatedAt: now },
-            });
-          }
-        } else {
-          await Submissions.create({
-            id: uuidv4(), schoolId, classId, subjectId: combo.subjectId, termNumber: termNum,
-            academicYearId: scope.academicYearId, assessmentType: KG_INDICATORS_TYPE, instance: 1,
-            streamId: combo.streamId || null,
-            status: 'locked', lockedBy: userId, lockedAt: now,
-            createdAt: now, updatedAt: now,
-          });
-        }
-      }
+      await _lockSubmissionCombos(Submissions, {
+        schoolId, classId, termNumber: termNum, academicYearId: scope.academicYearId,
+        combos: distinctCombos, userId, now, yearFilter, routeTag: 'report-cards/kg/publish',
+      });
     } catch (lockErr) {
       console.error('[report-cards/kg/publish] auto-lock failed (publish itself succeeded):', lockErr);
     }
@@ -3376,5 +3389,6 @@ router._isReportCommentChainComplete = _isReportCommentChainComplete;
 router.PUBLICATION_POLICY_DEFAULTS = PUBLICATION_POLICY_DEFAULTS;
 router._nextReportId = _nextReportId;
 router._schoolReportCode = _schoolReportCode;
+router._lockSubmissionCombos = _lockSubmissionCombos;
 
 module.exports = router;
