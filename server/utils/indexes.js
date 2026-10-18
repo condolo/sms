@@ -145,13 +145,47 @@ const INDEXES = [
 
   /* ── students ───────────────────────────────────────────────
      Primary: list students in a class (used by publish, ranking)
-     Secondary: admission number lookup */
+     Secondary: admission number lookup
+     Also: per-stream student counts — streams.js's GET / (the stream
+     dropdown's own enrichment step) and every attendance/assessment
+     roster narrowed to one stream all $match/$group on streamId; with
+     no index here, every one of those was a full collection scan.
+     Reported directly (2026-10-18): "the stream filter dropdown takes
+     time to load" — checked against live data first (small platform-
+     wide volume right now, so this specific gap isn't the dominant
+     cause of that today), but added since it's a real, zero-risk-to-
+     existing-data gap that only gets worse as a school's roll grows. */
   {
     col: 'students',
     indexes: [
       { key: { schoolId: 1, classId: 1 },              name: 'students_class' },
+      { key: { schoolId: 1, streamId: 1, status: 1 },   name: 'students_stream' },
       { key: { schoolId: 1, admissionNumber: 1 },       name: 'students_admission', sparse: true },
       { key: { id: 1 },                                 name: 'students_id',  unique: true, sparse: true },
+    ],
+  },
+
+  /* ── streams ────────────────────────────────────────────────
+     Primary: list a class's streams (every stream/class picker in the
+     app — Exams, Attendance, Report Cards, Lessons). Had no index
+     beyond the default schoolId one this file's startup query already
+     creates implicitly — see the same "stream dropdown is slow" report
+     above. */
+  {
+    col: 'streams',
+    indexes: [
+      { key: { schoolId: 1, classId: 1 },  name: 'streams_class' },
+      { key: { id: 1 },                    name: 'streams_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── classes ────────────────────────────────────────────────
+     Primary: list a school's classes (every class picker in the app). */
+  {
+    col: 'classes',
+    indexes: [
+      { key: { schoolId: 1, status: 1 },  name: 'classes_status' },
+      { key: { id: 1 },                   name: 'classes_id', unique: true, sparse: true },
     ],
   },
 
