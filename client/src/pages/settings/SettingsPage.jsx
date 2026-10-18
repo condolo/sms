@@ -3575,6 +3575,9 @@ const PERM_MODULES = [
     // head) can be granted the whole-school view here specifically,
     // without changing their base grades access anywhere else.
     { key: 'academic_analytics_school_wide', label: 'View Whole-School Assessment Analytics' },
+    // mirrors moduleRegistry.js's own comment — hasExplicitSubGrant-gated,
+    // no coarse-grant fallback, widens only.
+    { key: 'mark_list_school_wide', label: 'View Whole-School Mark List (all subjects/classes)' },
   ]},
   { key: 'timetable',  label: 'Timetable', subs: [
     { key: 'view',          label: 'View Timetable' },

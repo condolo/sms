@@ -367,6 +367,14 @@ const MODULE_REGISTRY = [
     // widens it — same posture as timetable__manage's admin console sub.
     // See GET /api/assessment/analytics.
     { key: 'academic_analytics_school_wide', label: 'View Whole-School Assessment Analytics' },
+    // Raised directly: an exam officer checking mark-entry completeness
+    // across every subject had no way to see beyond their own teaching
+    // assignments (assessment's own ASSESSMENT_FLOOR_ROLES is narrower
+    // than this role's otherwise-unrestricted 'school' scope level).
+    // Same posture as academic_analytics_school_wide right above —
+    // hasExplicitSubGrant-gated, no coarse-grant fallback, widens only.
+    // See GET /api/assessment/mark-list.
+    { key: 'mark_list_school_wide', label: 'View Whole-School Mark List (all subjects/classes)' },
   ]},
   { key: 'analytics', label: 'Analytics Dashboard', section: 'Analytics', subs: [
     { key: 'view', label: 'View Leadership Analytics' },

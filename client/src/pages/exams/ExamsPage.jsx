@@ -15,7 +15,7 @@ import {
   Search, Save, Check, PenLine, Bell,
   Users2, GraduationCap, Filter, Percent, Settings,
   Tag, Layers, Info, ClipboardPaste, Lock,
-  BookMarked, LockOpen, Send, XCircle, Baby,
+  BookMarked, LockOpen, Send, XCircle, Baby, ListChecks,
 } from 'lucide-react';
 import {
   exams as examsApi,
@@ -33,6 +33,7 @@ import {
 import RemindersTab   from '../grades/components/RemindersTab.jsx';
 import CAConfigTab    from '../grades/components/ConfigTab.jsx';
 import IndicatorMarkbook from './components/IndicatorMarkbook.jsx';
+import MarkListTab from './components/MarkListTab.jsx';
 import RCTemplatesSection from './components/RCTemplatesSection.jsx';
 import { TypePill, Toast, Skeleton } from '../grades/components/GradesPrimitives.jsx';
 import { DEFAULT_CUSTOM_TYPES, _pct, _scoreColor } from '../grades/constants.js';
@@ -50,6 +51,7 @@ export default function ExamsPage() {
   const TABS = [
     { id: 'exams',        label: 'Exams',                  icon: FileText,    adminOnly: false },
     { id: 'markbook',     label: 'Markbook',                icon: BookMarked,  adminOnly: false },
+    { id: 'marklist',     label: 'Mark List',               icon: ListChecks,  adminOnly: false },
     { id: 'review',       label: 'Review',                  icon: Send,        adminOnly: true  },
     { id: 'reminders',    label: 'Reminders',                icon: Bell,        adminOnly: false },
     { id: 'kg-templates', label: 'Kindergarten Templates',  icon: Baby,        adminOnly: true  },
@@ -150,6 +152,11 @@ export default function ExamsPage() {
           )}
           {tab === 'markbook' && (
             <MarkbookTab key="markbook" years={years} />
+          )}
+          {tab === 'marklist' && (
+            <motion.div key="marklist" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
+              <MarkListTab years={years} />
+            </motion.div>
           )}
           {tab === 'review' && canCreate && (
             <ReviewTab key="review" years={years} />

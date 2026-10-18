@@ -424,6 +424,10 @@ export const assessment = {
   bulkMarks:    (data)       => _post('/assessment/marks/bulk', data),
   deleteMark:   (id)         => _delete(`/assessment/marks/${id}`),
 
+  // MarkList (2026-10-18) — every subject for a class/sitting as columns
+  // in one table, so a missing mark doesn't need checking subject by subject.
+  markList:     (params)     => _get('/assessment/mark-list', params),
+
   // Report
   report:       (params)     => _get('/assessment/report', params),
 
