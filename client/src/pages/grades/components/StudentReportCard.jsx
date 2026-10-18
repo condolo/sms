@@ -73,18 +73,39 @@ function SubjectCommentField({ label, value, onSave }) {
   const [text, setText] = useState(value);
   const [status, setStatus] = useState(null); // null | 'saving' | 'saved' | 'error'
   const ref = useRef(null);
-  useEffect(() => { setText(value); }, [value]);
+  // Reported directly, traced to a real data-loss mechanism (2026-10-18,
+  // multiple teachers over several days — "all my comments disappeared"
+  // after entering many in a row): saving ANY student's subject comment
+  // invalidates the whole class's draftComments query, handing every
+  // mounted field a `value` prop that changed reference even when ITS
+  // OWN text hadn't. This used to resync unconditionally, so typing
+  // quickly across a roster (tab from field to field, each blur
+  // triggering a save-then-refetch) silently wiped whatever was being
+  // typed in the NEXT field before it was ever blurred/saved. Guard: a
+  // local edit in progress (dirty) always wins over an incoming prop
+  // update, until it's actually been saved.
+  const dirtyRef = useRef(false);
+  useEffect(() => {
+    if (dirtyRef.current) return;
+    setText(value);
+  }, [value]);
   useEffect(() => {
     if (!ref.current) return;
     ref.current.style.height = 'auto';
     ref.current.style.height = `${ref.current.scrollHeight}px`;
   }, [text]);
 
+  function handleChange(e) {
+    dirtyRef.current = true;
+    setText(e.target.value);
+  }
+
   async function handleBlur() {
-    if (text === value) return;
+    if (text === value) { dirtyRef.current = false; return; }
     setStatus('saving');
     try {
       await onSave(text);
+      dirtyRef.current = false;
       setStatus('saved');
       setTimeout(() => setStatus(s => (s === 'saved' ? null : s)), 2500);
     } catch {
@@ -101,7 +122,7 @@ function SubjectCommentField({ label, value, onSave }) {
           rows={1}
           maxLength={SUBJECT_COMMENT_MAX}
           value={text}
-          onChange={e => setText(e.target.value)}
+          onChange={handleChange}
           onBlur={handleBlur}
           placeholder="No comment entered"
           className={`w-full text-xs text-slate-700 bg-white border rounded-md px-2.5 py-1.5 resize-none overflow-hidden focus:outline-none focus:ring-1 focus:ring-indigo-400 ${status === 'error' ? 'border-red-300' : 'border-slate-200'}`}
@@ -263,8 +284,39 @@ const StudentReportCard = forwardRef(function StudentReportCard({
     observationRatings: draftComment?.observationRatings ?? {},
   });
 
+  // Reported directly, traced to a real and serious data-loss mechanism
+  // (2026-10-18, multiple teachers over several days — "all my comments
+  // disappeared" after entering many in a row): saveSubjectComment's own
+  // success handler invalidates the WHOLE CLASS's draftComments query
+  // (ReportCardsTab.jsx), not just this student's — correct, since other
+  // students' own data could also have changed — but that rebuilds
+  // `commentsMap` for every student, handing every mounted card a brand
+  // new `draftComment` object reference even when ITS OWN data hasn't
+  // changed. This effect used to resync unconditionally on any such
+  // reference change, so saving ONE student's subject comment silently
+  // wiped whatever a teacher was mid-typing (not yet blurred/saved) in
+  // every OTHER field, for every OTHER student, the instant that refetch
+  // landed — exactly what rapid-fire entry across a class roster would
+  // trigger over and over. Guarded the same way flushIfDirty's own
+  // comparison already does: never resync over an unsaved local edit.
+  const computeBulkDirty = () => {
+    const { subjectComments: _sc, ...bulk } = comment;
+    const original = {
+      classTeacherName:   draftComment?.classTeacherName   ?? '',
+      classTeacherRemark: draftComment?.classTeacherRemark ?? '',
+      sportsAndTalent:    draftComment?.sportsAndTalent    ?? '',
+      principalName:      draftComment?.principalName      ?? '',
+      principalRemark:    draftComment?.principalRemark    ?? '',
+      closingDate:        draftComment?.closingDate        ?? '',
+      nextTermBegin:      draftComment?.nextTermBegin      ?? '',
+      observationRatings: draftComment?.observationRatings ?? {},
+    };
+    return { bulk, isDirty: JSON.stringify(bulk) !== JSON.stringify(original) };
+  };
+
   useEffect(() => {
     if (!draftComment) return;
+    if (computeBulkDirty().isDirty) return;
     setComment({
       classTeacherName:   draftComment.classTeacherName   ?? '',
       classTeacherRemark: draftComment.classTeacherRemark ?? '',
@@ -276,6 +328,7 @@ const StudentReportCard = forwardRef(function StudentReportCard({
       subjectComments:    draftComment.subjectComments    ?? {},
       observationRatings: draftComment.observationRatings ?? {},
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftComment]);
 
   const [saving, setSaving] = useState(false);
@@ -307,27 +360,10 @@ const StudentReportCard = forwardRef(function StudentReportCard({
     }
   }, [comment, onSaveComment]);
 
-  // Reported directly: switching Class/Stream/Term/Year in ReportCardsTab
-  // while a remark was mid-edit silently discarded it — the same bug class
-  // just fixed in ExamsPage.jsx's selectors, but this screen only ever had
-  // an explicit "Save Comments" button, no save-before-switch guard. The
-  // parent calls this (via ref) before changing context; subject comments
+  // computeBulkDirty is defined above (same function now reused by the
+  // draftComment-resync effect) — the parent calls flushIfDirty via ref
+  // before changing Class/Stream/Term/Year context; subject comments
   // already save on blur so they're excluded here, same as handleSave.
-  const computeBulkDirty = useCallback(() => {
-    const { subjectComments: _sc, ...bulk } = comment;
-    const original = {
-      classTeacherName:   draftComment?.classTeacherName   ?? '',
-      classTeacherRemark: draftComment?.classTeacherRemark ?? '',
-      sportsAndTalent:    draftComment?.sportsAndTalent    ?? '',
-      principalName:      draftComment?.principalName      ?? '',
-      principalRemark:    draftComment?.principalRemark    ?? '',
-      closingDate:        draftComment?.closingDate        ?? '',
-      nextTermBegin:      draftComment?.nextTermBegin      ?? '',
-      observationRatings: draftComment?.observationRatings ?? {},
-    };
-    return { bulk, isDirty: JSON.stringify(bulk) !== JSON.stringify(original) };
-  }, [comment, draftComment]);
-
   useImperativeHandle(ref, () => ({
     isDirty: () => computeBulkDirty().isDirty,
     flushIfDirty: async () => {

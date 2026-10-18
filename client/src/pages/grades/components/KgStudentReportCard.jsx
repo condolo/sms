@@ -58,11 +58,29 @@ const KgStudentReportCard = forwardRef(function KgStudentReportCard({
   // silently, with nothing telling the caller it had failed, let alone why.
   const [commentError, setCommentError] = useState(null);
 
+  // Reported directly, traced to a real data-loss mechanism (2026-10-18):
+  // saving ANY student's comment in this class invalidates the whole
+  // class's draftComments query (ReportCardsTab.jsx), handing every
+  // mounted card a new `draftComment` reference even when its own data
+  // hasn't changed. This used to resync unconditionally, silently wiping
+  // a remark mid-edit for a different student the instant any other
+  // save in the class landed. Same guard as StudentReportCard.jsx's
+  // equivalent — never resync over an unsaved local edit.
+  const computeDirty = () => {
+    const original = {
+      classTeacherRemark: draftComment?.classTeacherRemark ?? '',
+      principalRemark:    draftComment?.principalRemark    ?? '',
+    };
+    return JSON.stringify(comment) !== JSON.stringify(original);
+  };
+
   useEffect(() => {
+    if (computeDirty()) return;
     setComment({
       classTeacherRemark: draftComment?.classTeacherRemark ?? '',
       principalRemark:    draftComment?.principalRemark    ?? '',
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftComment]);
 
   const set = (field) => (value) => setComment(c => ({ ...c, [field]: value }));
@@ -82,16 +100,9 @@ const KgStudentReportCard = forwardRef(function KgStudentReportCard({
     }
   }, [comment, onSaveComment]);
 
-  // Same save-before-switch guard as StudentReportCard.jsx's equivalent —
-  // the parent calls this via ref before changing Class/Stream/Term/Year.
-  const computeDirty = useCallback(() => {
-    const original = {
-      classTeacherRemark: draftComment?.classTeacherRemark ?? '',
-      principalRemark:    draftComment?.principalRemark    ?? '',
-    };
-    return JSON.stringify(comment) !== JSON.stringify(original);
-  }, [comment, draftComment]);
-
+  // computeDirty is defined above (shared with the draftComment-resync
+  // effect) — the parent calls flushIfDirty via ref before changing
+  // Class/Stream/Term/Year context.
   useImperativeHandle(ref, () => ({
     isDirty: computeDirty,
     flushIfDirty: async () => {
