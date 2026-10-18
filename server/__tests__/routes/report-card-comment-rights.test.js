@@ -321,6 +321,41 @@ describe('every class-teacher-tier field is guarded the same way as classTeacher
   });
 });
 
+describe('PUT /draft-comments/:studentId enforces the same length caps the client advertises (platform audit, 2026-10-18)', () => {
+  // Reported gap: this route — the one the UI actually calls — had NO
+  // length validation at all for classTeacherRemark/sportsAndTalent/
+  // classTeacherName/etc. A client-side maxLength was the only thing
+  // stopping an unbounded write. CommentSchema (above, in report-cards.js)
+  // already capped classTeacherRemark/principalRemark at 1000 but was only
+  // ever wired to the legacy PUT /:id/comments route.
+  const draftUrl = (studentId) => `/api/report-cards/draft-comments/${studentId}`;
+
+  test('classTeacherRemark over 1000 chars is rejected', async () => {
+    const res = await supertest(buildApp()).put(draftUrl('stu1')).send({ termNumber: 3, classTeacherRemark: 'x'.repeat(1001) });
+    expect(res.status).toBe(422);
+  });
+
+  test('classTeacherRemark at exactly 1000 chars is accepted', async () => {
+    const res = await supertest(buildApp()).put(draftUrl('stu1')).send({ termNumber: 3, classTeacherRemark: 'x'.repeat(1000) });
+    expect(res.status).toBe(200);
+  });
+
+  test('sportsAndTalent over 1000 chars is rejected', async () => {
+    const res = await supertest(buildApp()).put(draftUrl('stu1')).send({ termNumber: 3, sportsAndTalent: 'x'.repeat(1001) });
+    expect(res.status).toBe(422);
+  });
+
+  test('classTeacherName over 200 chars is rejected', async () => {
+    const res = await supertest(buildApp()).put(draftUrl('stu1')).send({ termNumber: 3, classTeacherName: 'x'.repeat(201) });
+    expect(res.status).toBe(422);
+  });
+
+  test('closingDate over 100 chars is rejected', async () => {
+    const res = await supertest(buildApp()).put(draftUrl('stu1')).send({ termNumber: 3, closingDate: 'x'.repeat(101) });
+    expect(res.status).toBe(422);
+  });
+});
+
 describe('reading draft comments', () => {
   test('a form tutor sees the full draft for her own stream', async () => {
     const res = await supertest(buildApp()).get('/api/report-cards/draft-comments?termNumber=3');

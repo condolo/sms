@@ -404,6 +404,31 @@ const CommentSchema = z.object({
   principalRemark:    z.string().max(1000).optional(),
 });
 
+// Platform audit (2026-10-18): this schema existed above but was only ever
+// wired to the legacy PUT /:id/comments route — the route the UI actually
+// calls, PUT /draft-comments/:studentId below, had NO length validation on
+// any of these fields at all, so a client-side cap (if one even existed)
+// was the only thing stopping an unbounded write. Caps match the client's
+// own StudentReportCard.jsx/KgStudentReportCard.jsx Field usage: 1000 for
+// the same remark fields as CommentSchema above, 200 for a name, 100 for
+// the free-text closing/next-term date strings (Field renders them as
+// plain text inputs, not date pickers).
+const DraftCommentBodySchema = z.object({
+  termNumber:         z.union([z.string(), z.number()]),
+  classTeacherName:   z.string().max(200).optional(),
+  classTeacherRemark: z.string().max(1000).optional(),
+  sportsAndTalent:    z.string().max(1000).optional(),
+  principalName:      z.string().max(200).optional(),
+  principalRemark:    z.string().max(1000).optional(),
+  closingDate:        z.string().max(100).optional(),
+  nextTermBegin:      z.string().max(100).optional(),
+  // Left unvalidated here on purpose — the route's own manual check further
+  // down (against this school's configured categories/rating values) is
+  // the real validation and already returns its own 400s; this schema
+  // only exists to cap the free-text fields above.
+  observationRatings: z.any().optional(),
+}).passthrough();
+
 function _validate(schema, data) {
   const r = schema.safeParse(data);
   if (!r.success) return { error: r.error.issues.map(i => ({ field: i.path.join('.'), message: i.message })) };
@@ -2886,10 +2911,12 @@ router.put('/draft-comments/:studentId', authMiddleware, PLAN, MODGATE, rbac('re
   try {
     const { schoolId, userId: updatedBy } = req.jwtUser;
     const { studentId } = req.params;
+    if (!req.body?.termNumber) return E.badRequest(res, 'termNumber is required');
+    const { data: validated, error: validationError } = _validate(DraftCommentBodySchema, req.body);
+    if (validationError) return E.validation(res, validationError);
     const { termNumber, classTeacherName, classTeacherRemark,
             sportsAndTalent, principalName, principalRemark, closingDate, nextTermBegin,
-            subjectComments, observationRatings } = req.body;
-    if (!termNumber) return E.badRequest(res, 'termNumber is required');
+            subjectComments, observationRatings } = validated;
 
     // Subject comments are saved one subject at a time (PUT .../subject/:subjectId),
     // so each save is checked against exactly the caller's own subject. Accepting a
