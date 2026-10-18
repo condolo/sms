@@ -528,6 +528,33 @@ async function _resolveTermScope(schoolId, ctx, { academicYearId, termId, termNu
   return { academicYearId: resolvedYearId, termId: resolvedTermId };
 }
 
+/* Reported directly, with a side-by-side PDF comparison: a published
+   report card showed "Class —" and a blank "Academic Year ·" prefix.
+   Root cause: className/termName/academicYear in PublishSchema are
+   optional DISPLAY STRINGS the server trusted the client to send — but
+   ReportCardsTab.jsx's publish call only ever sends {classId,
+   termNumber, academicYearId}, never these three. Every snapshot this
+   school has ever published is missing them, frozen blank forever (the
+   whole point of a snapshot). Resolved server-side here instead, from
+   the same IDs _resolveTermScope already resolved — authoritative, not
+   dependent on the client remembering to pass matching display text —
+   same posture as streamName/houseName just below, which were never
+   client-trusted to begin with. */
+async function _resolveDisplayNames(schoolId, ctx, { classId, academicYearId, termId }) {
+  const [cls, year] = await Promise.all([
+    tenantModel('classes', ctx).findOne({ schoolId, id: classId }).select('name').lean().catch(() => null),
+    academicYearId
+      ? tenantModel('academic_years', ctx).findOne({ schoolId, id: academicYearId }).select('name terms').lean().catch(() => null)
+      : Promise.resolve(null),
+  ]);
+  const term = year?.terms?.find(t => t.id === termId) ?? null;
+  return {
+    className:    cls?.name  || '',
+    academicYear: year?.name || '',
+    termName:     term?.name || '',
+  };
+}
+
 /* ══════════════════════════════════════════════════════════════
    GET/PUT /cycle-label — "Mid-Term"/"End of Term"/etc. label per
    {class, term, year}, shown in place of "Term Y" on the report card.
@@ -717,7 +744,11 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
     return E.badRequest(res, 'skipReason is required when skipModerationCheck is true — document why the moderation check is being bypassed');
   }
 
-  const { classId, termId, termNumber: termNum, academicYearId, className, termName, academicYear, schoolName, skipModerationCheck, skipReason } = data;
+  const {
+    classId, termId, termNumber: termNum, academicYearId,
+    className: clientClassName, termName: clientTermName, academicYear: clientAcademicYear,
+    schoolName, skipModerationCheck, skipReason,
+  } = data;
   const now     = new Date().toISOString();
   const batchId = uuidv4();
   const ctx     = tenantContext(req);
@@ -727,6 +758,14 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
   // every aggregation below would silently pull data across ALL years for
   // the class (classes are not year-scoped — see _resolveTermScope above).
   const scope = await _resolveTermScope(schoolId, ctx, { academicYearId, termId, termNumber: termNum });
+
+  // See _resolveDisplayNames' own comment — the client doesn't send these,
+  // so this is the real source, with the client's own value (currently
+  // always absent) kept only as a last-resort fallback.
+  const resolvedNames = await _resolveDisplayNames(schoolId, ctx, { classId, academicYearId: scope.academicYearId, termId: scope.termId });
+  const className    = resolvedNames.className    || clientClassName    || '';
+  const termName     = resolvedNames.termName     || clientTermName     || '';
+  const academicYear = resolvedNames.academicYear || clientAcademicYear || '';
 
   // ── Step 1: Create batch record (interrupt-safe anchor) ──────
   const Batches = tenantModel('publish_batches', ctx);
@@ -1314,11 +1353,21 @@ router.post('/kg/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
 
   const { data, error } = _validate(PublishSchema, req.body);
   if (error) return E.validation(res, error);
-  const { classId, termId, termNumber: termNum, academicYearId, className, termName, academicYear, schoolName } = data;
+  const {
+    classId, termId, termNumber: termNum, academicYearId,
+    className: clientClassName, termName: clientTermName, academicYear: clientAcademicYear,
+    schoolName,
+  } = data;
   const now     = new Date().toISOString();
   const batchId = uuidv4();
   const ctx     = tenantContext(req);
   const scope   = await _resolveTermScope(schoolId, ctx, { academicYearId, termId, termNumber: termNum });
+
+  // Same fix as POST /publish — see _resolveDisplayNames' own comment.
+  const resolvedNames = await _resolveDisplayNames(schoolId, ctx, { classId, academicYearId: scope.academicYearId, termId: scope.termId });
+  const className    = resolvedNames.className    || clientClassName    || '';
+  const termName     = resolvedNames.termName     || clientTermName     || '';
+  const academicYear = resolvedNames.academicYear || clientAcademicYear || '';
 
   const Batches = tenantModel('publish_batches', ctx);
   await Batches.create({
@@ -1760,27 +1809,40 @@ router.get('/bulk-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), s
     const total = await tenantModel('report_card_snapshots', tenantContext(req)).countDocuments(filter);
     if (total === 0) return E.notFound(res, 'No published report cards found for this class/term');
 
-    // RCE3c — class-wide extras resolved ONCE for the whole batch, not
-    // per student (this is a bulk export — an extra query per student
-    // would multiply real cost). school/subjectTeacherNames/comments-
-    // capability are the same for every student in one class; behaviour
-    // and term-over-term deviation stay unresolved here (genuinely
-    // per-student, and neither layout shipped so far needs them in the
-    // bulk-export path) — a documented scope boundary, not an oversight.
+    // Reported directly, with a side-by-side PDF comparison: bulk download
+    // showed raw subjectIds ("subj_demo_bio") instead of real subject
+    // names, and silently dropped the Behaviour section and the Dev
+    // column entirely, on the exact same published snapshot that renders
+    // correctly through GET /:id/pdf and GET /:id/html — both of which go
+    // through _loadRenderExtras (school, subjectTeacherNames,
+    // subjectNames, behaviour, deviations, subjectTeacherCommentsEnabled).
+    // This route built its own, separate "bulkExtra" object instead of
+    // reusing that function, and it was missing subjectNames entirely —
+    // the exact gap _loadRenderExtras' own comment already documents
+    // fixing for the single-student path, just never carried over here.
+    // The old comment on this block claimed behaviour/deviations were a
+    // deliberate, documented scope boundary ("neither layout shipped so
+    // far needs them in the bulk-export path") — that was true when it
+    // was written, but subject_paired/marks_then_comments both render a
+    // Behaviour section and a Dev column today, so that premise no longer
+    // holds; resolved per-student below, in the same per-chunk loop
+    // attendance already uses, rather than left silently blank.
     // Resolved AFTER the zero-match 404 check above — no point paying
-    // for 3 extra queries on a request that's about to 404 anyway.
-    const [bulkSchool, bulkCaConfig, bulkAssignments] = await Promise.all([
+    // for these queries on a request that's about to 404 anyway.
+    const [bulkSchool, bulkCaConfig, bulkAssignments, bulkSubjectDocs] = await Promise.all([
       _model('schools').findOne({ id: schoolId }, { logoUrl: 1, tagline: 1, address: 1, phone: 1, email: 1, website: 1, country: 1, principalSignatureUrl: 1, schoolStampUrl: 1, principalName: 1, timezone: 1 }).lean().catch(() => null),
       _getAssessmentConfig(schoolId, req.query.academicYearId || null),
       tenantModel('teaching_assignments', tenantContext(req))
         .find({ schoolId, classId: req.query.classId }).select('subjectId teacherName').lean().catch(() => []),
+      tenantModel('subjects', tenantContext(req)).find({ schoolId }).select('id name').lean().catch(() => []),
     ]);
     const bulkSubjectTeacherNames = {};
     for (const a of bulkAssignments) {
       if (!bulkSubjectTeacherNames[a.subjectId]) bulkSubjectTeacherNames[a.subjectId] = a.teacherName || '';
     }
-    const bulkExtra = {
-      school: bulkSchool, subjectTeacherNames: bulkSubjectTeacherNames,
+    const bulkSubjectNames = Object.fromEntries(bulkSubjectDocs.map(s => [s.id, s.name]));
+    const bulkExtraBase = {
+      school: bulkSchool, subjectTeacherNames: bulkSubjectTeacherNames, subjectNames: bulkSubjectNames,
       subjectTeacherCommentsEnabled: bulkCaConfig.subjectTeacherCommentsEnabled !== false,
     };
     // RCE8 — same real-logo-or-fallback behavior as the single-PDF route,
@@ -1807,7 +1869,7 @@ router.get('/bulk-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), s
     let chunkBuf = [];
 
     const processChunk = async (chunk) => {
-      const [attResults, photoBuffers] = await Promise.all([
+      const [attResults, photoBuffers, behaviourResults, deviationResults] = await Promise.all([
         Promise.all(chunk.map(s => s.attendanceSummary
           ? Promise.resolve(s.attendanceSummary)
           : attendanceSummary(schoolId, s.studentId, s.classId, s.termId, s.academicYearId)
@@ -1816,13 +1878,29 @@ router.get('/bulk-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), s
         config.showStudentPhoto !== false
           ? Promise.all(chunk.map(s => _fetchImageBuf(s.studentPhotoUrl).catch(() => null)))
           : Promise.resolve(chunk.map(() => null)),
+        // Genuinely per-student (each has their own merit/demerit history) —
+        // bounded cost, same CHUNK_SIZE=10-at-a-time posture attendance
+        // already uses above, not one query per student in the whole class.
+        Promise.all(chunk.map(s => behaviourSummary(schoolId, s.studentId).catch(() => null))),
+        Promise.all(chunk.map(s => (s.termNumber > 1
+          ? tenantModel('report_card_snapshots', tenantContext(req)).findOne({
+              schoolId, studentId: s.studentId, academicYearId: s.academicYearId,
+              termNumber: s.termNumber - 1, superseded: { $ne: true },
+            }).lean().catch(() => null)
+          : Promise.resolve(null)
+        ))),
       ]);
       chunk.forEach((snap, i) => {
         const isAdmin = ['admin', 'superadmin'].includes(role);
         if (snap.financialBlock && req.query.force !== '1' && !isAdmin) return; // skip blocked
         pdfDoc.addPage();
+        const studentExtra = {
+          ...bulkExtraBase,
+          behaviour:   behaviourResults[i],
+          deviations:  computeTermDeviation(snap.subjects, deviationResults[i]?.subjects),
+        };
         _buildPDFPage(pdfDoc, snap, config, attResults[i], false,
-          { ...bulkImages, studentPhoto: photoBuffers[i] }, bulkExtra);
+          { ...bulkImages, studentPhoto: photoBuffers[i] }, studentExtra);
         isFirst = false;
       });
     };
@@ -3284,6 +3362,7 @@ router._notifyReportCardsPublished = _notifyReportCardsPublished;
 router._normalizeGradeScaleBands = _normalizeGradeScaleBands;
 router._buildPDFPage = _buildPDFPage;
 router._loadRenderExtras = _loadRenderExtras;
+router._resolveDisplayNames = _resolveDisplayNames;
 router._computeReportSections = _computeReportSections;
 router._computeKgReportSections = _computeKgReportSections;
 router._resolveSnapComments = _resolveSnapComments;
