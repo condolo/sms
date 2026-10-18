@@ -309,4 +309,10 @@ describe('marks_then_comments — colors match this layout\'s own PDF palette (B
     const html = LAYOUTS.marks_then_comments.renderHtml(computeSections());
     expect(html).toContain('print-color-adjust:exact');
   });
+
+  test('each subject\'s grade renders in an ACCENT-colored pill, matching the PDF\'s navy+bronze pairing', () => {
+    const html = LAYOUTS.marks_then_comments.renderHtml(computeSections());
+    expect(html).toMatch(/background:#f7ede1;color:#8a5a2b;font-weight:700">A<\/span>/);
+    expect(html).toMatch(/background:#f7ede1;color:#8a5a2b;font-weight:700">C<\/span>/);
+  });
 });

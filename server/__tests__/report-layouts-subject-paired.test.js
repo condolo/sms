@@ -343,3 +343,11 @@ describe('subject_paired — printed backgrounds are not silently dropped', () =
     expect(html).toContain('print-color-adjust:exact');
   });
 });
+
+describe('subject_paired — grade shows as a colored badge, not plain text', () => {
+  test('each subject\'s grade renders in an ACCENT-colored pill, matching the PDF\'s navy+bronze pairing', () => {
+    const html = LAYOUTS.subject_paired.renderHtml(computeSections());
+    expect(html).toMatch(/background:#f7ede1;color:#8a5a2b;font-weight:700">A<\/span>/);
+    expect(html).toMatch(/background:#f7ede1;color:#8a5a2b;font-weight:700">C<\/span>/);
+  });
+});

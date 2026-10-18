@@ -59,6 +59,11 @@ function _registerReportFonts(doc) {
 const INK = '#15171c', INK_SOFT = '#5b5f68', INK_FAINT = '#9195a0';
 const SURFACE = '#f4f3f0', RULE = '#d8d6d0', RULE_SOFT = '#e8e6e1';
 const BRAND = '#1f2d3d', BRAND_WASH = '#eef1f4', ACCENT = '#8a5a2b';
+// Reported directly: "the report card is very dull... dark blue colour or
+// reddish". The PDF renderers already pair BRAND (navy) with ACCENT (a
+// warm bronze/terracotta) for exactly this kind of highlight; this HTML-
+// only wash is ACCENT's own light tint, for a grade badge's background.
+const ACCENT_WASH = '#f7ede1';
 const FAIL_RED = '#b3261e', PASS_GREEN = '#2e7d32';
 
 function _esc(str) {
@@ -1276,7 +1281,7 @@ function _renderSubjectPairedHtml(s) {
         <td style="${tdS};font-weight:700;min-width:120px">${_esc(row.nameLine)}</td>
         ${markCells}
         <td style="${tdC};font-weight:700">${_esc(row.scoreText)}</td>
-        <td style="${tdC};font-weight:700">${_esc(row.gradeText)}</td>
+        <td style="${tdC}">${row.gradeText ? `<span style="display:inline-block;min-width:20px;padding:1px 8px;border-radius:10px;background:${ACCENT_WASH};color:${ACCENT};font-weight:700">${_esc(row.gradeText)}</span>` : ''}</td>
         ${devCell}
       </tr>
       ${commentEnabled ? `
@@ -1659,7 +1664,7 @@ function _renderMarksThenCommentsHtml(s) {
         <td style="${tdS};font-weight:600;min-width:120px">${_esc(row.nameLine)}</td>
         ${markCells}
         <td style="${tdC};font-weight:700">${_esc(row.scoreText)}</td>
-        <td style="${tdC};font-weight:700">${_esc(row.gradeText)}</td>
+        <td style="${tdC}">${row.gradeText ? `<span style="display:inline-block;min-width:20px;padding:1px 8px;border-radius:10px;background:${ACCENT_WASH};color:${ACCENT};font-weight:700">${_esc(row.gradeText)}</span>` : ''}</td>
         ${devCell}
       </tr>`;
   }).join('');
