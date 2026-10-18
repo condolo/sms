@@ -263,7 +263,7 @@ function computeFinalScores(gradesData, examData, assessmentWeights, gradingSche
 
 /**
  * Fetch attendance summary for a student in a class/term.
- * Returns: { daysPresent, daysAbsent, totalSchoolDays, percentage }
+ * Returns: { daysPresent, daysAbsent, daysAuthorised, daysLate, totalSchoolDays, percentage }
  */
 async function attendanceSummary(schoolId, studentId, classId, termId, academicYearId) {
   const filter = { schoolId, studentId };
@@ -292,15 +292,26 @@ async function attendanceSummary(schoolId, studentId, classId, termId, academicY
     // behavior when no term/year is passed in at all.
   }
 
+  // Reported directly: "Present 16, Absent 0, Total Days 18 — what does
+  // that mean?" — a correct but incomplete picture. An authorised_absence
+  // or late day is neither 'present' nor literal 'absent', so Present +
+  // Absent not summing to Total Days read as a bug rather than a third
+  // (and fourth) category this summary never surfaced. Same fix as
+  // attendance.js's own GET /summary aggregate, which already breaks
+  // these out — this function just hadn't caught up.
   const Att = _model('attendance');
-  const [present, absent, total] = await Promise.all([
+  const [present, absent, authorised, late, total] = await Promise.all([
     Att.countDocuments({ ...filter, status: 'present' }),
     Att.countDocuments({ ...filter, status: 'absent' }),
+    Att.countDocuments({ ...filter, status: 'authorised_absence' }),
+    Att.countDocuments({ ...filter, status: 'late' }),
     Att.countDocuments(filter),
   ]);
   return {
     daysPresent:     present,
     daysAbsent:      absent,
+    daysAuthorised:  authorised,
+    daysLate:        late,
     totalSchoolDays: total,
     percentage:      total > 0 ? _round((present / total) * 100) : null,
   };

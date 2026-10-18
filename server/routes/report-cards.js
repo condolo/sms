@@ -2222,7 +2222,14 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
       meanGradeLabel: meanGrade?.descriptor ?? null,
     },
     attendance: showAttendance ? {
-      text: `Present: ${attendance.daysPresent}   Absent: ${attendance.daysAbsent}   Total Days: ${attendance.totalSchoolDays}` +
+      // Reported directly: Present + Absent not summing to Total Days
+      // read as a bug — an authorised absence or a late day is neither.
+      // Only shown when nonzero, so a school that never uses those
+      // statuses keeps the exact line it had before.
+      text: `Present: ${attendance.daysPresent}   Absent: ${attendance.daysAbsent}` +
+            (attendance.daysAuthorised ? `   Authorised: ${attendance.daysAuthorised}` : '') +
+            (attendance.daysLate ? `   Late: ${attendance.daysLate}` : '') +
+            `   Total Days: ${attendance.totalSchoolDays}` +
             (attendance.percentage != null ? `   Attendance: ${attendance.percentage}%` : ''),
     } : null,
     comments: {

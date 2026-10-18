@@ -466,7 +466,7 @@ describe('attendanceSummary', () => {
     ];
 
     const result = await attendanceSummary(SCHOOL, STUDENT, null, TERM_ID, YEAR_ID);
-    expect(result).toEqual({ daysPresent: 2, daysAbsent: 1, totalSchoolDays: 3, percentage: 66.67 });
+    expect(result).toEqual({ daysPresent: 2, daysAbsent: 1, daysAuthorised: 0, daysLate: 0, totalSchoolDays: 3, percentage: 66.67 });
   });
 
   test('the bug this fixes: a termId/academicYearId that would have matched nothing under the old field-based filter now matches real records', async () => {
@@ -508,6 +508,24 @@ describe('attendanceSummary', () => {
   test('zero matching attendance records returns null percentage, not NaN or a crash', async () => {
     mockAttendanceDocs = [];
     const result = await attendanceSummary(SCHOOL, STUDENT, null, null, null);
-    expect(result).toEqual({ daysPresent: 0, daysAbsent: 0, totalSchoolDays: 0, percentage: null });
+    expect(result).toEqual({ daysPresent: 0, daysAbsent: 0, daysAuthorised: 0, daysLate: 0, totalSchoolDays: 0, percentage: null });
+  });
+
+  test('authorised_absence and late days are broken out, not silently folded into present/absent (2026-10-18)', async () => {
+    // Reported directly: "Present 16, Absent 0, Total Days 18 — what does
+    // that mean?" — an authorised absence is neither, and this summary
+    // used to drop it on the floor instead of surfacing it as its own
+    // category the way attendance.js's own GET /summary already does.
+    mockAttendanceDocs = [
+      { schoolId: SCHOOL, studentId: STUDENT, date: '2026-05-05', status: 'present' },
+      { schoolId: SCHOOL, studentId: STUDENT, date: '2026-05-06', status: 'authorised_absence' },
+      { schoolId: SCHOOL, studentId: STUDENT, date: '2026-05-07', status: 'authorised_absence' },
+      { schoolId: SCHOOL, studentId: STUDENT, date: '2026-05-08', status: 'late' },
+    ];
+    const result = await attendanceSummary(SCHOOL, STUDENT, null, null, null);
+    expect(result).toEqual({
+      daysPresent: 1, daysAbsent: 0, daysAuthorised: 2, daysLate: 1,
+      totalSchoolDays: 4, percentage: 25,
+    });
   });
 });

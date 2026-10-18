@@ -615,22 +615,49 @@ const StudentReportCard = forwardRef(function StudentReportCard({
       {/* ── ATTENDANCE SECTION ────────────────────────────── */}
       {/* Reported directly: "attendance summary is on but I'm not seeing
           it" — this screen never fetched attendance at all before now,
-          only the published PDF did. Mirrors the Behaviour section above. */}
+          only the published PDF did. Mirrors the Behaviour section above.
+          Reported again, 2026-10-18: the 4 big stat cards didn't explain
+          themselves — Present + Absent not summing to Total Days (an
+          authorised/excused absence is neither) read as a bug rather than
+          a third category. Rebuilt as a small table, same dark-header
+          style as the Marks table above, with every status that can make
+          up Total Days broken out explicitly so the numbers always add up
+          on screen, not just in the arithmetic. */}
       {section === 'attendance' && showAttendance !== false && (
         <div className="p-5">
           {attendanceSummary ? (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              {[
-                { label: 'Present',  value: attendanceSummary.present ?? 0, cls: 'text-emerald-600' },
-                { label: 'Absent',   value: attendanceSummary.absent  ?? 0, cls: 'text-red-500' },
-                { label: 'Total Days', value: attendanceSummary.total ?? 0, cls: 'text-slate-700' },
-                { label: 'Attendance Rate', value: attendanceSummary.attendanceRate != null ? `${attendanceSummary.attendanceRate}%` : '—', cls: 'text-indigo-600' },
-              ].map(({ label, value, cls }) => (
-                <div key={label} className="rounded-xl border border-slate-200 p-4 text-center">
-                  <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">{label}</p>
-                  <p className={`text-3xl font-black ${cls}`}>{value}</p>
-                </div>
-              ))}
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs border-collapse max-w-md">
+                <thead>
+                  <tr className="bg-slate-800 text-white">
+                    <th className="text-left px-3 py-2 font-semibold text-[10px] uppercase tracking-wide">Status</th>
+                    <th className="px-3 py-2 font-semibold text-[10px] uppercase tracking-wide text-center">Days</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    { label: 'Present',             value: attendanceSummary.present    ?? 0, cls: 'text-emerald-600' },
+                    { label: 'Absent (unexcused)',  value: attendanceSummary.absent     ?? 0, cls: 'text-red-500' },
+                    { label: 'Authorised Absence',  value: attendanceSummary.authorised ?? 0, cls: 'text-amber-600' },
+                    { label: 'Late',                value: attendanceSummary.late       ?? 0, cls: 'text-amber-600' },
+                  ].map(({ label, value, cls }) => (
+                    <tr key={label} className="border-b border-slate-100">
+                      <td className="px-3 py-2 text-slate-700">{label}</td>
+                      <td className={`px-3 py-2 text-center font-semibold ${cls}`}>{value}</td>
+                    </tr>
+                  ))}
+                  <tr className="border-b border-slate-100 bg-slate-50">
+                    <td className="px-3 py-2 font-semibold text-slate-800">Total Days</td>
+                    <td className="px-3 py-2 text-center font-semibold text-slate-800">{attendanceSummary.total ?? 0}</td>
+                  </tr>
+                  <tr className="bg-slate-50">
+                    <td className="px-3 py-2 font-semibold text-slate-800">Attendance Rate</td>
+                    <td className="px-3 py-2 text-center font-semibold text-indigo-600">
+                      {attendanceSummary.attendanceRate != null ? `${attendanceSummary.attendanceRate}%` : '—'}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           ) : (
             <div className="flex flex-col items-center gap-2 py-10">
