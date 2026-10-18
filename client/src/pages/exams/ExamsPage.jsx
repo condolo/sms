@@ -6,6 +6,7 @@
    - Schedule entries colour-coded active/upcoming/past
    ============================================================ */
 import { useState, useMemo, useEffect, useRef, useCallback, Fragment } from 'react';
+import { useBlocker } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -536,7 +537,7 @@ function GridComment({ value, disabled, saved, onSave, onEdit }) {
       <textarea
         ref={ref}
         rows={1}
-        maxLength={500}
+        maxLength={1000}
         value={text}
         disabled={disabled}
         onChange={e => { setText(e.target.value); onEdit?.(); }}
@@ -621,6 +622,29 @@ function MarkbookTab({ years }) {
       return false;
     }
   }
+  // Reported gap (platform audit, 2026-10-18): saveBeforeSwitch only
+  // guards this page's own 6 selectors — closing the tab, the browser
+  // Back button, and clicking a different sidebar page while `dirty` was
+  // true all still silently discarded unsaved marks. These two guards
+  // close that: a native "leave site?" prompt for the browser-level
+  // exits, and an auto-save-then-proceed for in-app navigation (never a
+  // dismissable confirm, same reasoning as saveBeforeSwitch above).
+  useEffect(() => {
+    if (!dirty) return;
+    const handler = (e) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [dirty]);
+
+  const navBlocker = useBlocker(dirty);
+  useEffect(() => {
+    if (navBlocker.state !== 'blocked') return;
+    (async () => {
+      const ok = await saveBeforeSwitch();
+      if (ok) navBlocker.proceed();
+      else navBlocker.reset();
+    })();
+  }, [navBlocker]); // eslint-disable-line react-hooks/exhaustive-deps
   // Cells the last save rejected because someone else edited them first.
   // The typed value stays in `scores` (never silently cleared) until the
   // teacher dismisses the banner or a later save for that cell succeeds.
@@ -883,7 +907,18 @@ function MarkbookTab({ years }) {
      served from cache) marks from whichever year happened to be saved
      under that same classId+subjectId+termNumber+type, since class IDs
      persist across years. */
-  const { data: existingData } = useQuery({
+  // Reported directly (2026-10-18): "I can't see my marks, they
+  // disappeared — I logged out and opened it again and they were there."
+  // DB-verified intact and correctly timestamped — not data loss. Root
+  // cause traced here: this query had NO error handling at all. If the
+  // fetch failed for any transient reason (a slow/unreliable connection —
+  // a real condition for many schools), the grid just kept whatever
+  // `scores` state it had with zero visible indication anything had gone
+  // wrong — indistinguishable from "no marks entered yet," and the exact
+  // thing that pushes a teacher toward re-typing marks that were actually
+  // already saved. A full logout/login (or any hard reload) bypasses
+  // whatever failed and fetches fresh, which is why that "fixed" it.
+  const { data: existingData, isError: marksLoadError, isFetching: marksFetching, refetch: refetchMarks } = useQuery({
     queryKey: ['assessment', 'marks', { classId, subjectId, assessmentType: selectedEntry?.assessmentType, termNumber: selectedEntry?.termNumber, academicYearId: selectedEntry?.academicYearId }],
     queryFn:  () => assessmentApi.getMarks({
       classId,
@@ -894,6 +929,7 @@ function MarkbookTab({ years }) {
     }),
     enabled:  canQuery,
     staleTime: 30_000,
+    retry: 2,
   });
 
   useEffect(() => {
@@ -1329,6 +1365,29 @@ function MarkbookTab({ years }) {
       </div>
 
       {/* ── Content ── */}
+      {/* Reported directly (2026-10-18): a failed marks fetch rendered an
+          empty-looking grid with no indication anything was wrong — the
+          exact condition that makes a teacher doubt whether their marks
+          are actually saved. This is deliberately its own banner, not
+          folded into the "no students" empty state below, since an empty
+          class and a failed fetch need opposite reactions from a teacher
+          (nothing to do vs. don't re-type, just retry). */}
+      {canQuery && marksLoadError && (
+        <div className="mb-3 flex items-center gap-3 px-4 py-3 rounded-xl bg-red-50 border border-red-200">
+          <AlertTriangle size={16} className="text-red-500 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-red-800">Couldn't load your saved marks</p>
+            <p className="text-xs text-red-600">Your previously saved marks are safe — this screen just failed to fetch them. Please retry before entering more, so you don't accidentally re-type over what's already saved.</p>
+          </div>
+          <button
+            onClick={() => refetchMarks()}
+            disabled={marksFetching}
+            className="shrink-0 text-xs font-medium text-red-700 bg-white border border-red-300 rounded-lg px-3 py-1.5 hover:bg-red-100 disabled:opacity-50"
+          >
+            {marksFetching ? 'Retrying…' : 'Retry'}
+          </button>
+        </div>
+      )}
       {!canQuery ? (
         <div className="bg-white border border-slate-200 rounded-xl p-12 flex flex-col items-center gap-2">
           <BookMarked size={28} className="text-slate-300" />
