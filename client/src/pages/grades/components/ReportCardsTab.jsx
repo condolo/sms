@@ -164,7 +164,7 @@ export default function ReportCardsTab() {
   // teaching assignment fell through to the unrestricted default branch
   // here — same leak already closed for Attendance/Lessons/the Markbook's
   // own roster fetch (ExamsPage.jsx), just missed on this one caller.
-  const { data: studentsData } = useQuery({
+  const { data: studentsData, isError: isStudentsError, refetch: refetchStudents } = useQuery({
     queryKey: ['classes', classId, 'students'],
     queryFn:  () => classesApi.students(classId, { limit: 500, assessmentScope: true }),
     enabled:  !!classId,
@@ -225,7 +225,7 @@ export default function ReportCardsTab() {
   // "current" year, so switching the Year selector actually changes what
   // this reads instead of staying pinned to "now" underneath it.
   const effectiveYearId = yearId || currentPeriod.academicYearId || '';
-  const { data: instanceMarksAll } = useQuery({
+  const { data: instanceMarksAll, isError: isMarksError, refetch: refetchMarks } = useQuery({
     queryKey: ['assessment', 'marks', { classId, termNum, academicYearId: effectiveYearId }],
     queryFn:  () => assessmentApi.getMarks({ classId, termNumber: Number(termNum), academicYearId: effectiveYearId || undefined }),
     enabled:  canQueryNumeric,
@@ -248,7 +248,7 @@ export default function ReportCardsTab() {
   // this specific collection) — so a student's Term 2 draft comment can
   // in principle be shared across every year that has a Term 2 until
   // it's frozen into a published snapshot. Flagged, not fixed here.
-  const { data: commentsMap } = useQuery({
+  const { data: commentsMap, isError: isCommentsError, refetch: refetchComments } = useQuery({
     queryKey: ['reportCards', 'draftComments', { classId, termNum }],
     queryFn:  () => reportCardsApi.draftComments.list({ classId, termNumber: Number(termNum) }),
     enabled:  canQuery,
@@ -257,7 +257,7 @@ export default function ReportCardsTab() {
   });
 
   // Behaviour summary indexed by studentId for this class
-  const { data: behaviourMap } = useQuery({
+  const { data: behaviourMap, isError: isBehaviourError, refetch: refetchBehaviour } = useQuery({
     queryKey: ['behaviour', 'summary', { classId }],
     queryFn:  () => behaviourApi.summary({ classId }),
     enabled:  !!classId,
@@ -269,7 +269,7 @@ export default function ReportCardsTab() {
   // directly: "attendance summary is on but I'm not seeing it", traced to
   // this screen never fetching attendance at all (only the published PDF
   // did). Mirrors behaviourMap above exactly.
-  const { data: attendanceMap } = useQuery({
+  const { data: attendanceMap, isError: isAttendanceError, refetch: refetchAttendance } = useQuery({
     queryKey: ['attendance', 'summary', { classId }],
     queryFn:  () => attendanceApi.summary({ classId }),
     enabled:  !!classId,
@@ -278,7 +278,7 @@ export default function ReportCardsTab() {
   });
 
   // Published snapshots for this class/term/year — keyed by studentId
-  const { data: snapshotsMap } = useQuery({
+  const { data: snapshotsMap, isError: isSnapshotsError, refetch: refetchSnapshots } = useQuery({
     queryKey: ['reportCards', 'snapshots', { classId, termNum, yearId }],
     queryFn:  () => reportCardsApi.snapshots.list({ classId, termNumber: Number(termNum), academicYearId: yearId || undefined, limit: 200 }),
     enabled:  canQuery,
@@ -287,6 +287,26 @@ export default function ReportCardsTab() {
       (res?.data ?? []).filter(s => !s.superseded).map(s => [s.studentId, s])
     ),
   });
+
+  // Reported directly, root-caused against live data (2026-10-18, Mr
+  // Rajiv — "some of my marks disappeared"): marks/comments he'd already
+  // saved were confirmed intact in the database the whole time. Every
+  // query above except the main "generate" one swallowed a fetch failure
+  // completely silently — commentsMap/instanceMarksAll/behaviourMap/
+  // attendanceMap/snapshotsMap all rendered as if the data were genuinely
+  // empty, with nothing telling the teacher a request had failed rather
+  // than that nothing existed. One combined banner, not five separate
+  // ones — a teacher needs "something failed to load, don't trust what
+  // you see as complete" once, not a wall of red boxes.
+  const anyLoadError = isStudentsError || isCommentsError || isMarksError || isBehaviourError || isAttendanceError || isSnapshotsError;
+  function retryAllLoads() {
+    if (isStudentsError) refetchStudents();
+    if (isCommentsError) refetchComments();
+    if (isMarksError) refetchMarks();
+    if (isBehaviourError) refetchBehaviour();
+    if (isAttendanceError) refetchAttendance();
+    if (isSnapshotsError) refetchSnapshots();
+  }
 
   // "Just a label" (2026-10-18) — the Mid-Term/End-of-Term tag shown in
   // place of "Term X" on the report card. A setting per {class, term,
@@ -469,6 +489,21 @@ export default function ReportCardsTab() {
 
       {switchError && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800">{switchError}</div>
+      )}
+
+      {anyLoadError && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-3 flex items-center justify-between gap-3 text-xs text-red-800">
+          <span>
+            Some data failed to load — marks, comments, attendance, or behaviour shown below may be incomplete.
+            This does not mean anything was deleted; it's still saved.
+          </span>
+          <button
+            onClick={retryAllLoads}
+            className="shrink-0 px-3 py-1.5 rounded-lg border border-red-300 bg-white text-red-700 font-medium hover:bg-red-50 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
       )}
 
       {/* Selector bar */}
