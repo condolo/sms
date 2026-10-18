@@ -14,7 +14,7 @@
    ============================================================ */
 import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ListChecks, AlertTriangle } from 'lucide-react';
+import { ListChecks, AlertTriangle, Download, Loader2 } from 'lucide-react';
 import {
   classes as classesApi,
   streams as streamsApi,
@@ -99,6 +99,28 @@ export default function MarkListTab({ years }) {
     return n;
   }, [students, subjects, cells]);
 
+  // Downloads via the server's own GET /mark-list/export — the identical
+  // computation the table on screen just rendered from (same scope, same
+  // isPublished filter), never a separately-built export, so the file
+  // can't show something different from what's visible right now.
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState('');
+  async function downloadCsv() {
+    setDownloadError('');
+    setDownloading(true);
+    try {
+      await assessmentApi.markListExport({
+        classId, streamId: streamId || undefined,
+        termNumber: Number(termNumber), assessmentType: selectedEntry.assessmentType,
+        instance, academicYearId: selectedEntry.academicYearId || undefined,
+      });
+    } catch (err) {
+      setDownloadError(err?.message ?? 'Download failed.');
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   const selCls = 'w-full text-sm px-3 py-2 rounded-lg border border-slate-200 focus:border-slate-400 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 text-slate-800 transition';
 
   return (
@@ -179,12 +201,24 @@ export default function MarkListTab({ years }) {
               {students.length} student{students.length !== 1 ? 's' : ''} · {subjects.length} subject{subjects.length !== 1 ? 's' : ''}
               {!isWholeSchoolView && ' · showing only subjects you teach'}
             </p>
-            {missingCount > 0 && (
-              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-red-700 bg-red-50 border border-red-200 px-2.5 py-1 rounded-full">
-                <AlertTriangle size={11} /> {missingCount} missing mark{missingCount !== 1 ? 's' : ''}
-              </span>
-            )}
+            <div className="flex items-center gap-2">
+              {missingCount > 0 && (
+                <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-red-700 bg-red-50 border border-red-200 px-2.5 py-1 rounded-full">
+                  <AlertTriangle size={11} /> {missingCount} missing mark{missingCount !== 1 ? 's' : ''}
+                </span>
+              )}
+              <button
+                onClick={downloadCsv}
+                disabled={downloading}
+                title="Downloads as CSV — opens directly in Excel"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-slate-700 text-xs font-medium hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {downloading ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                Download
+              </button>
+            </div>
           </div>
+          {downloadError && <p className="px-5 py-2 text-xs text-red-500 border-b border-slate-100">{downloadError}</p>}
           <div className="overflow-x-auto">
             <table className="w-full text-xs border-collapse">
               <thead>

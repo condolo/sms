@@ -426,7 +426,8 @@ export const assessment = {
 
   // MarkList (2026-10-18) — every subject for a class/sitting as columns
   // in one table, so a missing mark doesn't need checking subject by subject.
-  markList:     (params)     => _get('/assessment/mark-list', params),
+  markList:       (params)     => _get('/assessment/mark-list', params),
+  markListExport: (params)     => _downloadPdf('/assessment/mark-list/export', 'mark-list.csv', params),
 
   // Report
   report:       (params)     => _get('/assessment/report', params),

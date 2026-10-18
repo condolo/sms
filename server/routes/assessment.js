@@ -961,117 +961,176 @@ router.get('/marks', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), scop
  * already-unrestricted floor role) widens to every subject and every
  * stream — see moduleRegistry.js's own comment on that sub-permission.
  */
+/**
+ * Shared by GET /mark-list (JSON, on-screen) and GET /mark-list/export
+ * (CSV download) — one computation, called twice, so the downloaded file
+ * can never drift from what the screen just showed. Throws { status,
+ * message } for the route to turn into an error response.
+ */
+async function _computeMarkList(req) {
+  const { schoolId } = req.jwtUser;
+  const { classId, streamId, termNumber, assessmentType, academicYearId } = req.query;
+  const instance = req.query.instance ? Number(req.query.instance) : 1;
+  if (!classId || !termNumber || !assessmentType) {
+    throw { status: 400, message: 'classId, termNumber and assessmentType are required' };
+  }
+
+  // Deliberately the SAME narrow floor resolveAssessmentScope itself
+  // uses (ASSESSMENT_FLOOR_ROLES) — NOT the generic ScopeEngine.
+  // isUnrestricted check. A 'school'-level role for most OTHER modules
+  // (exams_officer, admissions_officer, finance, hr, timetabler,
+  // discipline_committee) gets req.scope === null generically, which
+  // would make isUnrestricted(req,'assessment') true regardless of
+  // this floor — silently handing them the whole-school view with no
+  // grant needed, exactly the opposite of "controlled from Settings"
+  // this permission exists for, and inconsistent with the Markbook's
+  // own roster route (classes.js's assessmentScope branch), which
+  // already narrows these same roles down to their own teaching
+  // assignments via this identical floor.
+  const { role, roles: jwtRoles = [] } = req.jwtUser;
+  const effectiveRole = role || jwtRoles[0] || '';
+  const naturallyUnrestricted = ScopeEngine.ASSESSMENT_FLOOR_ROLES.has(effectiveRole);
+  const wholeSchoolGranted = !naturallyUnrestricted
+    && await hasExplicitSubGrant(req, 'reports', 'mark_list_school_wide', 'read');
+  const isWholeSchoolView = naturallyUnrestricted || wholeSchoolGranted;
+
+  // Per-subject scope: subjectId -> Set(streamId) | a sentinel meaning
+  // "every stream" (elective, or a whole-class compulsory grant).
+  // taughtPairs returns null to mean "management — sees everything"
+  // (isManagement's own MANAGEMENT_ROLES set, which also includes hod,
+  // a role outside ASSESSMENT_FLOOR_ROLES above) — that null must stay
+  // "unrestricted", never get coerced into an empty pairs list, or hod
+  // would see every subject filtered down to zero instead of all of them.
+  const ALL_STREAMS = '__all__';
+  let subjectScope = null; // null = unrestricted (whole-school view)
+  if (!isWholeSchoolView) {
+    const pairs = await taughtPairs(req);
+    if (pairs !== null) {
+      subjectScope = new Map();
+      for (const p of pairs.filter(p => p.classId === classId)) {
+        const set = subjectScope.get(p.subjectId) ?? new Set();
+        set.add(p.streamId || ALL_STREAMS);
+        subjectScope.set(p.subjectId, set);
+      }
+    }
+  }
+
+  const ClassSubjects = tenantModel('class_subjects', tenantContext(req));
+  let links = await ClassSubjects.find({ schoolId, classId }).select('subjectId isCompulsoryForClass').lean();
+  if (subjectScope) links = links.filter(l => subjectScope.has(l.subjectId));
+
+  const subjectIds = links.map(l => l.subjectId);
+  const Subjects = tenantModel('subjects', tenantContext(req));
+  const subjectDocs = await Subjects.find({ schoolId, id: { $in: subjectIds } }).select('id code name').lean();
+  const subjectInfo = Object.fromEntries(subjectDocs.map(s => [s.id, s]));
+  const subjects = links
+    .map(l => ({
+      id: l.subjectId,
+      code: subjectInfo[l.subjectId]?.code || subjectInfo[l.subjectId]?.name || l.subjectId,
+      name: subjectInfo[l.subjectId]?.name || '',
+      isCompulsory: l.isCompulsoryForClass !== false,
+    }))
+    .sort((a, b) => a.code.localeCompare(b.code));
+
+  const Students = tenantModel('students', tenantContext(req));
+  const studentFilter = { schoolId, classId, status: { $nin: ['withdrawn', 'graduated'] } };
+  if (streamId) studentFilter.streamId = streamId;
+  const students = await Students.find(studentFilter)
+    .select('id firstName lastName admissionNumber streamId')
+    .sort({ firstName: 1, lastName: 1 }).lean();
+
+  // Elective enrollment, resolved once per elective subject in play.
+  const electiveEnrollment = {};
+  for (const subj of subjects) {
+    if (!subj.isCompulsory) electiveEnrollment[subj.id] = await enrolledStudentIds(req, subj.id);
+  }
+
+  // Raised directly: "I don't want to see marks in report or markbook
+  // yet it's missing in MarkList" — academic-calc.js's own
+  // aggregateAssessmentMarks (what Report Cards actually reads) filters
+  // isPublished:true; this route didn't, so a future isPublished:false
+  // mark (none exist on live data today — checked directly — but the
+  // field exists precisely for this) would show as present here while
+  // silently excluded from the report card's own grade. Same filter,
+  // so "present here" and "counted there" can never diverge.
+  const Marks = tenantModel('assessment_marks', tenantContext(req));
+  const marks = await Marks.find({
+    schoolId, classId, subjectId: { $in: subjectIds },
+    termNumber: Number(termNumber), assessmentType: String(assessmentType).toUpperCase(), instance,
+    isPublished: true,
+    ..._yearFilterPart(academicYearId),
+  }).select('studentId subjectId rawScore markState').lean();
+  const markByKey = Object.fromEntries(marks.map(m => [`${m.studentId}::${m.subjectId}`, m]));
+
+  const cells = {};
+  for (const stu of students) {
+    cells[stu.id] = {};
+    for (const subj of subjects) {
+      const inScope = subjectScope
+        ? (subjectScope.get(subj.id)?.has(ALL_STREAMS) || subjectScope.get(subj.id)?.has(stu.streamId))
+        : true;
+      const enrolled = inScope && (subj.isCompulsory ? true : (electiveEnrollment[subj.id]?.has(stu.id) ?? false));
+      if (!enrolled) { cells[stu.id][subj.id] = null; continue; }
+      const mark = markByKey[`${stu.id}::${subj.id}`];
+      cells[stu.id][subj.id] = mark
+        ? { rawScore: mark.rawScore, markState: mark.markState }
+        : { rawScore: null, markState: 'MISSING' };
+    }
+  }
+
+  return {
+    students: students.map(s => ({ id: s.id, name: `${s.firstName} ${s.lastName}`.trim(), admissionNo: s.admissionNumber || '' })),
+    subjects: subjects.map(({ id, code, name }) => ({ id, code, name })),
+    cells,
+    isWholeSchoolView,
+  };
+}
+
 router.get('/mark-list', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), scopeMiddleware, async (req, res) => {
   try {
-    const { schoolId } = req.jwtUser;
-    const { classId, streamId, termNumber, assessmentType, academicYearId } = req.query;
-    const instance = req.query.instance ? Number(req.query.instance) : 1;
-    if (!classId || !termNumber || !assessmentType) {
-      return E.badRequest(res, 'classId, termNumber and assessmentType are required');
-    }
-
-    // Deliberately the SAME narrow floor resolveAssessmentScope itself
-    // uses (ASSESSMENT_FLOOR_ROLES) — NOT the generic ScopeEngine.
-    // isUnrestricted check. A 'school'-level role for most OTHER modules
-    // (exams_officer, admissions_officer, finance, hr, timetabler,
-    // discipline_committee) gets req.scope === null generically, which
-    // would make isUnrestricted(req,'assessment') true regardless of
-    // this floor — silently handing them the whole-school view with no
-    // grant needed, exactly the opposite of "controlled from Settings"
-    // this permission exists for, and inconsistent with the Markbook's
-    // own roster route (classes.js's assessmentScope branch), which
-    // already narrows these same roles down to their own teaching
-    // assignments via this identical floor.
-    const { role, roles: jwtRoles = [] } = req.jwtUser;
-    const effectiveRole = role || jwtRoles[0] || '';
-    const naturallyUnrestricted = ScopeEngine.ASSESSMENT_FLOOR_ROLES.has(effectiveRole);
-    const wholeSchoolGranted = !naturallyUnrestricted
-      && await hasExplicitSubGrant(req, 'reports', 'mark_list_school_wide', 'read');
-    const isWholeSchoolView = naturallyUnrestricted || wholeSchoolGranted;
-
-    // Per-subject scope: subjectId -> Set(streamId) | a sentinel meaning
-    // "every stream" (elective, or a whole-class compulsory grant).
-    // taughtPairs returns null to mean "management — sees everything"
-    // (isManagement's own MANAGEMENT_ROLES set, which also includes hod,
-    // a role outside ASSESSMENT_FLOOR_ROLES above) — that null must stay
-    // "unrestricted", never get coerced into an empty pairs list, or hod
-    // would see every subject filtered down to zero instead of all of them.
-    const ALL_STREAMS = '__all__';
-    let subjectScope = null; // null = unrestricted (whole-school view)
-    if (!isWholeSchoolView) {
-      const pairs = await taughtPairs(req);
-      if (pairs !== null) {
-        subjectScope = new Map();
-        for (const p of pairs.filter(p => p.classId === classId)) {
-          const set = subjectScope.get(p.subjectId) ?? new Set();
-          set.add(p.streamId || ALL_STREAMS);
-          subjectScope.set(p.subjectId, set);
-        }
-      }
-    }
-
-    const ClassSubjects = tenantModel('class_subjects', tenantContext(req));
-    let links = await ClassSubjects.find({ schoolId, classId }).select('subjectId isCompulsoryForClass').lean();
-    if (subjectScope) links = links.filter(l => subjectScope.has(l.subjectId));
-
-    const subjectIds = links.map(l => l.subjectId);
-    const Subjects = tenantModel('subjects', tenantContext(req));
-    const subjectDocs = await Subjects.find({ schoolId, id: { $in: subjectIds } }).select('id code name').lean();
-    const subjectInfo = Object.fromEntries(subjectDocs.map(s => [s.id, s]));
-    const subjects = links
-      .map(l => ({
-        id: l.subjectId,
-        code: subjectInfo[l.subjectId]?.code || subjectInfo[l.subjectId]?.name || l.subjectId,
-        name: subjectInfo[l.subjectId]?.name || '',
-        isCompulsory: l.isCompulsoryForClass !== false,
-      }))
-      .sort((a, b) => a.code.localeCompare(b.code));
-
-    const Students = tenantModel('students', tenantContext(req));
-    const studentFilter = { schoolId, classId, status: { $nin: ['withdrawn', 'graduated'] } };
-    if (streamId) studentFilter.streamId = streamId;
-    const students = await Students.find(studentFilter)
-      .select('id firstName lastName admissionNumber streamId')
-      .sort({ firstName: 1, lastName: 1 }).lean();
-
-    // Elective enrollment, resolved once per elective subject in play.
-    const electiveEnrollment = {};
-    for (const subj of subjects) {
-      if (!subj.isCompulsory) electiveEnrollment[subj.id] = await enrolledStudentIds(req, subj.id);
-    }
-
-    const Marks = tenantModel('assessment_marks', tenantContext(req));
-    const marks = await Marks.find({
-      schoolId, classId, subjectId: { $in: subjectIds },
-      termNumber: Number(termNumber), assessmentType: String(assessmentType).toUpperCase(), instance,
-      ..._yearFilterPart(academicYearId),
-    }).select('studentId subjectId rawScore markState').lean();
-    const markByKey = Object.fromEntries(marks.map(m => [`${m.studentId}::${m.subjectId}`, m]));
-
-    const cells = {};
-    for (const stu of students) {
-      cells[stu.id] = {};
-      for (const subj of subjects) {
-        const inScope = subjectScope
-          ? (subjectScope.get(subj.id)?.has(ALL_STREAMS) || subjectScope.get(subj.id)?.has(stu.streamId))
-          : true;
-        const enrolled = inScope && (subj.isCompulsory ? true : (electiveEnrollment[subj.id]?.has(stu.id) ?? false));
-        if (!enrolled) { cells[stu.id][subj.id] = null; continue; }
-        const mark = markByKey[`${stu.id}::${subj.id}`];
-        cells[stu.id][subj.id] = mark
-          ? { rawScore: mark.rawScore, markState: mark.markState }
-          : { rawScore: null, markState: 'MISSING' };
-      }
-    }
-
-    return _ok(res, {
-      students: students.map(s => ({ id: s.id, name: `${s.firstName} ${s.lastName}`.trim(), admissionNo: s.admissionNumber || '' })),
-      subjects: subjects.map(({ id, code, name }) => ({ id, code, name })),
-      cells,
-      isWholeSchoolView,
-    });
+    return _ok(res, await _computeMarkList(req));
   } catch (err) {
+    if (err?.status) return res.status(err.status).json({ success: false, error: { code: 'VALIDATION_ERROR', message: err.message } });
     console.error('[assessment/mark-list GET]', err);
+    return E.serverError(res);
+  }
+});
+
+/**
+ * GET /api/assessment/mark-list/export — the same data as GET /mark-list,
+ * as a CSV (opens directly in Excel). Calls the identical shared
+ * computation above — never its own, separately-written query — so the
+ * downloaded file can't drift from what the screen just showed.
+ */
+function _csvEscape(v) {
+  const s = String(v ?? '');
+  return (s.includes(',') || s.includes('"') || s.includes('\n') || s.includes('\r'))
+    ? '"' + s.replace(/"/g, '""') + '"'
+    : s;
+}
+
+router.get('/mark-list/export', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), scopeMiddleware, async (req, res) => {
+  try {
+    const { students, subjects, cells } = await _computeMarkList(req);
+    const headers = ['Student', 'Admission No', ...subjects.map(s => s.code)];
+    const lines = [headers.map(_csvEscape).join(',')];
+    for (const stu of students) {
+      const row = [stu.name, stu.admissionNo];
+      for (const subj of subjects) {
+        const cell = cells[stu.id]?.[subj.id];
+        if (!cell) { row.push(''); continue; }
+        row.push(cell.markState === 'MISSING' ? 'MISSING' : cell.markState !== 'present' ? cell.markState : cell.rawScore);
+      }
+      lines.push(row.map(_csvEscape).join(','));
+    }
+    const csv = '﻿' + lines.join('\r\n'); // BOM for Excel
+    const stamp = new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="msingi_mark_list_${stamp}.csv"`);
+    return res.send(csv);
+  } catch (err) {
+    if (err?.status) return res.status(err.status).json({ success: false, error: { code: 'VALIDATION_ERROR', message: err.message } });
+    console.error('[assessment/mark-list/export GET]', err);
     return E.serverError(res);
   }
 });

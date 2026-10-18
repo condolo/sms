@@ -86,7 +86,7 @@ beforeEach(() => {
       { schoolId: SCHOOL, teacherId: 'usr_t1', classId: 'cls_1', subjectId: 'math', streamId: 'strm_X' },
     ],
     assessment_marks: [
-      { schoolId: SCHOOL, classId: 'cls_1', subjectId: 'math', studentId: 'stu_A', termNumber: 1, assessmentType: 'MT', instance: 1, rawScore: 80, markState: 'present' },
+      { schoolId: SCHOOL, classId: 'cls_1', subjectId: 'math', studentId: 'stu_A', termNumber: 1, assessmentType: 'MT', instance: 1, rawScore: 80, markState: 'present', isPublished: true },
       // stu_B has NO math mark — should show MISSING.
       // stu_A has NO art mark — should show MISSING (enrolled, no score).
       // stu_B is not enrolled in art at all — should show null (blank).
@@ -109,6 +109,44 @@ describe('GET /api/assessment/mark-list — floor role (admin) sees every subjec
     expect(cells.stu_B.math).toEqual({ rawScore: null, markState: 'MISSING' }); // enrolled (compulsory), no mark
     expect(cells.stu_A.art).toEqual({ rawScore: null, markState: 'MISSING' });  // enrolled elective, no mark
     expect(cells.stu_B.art).toBeNull(); // not enrolled in the elective — blank, not flagged
+  });
+});
+
+describe('GET /api/assessment/mark-list — stays in sync with Report Cards (2026-10-18)', () => {
+  // Raised directly: "I don't want to see marks in report or markbook
+  // yet it's missing in MarkList." academic-calc.js's aggregateAssessmentMarks
+  // (what Report Cards actually reads) filters isPublished:true — a mark
+  // that fails that filter is invisible to the report card's own grade
+  // calculation. This proves MarkList uses the identical filter, so it
+  // can never claim "present" for something the report card silently
+  // excludes.
+  beforeEach(() => { mockUser = { schoolId: SCHOOL, userId: 'usr_admin', role: 'admin' }; });
+
+  test('an unpublished mark (isPublished:false) shows MISSING, not present — matching what the report card would compute', async () => {
+    mockDb.assessment_marks.push({
+      schoolId: SCHOOL, classId: 'cls_1', subjectId: 'art', studentId: 'stu_A',
+      termNumber: 1, assessmentType: 'MT', instance: 1, rawScore: 90, markState: 'present', isPublished: false,
+    });
+    const res = await supertest(buildApp()).get(url({ classId: 'cls_1', termNumber: 1, assessmentType: 'MT' }));
+    expect(res.body.data.cells.stu_A.art).toEqual({ rawScore: null, markState: 'MISSING' });
+  });
+});
+
+describe('GET /api/assessment/mark-list/export — CSV matches the on-screen view exactly', () => {
+  beforeEach(() => { mockUser = { schoolId: SCHOOL, userId: 'usr_admin', role: 'admin' }; });
+
+  test('downloads a CSV with the same present/MISSING/blank cells as the JSON view', async () => {
+    const res = await supertest(buildApp()).get(url({ classId: 'cls_1', termNumber: 1, assessmentType: 'MT' }).replace('/mark-list?', '/mark-list/export?'));
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/text\/csv/);
+    expect(res.headers['content-disposition']).toMatch(/attachment; filename="msingi_mark_list_/);
+    const body = res.text.replace(/^﻿/, '');
+    const lines = body.split('\r\n');
+    expect(lines[0]).toBe('Student,Admission No,ART,MAT');
+    const stuARow = lines.find(l => l.startsWith('Amy A,'));
+    expect(stuARow).toBe('Amy A,A1,MISSING,80');
+    const stuBRow = lines.find(l => l.startsWith('Bob B,'));
+    expect(stuBRow).toBe('Bob B,B1,,MISSING'); // blank for not-enrolled art, MISSING for compulsory math
   });
 });
 
