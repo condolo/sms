@@ -29,7 +29,7 @@
      studentDeviations — { subjects: { [subjectId]: number|null }, mean: number|null } | null
      behaviourSummary — { merits, demerits, points, total } | null
    ============================================================ */
-import { Fragment, useState, useCallback, useEffect, useRef } from 'react';
+import { Fragment, useState, useCallback, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import { Printer, Save, Check, BarChart2, MessageSquare, Award, CheckCircle, Loader2, CalendarCheck } from 'lucide-react';
 import { DEFAULT_CUSTOM_TYPES, _gradeFromScale } from '../constants.js';
 import { reportCards as reportCardsApi } from '@/api/client.js';
@@ -127,7 +127,11 @@ function SubjectCommentField({ label, value, onSave }) {
   );
 }
 
-function Field({ label, value, onChange, multiline = false, readOnly = false, placeholder = '' }) {
+// Platform audit (2026-10-18): these fields had no client-side maxLength
+// at all — caps now match the server's DraftCommentBodySchema in
+// report-cards.js (keep in sync): 1000 for a remark, 200 for a name, 100
+// for the closing/next-term date strings (plain text inputs, not pickers).
+function Field({ label, value, onChange, multiline = false, readOnly = false, placeholder = '', maxLength }) {
   return (
     <div className="flex flex-col gap-1">
       <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">{label}</label>
@@ -136,10 +140,10 @@ function Field({ label, value, onChange, multiline = false, readOnly = false, pl
           {value || <span className="text-slate-300 italic">{placeholder || 'Not set'}</span>}
         </p>
       ) : multiline ? (
-        <textarea value={value} onChange={e => onChange(e.target.value)} rows={3}
+        <textarea value={value} onChange={e => onChange(e.target.value)} rows={3} maxLength={maxLength}
           className="w-full text-xs text-slate-700 border border-slate-200 rounded-md px-2.5 py-1.5 resize-none focus:outline-none focus:ring-1 focus:ring-indigo-400" />
       ) : (
-        <input type="text" value={value} onChange={e => onChange(e.target.value)}
+        <input type="text" value={value} onChange={e => onChange(e.target.value)} maxLength={maxLength}
           className="w-full text-xs text-slate-700 border border-slate-200 rounded-md px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400" />
       )}
     </div>
@@ -203,14 +207,14 @@ function SectionTab({ active, onClick, icon: Icon, label }) {
   );
 }
 
-export default function StudentReportCard({
+const StudentReportCard = forwardRef(function StudentReportCard({
   student, studentInfo, classId, className, subjectMap,
   customTypes, gradeScale, instanceMarks,
   draftComment, onSaveComment, onSaveSubjectComment, termNum, school, academicYear,
   studentDeviations, behaviourSummary, snapshot,
   observationConfig, showRanking,
   attendanceSummary, showAttendance,
-}) {
+}, ref) {
   const types      = customTypes ?? DEFAULT_CUSTOM_TYPES;
   // No local fallback — the server always returns the exact bands it used
   // to grade this student's subjects (report-cards.js's _normalizeGradeScaleBands).
@@ -302,6 +306,44 @@ export default function StudentReportCard({
       setSaving(false);
     }
   }, [comment, onSaveComment]);
+
+  // Reported directly: switching Class/Stream/Term/Year in ReportCardsTab
+  // while a remark was mid-edit silently discarded it — the same bug class
+  // just fixed in ExamsPage.jsx's selectors, but this screen only ever had
+  // an explicit "Save Comments" button, no save-before-switch guard. The
+  // parent calls this (via ref) before changing context; subject comments
+  // already save on blur so they're excluded here, same as handleSave.
+  const computeBulkDirty = useCallback(() => {
+    const { subjectComments: _sc, ...bulk } = comment;
+    const original = {
+      classTeacherName:   draftComment?.classTeacherName   ?? '',
+      classTeacherRemark: draftComment?.classTeacherRemark ?? '',
+      sportsAndTalent:    draftComment?.sportsAndTalent    ?? '',
+      principalName:      draftComment?.principalName      ?? '',
+      principalRemark:    draftComment?.principalRemark    ?? '',
+      closingDate:        draftComment?.closingDate        ?? '',
+      nextTermBegin:      draftComment?.nextTermBegin      ?? '',
+      observationRatings: draftComment?.observationRatings ?? {},
+    };
+    return { bulk, isDirty: JSON.stringify(bulk) !== JSON.stringify(original) };
+  }, [comment, draftComment]);
+
+  useImperativeHandle(ref, () => ({
+    isDirty: () => computeBulkDirty().isDirty,
+    flushIfDirty: async () => {
+      const { bulk, isDirty } = computeBulkDirty();
+      if (!isDirty || !onSaveComment) return true;
+      try {
+        await onSaveComment(bulk);
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2500);
+        return true;
+      } catch (err) {
+        setCommentError(err?.message ?? 'Could not save — please try again.');
+        return false;
+      }
+    },
+  }), [comment, draftComment, onSaveComment]);
 
   // Rethrows on failure — SubjectCommentField catches it to show its OWN
   // inline saved/error state, right on the field that failed, instead of
@@ -501,22 +543,23 @@ export default function StudentReportCard({
                 onChange={set('classTeacherName')}
                 readOnly={!!autoClassTeacherName}
                 placeholder="Auto-resolved from stream"
+                maxLength={200}
               />
-              <Field label="Class Teacher Remarks" value={comment.classTeacherRemark} onChange={set('classTeacherRemark')} multiline />
+              <Field label="Class Teacher Remarks" value={comment.classTeacherRemark} onChange={set('classTeacherRemark')} multiline maxLength={1000} />
             </div>
             <div className="space-y-2">
-              <Field label="Principal / Section Head Name" value={comment.principalName} onChange={set('principalName')} />
-              <Field label="Principal / Section Head Remarks" value={comment.principalRemark} onChange={set('principalRemark')} multiline />
+              <Field label="Principal / Section Head Name" value={comment.principalName} onChange={set('principalName')} maxLength={200} />
+              <Field label="Principal / Section Head Remarks" value={comment.principalRemark} onChange={set('principalRemark')} multiline maxLength={1000} />
             </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Field label="Sports & Talent / Co-Curricular" value={comment.sportsAndTalent} onChange={set('sportsAndTalent')} multiline />
+            <Field label="Sports & Talent / Co-Curricular" value={comment.sportsAndTalent} onChange={set('sportsAndTalent')} multiline maxLength={1000} />
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Field label="Closing Date" value={comment.closingDate} onChange={set('closingDate')} />
-            <Field label="Next Term Begins" value={comment.nextTermBegin} onChange={set('nextTermBegin')} />
+            <Field label="Closing Date" value={comment.closingDate} onChange={set('closingDate')} maxLength={100} />
+            <Field label="Next Term Begins" value={comment.nextTermBegin} onChange={set('nextTermBegin')} maxLength={100} />
           </div>
 
           {observationConfig?.enabled && observationConfig.categories?.length > 0 && (
@@ -599,4 +642,6 @@ export default function StudentReportCard({
       )}
     </div>
   );
-}
+});
+
+export default StudentReportCard;

@@ -7,18 +7,20 @@
    (report-cards.js's /kg/generate vs /generate) rather than branching
    one component on class type.
    ============================================================ */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { CheckCircle } from 'lucide-react';
 
-function Field({ label, value, onChange, multiline = false }) {
+// Platform audit (2026-10-18): no client-side maxLength existed here —
+// 1000 matches the server's DraftCommentBodySchema cap (report-cards.js).
+function Field({ label, value, onChange, multiline = false, maxLength }) {
   return (
     <div className="flex flex-col gap-1">
       <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">{label}</label>
       {multiline ? (
-        <textarea value={value} onChange={e => onChange(e.target.value)} rows={3}
+        <textarea value={value} onChange={e => onChange(e.target.value)} rows={3} maxLength={maxLength}
           className="w-full text-xs text-slate-700 border border-slate-200 rounded-md px-2.5 py-1.5 resize-none focus:outline-none focus:ring-1 focus:ring-indigo-400" />
       ) : (
-        <input type="text" value={value} onChange={e => onChange(e.target.value)}
+        <input type="text" value={value} onChange={e => onChange(e.target.value)} maxLength={maxLength}
           className="w-full text-xs text-slate-700 border border-slate-200 rounded-md px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400" />
       )}
     </div>
@@ -34,10 +36,10 @@ function gradeColor(grade) {
   return 'text-red-500';
 }
 
-export default function KgStudentReportCard({
+const KgStudentReportCard = forwardRef(function KgStudentReportCard({
   student, className, termNum, academicYear,
   draftComment, onSaveComment, snapshot,
-}) {
+}, ref) {
   const display = student.display ?? {};
   const showScore = display.showScore !== false;
   const showGrade = display.showGrade !== false;
@@ -79,6 +81,33 @@ export default function KgStudentReportCard({
       setSaving(false);
     }
   }, [comment, onSaveComment]);
+
+  // Same save-before-switch guard as StudentReportCard.jsx's equivalent —
+  // the parent calls this via ref before changing Class/Stream/Term/Year.
+  const computeDirty = useCallback(() => {
+    const original = {
+      classTeacherRemark: draftComment?.classTeacherRemark ?? '',
+      principalRemark:    draftComment?.principalRemark    ?? '',
+    };
+    return JSON.stringify(comment) !== JSON.stringify(original);
+  }, [comment, draftComment]);
+
+  useImperativeHandle(ref, () => ({
+    isDirty: computeDirty,
+    flushIfDirty: async () => {
+      const isDirty = computeDirty();
+      if (!isDirty || !onSaveComment) return true;
+      try {
+        await onSaveComment(comment);
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2500);
+        return true;
+      } catch (err) {
+        setCommentError(err?.message ?? 'Could not save — please try again.');
+        return false;
+      }
+    },
+  }), [comment, draftComment, onSaveComment]);
 
   return (
     <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
@@ -167,8 +196,8 @@ export default function KgStudentReportCard({
 
       {/* Remarks */}
       <div className="px-5 py-3.5 border-t border-slate-100 grid sm:grid-cols-2 gap-3">
-        <Field label="Class Teacher Remarks" value={comment.classTeacherRemark} onChange={set('classTeacherRemark')} multiline />
-        <Field label="Principal / Section Head Remarks" value={comment.principalRemark} onChange={set('principalRemark')} multiline />
+        <Field label="Class Teacher Remarks" value={comment.classTeacherRemark} onChange={set('classTeacherRemark')} multiline maxLength={1000} />
+        <Field label="Principal / Section Head Remarks" value={comment.principalRemark} onChange={set('principalRemark')} multiline maxLength={1000} />
       </div>
       <div className="px-5 pb-3.5 flex justify-end items-center gap-2">
         {commentError && <p className="text-[11px] text-red-600">{commentError}</p>}
@@ -182,4 +211,6 @@ export default function KgStudentReportCard({
       </div>
     </div>
   );
-}
+});
+
+export default KgStudentReportCard;

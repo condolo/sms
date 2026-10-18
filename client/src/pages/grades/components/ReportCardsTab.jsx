@@ -1,7 +1,8 @@
 /* ============================================================
    ReportCardsTab — class/term selector + report card view
    ============================================================ */
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { useBlocker } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, ClipboardList, FileText, Send, CheckCircle, Loader2, Download } from 'lucide-react';
 import {
@@ -47,6 +48,54 @@ export default function ReportCardsTab() {
   // belongs to the PREVIOUS class (or, worse, a same-named stream in the
   // new one that isn't what the admin meant).
   useEffect(() => { setStreamId(''); }, [classId]);
+
+  // Reported gap (platform audit, 2026-10-18): this screen's Class/Stream/
+  // Term/Year selectors reset state with no save-before-switch guard at
+  // all — unlike ExamsPage.jsx's grid, a teacher could type a class
+  // teacher/principal remark here, switch class or term, and silently
+  // lose it. Each mounted card (Student/KgStudentReportCard) exposes
+  // isDirty()/flushIfDirty() via ref; this registry lets the selectors
+  // and the browser-exit guards below ask every currently-visible card
+  // before letting a switch or navigation proceed, same reasoning as
+  // ExamsPage.jsx's own saveBeforeSwitch.
+  const cardRefs = useRef(new Map());
+  function registerCardRef(studentId, el) {
+    if (el) cardRefs.current.set(studentId, el);
+    else cardRefs.current.delete(studentId);
+  }
+  const [switchError, setSwitchError] = useState('');
+  async function saveBeforeSwitch() {
+    const cards = [...cardRefs.current.values()];
+    if (cards.length === 0) return true;
+    setSwitchError('');
+    const results = await Promise.all(cards.map(c => c.flushIfDirty().catch(() => false)));
+    if (results.every(Boolean)) return true;
+    setSwitchError('Some unsaved remarks could not be saved automatically — please check the highlighted card(s) before switching.');
+    return false;
+  }
+  // Reads cardRefs.current fresh on every call — safe to call lazily from
+  // the blocker below (react-router invokes it at the moment navigation
+  // is attempted, not once at render time), since cardRefs is a stable
+  // ref, never recreated by a re-render.
+  const anyCardDirty = useCallback(() => {
+    return [...cardRefs.current.values()].some(c => c.isDirty?.());
+  }, []);
+
+  useEffect(() => {
+    const handler = (e) => { if (anyCardDirty()) { e.preventDefault(); e.returnValue = ''; } };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, []);
+
+  const navBlocker = useBlocker(anyCardDirty);
+  useEffect(() => {
+    if (navBlocker.state !== 'blocked') return;
+    (async () => {
+      const ok = await saveBeforeSwitch();
+      if (ok) navBlocker.proceed();
+      else navBlocker.reset();
+    })();
+  }, [navBlocker]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [publishError, setPublishError] = useState('');
   // Reported directly (2026-10-13 workflow redesign): there is no more
@@ -108,9 +157,16 @@ export default function ReportCardsTab() {
   // academic-calc's own generate query) has no such cap — it's only this
   // name/admission-number/streamId lookup that was quietly incomplete.
   // 500 matches the same ceiling the Markbook's own roster fetch uses.
+  // Platform audit (2026-10-18): this call carried no `assessmentScope`
+  // flag, so a staff member whose floor role is generically "school"-level
+  // for its own module (exams_officer, admissions_officer, finance, hr,
+  // timetabler, discipline_committee) but who also holds a real, narrow
+  // teaching assignment fell through to the unrestricted default branch
+  // here — same leak already closed for Attendance/Lessons/the Markbook's
+  // own roster fetch (ExamsPage.jsx), just missed on this one caller.
   const { data: studentsData } = useQuery({
     queryKey: ['classes', classId, 'students'],
-    queryFn:  () => classesApi.students(classId, { limit: 500 }),
+    queryFn:  () => classesApi.students(classId, { limit: 500, assessmentScope: true }),
     enabled:  !!classId,
     staleTime: 5 * 60_000,
   });
@@ -385,6 +441,10 @@ export default function ReportCardsTab() {
   return (
     <div className="space-y-4">
 
+      {switchError && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800">{switchError}</div>
+      )}
+
       {/* Selector bar */}
       <div className="bg-white border border-slate-200 rounded-xl p-5">
         <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">Generate Report Cards</p>
@@ -392,14 +452,14 @@ export default function ReportCardsTab() {
           <SelField
             label="Class"
             value={classId}
-            onChange={v => { setClassId(v); }}
+            onChange={async v => { if (!(await saveBeforeSwitch())) return; setClassId(v); }}
             options={classesList.map(c => ({ value: c.id ?? c._id, label: c.name }))}
             placeholder="Select class"
           />
           <SelField
             label="Stream"
             value={streamId}
-            onChange={setStreamId}
+            onChange={async v => { if (!(await saveBeforeSwitch())) return; setStreamId(v); }}
             options={streamsList.map(st => ({ value: st.id ?? st._id, label: st.name }))}
             placeholder={classId ? 'All streams' : 'Select a class first'}
             disabled={!classId || streamsList.length === 0}
@@ -407,14 +467,14 @@ export default function ReportCardsTab() {
           <SelField
             label="Term"
             value={termNum}
-            onChange={setTermNum}
+            onChange={async v => { if (!(await saveBeforeSwitch())) return; setTermNum(v); }}
             options={TERM_NUMBERS.map(n => ({ value: String(n), label: `Term ${n}` }))}
             placeholder="Select term"
           />
           <SelField
             label="Academic Year"
             value={yearId}
-            onChange={setYearId}
+            onChange={async v => { if (!(await saveBeforeSwitch())) return; setYearId(v); }}
             options={yearsList.map(y => ({ value: y.id ?? y._id, label: y.name ?? y.year }))}
             placeholder={currentPeriod.academicYear ? `Current (${currentPeriod.academicYear})` : 'Current year'}
           />
@@ -541,6 +601,7 @@ export default function ReportCardsTab() {
           {visibleKgStudents.map(student => (
             <KgStudentReportCard
               key={student.studentId}
+              ref={el => registerCardRef(student.studentId, el)}
               student={student}
               className={className}
               termNum={Number(termNum)}
@@ -561,6 +622,7 @@ export default function ReportCardsTab() {
           {visibleStudents.map(student => (
             <StudentReportCard
               key={student.studentId}
+              ref={el => registerCardRef(student.studentId, el)}
               student={student}
               studentInfo={studentInfoMap[student.studentId]}
               classId={classId}
