@@ -1054,6 +1054,12 @@ export const reportCards = {
     list:   (params) => _get('/report-cards', params),
     get:    (id)     => _get(`/report-cards/${id}`),
   },
+  // "Just a label" (2026-10-18) — the Mid-Term/End-of-Term tag shown in
+  // place of "Term X" on the report card, one per {class, term, year}.
+  cycleLabel: {
+    get: (params) => _get('/report-cards/cycle-label', params),
+    set: (data)   => _put('/report-cards/cycle-label', data),
+  },
   verify: (reportId) => _get(`/report-cards/verify/${reportId}`),
   draftComments: {
     list:         (params)                     => _get('/report-cards/draft-comments', params),

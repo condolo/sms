@@ -707,7 +707,7 @@ function _renderCoverHtml(s) {
     <div style="display:inline-block;background:${BRAND};color:#fff;padding:8px 28px;border-radius:6px;font-size:14px;font-weight:700;letter-spacing:1.5px">
       ${_esc(cover.title)}
     </div>
-    <p style="font-size:11px;color:#64748b;margin:8px 0 0">Academic Year ${_esc(cover.academicYear)} &middot; Term ${_esc(cover.termNumber ?? '—')}</p>
+    <p style="font-size:11px;color:#64748b;margin:8px 0 0">Academic Year ${_esc(cover.academicYear)} &middot; ${cover.reportLabel ? _esc(cover.reportLabel) : `Term ${_esc(cover.termNumber ?? '—')}`}</p>
   </div>
   ${photoHtml}
   <table style="border-collapse:collapse;width:440px;font-size:12px">${infoRows}</table>
@@ -772,7 +772,7 @@ function _drawCoverPdf(doc, s, images) {
   // Period bar — kicker left, year/term right.
   doc.fillColor(ACCENT).font(FONTS.sansSemibold).fontSize(8.5).text((cover.title || 'ACADEMIC REPORT').toUpperCase(), X, y);
   doc.fillColor(INK_SOFT).font(FONTS.monoRegular).fontSize(9.5)
-     .text(`${cover.academicYear || '—'}  ·  Term ${cover.termNumber ?? '—'}`, X, y, { width: PAGE_WIDTH, align: 'right' });
+     .text(`${cover.academicYear || '—'}  ·  ${cover.reportLabel || `Term ${cover.termNumber ?? '—'}`}`, X, y, { width: PAGE_WIDTH, align: 'right' });
   y += 21;
 
   // Learner identity — name (serif, dominant) + class/admission subline

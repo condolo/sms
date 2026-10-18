@@ -329,6 +329,19 @@ describe('subject_paired — a missing mark or deviation is left blank, not show
   });
 });
 
+describe('subject_paired — cover shows the school\'s own report-cycle label in place of "Term X" (2026-10-18, "just a label")', () => {
+  test('a school-set reportLabel replaces "Term N" on the cover', () => {
+    const html = LAYOUTS.subject_paired.renderHtml(computeSections({ reportLabel: 'Mid-Term 1' }));
+    expect(html).toContain('Mid-Term 1');
+    expect(html).not.toMatch(/Academic Year 2026 &middot; Term 2/);
+  });
+
+  test('no reportLabel set — unchanged "Term N" behavior', () => {
+    const html = LAYOUTS.subject_paired.renderHtml(computeSections());
+    expect(html).toMatch(/Academic Year 2026 &middot; Term 2/);
+  });
+});
+
 describe('subject_paired — HTML colors match this layout\'s own PDF palette (BRAND), not a separately-hardcoded value', () => {
   test('table headers and section rules use #1f2d3d, never the old #1e293b', () => {
     const html = LAYOUTS.subject_paired.renderHtml(computeSections());

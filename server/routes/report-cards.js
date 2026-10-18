@@ -262,6 +262,28 @@ async function _loadCaConfig(schoolId) {
   return { customTypes: assessmentCfg.customTypes };
 }
 
+/* Report cycle label — "just a label" per direct instruction (2026-10-18):
+   most schools issue more than one report per term (a Mid-Term progress
+   report, then a full End-of-Term one), but the report card only ever
+   showed "Academic Year X · Term Y" — no way to say WHICH of those this
+   is. Deliberately scoped down for now: one editable label per
+   {class, term, year}, shown in place of "Term Y" wherever that already
+   appears, with no change to publish/supersede semantics — publishing a
+   second report for the same class/term/year still replaces the first
+   one exactly as it does today. Stored as its own setting (not part of
+   the snapshot until generate/publish freezes it onto one) specifically
+   so it survives a republish without needing to be retyped — "the system
+   is aware this is the Mid-Term report even if it is republished" was
+   the direct requirement. A later "two independently-visible reports per
+   term" feature is a separate, larger change to that supersede logic,
+   not implied by this one. */
+async function _loadCycleLabel(schoolId, classId, termNumber, academicYearId) {
+  const doc = await tenantModel('report_card_cycle_labels', { schoolId }).findOne({
+    schoolId, classId, termNumber: Number(termNumber), academicYearId: academicYearId || null,
+  }).lean();
+  return doc?.label || '';
+}
+
 /* Grade scales are section-scoped: a report is for one class, and a class
    belongs to one section. Refusing with a clear message beats computing with
    an undefined scale. */
@@ -507,6 +529,48 @@ async function _resolveTermScope(schoolId, ctx, { academicYearId, termId, termNu
 }
 
 /* ══════════════════════════════════════════════════════════════
+   GET/PUT /cycle-label — "Mid-Term"/"End of Term"/etc. label per
+   {class, term, year}, shown in place of "Term Y" on the report card.
+   See _loadCycleLabel's own comment for the full reasoning.
+   ══════════════════════════════════════════════════════════════ */
+const CycleLabelSchema = z.object({
+  classId:        z.string().min(1),
+  termNumber:     z.union([z.string(), z.number()]),
+  academicYearId: z.string().optional(),
+  label:          z.string().max(60).trim().optional().default(''),
+});
+
+router.get('/cycle-label', authMiddleware, PLAN, MODGATE, rbac('report_cards', 'read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const { classId, termNumber, academicYearId } = req.query;
+    if (!classId || !termNumber) return E.badRequest(res, 'classId and termNumber are required');
+    const label = await _loadCycleLabel(schoolId, String(classId), termNumber, academicYearId ? String(academicYearId) : null);
+    return ok(res, { label });
+  } catch (err) {
+    console.error('[report-cards/cycle-label GET]', err);
+    return E.serverError(res);
+  }
+});
+
+router.put('/cycle-label', authMiddleware, PLAN, MODGATE, rbac('report_cards', 'update'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const { data, error } = _validate(CycleLabelSchema, req.body);
+    if (error) return E.validation(res, error);
+    const doc = await tenantModel('report_card_cycle_labels', tenantContext(req)).findOneAndUpdate(
+      { schoolId, classId: data.classId, termNumber: Number(data.termNumber), academicYearId: data.academicYearId || null },
+      { $set: { label: data.label, updatedBy: userId, updatedAt: new Date() }, $setOnInsert: { id: uuidv4(), schoolId, createdAt: new Date() } },
+      { upsert: true, new: true }
+    ).lean();
+    return ok(res, { label: doc.label });
+  } catch (err) {
+    console.error('[report-cards/cycle-label PUT]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
    POST /generate  — live preview (not persisted)
    ══════════════════════════════════════════════════════════════ */
 router.post('/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), async (req, res) => {
@@ -522,9 +586,10 @@ router.post('/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
     // _resolveTermScope's own comment for why assessment_marks is exempt).
     const scope = await _resolveTermScope(schoolId, ctx, { academicYearId, termId, termNumber: termNum });
 
-    const [config, caConfig] = await Promise.all([
+    const [config, caConfig, cycleLabel] = await Promise.all([
       _loadConfig(schoolId),
       _loadCaConfig(schoolId),
+      _loadCycleLabel(schoolId, classId, termNum, scope.academicYearId),
     ]);
 
     // aggregateUnmoderatedMarks/"provisional" REMOVED 2026-10-13 — workflow
@@ -605,6 +670,7 @@ router.post('/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
         rankingEnabled: config.rankingEnabled, rankingSubjectStrategy: config.rankingSubjectStrategy,
         assessmentWeights: _convertCustomTypesToWeights(caConfig.customTypes),
         customTypes: caConfig.customTypes ?? null,
+        reportLabel: cycleLabel || null,
         // Always the exact bands used to grade this response's subjects —
         // never null, normalised to one shape regardless of whether they
         // came from grade_boundaries or the academic_config fallback (Audit
@@ -684,10 +750,11 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
       return E.badRequest(res, `Academic year "${scope.academicYearId}" has been archived — report card publishing is not permitted for closed years.`);
     }
 
-    const [config, caConfig, policy] = await Promise.all([
+    const [config, caConfig, policy, cycleLabel] = await Promise.all([
       _loadConfig(schoolId),
       _loadCaConfig(schoolId),
       _loadPublicationPolicy(schoolId),
+      _loadCycleLabel(schoolId, classId, termNum, scope.academicYearId),
     ]);
 
     const activeWeights = _convertCustomTypesToWeights(caConfig.customTypes);
@@ -909,6 +976,12 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
           termNumber:     termNum        ?? null,
           academicYearId: scope.academicYearId,  academicYear: academicYear || '',
           schoolName:     schoolName || '',
+          // "Just a label" (2026-10-18) — frozen onto the snapshot the same
+          // way streamName/templateId already are (outside _hashSnapshot's
+          // allowlist, so this doesn't touch integrity verification), so a
+          // republish picks up whatever the setting says NOW rather than
+          // whatever it said when the previous version was published.
+          reportLabel:    cycleLabel || null,
 
           // Immutable config snapshot — use active (CA-system-aware) weights and schema
           gradingSchema:          activeSchema,
@@ -2332,6 +2405,10 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
       houseName:        snap.houseName    || '',
       academicYear:     snap.academicYear || '',
       termNumber:       snap.termNumber   ?? null,
+      // "Just a label" (2026-10-18) — shown in place of "Term X" on the
+      // cover wherever that's rendered, when the school has set one for
+      // this class/term/year (e.g. "Mid-Term Report").
+      reportLabel:      snap.reportLabel  || null,
       // RCE3b — school identity/contact, resolved live at render time
       // (branding, not scored content — same non-frozen posture logoUrl/
       // tagline already have; a school updating its address later is
@@ -2395,6 +2472,7 @@ function _computeKgReportSections(snap, config, extra = {}) {
       houseName:    snap.houseName   || '',
       academicYear: snap.academicYear || '',
       termNumber:   snap.termNumber  ?? null,
+      reportLabel:  snap.reportLabel || null,
       schoolAddress: school?.address || '',
       schoolPhone:   school?.phone   || '',
       schoolEmail:   school?.email   || '',
@@ -2758,6 +2836,9 @@ const PreviewHtmlSchema = z.object({
     customTypes: z.array(z.any()).nullable().optional(),
     passMark: z.number().optional(), rankingEnabled: z.boolean().optional(), showGPA: z.boolean().optional(),
     subjectTeacherCommentsEnabled: z.boolean().optional(),
+    // "Just a label" (2026-10-18) — round-tripped from /generate's own
+    // response the same way customTypes/gradeScale already are.
+    reportLabel: z.string().max(60).nullable().optional(),
   }).optional(),
 });
 
@@ -2799,6 +2880,7 @@ router.post('/preview-html', authMiddleware, PLAN, MODGATE, rbac('grades', 'read
       streamName: previewStreamName,
       termNumber: termNum ?? null, academicYear: academicYear || '',
       schoolName: school?.name || '',
+      reportLabel: clientConfig?.reportLabel || null,
       gradingSchema,
       assessmentWeights: _convertCustomTypesToWeights(clientConfig?.customTypes ?? []),
       passMark: clientConfig?.passMark, rankingSubjectStrategy: null,

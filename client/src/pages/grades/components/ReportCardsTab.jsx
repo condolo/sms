@@ -288,6 +288,32 @@ export default function ReportCardsTab() {
     ),
   });
 
+  // "Just a label" (2026-10-18) — the Mid-Term/End-of-Term tag shown in
+  // place of "Term X" on the report card. A setting per {class, term,
+  // year}, not part of the snapshot until generate/publish freezes it
+  // onto one — so it survives a republish without needing to be retyped.
+  const { data: cycleLabelData } = useQuery({
+    queryKey: ['reportCards', 'cycleLabel', { classId, termNum, yearId }],
+    queryFn:  () => reportCardsApi.cycleLabel.get({ classId, termNumber: Number(termNum), academicYearId: yearId || undefined }),
+    enabled:  canQuery,
+    staleTime: 30_000,
+  });
+  const savedCycleLabel = cycleLabelData?.data?.label ?? '';
+  const [labelDraft, setLabelDraft] = useState('');
+  const [labelSaved, setLabelSaved] = useState(false);
+  useEffect(() => { setLabelDraft(savedCycleLabel); }, [savedCycleLabel]);
+
+  const { mutate: saveCycleLabel, isPending: savingLabel } = useMutation({
+    mutationFn: () => reportCardsApi.cycleLabel.set({
+      classId, termNumber: Number(termNum), academicYearId: yearId || undefined, label: labelDraft,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['reportCards', 'cycleLabel', { classId, termNum, yearId }] });
+      setLabelSaved(true);
+      setTimeout(() => setLabelSaved(false), 2000);
+    },
+  });
+
   /* ── Publish mutation ─────────────────────────────────── */
   // Publish is always for the WHOLE class/term/year batch — PublishSchema
   // has no studentId/streamId narrowing, so the stream filter below is a
@@ -478,6 +504,29 @@ export default function ReportCardsTab() {
             options={yearsList.map(y => ({ value: y.id ?? y._id, label: y.name ?? y.year }))}
             placeholder={currentPeriod.academicYear ? `Current (${currentPeriod.academicYear})` : 'Current year'}
           />
+          {canQuery && isManagementRole && (
+            <div className="flex flex-col gap-1.5 min-w-[180px]">
+              <label className="text-xs font-medium text-slate-600">Report Label (optional)</label>
+              <div className="flex gap-1.5">
+                <input
+                  type="text"
+                  value={labelDraft}
+                  onChange={e => setLabelDraft(e.target.value)}
+                  placeholder={`e.g. Mid-Term ${termNum || ''}`}
+                  maxLength={60}
+                  className="w-full text-sm px-3 py-2 rounded-lg border border-slate-200 focus:border-slate-400 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 text-slate-800 transition"
+                />
+                <button
+                  onClick={() => saveCycleLabel()}
+                  disabled={savingLabel || labelDraft === savedCycleLabel}
+                  title="Shown in place of &quot;Term X&quot; on the report card; survives a republish until changed again."
+                  className="shrink-0 px-3 py-2 rounded-lg border border-slate-200 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {savingLabel ? '...' : labelSaved ? 'Saved' : 'Save'}
+                </button>
+              </div>
+            </div>
+          )}
           {canQuery && isManagementRole && hasPublishedSnapshots && (
             <div className="flex flex-col gap-1">
               <div className="flex gap-2">
@@ -644,6 +693,7 @@ export default function ReportCardsTab() {
               snapshot={snapshotsMap?.[student.studentId] ?? null}
               observationConfig={{ enabled: !!config.showObservationRatings, categories: config.observationCategories ?? [] }}
               showRanking={!!config.rankingEnabled && config.showRankOnReport !== false}
+              reportLabel={savedCycleLabel || null}
             />
           ))}
         </div>

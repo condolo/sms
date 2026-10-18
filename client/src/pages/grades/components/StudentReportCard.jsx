@@ -235,6 +235,7 @@ const StudentReportCard = forwardRef(function StudentReportCard({
   studentDeviations, behaviourSummary, snapshot,
   observationConfig, showRanking,
   attendanceSummary, showAttendance,
+  reportLabel,
 }, ref) {
   const types      = customTypes ?? DEFAULT_CUSTOM_TYPES;
   // No local fallback — the server always returns the exact bands it used
@@ -408,7 +409,7 @@ const StudentReportCard = forwardRef(function StudentReportCard({
             student, studentInfo, classId, className, termNum, academicYear, school,
             draftComment: comment,
             studentDeviations, behaviourSummary,
-            config: { gradeScale, customTypes: types },
+            config: { gradeScale, customTypes: types, reportLabel },
           });
 
       const w = window.open('', '_blank', 'width=1200,height=900');

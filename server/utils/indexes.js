@@ -30,6 +30,15 @@ const INDEXES = [
       { key: { reportId: 1 },                                           name: 'snap_report_id',    unique: true, sparse: true },
     ],
   },
+  /* ── report_card_cycle_labels ────────────────────────────────
+     One doc per {school, class, term, year} — the "just a label"
+     setting (2026-10-18), looked up on every /generate and /publish. */
+  {
+    col: 'report_card_cycle_labels',
+    indexes: [
+      { key: { schoolId: 1, classId: 1, termNumber: 1, academicYearId: 1 }, name: 'cycle_label_lookup' },
+    ],
+  },
   /* ── report_card_counters ───────────────────────────────────
      One doc per school/year/term combo; seq incremented atomically */
   {
