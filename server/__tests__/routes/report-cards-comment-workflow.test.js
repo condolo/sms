@@ -86,6 +86,9 @@ beforeEach(() => {
       { id: 'u_principal',     schoolId: SCHOOL, name: 'The Principal',    role: 'principal', isActive: true },
       { id: 'u_deputy',        schoolId: SCHOOL, name: 'The Deputy',       role: 'deputy_principal', isActive: true },
     ]),
+    // _publishedCommentsLockFor's own lookup — nothing published in any
+    // of this file's scenarios, so comments are never locked here.
+    report_card_snapshots: makeStore(),
   };
 });
 

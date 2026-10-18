@@ -55,6 +55,7 @@ const { canViewFullReport, viewReportFor } = require('../utils/report-view-scope
 const { isElective, enrolledStudentIds, canTeachElective, isInCurriculum } = require('../utils/elective-scope');
 const { getWorkflowConfig, saveWorkflowConfig, resolveStep, resolveAssigneeLabel } = require('../utils/workflow-config');
 const { dispatchNotification } = require('../utils/notify-dispatch');
+const { enqueueJob, registerHandler } = require('../utils/job-queue');
 const email = require('../utils/email');
 const {
   aggregateAssessmentMarks,
@@ -1100,6 +1101,15 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
           // Carry forward comments from the previous version, or — for a
           // first-ever publish — seed from the draft comments doc (RC5).
           comments: _resolveSnapComments(prev, draft),
+          // Comments lock the same way marks do (2026-10-18, direct
+          // request): PUT /:id/comments below now refuses any edit while
+          // this is true, same wording/shape as the marks "locked —
+          // ask an admin to unlock it" guard. POST /:id/comments/unlock
+          // is the matching escape hatch, same admin-only + mandatory-
+          // reason + 24h auto-relock contract as mark-submissions.js's
+          // own unlock.
+          commentsLocked:   true,
+          commentsLockedAt: now,
 
           // Snapshot school signature/stamp URLs at publish time (stays valid even if URLs change later)
           principalSignatureUrl,
@@ -1508,6 +1518,10 @@ router.post('/kg/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
           kgDisplay:     template.display ?? {},
 
           comments: _resolveSnapComments(prev, draft),
+          // Comments lock the same way marks do — see the identical field
+          // on the numeric /publish route above for the full rationale.
+          commentsLocked:   true,
+          commentsLockedAt: now,
 
           principalSignatureUrl, schoolStampUrl, schoolPrincipalName,
           financialBlock: blockedStudentIds.has(stu.id),
@@ -2111,6 +2125,17 @@ router.put('/:id/comments', authMiddleware, PLAN, MODGATE, rbac('grades', 'updat
     if (!snap) return E.notFound(res, 'Report card snapshot not found');
     if (snap.superseded) return E.badRequest(res, 'Cannot edit a superseded report card. Use the current version.');
 
+    // Comments lock the same way marks do (2026-10-18, direct request):
+    // set automatically at publish (see commentsLocked on the snapshot
+    // object in /publish and /kg/publish), cleared only through the
+    // matching POST /:id/comments/unlock below. Pre-fix snapshots simply
+    // have commentsLocked: undefined — falsy, same backward-compatible
+    // posture assessment_marks.isLocked already has for marks saved
+    // before locking existed at all.
+    if (snap.commentsLocked) {
+      return E.forbidden(res, 'Comments are locked — the report card for this term has been published. Ask an admin to unlock it for a correction.');
+    }
+
     // Subject-teacher scoping (RC6) — the draft-comments routes for this
     // exact same data (a subject's comment before publish) already enforce
     // this via unassignedPairs; this route, which can also edit
@@ -2151,6 +2176,72 @@ router.put('/:id/comments', authMiddleware, PLAN, MODGATE, rbac('grades', 'updat
 
     return ok(res, { id: req.params.id, comments: doc.comments });
   } catch (err) { console.error('[report-cards/:id/comments PUT]', err); return E.serverError(res); }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   POST /:id/comments/unlock  (2026-10-18 — comments lock like marks)
+   Admin-only, mandatory reason, 24h auto-relock — same contract as
+   mark-submissions.js's own POST /:id/unlock (its default, no-
+   workflow-config path, which is what every school actually uses
+   today). A separate job type (comments_relock) rather than reusing
+   marks_relock: the payload/target shape is a snapshot id, not a
+   mark_submissions id, and the two must never be confused by a worker
+   that only has the job type to go on.
+   ══════════════════════════════════════════════════════════════ */
+const COMMENTS_RELOCK_DELAY_MS = 24 * 60 * 60 * 1000; // 24h — same window as marks
+
+async function _autoRelockComments(payload) {
+  const { snapshotId, schoolId } = payload || {};
+  if (!snapshotId || !schoolId) return;
+  const Snaps = _model('report_card_snapshots');
+  const snap = await Snaps.findOne({ id: snapshotId, schoolId }).lean();
+  // Only re-lock if still unlocked — an admin who already re-locked it
+  // manually, or published a newer version over it, is never clobbered.
+  if (!snap || snap.commentsLocked) return;
+
+  const now = new Date().toISOString();
+  await Snaps.updateOne({ id: snapshotId, schoolId }, {
+    $set: { commentsLocked: true, commentsLockedAt: now, commentsUnlockedAt: null },
+  });
+  await AuditService.log({
+    action: 'report_card.comments_auto_relocked', actor: { userId: 'system', role: 'system', email: null }, schoolId,
+    target: { type: 'report_card_snapshot', id: snapshotId }, details: {},
+  });
+}
+registerHandler('comments_relock', _autoRelockComments);
+
+router.post('/:id/comments/unlock', authMiddleware, PLAN, MODGATE, rbac('grades', 'update'), async (req, res) => {
+  try {
+    const { schoolId, userId, role, email } = req.jwtUser;
+    const reason = (req.body.reason || '').trim();
+    if (!reason) return E.badRequest(res, 'A reason is required to unlock comments.');
+    if (!['admin', 'superadmin'].includes(role)) {
+      return E.forbidden(res, 'Only admins can unlock comments.');
+    }
+
+    const snap = await tenantModel('report_card_snapshots', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
+    if (!snap) return E.notFound(res, 'Report card snapshot not found');
+    if (!snap.commentsLocked) return E.badRequest(res, 'Comments are not locked.');
+
+    const now = new Date().toISOString();
+    const doc = await tenantModel('report_card_snapshots', tenantContext(req)).findOneAndUpdate(
+      { id: req.params.id, schoolId },
+      { $set: { commentsLocked: false, commentsUnlockedBy: userId, commentsUnlockedAt: now, commentsUnlockReason: reason, updatedAt: now, updatedBy: userId } },
+      { new: true }
+    ).lean();
+
+    await AuditService.log({
+      action: 'report_card.comments_unlocked', actor: { userId, role, email }, schoolId,
+      target: { type: 'report_card_snapshot', id: doc.id }, details: { reason }, req,
+    });
+
+    await enqueueJob({ type: 'comments_relock', payload: { snapshotId: doc.id, schoolId }, runAt: new Date(Date.now() + COMMENTS_RELOCK_DELAY_MS) });
+
+    return ok(res, { id: doc.id, commentsLocked: doc.commentsLocked });
+  } catch (err) {
+    console.error('[report-cards/:id/comments/unlock POST]', err);
+    return E.serverError(res);
+  }
 });
 
 /* ── PDF builder (shared between single and bulk) ───────────── */
@@ -3092,6 +3183,26 @@ router.post('/preview-html', authMiddleware, PLAN, MODGATE, rbac('grades', 'read
    matches by method+path together, and neither of these path shapes
    collides with any PUT route). */
 
+/* Comments lock the same way marks do (2026-10-18, direct request) — a
+   DIFFERENT axis from the commentLockState removed 2026-10-11 (see
+   comment-scope.js's header): that one blocked a comment write based on
+   that SAME subject's marks-submission state, pre-publish, and was
+   removed because a teacher must be free to write the comment and
+   submit marks in either order. This one blocks a draft write only once
+   the STUDENT'S REPORT FOR THIS TERM HAS BEEN PUBLISHED — mirroring
+   POST /marks' "this mark is locked, ask an admin to unlock it" guard,
+   not reviving the old per-subject gate. The draft doc itself is never
+   locked/unlocked directly: it tracks whichever published snapshot (if
+   any) exists for this studentId+termNumber, the same way assessment_
+   marks.isLocked tracks its own schedule/submission state rather than
+   storing a second copy of the decision. */
+async function _publishedCommentsLockFor(schoolId, ctx, studentId, termNumber) {
+  const snap = await tenantModel('report_card_snapshots', ctx)
+    .findOne({ schoolId, studentId, termNumber: Number(termNumber), superseded: { $ne: true }, commentsLocked: true })
+    .select('id').lean();
+  return !!snap;
+}
+
 // PUT /draft-comments/:studentId — upsert comment record for a student
 // subjectComments: { [subjectId]: string } — merged per-key (each teacher only touches their own subject)
 router.put('/draft-comments/:studentId', authMiddleware, PLAN, MODGATE, rbac('report_cards', 'update'), async (req, res) => {
@@ -3104,6 +3215,10 @@ router.put('/draft-comments/:studentId', authMiddleware, PLAN, MODGATE, rbac('re
     const { termNumber, classTeacherName, classTeacherRemark,
             sportsAndTalent, principalName, principalRemark, closingDate, nextTermBegin,
             subjectComments, observationRatings } = validated;
+
+    if (await _publishedCommentsLockFor(schoolId, tenantContext(req), studentId, termNumber)) {
+      return E.forbidden(res, 'Comments are locked — the report card for this term has been published. Ask an admin to unlock it for a correction.');
+    }
 
     // Subject comments are saved one subject at a time (PUT .../subject/:subjectId),
     // so each save is checked against exactly the caller's own subject. Accepting a
@@ -3264,9 +3379,13 @@ router.put('/draft-comments/:studentId/subject/:subjectId', authMiddleware, PLAN
       return E.forbidden(res, 'You are not assigned to teach this subject in this class.');
     }
 
-    // No lock here any more (2026-10-11) — a comment write is never
-    // blocked by marks status, submission state, or the assessment-
-    // schedule lock. See comment-scope.js's header for why.
+    // No lock tied to marks status, submission state, or the assessment-
+    // schedule lock any more (2026-10-11) — see comment-scope.js's header.
+    // The DIFFERENT, publish-based lock added 2026-10-18 still applies
+    // here (see _publishedCommentsLockFor above).
+    if (await _publishedCommentsLockFor(schoolId, tenantContext(req), studentId, termNumber)) {
+      return E.forbidden(res, 'Comments are locked — the report card for this term has been published. Ask an admin to unlock it for a correction.');
+    }
 
     const doc = await tenantModel('report_card_draft_comments', tenantContext(req)).findOneAndUpdate(
       { schoolId, studentId, termNumber: Number(termNumber) },
@@ -3307,6 +3426,10 @@ router.patch('/draft-comments/:studentId/advance', authMiddleware, PLAN, MODGATE
     const ctx = tenantContext(req);
     const config = await getWorkflowConfig(ctx, schoolId, REPORT_COMMENT_WORKFLOW_KEY);
     if (!config) return E.badRequest(res, 'No report-comment approval chain is configured for this school');
+
+    if (await _publishedCommentsLockFor(schoolId, ctx, studentId, termNumber)) {
+      return E.forbidden(res, 'Comments are locked — the report card for this term has been published. Ask an admin to unlock it for a correction.');
+    }
 
     const Draft = tenantModel('report_card_draft_comments', ctx);
     const existing = await Draft.findOne({ schoolId, studentId, termNumber: Number(termNumber) }).lean();
@@ -3390,5 +3513,7 @@ router.PUBLICATION_POLICY_DEFAULTS = PUBLICATION_POLICY_DEFAULTS;
 router._nextReportId = _nextReportId;
 router._schoolReportCode = _schoolReportCode;
 router._lockSubmissionCombos = _lockSubmissionCombos;
+router._publishedCommentsLockFor = _publishedCommentsLockFor;
+router._autoRelockComments = _autoRelockComments;
 
 module.exports = router;

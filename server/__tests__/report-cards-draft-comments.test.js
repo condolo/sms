@@ -50,6 +50,11 @@ jest.mock('../utils/tenant-model', () => ({
         findOneAndUpdate: (...args) => { mockFindOneAndUpdate(...args); return { lean: () => Promise.resolve({ ...args[1].$set }) }; },
       };
     }
+    // _publishedCommentsLockFor's own lookup — no published/locked report
+    // in any of this file's scenarios, same as before comments-locking existed.
+    if (col === 'report_card_snapshots') {
+      return { findOne: () => ({ select: () => ({ lean: () => Promise.resolve(null) }) }) };
+    }
     throw new Error(`unexpected tenantModel('${col}') call in this test`);
   }),
   tenantContext: jest.fn(() => ({})),

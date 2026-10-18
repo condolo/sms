@@ -88,6 +88,9 @@ beforeEach(() => {
     teachers: makeStore([{ id: 'tch_1', schoolId: SCHOOL, userId: 'u_class_teacher', email: 'teacher@school.test' }]),
     streams:  makeStore([{ id: 'strm_1', schoolId: SCHOOL, classId: 'cls_001', formTeacherId: 'tch_1' }]),
     users:    makeStore([{ id: 'u_class_teacher', schoolId: SCHOOL, email: 'teacher@school.test' }]),
+    // _publishedCommentsLockFor's own lookup — nothing published in any
+    // of this file's scenarios, so comments are never locked here.
+    report_card_snapshots: makeStore(),
   };
 });
 
