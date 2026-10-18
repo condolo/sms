@@ -688,7 +688,7 @@ function _renderCoverHtml(s) {
   const infoRows = [
     ['Student Name', cover.studentName], ['Admission No.', cover.admissionNo],
     ['Class', cover.className], ['Stream', cover.streamName || '—'], ['House', cover.houseName || '—'],
-    ['Class Teacher', cover.classTeacherName || '—'], ['Principal', cover.principalName || '—'],
+    ['Class Teacher', cover.classTeacherName || '—'], [cover.principalLabel || 'Principal', cover.principalName || '—'],
   ].map(([label, value]) => `
     <tr><td style="padding:7px 14px;border:1px solid #e2e8f0;font-weight:600;background:#f8fafc;width:40%">${_esc(label)}</td>
         <td style="padding:7px 14px;border:1px solid #e2e8f0;font-weight:700">${_esc(value)}</td></tr>`).join('');
@@ -787,7 +787,7 @@ function _drawCoverPdf(doc, s, images) {
 
   const metaRows = [
     ['Class Teacher', cover.classTeacherName || '—'], ['Stream', cover.streamName || '—'],
-    ['House', cover.houseName || '—'], ['Principal', cover.principalName || '—'],
+    ['House', cover.houseName || '—'], [cover.principalLabel || 'Principal', cover.principalName || '—'],
   ];
   const metaColW = identityW / 2, metaStartY = y;
   metaRows.forEach(([label, value], i) => {
@@ -1324,6 +1324,14 @@ function _renderSubjectPairedHtml(s) {
   // unified block per signer (comment + name + signature + stamp + date
   // together, same shared component every other layout uses), placed
   // after Behaviour so it's genuinely the last content on the page.
+  // Reported directly (2026-10-18): "signature to be after the comment,
+  // just below." A side-by-side 2-column grid put each signer's own
+  // comment+signature in its own column, but a short column (e.g. the
+  // Principal's with no comment shown) sits flush at the top next to the
+  // OTHER signer's comment banner — reading as if that signature belongs
+  // to the wrong person's comment. Stacking both signers full-width, one
+  // below the other, keeps each one's own signature unambiguously
+  // directly under its own comment.
   const signOffHtml = s.comments.reportRemarks.length > 0 ? `
   <div style="margin:16px 0;page-break-inside:avoid;break-inside:avoid">
     ${s.comments.reportRemarks.map(r => `
@@ -1332,7 +1340,7 @@ function _renderSubjectPairedHtml(s) {
       <div style="border:1px solid #e2e8f0;border-radius:4px;padding:8px 12px;min-height:50px;font-size:11px;color:#475569">${_esc(r.text)}</div>
     </div>`).join('')}
   </div>` : `
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:16px 0;page-break-inside:avoid;break-inside:avoid">
+  <div style="display:flex;flex-direction:column;gap:16px;margin:16px 0;page-break-inside:avoid;break-inside:avoid">
     ${(s.comments.showClassTeacherRemark || s.comments.classTeacherName) ? _remarkSignOffHtml({
       roleLabel: s.signatures.classTeacherLabel, personName: s.comments.classTeacherName,
       remarkText: s.comments.classTeacherRemark, signDate: s.footer.signDate,
@@ -1719,6 +1727,11 @@ function _renderMarksThenCommentsHtml(s) {
     <tbody>${subjectCommentRows || `<tr><td colspan="3" style="${tdS};color:#94a3b8;font-style:italic">No subjects on this report.</td></tr>`}</tbody>
   </table>` : '';
 
+  // Reported directly (2026-10-18): "signature to be after the comment,
+  // just below" — same fix as subject_paired's identical signOffHtml
+  // above. A side-by-side 2-column grid let a short column (e.g. no
+  // comment shown) sit next to the OTHER signer's comment banner,
+  // reading as if it belonged there. Stacked full-width instead.
   const remarksSectionHtml = s.comments.reportRemarks.length > 0 ? `
   <div style="margin-bottom:16px">
     ${s.comments.reportRemarks.map(r => `
@@ -1727,7 +1740,7 @@ function _renderMarksThenCommentsHtml(s) {
       <div style="border:1px solid #e2e8f0;border-radius:4px;padding:8px 12px;min-height:50px;font-size:11px;color:#475569">${_esc(r.text)}</div>
     </div>`).join('')}
   </div>` : `
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;page-break-inside:avoid;break-inside:avoid">
+  <div style="display:flex;flex-direction:column;gap:16px;margin-bottom:16px;page-break-inside:avoid;break-inside:avoid">
     ${(s.comments.showClassTeacherRemark || s.comments.classTeacherName) ? _remarkSignOffHtml({
       roleLabel: s.signatures.classTeacherLabel, personName: s.comments.classTeacherName,
       remarkText: s.comments.classTeacherRemark, signDate: s.footer.signDate,

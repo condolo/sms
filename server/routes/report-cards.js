@@ -2420,6 +2420,12 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
       schoolCountry:    school?.country || '',
       classTeacherName: snap.comments?.classTeacherName || '',
       principalName:    resolvedPrincipalName,
+      // Reported directly: renaming "Principal" to "Head of School" in
+      // Settings updated the sign-off block (signatures.principalLabel,
+      // above) correctly, but the cover page's own meta row still read a
+      // hardcoded 'Principal' literal in report-layouts.js — same source
+      // of truth, just never threaded into `cover`.
+      principalLabel:   config.principalSignatureLabel || 'Principal',
       studentPhotoUrl:  config.showStudentPhoto !== false ? (snap.studentPhotoUrl || null) : null,
     },
     gradingKey: gradeBands.map((b, i) => ({
@@ -2480,6 +2486,7 @@ function _computeKgReportSections(snap, config, extra = {}) {
       schoolCountry: school?.country || '',
       classTeacherName: snap.comments?.classTeacherName || '',
       principalName:    resolvedPrincipalName,
+      principalLabel:   config.principalSignatureLabel || 'Principal',
       studentPhotoUrl:  config.showStudentPhoto !== false ? (snap.studentPhotoUrl || null) : null,
     },
     templateName: snap.templateName || '',

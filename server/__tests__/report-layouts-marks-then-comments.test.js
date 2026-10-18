@@ -316,3 +316,25 @@ describe('marks_then_comments — colors match this layout\'s own PDF palette (B
     expect(html).toMatch(/background:#f7ede1;color:#8a5a2b;font-weight:700">C<\/span>/);
   });
 });
+
+describe('marks_then_comments — cover respects a renamed Principal signature label and a school-set report-cycle label (2026-10-18)', () => {
+  test('config.principalSignatureLabel replaces the cover\'s "Principal" row label', () => {
+    const html = LAYOUTS.marks_then_comments.renderHtml(computeSections({}, { principalSignatureLabel: 'Head of School' }));
+    expect(html).toContain('Head of School');
+    expect(html).not.toMatch(/>Principal<\/td>/);
+  });
+
+  test('a school-set reportLabel replaces "Term N" on the cover', () => {
+    const html = LAYOUTS.marks_then_comments.renderHtml(computeSections({ reportLabel: 'Mid-Term 1' }));
+    expect(html).toContain('Mid-Term 1');
+    expect(html).not.toMatch(/Academic Year 2026 &middot; Term 2/);
+  });
+});
+
+describe('marks_then_comments — class teacher and principal sign-off stack vertically, not side by side (2026-10-18)', () => {
+  test('the sign-off wrapper is a single-column flex stack, not a 2-column grid', () => {
+    const html = LAYOUTS.marks_then_comments.renderHtml(computeSections());
+    expect(html).toContain('display:flex;flex-direction:column;gap:16px');
+    expect(html).not.toContain('display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px');
+  });
+});

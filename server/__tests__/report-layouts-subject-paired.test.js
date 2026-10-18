@@ -342,6 +342,27 @@ describe('subject_paired — cover shows the school\'s own report-cycle label in
   });
 });
 
+describe('subject_paired — cover respects a renamed Principal signature label (2026-10-18)', () => {
+  test('config.principalSignatureLabel replaces the cover\'s "Principal" row label', () => {
+    const html = LAYOUTS.subject_paired.renderHtml(computeSections({}, { principalSignatureLabel: 'Head of School' }));
+    expect(html).toContain('Head of School');
+    expect(html).not.toMatch(/>Principal<\/td>/);
+  });
+
+  test('no override set — cover still says "Principal"', () => {
+    const html = LAYOUTS.subject_paired.renderHtml(computeSections());
+    expect(html).toMatch(/>Principal<\/td>/);
+  });
+});
+
+describe('subject_paired — class teacher and principal sign-off stack vertically, not side by side (2026-10-18)', () => {
+  test('the sign-off wrapper is a single-column flex stack, not a 2-column grid', () => {
+    const html = LAYOUTS.subject_paired.renderHtml(computeSections());
+    expect(html).toContain('display:flex;flex-direction:column;gap:16px');
+    expect(html).not.toContain('display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:16px 0');
+  });
+});
+
 describe('subject_paired — HTML colors match this layout\'s own PDF palette (BRAND), not a separately-hardcoded value', () => {
   test('table headers and section rules use #1f2d3d, never the old #1e293b', () => {
     const html = LAYOUTS.subject_paired.renderHtml(computeSections());
