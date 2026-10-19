@@ -36,6 +36,7 @@ let mockClassSubjects       = [];
 let mockStudents             = [];
 let mockRcTemplates         = [];
 let mockIndicatorMarks      = [];
+let mockIndicatorDefinitions = [];
 let mockAcademicConfig      = { schoolId: SCHOOL_A, archivedAcademicYears: [] };
 
 function mockMatches(doc, filter) {
@@ -88,6 +89,7 @@ jest.mock('../../utils/tenant-model', () => ({
     if (collection === 'students')             return mockCollFor(mockStudents);
     if (collection === 'rc_templates')         return mockCollFor(mockRcTemplates);
     if (collection === 'indicator_marks')      return mockCollFor(mockIndicatorMarks);
+    if (collection === 'indicator_definitions') return mockCollFor(mockIndicatorDefinitions);
     return mockCollFor([]);
   },
 }));
@@ -132,6 +134,9 @@ beforeEach(() => {
   mockStudents        = [{ id: 's1', schoolId: SCHOOL_A, streamId: null }];
   mockRcTemplates    = [{ ...TEMPLATE_A }];
   mockIndicatorMarks = [];
+  // Indicator identity/maxScore now comes from indicator_definitions,
+  // not the template (2026-10-19) — see indicator-marks.js's header.
+  mockIndicatorDefinitions = [{ id: 'ind1', schoolId: SCHOOL_A, classId: 'classA', subjectId: 'subj_science', termNumber: 2, academicYearId: null, text: 'Define collision', maxScore: 10 }];
   mockAcademicConfig = { schoolId: SCHOOL_A, archivedAcademicYears: [] };
 });
 
@@ -171,7 +176,7 @@ describe('per-indicator maxScore validation', () => {
   });
 
   test('a higher maxScore (e.g. 20, confirmed from a real ICT sample) raises the ceiling accordingly', async () => {
-    mockRcTemplates[0].subjects[0].indicators[0].maxScore = 20;
+    mockIndicatorDefinitions[0].maxScore = 20;
     const res = await supertest(buildApp(TEACHER_ASSIGNED)).post('/api/indicator-marks/bulk').send({ marks: [validMark({ score: 18 })] });
     expect(res.status).toBe(200);
   });

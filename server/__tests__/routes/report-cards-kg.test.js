@@ -68,6 +68,7 @@ let mockSections = [];
 let mockGradeBoundaries = [];
 let mockRcTemplates = [];
 let mockIndicatorMarks = [];
+let mockIndicatorDefinitions = [];
 let mockSnapshots = [];
 let mockDraftComments = [];
 let mockPublishBatches = [];
@@ -141,6 +142,7 @@ jest.mock('../../utils/tenant-model', () => ({
       students: mockStudents, streams: mockStreams, teachers: mockTeachers,
       classes: mockClasses, sections: mockSections, grade_boundaries: mockGradeBoundaries,
       rc_templates: mockRcTemplates, indicator_marks: mockIndicatorMarks,
+      indicator_definitions: mockIndicatorDefinitions,
       report_card_snapshots: mockSnapshots, report_card_draft_comments: mockDraftComments,
       publish_batches: mockPublishBatches, invoices: [], academic_years: [],
     };
@@ -194,6 +196,12 @@ beforeEach(() => {
   mockGradeBoundaries = [{ id: 'scaleA', schoolId: SCHOOL_A, sectionId: 'sec_kg', isDefault: true, name: 'KG Scale', bands: GRADE_BANDS }];
   mockRcTemplates = [{ ...TEMPLATE, subjects: TEMPLATE.subjects.map(s => ({ ...s })) }];
   mockIndicatorMarks = [];
+  // Indicator identity/text now comes from indicator_definitions, not
+  // the template (2026-10-19) — see indicator-marks.js's header.
+  mockIndicatorDefinitions = [
+    { id: 'ind1', schoolId: SCHOOL_A, classId: 'classKG', subjectId: 'subj_science', termNumber: 2, academicYearId: null, text: 'Define collision', maxScore: 10, order: 0 },
+    { id: 'ind2', schoolId: SCHOOL_A, classId: 'classKG', subjectId: 'subj_science', termNumber: 2, academicYearId: null, text: 'Match animals', maxScore: 10, order: 1 },
+  ];
   mockSnapshots = [];
   mockDraftComments = [];
   mockPublishBatches = [];

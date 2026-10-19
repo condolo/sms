@@ -20,6 +20,15 @@ const { tenantModel } = require('./tenant-model');
 const { resolveRcTemplate } = require('./rc-template-scale');
 const { resolveGrade } = require('../routes/academic-config');
 
+/* A requested academicYearId must also match an indicator_definitions
+   doc stored with no year at all — same tolerant posture every other
+   mark-adjacent collection in this codebase uses. */
+function _yearFilterPart(academicYearId) {
+  return academicYearId
+    ? { $or: [{ academicYearId }, { academicYearId: null }, { academicYearId: { $exists: false } }] }
+    : {};
+}
+
 /**
  * One student's KG report for one term. `scale` is the already-resolved
  * grade_boundaries scale (resolved ONCE per batch by the caller, same
@@ -32,10 +41,18 @@ async function computeKgReport(ctx, schoolId, classId, studentId, termNumber, ac
   const template = await resolveRcTemplate(schoolId, classId);
   if (!template) return null;
 
-  const marks = await tenantModel('indicator_marks', ctx).find({
-    schoolId, studentId, classId, termNumber,
-  }).lean();
+  // Indicator TEXT is teacher-managed per class+subject+term, not
+  // template content (2026-10-19) — see indicator-marks.js's header.
+  // Fetched once for the whole class/term here (not per-subject), then
+  // grouped below — same "resolve once per batch" discipline `scale`
+  // already follows.
+  const [marks, allDefs] = await Promise.all([
+    tenantModel('indicator_marks', ctx).find({ schoolId, studentId, classId, termNumber }).lean(),
+    tenantModel('indicator_definitions', ctx).find({ schoolId, classId, termNumber, ..._yearFilterPart(academicYearId) }).lean(),
+  ]);
   const markByIndicator = Object.fromEntries(marks.map(m => [`${m.subjectId}::${m.indicatorId}`, m]));
+  const defsBySubject = {};
+  for (const d of allDefs) (defsBySubject[d.subjectId] ??= []).push(d);
 
   let overallEarned = 0, overallPossible = 0;
   const subjects = (template.subjects ?? []).map(subj => {
@@ -46,7 +63,7 @@ async function computeKgReport(ctx, schoolId, classId, studentId, termNumber, ac
     // band object including color, that util only returns the array).
     const bands = subj.performanceBands?.length ? subj.performanceBands : (template.performanceBands ?? []);
     let earned = 0, possible = 0;
-    const indicators = [...(subj.indicators ?? [])]
+    const indicators = [...(defsBySubject[subj.subjectId] ?? [])]
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
       .map(ind => {
         const mark = markByIndicator[`${subj.subjectId}::${ind.id}`];

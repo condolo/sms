@@ -27,6 +27,7 @@ let mockClassSubjects       = [];
 let mockStudents            = [];
 let mockRcTemplates         = [];
 let mockIndicatorMarks      = [];
+let mockIndicatorDefinitions = [];
 let mockMarkSubmissions     = [];
 let mockAcademicConfig      = { schoolId: SCHOOL_A, archivedAcademicYears: [] };
 
@@ -79,6 +80,7 @@ jest.mock('../../utils/tenant-model', () => ({
     if (collection === 'students')             return mockCollFor(mockStudents);
     if (collection === 'rc_templates')          return mockCollFor(mockRcTemplates);
     if (collection === 'indicator_marks')       return mockCollFor(mockIndicatorMarks);
+    if (collection === 'indicator_definitions') return mockCollFor(mockIndicatorDefinitions);
     if (collection === 'mark_submissions')      return mockCollFor(mockMarkSubmissions);
     return mockCollFor([]);
   },
@@ -117,6 +119,9 @@ beforeEach(() => {
   mockStudents        = [{ id: 's1', schoolId: SCHOOL_A, streamId: null }];
   mockRcTemplates     = [{ ...TEMPLATE_A }];
   mockIndicatorMarks  = [];
+  // Indicator identity/maxScore now comes from indicator_definitions,
+  // not the template (2026-10-19) — see indicator-marks.js's header.
+  mockIndicatorDefinitions = [{ id: 'ind1', schoolId: SCHOOL_A, classId: 'classA', subjectId: 'subj_science', termNumber: 2, academicYearId: null, text: 'Define collision', maxScore: 10 }];
   mockMarkSubmissions = [];
   mockAcademicConfig  = { schoolId: SCHOOL_A, archivedAcademicYears: [] };
 });

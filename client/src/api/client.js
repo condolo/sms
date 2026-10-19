@@ -1122,6 +1122,14 @@ export const rcTemplates = {
 export const indicatorMarks = {
   list:     (params) => _get('/indicator-marks', params),
   bulkSave: (marks)   => _post('/indicator-marks/bulk', { marks }),
+  // Indicator TEXT, teacher-managed per class+subject+term (2026-10-19) —
+  // see server/routes/indicator-marks.js's header. Not template content.
+  definitions: {
+    list:   (params)     => _get('/indicator-marks/definitions', params),
+    create: (data)        => _post('/indicator-marks/definitions', data),
+    update: (id, data)   => _put(`/indicator-marks/definitions/${id}`, data),
+    remove: (id)          => _delete(`/indicator-marks/definitions/${id}`),
+  },
 };
 
 // RC11 — Report Card Template Engine registry (/api/report-card-templates):

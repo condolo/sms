@@ -4,7 +4,7 @@
    Exams' own top-level "Kindergarten Templates" tab (ExamsPage.jsx),
    alongside Configuration — moved there from Report Cards (2026-10-13),
    raised directly: the template defines the Markbook's indicator-entry
-   structure (performance bands, subjects, indicators), so it belongs
+   structure (performance bands, which subjects use it), so it belongs
    with the rest of assessment configuration, not with report-card
    generation — Report Cards only ever CONSUMES a template via
    resolveRcTemplate, it never configured one. (Before that it had
@@ -16,9 +16,20 @@
    renderer/scoring UI (that deferral was about the RENDERER, not
    about where this config screen lives).
 
+   Indicator TEXT moved OUT of this screen (2026-10-19, direct
+   request): "whoever is setting the template is like an admin, he
+   doesn't know all the indicators per subject, and these indicators
+   vary depending on what content was set." This screen still assigns
+   WHICH subjects use indicator-based entry and their performance
+   bands — genuinely school-wide, admin-owned config — but the actual
+   "Able to..." competency text is now added by the subject teacher
+   directly in the Markbook (IndicatorMarkbook.jsx), scoped per
+   class+subject+term so it can vary with whatever was actually
+   taught. See server/routes/indicator-marks.js's header for the full
+   rationale and the new /definitions endpoints.
+
    Schema extensions (2026-10, same milestone), confirmed against real
-   competency-band report samples rather than assumed: per-indicator
-   `maxScore` (IndicatorRow — not universally 10), an optional
+   competency-band report samples rather than assumed: an optional
    per-subject `performanceBands` override (SubjectEditor's toggle —
    the same band label can be worth a different score in a different
    subject), and `sectionId`/`isDefault` section-scoping (the "Default
@@ -32,7 +43,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Plus, X, Save, Trash2, Loader2, CheckCircle2, AlertTriangle,
-  ChevronDown, ChevronUp, LayoutTemplate, Pencil, GripVertical,
+  ChevronDown, ChevronUp, LayoutTemplate, Pencil,
   BookOpen, Tag, ToggleLeft, ToggleRight, Info, Eye,
 } from 'lucide-react';
 import { rcTemplates as api, classes as classesApi, subjects as subjectsApi, classSubjects as classSubjectsApi } from '@/api/client.js';
@@ -163,43 +174,6 @@ function BandRow({ band, onChange, onRemove }) {
   );
 }
 
-/* ── IndicatorRow ────────────────────────────────────────────── */
-function IndicatorRow({ indicator, onChange, onRemove }) {
-  return (
-    <div className="flex items-start gap-2 py-1">
-      <GripVertical size={13} className="mt-2.5 text-slate-300 shrink-0" />
-      <input
-        type="text"
-        value={indicator.text}
-        onChange={e => onChange({ ...indicator, text: e.target.value })}
-        placeholder="e.g. Able to identify and name the five senses"
-        maxLength={400}
-        className="flex-1 text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
-      />
-      {/* Confirmed against real samples (2026-10) — NOT always 10; one
-          school's ICT indicators scored up to 18. A subject's % is
-          (scores earned) / (sum of each indicator's own maxScore) * 100,
-          so this needs to be settable per indicator, not assumed. */}
-      <div className="relative shrink-0" title="Maximum possible score for this indicator">
-        <input
-          type="number" min="1" max="1000" step="1"
-          value={indicator.maxScore ?? 10}
-          onChange={e => onChange({ ...indicator, maxScore: Number(e.target.value) })}
-          className="w-16 text-sm text-right border border-slate-200 rounded-lg pl-2 pr-6 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
-        />
-        <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 text-[10px] pointer-events-none">max</span>
-      </div>
-      <button
-        type="button" onClick={onRemove}
-        className="mt-1.5 p-1 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded transition shrink-0"
-        title="Remove indicator"
-      >
-        <X size={11} />
-      </button>
-    </div>
-  );
-}
-
 /* ── SubjectEditor ───────────────────────────────────────────── */
 function SubjectEditor({ subject, templateBands, subjectOptions, onChange, onRemove }) {
   const [expanded, setExpanded] = useState(true);
@@ -211,21 +185,6 @@ function SubjectEditor({ subject, templateBands, subjectOptions, onChange, onRem
   function selectSubject(subjectId) {
     const s = subjectOptions.find(o => (o.id ?? o._id) === subjectId);
     onChange({ ...subject, subjectId, name: s?.name ?? '' });
-  }
-
-  function addIndicator() {
-    onChange({
-      ...subject,
-      indicators: [...subject.indicators, { _uid: uid(), text: '', order: subject.indicators.length, maxScore: 10 }],
-    });
-  }
-
-  function updateIndicator(uId, updated) {
-    onChange({ ...subject, indicators: subject.indicators.map(i => i._uid === uId ? updated : i) });
-  }
-
-  function removeIndicator(uId) {
-    onChange({ ...subject, indicators: subject.indicators.filter(i => i._uid !== uId) });
   }
 
   // Confirmed against a real sample (2026-10) — the same band label can
@@ -273,7 +232,6 @@ function SubjectEditor({ subject, templateBands, subjectOptions, onChange, onRem
             return <option key={sId} value={sId}>{s.name}</option>;
           })}
         </select>
-        <span className="text-[10px] text-slate-400">{subject.indicators.length} indicator{subject.indicators.length !== 1 ? 's' : ''}</span>
         <button
           type="button" onClick={() => setExpanded(e => !e)}
           className="p-1 text-slate-400 hover:text-slate-700 rounded transition"
@@ -289,27 +247,17 @@ function SubjectEditor({ subject, templateBands, subjectOptions, onChange, onRem
         </button>
       </div>
 
-      {/* Indicators */}
+      {/* Indicators are no longer configured here (2026-10-19, direct
+          request) — the admin doesn't know every subject's actual
+          content for the term, and it varies, so indicator TEXT is now
+          added directly by the subject teacher in the Markbook. This
+          panel only assigns the subject to competency-based entry and
+          its (optional) performance-band override. */}
       {expanded && (
         <div className="px-3 pb-3 pt-1 space-y-0.5">
-          {subject.indicators.length === 0 && (
-            <p className="text-xs text-slate-400 italic py-2 text-center">No indicators yet — add one below</p>
-          )}
-          {subject.indicators.map(ind => (
-            <IndicatorRow
-              key={ind._uid}
-              indicator={ind}
-              onChange={updated => updateIndicator(ind._uid, updated)}
-              onRemove={() => removeIndicator(ind._uid)}
-            />
-          ))}
-          <button
-            type="button"
-            onClick={addIndicator}
-            className="mt-1 flex items-center gap-1.5 text-xs text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 px-2.5 py-1.5 rounded-lg transition"
-          >
-            <Plus size={11} /> Add indicator
-          </button>
+          <p className="text-xs text-slate-400 italic py-2 text-center">
+            Learning indicators for this subject are added by the subject teacher directly in the Markbook — not here.
+          </p>
 
           {/* Per-subject band override */}
           <div className="mt-3 pt-3 border-t border-slate-100">
@@ -780,10 +728,10 @@ function TemplateSlideOver({ initial, classes, subjectOptions, onSave, onClose, 
             )}
           </Section>
 
-          {/* ── Subjects & Indicators ── */}
-          <Section title="Subjects & Learning Indicators" icon={BookOpen} defaultOpen>
+          {/* ── Subjects (competency-based entry) ── */}
+          <Section title="Subjects" icon={BookOpen} defaultOpen>
             <p className="text-xs text-slate-400 -mt-1 mb-3">
-              Add subjects and the specific "Able to…" competencies assessed under each.
+              Add the subjects that use competency-band entry for this class. The subject teacher adds the actual "Able to…" indicators directly in the Markbook each term — not here, since only they know what was actually taught.
               {form.classIds.length === 0
                 ? ' Assign a class above (Assign to Classes) to scope this list to its real curriculum, or add subjects manually here.'
                 : curriculumSubjectIds?.size === 0
@@ -876,7 +824,6 @@ function TemplateSlideOver({ initial, classes, subjectOptions, onSave, onClose, 
 /* ── TemplateCard ────────────────────────────────────────────── */
 function TemplateCard({ template, sectionMap, onEdit, onDelete, deleting }) {
   const subjectCount   = template.subjects?.length ?? 0;
-  const indicatorCount = (template.subjects ?? []).reduce((s, sub) => s + (sub.indicators?.length ?? 0), 0);
   const classCount     = template.classIds?.length ?? 0;
   const sectionName    = template.sectionId ? Object.values(sectionMap ?? {}).find(s => s.id === template.sectionId)?.name : null;
 
@@ -906,8 +853,6 @@ function TemplateCard({ template, sectionMap, onEdit, onDelete, deleting }) {
           )}
           <div className="flex items-center gap-3 mt-2 text-xs text-slate-400">
             <span>{subjectCount} subject{subjectCount !== 1 ? 's' : ''}</span>
-            <span>·</span>
-            <span>{indicatorCount} indicator{indicatorCount !== 1 ? 's' : ''}</span>
             <span>·</span>
             <span>{classCount} class{classCount !== 1 ? 'es' : ''} assigned</span>
           </div>
@@ -1044,7 +989,7 @@ export default function RCTemplatesSection() {
             <h3 className="text-sm font-semibold text-slate-800">Kindergarten Templates</h3>
             <p className="text-xs text-slate-400 mt-0.5">
               Define competency-based report card templates for early-childhood and KG classes.
-              Each template specifies the performance bands, subjects, and learning indicators teachers assess.
+              Each template specifies the performance bands and which subjects use indicator-based entry — subject teachers add the actual indicators each term, directly in the Markbook.
             </p>
           </div>
           <button

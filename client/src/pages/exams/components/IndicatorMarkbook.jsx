@@ -6,6 +6,17 @@
    include the one currently selected — a class either uses this
    subject's indicators or the ordinary numeric Markbook, never both.
 
+   Indicators themselves are managed HERE, not in Kindergarten
+   Templates (2026-10-19, direct request): "whoever is setting the
+   template is like an admin, he doesn't know all the indicators per
+   subject... these indicators vary depending on what content was
+   set... they have to be added manually in the Markbook." The
+   template still decides which subjects use this entry mode and the
+   performance bands; the subject teacher now owns the indicator TEXT
+   itself, scoped per class+subject+term (server/routes/
+   indicator-marks.js's /definitions), so it's free to differ as the
+   actual content taught changes.
+
    Entry is per-student: open a student, see every indicator for this
    subject, pick a Performance Band (prefills the score, overridable)
    or type a score directly, save all of that student's indicators for
@@ -32,7 +43,7 @@
 import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { X, Save, Loader2, CheckCircle2, AlertTriangle, Lock, ChevronRight } from 'lucide-react';
+import { X, Save, Loader2, CheckCircle2, AlertTriangle, Lock, ChevronRight, Plus, Pencil, Trash2, ListChecks } from 'lucide-react';
 import { indicatorMarks as api, markSubmissions as markSubmissionsApi } from '@/api/client.js';
 
 // Reserved sentinel — must match server/routes/mark-submissions.js's
@@ -149,7 +160,7 @@ function StudentIndicatorSlideOver({
 
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-3">
           {indicators.length === 0 && (
-            <p className="text-sm text-slate-400 italic text-center py-8">This subject has no indicators defined yet — add some in Kindergarten Templates.</p>
+            <p className="text-sm text-slate-400 italic text-center py-8">No indicators yet — close this and add one above, under "Indicators for this term."</p>
           )}
           {indicators.map(ind => {
             const row = rows[ind.id];
@@ -201,6 +212,142 @@ function StudentIndicatorSlideOver({
   );
 }
 
+/* ── Indicator manager (add/edit/delete) ──────────────────────
+   Teacher-owned, scoped to this class+subject+term — see this file's
+   own header. Deliberately lightweight compared to RCTemplatesSection's
+   old admin editor: one text field, one maxScore field, inline. */
+function IndicatorDefRow({ indicator, disabled, onSave, onDelete }) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText]       = useState(indicator.text);
+  const [maxScore, setMaxScore] = useState(indicator.maxScore ?? 10);
+
+  function commit() {
+    const trimmed = text.trim();
+    if (!trimmed) { setText(indicator.text); setEditing(false); return; }
+    if (trimmed !== indicator.text || Number(maxScore) !== indicator.maxScore) {
+      onSave({ text: trimmed, maxScore: Number(maxScore) || 10 });
+    }
+    setEditing(false);
+  }
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-2 py-1">
+        <input
+          autoFocus
+          type="text" value={text} maxLength={400}
+          onChange={e => setText(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') { setText(indicator.text); setEditing(false); } }}
+          onBlur={commit}
+          className="flex-1 text-sm border border-indigo-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+        />
+        <input
+          type="number" min="1" max="1000" value={maxScore}
+          onChange={e => setMaxScore(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') commit(); }}
+          onBlur={commit}
+          className="w-16 text-sm text-right border border-indigo-300 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2 py-1 group">
+      <p className="flex-1 text-sm text-slate-700">{indicator.text}</p>
+      <span className="text-xs text-slate-400 shrink-0">/{indicator.maxScore ?? 10}</span>
+      {!disabled && (
+        <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition">
+          <button onClick={() => setEditing(true)} className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition" title="Edit">
+            <Pencil size={12} />
+          </button>
+          <button
+            onClick={() => { if (window.confirm(`Delete "${indicator.text}"?`)) onDelete(); }}
+            className="p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded transition"
+            title="Delete"
+          >
+            <Trash2 size={12} />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function IndicatorManager({ indicators, disabled, onAdd, onSave, onDelete, adding }) {
+  const [open, setOpen] = useState(indicators.length === 0);
+  const [newText, setNewText] = useState('');
+  const [newMax, setNewMax]   = useState(10);
+
+  function submitAdd() {
+    const trimmed = newText.trim();
+    if (!trimmed) return;
+    onAdd({ text: trimmed, maxScore: Number(newMax) || 10 });
+    setNewText('');
+    setNewMax(10);
+  }
+
+  return (
+    <div className="border-b border-slate-100">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-5 py-2.5 bg-white hover:bg-slate-50 transition"
+      >
+        <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+          <ListChecks size={13} className="text-slate-400" />
+          Indicators for this term ({indicators.length})
+        </span>
+        <ChevronRight size={13} className={`text-slate-400 transition-transform ${open ? 'rotate-90' : ''}`} />
+      </button>
+      {open && (
+        <div className="px-5 pb-3 pt-0.5">
+          {indicators.length === 0 && (
+            <p className="text-xs text-slate-400 italic py-1">
+              No indicators yet for this subject this term — add what was actually taught below.
+            </p>
+          )}
+          <div className="divide-y divide-slate-50">
+            {indicators.map(ind => (
+              <IndicatorDefRow
+                key={ind.id}
+                indicator={ind}
+                disabled={disabled}
+                onSave={data => onSave(ind.id, data)}
+                onDelete={() => onDelete(ind.id)}
+              />
+            ))}
+          </div>
+          {!disabled && (
+            <div className="flex items-center gap-2 mt-2">
+              <input
+                type="text" value={newText} maxLength={400}
+                onChange={e => setNewText(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') submitAdd(); }}
+                placeholder="e.g. Able to identify and name the five senses"
+                className="flex-1 text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+              />
+              <input
+                type="number" min="1" max="1000" value={newMax}
+                onChange={e => setNewMax(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') submitAdd(); }}
+                title="Maximum possible score"
+                className="w-16 text-sm text-right border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+              />
+              <button
+                type="button" onClick={submitAdd} disabled={adding || !newText.trim()}
+                className="flex items-center gap-1 text-xs font-medium text-white bg-slate-900 hover:bg-slate-800 disabled:opacity-50 px-3 py-1.5 rounded-lg transition shrink-0"
+              >
+                {adding ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />} Add
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── Main panel ──────────────────────────────────────────────── */
 export default function IndicatorMarkbook({
   classId, subjectId, streamId, students, template, templateSubject,
@@ -211,9 +358,18 @@ export default function IndicatorMarkbook({
   const [openStudentId, setOpenStudentId] = useState(null);
 
   const bands = effectiveBands(template, templateSubject);
+
+  // Indicator TEXT is teacher-managed per class+subject+term (2026-10-19)
+  // — NOT read off the template any more. See this file's own header.
+  const { data: indicatorDefsData } = useQuery({
+    queryKey: ['indicator-definitions', { classId, subjectId, termNumber, academicYearId }],
+    queryFn:  () => api.definitions.list({ classId, subjectId, termNumber, academicYearId: academicYearId || undefined }),
+    enabled:  !!classId && !!subjectId,
+    staleTime: 15_000,
+  });
   const indicators = useMemo(
-    () => [...(templateSubject.indicators ?? [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
-    [templateSubject]
+    () => [...(indicatorDefsData?.data ?? [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+    [indicatorDefsData]
   );
 
   const { data: marksData, isLoading } = useQuery({
@@ -251,6 +407,28 @@ export default function IndicatorMarkbook({
   const reviewLocked = submission?.status === 'locked';
   const entryClosed = isLocked || reviewLocked;
 
+  /* ── Indicator management (add/edit/delete) ──────────────────
+     Teacher-owned now — see this file's header. Mutations share the
+     indicator-definitions query key so the list and every open
+     slide-over stay in sync without a manual refetch call. */
+  const defsQueryKey = ['indicator-definitions', { classId, subjectId, termNumber, academicYearId }];
+
+  const { mutate: addIndicator, isPending: addingIndicator } = useMutation({
+    mutationFn: (data) => api.definitions.create({ classId, subjectId, termNumber, academicYearId: academicYearId || undefined, ...data }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: defsQueryKey }); },
+    onError:   err => setToast({ msg: err?.message ?? 'Failed to add indicator.', type: 'error' }),
+  });
+  const { mutate: editIndicator } = useMutation({
+    mutationFn: ({ id, ...data }) => api.definitions.update(id, data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: defsQueryKey }); },
+    onError:   err => setToast({ msg: err?.message ?? 'Failed to save indicator.', type: 'error' }),
+  });
+  const { mutate: deleteIndicator } = useMutation({
+    mutationFn: (id) => api.definitions.remove(id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: defsQueryKey }); },
+    onError:   err => setToast({ msg: err?.message ?? 'Failed to delete indicator.', type: 'error' }),
+  });
+
   function scoredCount(studentId) {
     const sm = marksByStudent[studentId] ?? {};
     return indicators.filter(ind => sm[ind.id]).length;
@@ -287,9 +465,18 @@ export default function IndicatorMarkbook({
           )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <span className="text-xs text-slate-400">{template.name} · {indicators.length} indicator{indicators.length !== 1 ? 's' : ''} · Competency-band entry</span>
+          <span className="text-xs text-slate-400">{template.name} · Competency-band entry</span>
         </div>
       </div>
+
+      <IndicatorManager
+        indicators={indicators}
+        disabled={entryClosed}
+        adding={addingIndicator}
+        onAdd={addIndicator}
+        onSave={(id, data) => editIndicator({ id, ...data })}
+        onDelete={deleteIndicator}
+      />
 
       {isLoading ? (
         <div className="p-5 space-y-2">{[...Array(4)].map((_, i) => <div key={i} className="h-10 rounded-lg bg-slate-100 animate-pulse" />)}</div>

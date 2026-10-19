@@ -546,6 +546,20 @@ const INDEXES = [
     ],
   },
 
+  /* ── indicator_definitions (2026-10-19) ─────────────────────
+     Kindergarten/competency indicators, teacher-authored per
+     class+subject+term — not a static admin-template field, since
+     indicators vary with whatever content was actually taught that
+     term. Primary: the Markbook loads/manages this list by exactly
+     that key every time it opens a subject. */
+  {
+    col: 'indicator_definitions',
+    indexes: [
+      { key: { schoolId: 1, classId: 1, subjectId: 1, termNumber: 1 }, name: 'indef_class_sub_term' },
+      { key: { id: 1 },                                                 name: 'indef_id', unique: true, sparse: true },
+    ],
+  },
+
   /* ── assessment_config ──────────────────────────────────────
      One config doc per school (academicYearId: null = global config).
      Queried by { schoolId, academicYearId } on every mark operation. */

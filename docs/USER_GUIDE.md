@@ -112,8 +112,8 @@ Contact your school administrator to reset your password. They can generate a ne
 ### Auto-Logout (Security)
 For your security, Msingi automatically signs you out after **10 minutes of inactivity**. At 9 minutes, an amber warning toast appears — click **Stay signed in** to reset the timer. This protects shared or unattended devices.
 
-### Password Policy (60-Day Rotation)
-All passwords expire every **60 days**. When your password is about to expire:
+### Password Policy (90-Day Rotation)
+Current authentication policy requires a password change every **90 days**. When your password is about to expire:
 - A **dashboard banner** appears at the top of your screen (blue → amber → red as expiry approaches)
 - An **email reminder** is sent at 7, 3, 1, and 0 days before expiry
 - On the expiry day, you will be prompted to set a new password **before** you can log in
@@ -434,6 +434,8 @@ Some classes — typically early-years ones — aren't graded with a single nume
 
 **How do I know if my class uses this?** You don't need to do anything to switch it on or off — it's entirely based on whether your school's admin has assigned a **Kindergarten Template** to your class (directly, or as the default for your Section, e.g. "Early Years"). If a template is assigned, the Markbook switches to indicator entry automatically the moment you select that class/subject; if not, you'll see the ordinary numeric grid, even for a class literally named "Kindergarten." Ask your admin (Exams → Kindergarten Templates) if you expected indicator entry but are seeing the numeric grid instead.
 
+**Adding indicators (2026-10-19):** the indicators themselves aren't pre-written by your admin — you add them, per class/subject/term, in an "Indicators for this term" panel at the top of the Markbook. Type what you actually assessed this term (e.g. "Able to count to 20"), set its maximum score, and add it — it's immediately available to score every student against. You can edit or delete an indicator any time before students have scores against it; once scored, you'll need to remove those scores first. Indicators don't carry over automatically from one term to the next, since what you taught (and so what you're assessing) can genuinely change.
+
 **Entering scores:**
 1. Open a student from the class/subject list.
 2. For each indicator, either pick a **Performance Band** (this fills in the expected score for you, but you can still change it) or type a score directly — up to that indicator's own maximum (indicators don't all share the same maximum; check the number shown next to each one).
@@ -501,7 +503,7 @@ Scheduled → In Progress → Completed
 ### Entering Marks (Markbook) *(updated 2026-10-13 — see §9a for what happens at publish)*
 1. Go to the **Markbook** tab and filter by class, subject, term, and assessment type.
 2. Enter each student's score, or use the mark-state options for Absent / Missing / Exempt / Incomplete.
-3. There's no submit-for-review step — marks stay freely editable for every student, including one added to the roster after the rest of the class, right up until the report card for that class/term is published. A student added mid-term is immediately editable like everyone else, with no separate action needed.
+3. There's no submit-for-review step — marks stay editable until the report card for that class/term is published, unless separately locked. A student added mid-term must also be enrolled in the relevant subject; confirm that student's row appears in the selected Markbook roster before entering marks, especially for elective subjects.
 4. Publishing the report card (§9a) locks every mark entry for that class/term automatically — the grid shows a plain **Locked** pill and can no longer be edited by the teacher.
 5. If a mark needs correcting after publishing, ask an admin to unlock it from the **Review** tab (a reason is required). The unlock is temporary — it automatically re-locks 24 hours later unless an admin acts again first. After correcting the mark, an admin re-publishes to update the report card.
 
@@ -806,7 +808,7 @@ Click a staff member to open their profile:
 - Emergency contact
 
 ### Adding Staff
-Click **+ Add Staff Member**. All new staff accounts are also created in the user directory with appropriate role(s).
+In **HR & Staff → Staff**, click **Add Staff** to create the employee's HR profile. This is separate from a login account. If the employee needs to sign in, use **Create Login Account** from the profile, or **Activate Existing User** when the person already has a login but no HR record. See the [HR Guide](HR_GUIDE.md#2-staff-records) for the current linking workflow.
 
 ---
 
@@ -824,7 +826,7 @@ Navigate to **Reports**. Each is its own tab, loading live as soon as you open i
 Use the **CSV** export button on the current tab to download what you're looking at.
 
 ### Report Cards *(fully redesigned in v4.6)*
-Student-level term reports are generated from **Reports → Report Cards**. Each card includes:
+Student-level term reports are generated from **Report Cards → Generate & Publish**. Each card includes:
 - Subject-by-subject breakdown (continuous assessment + exam scores + weighted final score)
 - Grade, GPA points, and descriptor per subject
 - ★ Best-in-class indicator per subject

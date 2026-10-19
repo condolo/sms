@@ -6,6 +6,22 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.195.0] — 2026-10-19 — feat(exams): Kindergarten indicators move from the template to the Markbook
+
+Direct pushback on the original design: "whoever is setting the template is like an admin, he doesn't know all the indicators per subject, and these indicators vary depending on what content was set, so they can't be static — they have to be added manually in the Markbook." Confirmed live: the one real KG template (sch_demo) had performance bands configured but zero subjects/indicators — the admin had nowhere sensible to author per-subject competency text that actually matches what was taught that term.
+
+**The template still decides WHICH subjects use indicator-based entry and the performance bands** — genuinely admin-owned, school-wide config, same as assessment weights/types. **Indicator TEXT itself is now owned by the subject teacher**, scoped per `{classId, subjectId, termNumber[, academicYearId]}` in a new `indicator_definitions` collection, managed directly inside `IndicatorMarkbook.jsx` (an "Indicators for this term" panel — add/edit/delete, same subject-teacher scoping as marks) rather than in Kindergarten Templates.
+
+- New `server/routes/indicator-marks.js` endpoints: `GET/POST /definitions`, `PUT /definitions/:id`, `DELETE /definitions/:id` — curriculum + subject-teacher-scoping guards identical to the mark-writing routes, blocked once the term's indicator marks are locked (published), and `DELETE` refuses while any student already has a score against that indicator.
+- `POST /indicator-marks/bulk`'s score-vs-maxScore validation now reads `indicator_definitions` instead of `template.subjects[].indicators`.
+- **`server/utils/kg-report.js`'s `computeKgReport`** — the actual report-card computation path, not just the Markbook's display — updated the same way; this was the critical piece, since it used to read `subj.indicators` straight off the template and would otherwise have shown zero indicator rows on every published KG report card the moment the template stopped carrying indicator content.
+- `RCTemplatesSection.jsx` (admin): removed the per-subject indicator editor; a subject is now just assigned to competency-based entry plus its optional band override, with a note that the subject teacher adds the actual indicators in the Markbook.
+- `rc_templates.subjects[].indicators` stays in the schema (harmless, unused) rather than migrated — confirmed live that no template had any real indicator data to lose.
+
+Tests: 4 new files (`indicator-definitions.test.js`, `kg-report-indicator-definitions.test.js`) plus fixture updates to `indicator-marks.test.js`, `indicator-marks-submission-lock.test.js`, and `report-cards-kg.test.js` (all previously seeded indicators via the template; now via `indicator_definitions`). Full suite: 322/322 suites, 3310/3310 tests.
+
+---
+
 ## [v5.194.0] — 2026-10-15 — fix(students): profile Overview showed "Class: —" despite a valid class/stream on record
 
 Reported directly, with a screenshot: an active student's Overview card showed blank Class, while the same student's Edit form correctly showed both class and stream. Confirmed live (Nathaniel Maina, Trinitas): `classId`/`streamId` were intact, but the denormalized `className`/`streamName` fields were blank — Overview printed them as stored; Edit resolves live and was never affected. `GET /api/students/:id` now resolves `className`/`streamName` live from `classId`/`streamId` on every read, so display can't drift from the real reference regardless of how stale the stored copy is — no backfill needed. Tests: 2 new (`students.test.js`). Full suite: 313/313 suites, 3219/3219 tests.
