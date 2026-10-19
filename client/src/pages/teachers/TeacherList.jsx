@@ -71,15 +71,15 @@ export default function TeacherList() {
   const canCreate      = isAdminLevel || can('teachers', 'create');
   const canEditTeacher = isAdminLevel || can('teachers', 'update');
   const canDelete      = isAdminLevel || can('teachers', 'delete');
-  // canViewFull is a DELIBERATE exception, left as a hardcoded role floor —
-  // it gates sensitive PII (contact details, DOB) that the server's own
-  // GET /api/teachers independently redacts for anyone outside the identical
-  // FULL_ACCESS_ROLES set (teachers.js) via a limited-projection query, not a
-  // permission check. Making this Settings-grantable here without also
-  // changing that server-side floor would be pure UI theater — the fields
-  // simply wouldn't be in the API response — so it stays in sync with the
-  // server's real privacy boundary rather than the Settings permission model.
-  const canViewFull = ['admin', 'superadmin', 'principal', 'hr'].includes(role);
+  // canViewFull must track the server's own privacy boundary exactly —
+  // GET /api/teachers' _canViewFullData (teachers.js) is `hasPermission(req,
+  // 'teachers', 'update')`, the identical check canEditTeacher above already
+  // uses, not a hardcoded role list (that used to be true; teachers.js moved
+  // off it — this comment and value were never updated to match, so a role
+  // granted Edit Teacher via Settings could edit a teacher's contact/DOB
+  // fields without ever being able to see them first). Reusing canEditTeacher
+  // directly keeps the two from drifting apart again.
+  const canViewFull = canEditTeacher;
 
   const [search,       setSearch]       = useState('');
   const [debSearch,    setDebSearch]    = useState('');
@@ -435,8 +435,10 @@ function TeacherDetailSlideOver({ teacher: initialTeacher, canEdit, canDelete, o
   const [subjectSearch, setSubjectSearch] = useState('');
   const [errors, setErrors]     = useState({});
 
-  const viewerRole = useAuthStore(s => s.session?.user?.role ?? '');
-  const canViewFull = ['admin', 'superadmin', 'principal', 'hr'].includes(viewerRole);
+  // Same privacy boundary as the list view's own canViewFull (see that
+  // comment) — reuses the canEdit prop (isAdminLevel || can('teachers',
+  // 'update')) rather than recomputing a second, driftable role check.
+  const canViewFull = canEdit;
 
   const { data: deptsRaw } = useQuery({
     queryKey: ['departments'],
@@ -657,8 +659,10 @@ function TeacherDetailSlideOver({ teacher: initialTeacher, canEdit, canDelete, o
                 ) : <p className="text-sm text-slate-400">No subjects listed</p>}
               </div>
 
-              {/* Qualifications */}
-              {teacher.qualifications && (
+              {/* Qualifications — HR profile content, not a colleague's
+                  public teaching info (reported directly); same gate as
+                  Contact/DOB below. */}
+              {canViewFull && teacher.qualifications && (
                 <div>
                   <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest mb-3">Qualifications</p>
                   <div className="flex items-start gap-2">

@@ -141,15 +141,20 @@ function _stripSensitive(doc) {
 async function _canViewFullData(req) { return hasPermission(req, 'teachers', 'update'); }
 
 /* MongoDB projection for limited view — sensitive fields never leave the DB.
-   Includes professional/public info only: name, photo, role, status, and
-   the academic fields (subjects/classes/qualifications) that form a teacher's
-   public profile.  Personal contact details, HR data, and IDs are excluded
+   Includes only what a colleague needs to identify who someone is and what
+   they teach: name, photo, role, status, subjects, classes. Reported
+   directly: teachers could see a colleague's qualifications/specialization
+   in this same "limited" view — those are HR profile content, not public
+   teaching info, and stayed in this projection by oversight (a school's own
+   public-profile intent, not a deliberate decision to expose them to
+   colleagues). Removed; `departmentId` stays (just a department label, not
+   personal HR data). Personal contact details, HR data, and IDs are excluded
    at query time so they are never loaded into Node.js memory. */
 // Inclusive projection — MongoDB only returns the listed fields, so __v is
 // already excluded without needing -__v (mixing inclusive+exclusive is invalid).
 const LIMITED_PROJECTION =
   'id firstName lastName title middleName photo role staffType status extraRoles ' +
-  'subjects classes qualifications specialization departmentId';
+  'subjects classes departmentId';
 
 const FULL_PROJECTION = '-__v';
 
