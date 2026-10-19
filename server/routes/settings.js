@@ -957,6 +957,18 @@ router.post('/users/invite', authMiddleware, rbac('settings', 'create'), async (
           { schoolId: req.jwtUser.schoolId, id: staffId },
           { $set: { userId: createdUser.id } }
         );
+        // Any teaching_assignments created before this login existed were
+        // keyed by teacher.id, the only identifier available at that time
+        // (see teaching-assignments.js's canonicalTeacherId comment) — every
+        // scope check (Attendance/Markbook/Lessons) matches teacherId
+        // against the login's OWN id from here on, so those rows stay
+        // invisible to this teacher forever unless re-keyed now. Confirmed
+        // live: exactly this gap, 181 rows across 4 schools, traced to this
+        // flow (and timetable.js's own lazy self-heal) never doing this.
+        await tenantModel('teaching_assignments', tenantContext(req)).updateMany(
+          { schoolId: req.jwtUser.schoolId, teacherId: staffId },
+          { $set: { teacherId: createdUser.id } }
+        );
       } catch (linkErr) {
         console.warn('[settings] teacher userId backlink (non-fatal):', linkErr.message);
       }

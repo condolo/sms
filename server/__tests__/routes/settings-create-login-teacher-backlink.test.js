@@ -38,7 +38,7 @@ jest.mock('../../utils/token-version', () => ({
 const mockAuditLog = jest.fn().mockResolvedValue(undefined);
 jest.mock('../../services/audit', () => ({ log: (...args) => mockAuditLog(...args) }));
 
-let mockUsers, mockSchools, mockCustomRoles, mockRolePerms, mockTeachers;
+let mockUsers, mockSchools, mockCustomRoles, mockRolePerms, mockTeachers, mockAssignments;
 
 function mockMakeCollection(store) {
   return {
@@ -49,6 +49,11 @@ function mockMakeCollection(store) {
       const doc = store.find(filter);
       if (doc) store.apply(doc, update);
       return Promise.resolve({ matchedCount: doc ? 1 : 0 });
+    }),
+    updateMany: jest.fn((filter, update) => {
+      const matched = store.docs.filter(d => store.matcher ? store.matcher(d, filter) : false);
+      matched.forEach(doc => store.apply(doc, update));
+      return Promise.resolve({ matchedCount: matched.length });
     }),
     create: jest.fn((doc) => { store.docs.push(doc); return Promise.resolve(doc); }),
     find: jest.fn(() => ({ sort: jest.fn().mockReturnThis(), lean: jest.fn().mockResolvedValue(store.docs) })),
@@ -67,6 +72,7 @@ function _teacherFilterMatch(doc, filter) {
 function mockMakeStore(initialDocs, matcher) {
   return {
     docs: [...initialDocs],
+    matcher,
     find(filter) { return this.docs.find(d => matcher(d, filter)); },
     apply(doc, update) {
       if (update.$set) Object.assign(doc, update.$set);
@@ -85,10 +91,11 @@ jest.mock('../../utils/model', () => ({
 jest.mock('../../utils/tenant-model', () => ({
   tenantContext: (req) => ({ schoolId: req.jwtUser.schoolId }),
   tenantModel: (collection) => {
-    if (collection === 'users')            return mockMakeCollection(mockUsers);
-    if (collection === 'custom_roles')     return mockMakeCollection(mockCustomRoles);
-    if (collection === 'role_permissions') return mockMakeCollection(mockRolePerms);
-    if (collection === 'teachers')         return mockMakeCollection(mockTeachers);
+    if (collection === 'users')                return mockMakeCollection(mockUsers);
+    if (collection === 'custom_roles')         return mockMakeCollection(mockCustomRoles);
+    if (collection === 'role_permissions')     return mockMakeCollection(mockRolePerms);
+    if (collection === 'teachers')             return mockMakeCollection(mockTeachers);
+    if (collection === 'teaching_assignments') return mockMakeCollection(mockAssignments);
     return mockMakeCollection(mockMakeStore([], () => false));
   },
 }));
@@ -128,6 +135,12 @@ beforeEach(() => {
     [{ id: 'tch_robert', schoolId: SCHOOL_ID, userId: null, email: 'robert@demo.school', firstName: 'Robert', lastName: 'Kioko' }],
     _teacherFilterMatch
   );
+  // Assigned before Robert had a login — stamped under his staff id, the
+  // same 181-row, 4-school gap this backlink's own re-key now closes too.
+  mockAssignments = mockMakeStore(
+    [{ id: 'ta_1', schoolId: SCHOOL_ID, teacherId: 'tch_robert', classId: 'cls_1', subjectId: 'subj_math' }],
+    (d, f) => d.schoolId === f.schoolId && d.teacherId === f.teacherId
+  );
 });
 
 describe('POST /api/settings/users/invite — Create Login Account backlink', () => {
@@ -141,6 +154,10 @@ describe('POST /api/settings/users/invite — Create Login Account backlink', ()
     const newUserId = res.body.data.user.id;
     const teacher = mockTeachers.docs.find(t => t.id === 'tch_robert');
     expect(teacher.userId).toBe(newUserId);
+    // The assignment created before Robert had a login is re-keyed to his
+    // new login id too — otherwise Attendance/Markbook/Lessons would stay
+    // invisible to him despite the backlink above succeeding.
+    expect(mockAssignments.docs.find(a => a.id === 'ta_1').teacherId).toBe(newUserId);
   });
 
   test('no staffId (plain invite, not tied to an existing staff member) does not touch any teacher record', async () => {

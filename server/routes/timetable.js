@@ -842,6 +842,16 @@ router.get('/my', authMiddleware, async (req, res) => {
         teacher = await Teachers.findOne({ schoolId, email: (email || '').toLowerCase() }).lean();
         if (teacher && !teacher.userId) {
           Teachers.updateOne({ schoolId, id: teacher.id }, { $set: { userId } }).catch(() => {});
+          // Any teaching_assignments created before this login existed were
+          // keyed by teacher.id (the only identifier available at the time —
+          // see teaching-assignments.js's own canonicalTeacherId comment).
+          // Every scope check (Attendance/Markbook/Lessons) matches
+          // teacherId against this person's OWN userId from here on, so an
+          // un-rekeyed row stays invisible to them forever otherwise.
+          // Confirmed live: exactly this gap, 181 rows across 4 schools.
+          tenantModel('teaching_assignments', tenantContext(req))
+            .updateMany({ schoolId, teacherId: teacher.id }, { $set: { teacherId: userId } })
+            .catch(() => {});
           teacher.userId = userId;
         }
       }

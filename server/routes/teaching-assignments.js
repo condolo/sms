@@ -228,6 +228,21 @@ router.post('/', authMiddleware, async (req, res) => { // rbac: canManage() belo
     if (!cls)     return E.notFound(res, 'Class not found');
     if (data.preferredRoomId && !room) return E.notFound(res, 'Room not found');
 
+    // Always key the assignment by the teacher's LOGIN account id when one
+    // is linked, never by data.teacherId as sent — every scope check that
+    // decides what this teacher can see (Attendance/Markbook/Lessons, via
+    // scopeMiddleware's _loadAssigned) matches teaching_assignments.teacherId
+    // against req.jwtUser.userId, which IS the login id, not teachers.id.
+    // The lookup above accepts either as input (teacher.id is the only
+    // option for a teacher with no login yet), but confirmed live: 181
+    // existing rows across 4 schools were keyed by teacher.id even though
+    // that teacher's login was linked (teacher.userId set) — invisible to
+    // them, with no error anywhere, because they were created before the
+    // login existed and never re-keyed once it did. This stops new rows
+    // from joining that set; see the migration note on invalidateScopeCache
+    // in teachers.js/import-export.js/timetable.js for the other half.
+    const canonicalTeacherId = teacher.userId || teacher.id;
+
     // Same normalization GET /classes already applies for its own dropdowns
     // (see that route's "Normalize" comment) — a legacy class matched only
     // via _classQuery's _id fallback has no real `id` field, and every
@@ -282,7 +297,7 @@ router.post('/', authMiddleware, async (req, res) => { // rbac: canManage() belo
     // and Agnes/Maths/Year 7ii are two distinct, non-conflicting rows.
     const existing = await tenantModel('teaching_assignments', tenantContext(req)).findOne({
       schoolId,
-      teacherId: data.teacherId,
+      teacherId: canonicalTeacherId,
       subjectId: data.subjectId,
       classId:   data.classId,
       streamId:  stream?.id ?? null,
@@ -299,7 +314,7 @@ router.post('/', authMiddleware, async (req, res) => { // rbac: canManage() belo
     const doc = await tenantModel('teaching_assignments', tenantContext(req)).create({
       id:                uuidv4(),
       schoolId,
-      teacherId:         data.teacherId,
+      teacherId:         canonicalTeacherId,
       teacherName,
       subjectId:         data.subjectId,
       subjectName:       subject.name,
@@ -316,7 +331,7 @@ router.post('/', authMiddleware, async (req, res) => { // rbac: canManage() belo
     });
 
     // Bust scope cache so the teacher's next request reflects the new assignment
-    invalidateScopeCache(data.teacherId, schoolId);
+    invalidateScopeCache(canonicalTeacherId, schoolId);
     return created(res, doc.toObject ? doc.toObject() : doc);
   } catch (err) {
     console.error('[teaching-assignments POST /]', err);

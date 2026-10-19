@@ -76,6 +76,11 @@ function mockMakeFakeCollection(seed = []) {
       if (doc) Object.assign(doc, update.$set ?? update);
       return Promise.resolve({ matchedCount: doc ? 1 : 0 });
     }),
+    updateMany: jest.fn((filter, update) => {
+      const matched = docs.filter(d => mockMatchesFilter(d, filter));
+      matched.forEach(doc => Object.assign(doc, update.$set ?? update));
+      return Promise.resolve({ matchedCount: matched.length });
+    }),
   };
 }
 
@@ -87,15 +92,16 @@ jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) =
 jest.mock('../../middleware/module-gate', () => ({ moduleGate: () => (_req, _res, next) => next() }));
 
 let mockCurrentUser;
-let mockTeachers, mockTimetable, mockSchools, mockUsers;
+let mockTeachers, mockTimetable, mockSchools, mockUsers, mockAssignments;
 
 jest.mock('../../utils/model', () => ({ _model: jest.fn((col) => (col === 'schools' ? mockSchools : mockMakeFakeCollection([]))) }));
 jest.mock('../../utils/tenant-model', () => ({
   tenantContext: (req) => ({ schoolId: req.jwtUser.schoolId }),
   tenantModel: jest.fn((col) => {
-    if (col === 'teachers')  return mockTeachers;
-    if (col === 'timetable') return mockTimetable;
-    if (col === 'users')     return mockUsers;
+    if (col === 'teachers')             return mockTeachers;
+    if (col === 'timetable')            return mockTimetable;
+    if (col === 'users')                return mockUsers;
+    if (col === 'teaching_assignments') return mockAssignments;
     return mockMakeFakeCollection([]);
   }),
 }));
@@ -113,8 +119,9 @@ function buildApp() {
 
 beforeEach(() => {
   jest.clearAllMocks();
-  mockSchools = mockMakeFakeCollection([{ id: SCHOOL_A, timetableStatus: { published: true } }]);
-  mockUsers   = mockMakeFakeCollection([]);
+  mockSchools    = mockMakeFakeCollection([{ id: SCHOOL_A, timetableStatus: { published: true } }]);
+  mockUsers      = mockMakeFakeCollection([]);
+  mockAssignments = mockMakeFakeCollection([]);
 });
 
 describe('GET /api/timetable/my — teacher resolution', () => {
@@ -163,6 +170,12 @@ describe('GET /api/timetable/my — teacher resolution', () => {
     mockTimetable = mockMakeFakeCollection([
       { id: 's2', schoolId: SCHOOL_A, teacherId: 'tch_2', isActive: true, day: 'tuesday', period: 2 },
     ]);
+    // A teaching assignment created the same way, before this login
+    // existed — stamped under the staff id too, exactly the 181-row,
+    // 4-school gap this self-heal now also closes.
+    mockAssignments = mockMakeFakeCollection([
+      { id: 'ta_2', schoolId: SCHOOL_A, teacherId: 'tch_2', classId: 'cls_1', subjectId: 'subj_math' },
+    ]);
 
     const res = await supertest(buildApp()).get('/api/timetable/my');
 
@@ -175,6 +188,14 @@ describe('GET /api/timetable/my — teacher resolution', () => {
       { schoolId: SCHOOL_A, id: 'tch_2' },
       { $set: { userId: 'usr_2' } },
     );
+    // Same self-heal for any teaching_assignments stamped under the old
+    // staff id — otherwise Attendance/Markbook/Lessons stay invisible to
+    // this teacher even after their login resolves correctly here.
+    expect(mockAssignments.updateMany).toHaveBeenCalledWith(
+      { schoolId: SCHOOL_A, teacherId: 'tch_2' },
+      { $set: { teacherId: 'usr_2' } },
+    );
+    expect(mockAssignments._docs()[0].teacherId).toBe('usr_2');
   });
 
   test('drift: slots scheduled both before and after login-linkage are both visible together', async () => {
