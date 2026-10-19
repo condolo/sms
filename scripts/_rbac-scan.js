@@ -57,7 +57,25 @@ const ROUTE_RE = /router\.(get|post|put|patch|delete)\s*\(\s*['"`]([^'"`]+)['"`]
 //                              rbac()'s own coarse module+action shape can't
 //                              express (e.g. attendance.js's absentee-officer
 //                              config, gated on a distinct 'absentees' sub-key)
-const RBAC_RE  = /rbac\s*\(|\/[/*] rbac:|planGate\(|_pdfAccess|_can\(|_typeGuard|behaviourAccess\(|timetableManageAccess\(|attendanceConflictAccess\(|_hasBulkImportGrant\(|hasExplicitSubGrant\(/;
+//   explicitSub(              — explicit-sub.js's finance sub-permission
+//                              wrapper (term_billing/early_payment/activities);
+//                              fails closed via the same hasExplicitSubGrant,
+//                              used on finance.js's and extracurricular.js's
+//                              own write routes in place of rbac('finance',...)
+//   payrollManageAccess(      — hr.js's own floor-role-or-explicit-sub-grant
+//                              wrapper for payroll write/config routes, tied
+//                              to the 'payroll_view' sub-key (see hr.js's own
+//                              comment on why a bare rbac('hr', action) can't
+//                              be scoped correctly for these)
+//   hrFloorOnly               — hr.js's HR_ROLES-only floor guard for
+//                              capabilities with no dedicated sub-permission
+//                              of their own (e.g. GET /summary)
+//   !isAdmin\(req\)\)\s*return — lessons.js's own inline deny-and-return
+//                              idiom (isAdmin is local to this file; checked
+//                              to confirm every other isAdmin(req) use in
+//                              lessons.js is a scope-narrowing check, not a
+//                              stand-in for a missing gate, before adding it)
+const RBAC_RE  = /rbac\s*\(|\/[/*] rbac:|planGate\(|_pdfAccess|_can\(|_typeGuard|behaviourAccess\(|timetableManageAccess\(|attendanceConflictAccess\(|_hasBulkImportGrant\(|hasExplicitSubGrant\(|explicitSub\(|payrollManageAccess\(|hrFloorOnly|!isAdmin\(req\)\)\s*return/;
 const AUTH_RE  = /authMiddleware/;
 // Some files apply authMiddleware once, file-wide, via router.use(...)
 // rather than repeating it on every individual route line (e.g.

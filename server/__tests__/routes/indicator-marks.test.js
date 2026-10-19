@@ -24,7 +24,7 @@ jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) =
 jest.mock('../../middleware/module-gate', () => ({ moduleGate: () => (_req, _res, next) => next() }));
 jest.mock('../../middleware/scopeMiddleware', () => ({ scopeMiddleware: (_req, _res, next) => next() }));
 jest.mock('../../utils/scopeEngine', () => ({ applyToFilter: jest.fn(), hasNoAssignments: jest.fn(() => false) }));
-// rbac() itself (the coarse grades:{read,create} gate) is a pass-through
+// Note: rbac() itself (the coarse grades:{read,create} gate) is a pass-through
 // here — this file's job is the subject-teacher scoping / score-
 // validation / archival guards INSIDE the handler, same split as
 // students.test.js vs students-sensitive-permissions.test.js.
