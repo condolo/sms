@@ -1897,25 +1897,27 @@ function PromoteModal({ onClose }) {
 function DuplicateStudentsPanel({ groups, houseName, onClose }) {
   const qc = useQueryClient();
   const { toast } = useToast();
-  // Per-group overrides, keyed by admissionNumber: { included, keepId }.
+  // Per-group overrides, keyed by groupKey (stable regardless of whether
+  // the group was matched by admission number or by name + date of birth
+  // — see server/routes/students.js's GET /duplicates): { included, keepId }.
   // A group not in here uses the default (included=true, keepId=recommended).
   const [overrides, setOverrides] = useState({});
   const [bulkConfirming, setBulkConfirming] = useState(false);
 
   function selectionFor(group) {
     return {
-      included: overrides[group.admissionNumber]?.included ?? true,
-      keepId:   overrides[group.admissionNumber]?.keepId   ?? group.recommendedKeepId,
+      included: overrides[group.groupKey]?.included ?? true,
+      keepId:   overrides[group.groupKey]?.keepId   ?? group.recommendedKeepId,
     };
   }
   function setKeeper(group, keepId) {
-    setOverrides(o => ({ ...o, [group.admissionNumber]: { ...selectionFor(group), keepId } }));
+    setOverrides(o => ({ ...o, [group.groupKey]: { ...selectionFor(group), keepId } }));
   }
   function toggleIncluded(group) {
-    setOverrides(o => ({ ...o, [group.admissionNumber]: { ...selectionFor(group), included: !selectionFor(group).included } }));
+    setOverrides(o => ({ ...o, [group.groupKey]: { ...selectionFor(group), included: !selectionFor(group).included } }));
   }
   function setAllIncluded(included) {
-    setOverrides(o => Object.fromEntries(groups.map(g => [g.admissionNumber, { ...selectionFor(g), included }])));
+    setOverrides(o => Object.fromEntries(groups.map(g => [g.groupKey, { ...selectionFor(g), included }])));
   }
 
   const selectedGroups = groups.filter(g => selectionFor(g).included);
@@ -1972,7 +1974,7 @@ function DuplicateStudentsPanel({ groups, houseName, onClose }) {
             <div>
               <h2 className="text-base font-semibold text-slate-900">Duplicate Students</h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                {groups.length} group{groups.length === 1 ? '' : 's'} share{groups.length === 1 ? 's' : ''} one admission number. Every group is pre-selected with its recommended keeper — review each, adjust as needed, then remove them all in one go.
+                {groups.length} group{groups.length === 1 ? '' : 's'} of records that are plausibly the same student — sharing an admission number, or the same name and date of birth. Every group is pre-selected with its recommended keeper — review each, adjust as needed, then remove them all in one go.
               </p>
             </div>
           </div>
@@ -2000,14 +2002,14 @@ function DuplicateStudentsPanel({ groups, houseName, onClose }) {
           {groups.length === 0 && (
             <div className="text-center py-16 text-sm text-slate-500">
               <CheckCircle2 size={28} className="mx-auto mb-2 text-emerald-500" />
-              No duplicate admission numbers left to resolve.
+              No duplicate students left to resolve.
             </div>
           )}
 
           {groups.map(group => {
             const { included, keepId } = selectionFor(group);
             return (
-              <div key={group.admissionNumber} className={`rounded-xl border overflow-hidden transition-colors ${included ? 'border-slate-200' : 'border-slate-100 opacity-60'}`}>
+              <div key={group.groupKey} className={`rounded-xl border overflow-hidden transition-colors ${included ? 'border-slate-200' : 'border-slate-100 opacity-60'}`}>
                 <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center gap-3">
                   <input
                     type="checkbox"
@@ -2015,7 +2017,7 @@ function DuplicateStudentsPanel({ groups, houseName, onClose }) {
                     onChange={() => toggleIncluded(group)}
                     className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400"
                   />
-                  <span className="text-sm font-semibold text-slate-800 flex-1">Admission No. {group.admissionNumber}</span>
+                  <span className="text-sm font-semibold text-slate-800 flex-1">{group.label}</span>
                   <span className="text-xs text-slate-500">{group.count} records</span>
                 </div>
                 <p className="px-4 pt-3 text-xs text-slate-500">{group.recommendedReason}</p>
@@ -2045,6 +2047,7 @@ function DuplicateStudentsPanel({ groups, houseName, onClose }) {
                           </span>
                         </div>
                         <div className="space-y-0.5 text-xs text-slate-500">
+                          <p>Admission No. {s.admissionNumber || '—'}</p>
                           <p>Class: {s.className || '—'} {s.houseId ? `· House ${houseName(s.houseId) ?? s.houseId}` : ''}</p>
                           <p>Gender: {s.gender || '—'} · DOB: {fmtDate(s.dateOfBirth)}</p>
                           <p>Status: {s.status || '—'} · Added {fmtDate(s.createdAt)}</p>

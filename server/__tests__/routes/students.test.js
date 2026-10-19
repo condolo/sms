@@ -475,6 +475,14 @@ describe('POST /api/students', () => {
    that share the kept student's own admission number.
 ══════════════════════════════════════════════════════════════ */
 describe('GET /api/students/duplicates', () => {
+  // The name+date-of-birth detection pass (2026-10-19) runs a second,
+  // independent Students.find() alongside the admission-number aggregate
+  // — stubbed empty here so these admission-number-focused tests aren't
+  // affected by it; see the dedicated describe block below for its own coverage.
+  beforeEach(() => {
+    mockStudentsFind.mockReturnValue({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([]) }) });
+  });
+
   test('returns no groups when nothing collides', async () => {
     mockStudentsAggregate.mockResolvedValueOnce([]);
 
@@ -531,7 +539,10 @@ describe('POST /api/students/duplicates/resolve', () => {
     });
     mockStudentsFind.mockReturnValue({
       select: jest.fn().mockReturnValue({
-        lean: jest.fn().mockResolvedValue([{ id: 'stu_dupe', _id: 'oid_dupe', firstName: 'Jane', lastName: 'Doe' }]),
+        // admissionNumber now matters here: the match against keepId is
+        // done in JS (_sameStudentIdentity), not by the DB query alone
+        // (2026-10-19 — the same route now also accepts a name+DOB match).
+        lean: jest.fn().mockResolvedValue([{ id: 'stu_dupe', _id: 'oid_dupe', firstName: 'Jane', lastName: 'Doe', admissionNumber: 'ADM-001' }]),
       }),
     });
     mockInvoicesUpdateMany.mockResolvedValueOnce({ modifiedCount: 2 });
@@ -609,8 +620,8 @@ describe('POST /api/students/duplicates/resolve-bulk', () => {
       .mockReturnValueOnce({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue({ id: 'stu_keep1', admissionNumber: 'ADM-001', firstName: 'Jane', lastName: 'Doe' }) }) })
       .mockReturnValueOnce({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue({ id: 'stu_keep2', admissionNumber: 'ADM-002', firstName: 'John', lastName: 'Smith' }) }) });
     mockStudentsFind
-      .mockReturnValueOnce({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([{ id: 'stu_dupe1', _id: 'oid_dupe1' }]) }) })
-      .mockReturnValueOnce({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([{ id: 'stu_dupe2', _id: 'oid_dupe2' }]) }) });
+      .mockReturnValueOnce({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([{ id: 'stu_dupe1', _id: 'oid_dupe1', admissionNumber: 'ADM-001' }]) }) })
+      .mockReturnValueOnce({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([{ id: 'stu_dupe2', _id: 'oid_dupe2', admissionNumber: 'ADM-002' }]) }) });
 
     const app = buildApp();
     const res = await supertest(app)
@@ -635,7 +646,7 @@ describe('POST /api/students/duplicates/resolve-bulk', () => {
       .mockReturnValueOnce({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) }) }) // group 1: keeper not found
       .mockReturnValueOnce({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue({ id: 'stu_keep2', admissionNumber: 'ADM-002', firstName: 'John', lastName: 'Smith' }) }) });
     mockStudentsFind
-      .mockReturnValueOnce({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([{ id: 'stu_dupe2', _id: 'oid_dupe2' }]) }) });
+      .mockReturnValueOnce({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([{ id: 'stu_dupe2', _id: 'oid_dupe2', admissionNumber: 'ADM-002' }]) }) });
 
     const app = buildApp();
     const res = await supertest(app)
@@ -660,6 +671,128 @@ describe('POST /api/students/duplicates/resolve-bulk', () => {
       .send({});
 
     expect(res.status).toBe(400);
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════
+   Name + date-of-birth duplicate detection (2026-10-19)
+   Reported directly, confirmed live: the SAME child entered 3 times
+   under 3 different admission numbers (a bulk import that didn't
+   recognise an existing student) — invisible to the admission-number-
+   only check above. "A student is appearing so many times... why does
+   the system allow?"
+══════════════════════════════════════════════════════════════ */
+describe('GET /api/students/duplicates — name + date of birth pass', () => {
+  test('groups two records with the same name and DOB but different admission numbers', async () => {
+    mockStudentsAggregate.mockResolvedValueOnce([]); // no admission-number collisions
+    mockStudentsFind.mockReturnValue({
+      select: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue([
+          makeStudent({ id: 'stu_a', admissionNumber: 'ADM-001', firstName: 'Toria', lastName: 'Mweya', middleName: 'Wangari', dateOfBirth: '2020-10-30' }),
+          makeStudent({ id: 'stu_b', admissionNumber: 'ADM-008', firstName: 'Toria', lastName: 'Mweya', middleName: 'Wangari', dateOfBirth: '10/30/2020' }), // same date, different string format
+          makeStudent({ id: 'stu_c', admissionNumber: 'ADM-012', firstName: 'Someone', lastName: 'Else', dateOfBirth: '2020-01-01' }),
+        ]),
+      }),
+    });
+    mockInvoicesAggregate.mockResolvedValueOnce([]);
+    mockPaymentsAggregate.mockResolvedValueOnce([]);
+
+    const app = buildApp();
+    const res = await supertest(app).get('/api/students/duplicates').set('Authorization', 'Bearer fake-token');
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.totalGroups).toBe(1);
+    const group = res.body.data.groups[0];
+    expect(group.matchType).toBe('nameAndDateOfBirth');
+    expect(group.count).toBe(2);
+    expect(group.students.map(s => s.id).sort()).toEqual(['stu_a', 'stu_b']);
+  });
+
+  test('does NOT group same-name students with different dates of birth (false-positive guard)', async () => {
+    mockStudentsAggregate.mockResolvedValueOnce([]);
+    mockStudentsFind.mockReturnValue({
+      select: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue([
+          makeStudent({ id: 'stu_a', admissionNumber: 'ADM-001', firstName: 'John', lastName: 'Kamau', dateOfBirth: '2019-05-01' }),
+          makeStudent({ id: 'stu_b', admissionNumber: 'ADM-002', firstName: 'John', lastName: 'Kamau', dateOfBirth: '2017-03-14' }),
+        ]),
+      }),
+    });
+
+    const app = buildApp();
+    const res = await supertest(app).get('/api/students/duplicates').set('Authorization', 'Bearer fake-token');
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.totalGroups).toBe(0);
+  });
+
+  test('does NOT group same-name students when neither has a date of birth on record', async () => {
+    mockStudentsAggregate.mockResolvedValueOnce([]);
+    mockStudentsFind.mockReturnValue({
+      select: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue([
+          makeStudent({ id: 'stu_a', admissionNumber: 'ADM-001', firstName: 'John', lastName: 'Kamau', dateOfBirth: null }),
+          makeStudent({ id: 'stu_b', admissionNumber: 'ADM-002', firstName: 'John', lastName: 'Kamau', dateOfBirth: null }),
+        ]),
+      }),
+    });
+
+    const app = buildApp();
+    const res = await supertest(app).get('/api/students/duplicates').set('Authorization', 'Bearer fake-token');
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.totalGroups).toBe(0);
+  });
+});
+
+describe('POST /api/students/duplicates/resolve — name + date of birth match', () => {
+  test('resolves a group whose members share a name and DOB but NOT an admission number', async () => {
+    mockStudentsFindOne.mockReturnValue({
+      select: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue({ id: 'stu_keep', admissionNumber: 'ADM-001', firstName: 'Toria', middleName: 'Wangari', lastName: 'Mweya', dateOfBirth: '2020-10-30' }),
+      }),
+    });
+    mockStudentsFind.mockReturnValue({
+      select: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue([
+          { id: 'stu_dupe', _id: 'oid_dupe', firstName: 'Toria', middleName: 'Wangari', lastName: 'Mweya', dateOfBirth: '10/30/2020', admissionNumber: 'ADM-008' },
+        ]),
+      }),
+    });
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/students/duplicates/resolve')
+      .set('Authorization', 'Bearer fake-token')
+      .send({ keepId: 'stu_keep', removeIds: ['stu_dupe'] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.kept).toBe('stu_keep');
+    expect(res.body.data.removed).toBe(1);
+  });
+
+  test('refuses when a removeId matches neither admission number nor name+DOB', async () => {
+    mockStudentsFindOne.mockReturnValue({
+      select: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue({ id: 'stu_keep', admissionNumber: 'ADM-001', firstName: 'Toria', middleName: 'Wangari', lastName: 'Mweya', dateOfBirth: '2020-10-30' }),
+      }),
+    });
+    mockStudentsFind.mockReturnValue({
+      select: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue([
+          { id: 'stu_unrelated', _id: 'oid_unrelated', firstName: 'Someone', lastName: 'Else', dateOfBirth: '1999-01-01', admissionNumber: 'ADM-999' },
+        ]),
+      }),
+    });
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/students/duplicates/resolve')
+      .set('Authorization', 'Bearer fake-token')
+      .send({ keepId: 'stu_keep', removeIds: ['stu_unrelated'] });
+
+    expect(res.status).toBe(400);
+    expect(mockStudentsDeleteMany).not.toHaveBeenCalled();
   });
 });
 

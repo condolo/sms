@@ -243,16 +243,67 @@ router.get('/stats', authMiddleware, PLAN, MODGATE, rbac('students', 'read'), as
   } catch (err) { console.error('[students GET /stats]', err); return E.serverError(res); }
 });
 
-/* ── GET /api/students/duplicates ─ Find students sharing one admission
-   number (2026-09) ──────────────────────────────────────────────────
+/* Canonical YYYY-MM-DD for a dateOfBirth stored in either ISO
+   ("2020-10-30") or US slash ("10/30/2020") form — confirmed live
+   (2026-10-19): the SAME student's own duplicate records carried both
+   formats, so a straight string comparison between two genuine
+   duplicates never matched. Returns null for anything unparseable —
+   never treated as a match signal. */
+function _normalizeDob(dob) {
+  if (!dob) return null;
+  const s = String(dob).trim();
+  // ISO: YYYY-MM-DD (date part only, ignoring any time component).
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  // US slash: MM/DD/YYYY — confirmed live as the other real format this
+  // data uses (the exact pair that originally failed to match: the same
+  // duplicate child stored as "2020-10-30" on one record and "10/30/2020"
+  // on another). Matched directly by regex rather than new Date(...),
+  // which parses a non-ISO string in the LOCAL timezone while an ISO
+  // string is parsed as UTC — in any timezone east of UTC that mismatch
+  // silently shifts one of the two dates by a day, which is exactly the
+  // bug this function exists to avoid.
+  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) return `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`;
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return null;
+  return d.toISOString().slice(0, 10);
+}
+function _normName(s) { return (s || '').trim().toLowerCase(); }
+
+/* Whether two student docs are plausibly the SAME real child — either
+   signal is sufficient on its own:
+     - the same (non-blank) admission number, or
+     - the same first+middle+last name AND the same date of birth.
+   A shared name alone is not enough (two different children can share
+   a common name); requiring DOB too keeps false positives effectively
+   impossible while still catching a re-import that assigned the
+   duplicate a brand-new admission number (2026-10-19, reported
+   directly — "a student is appearing so many times... why does the
+   system allow?"). */
+function _sameStudentIdentity(a, b) {
+  if (a.admissionNumber && b.admissionNumber && a.admissionNumber === b.admissionNumber) return true;
+  const aDob = _normalizeDob(a.dateOfBirth), bDob = _normalizeDob(b.dateOfBirth);
+  if (!aDob || !bDob || aDob !== bDob) return false;
+  return _normName(a.firstName) === _normName(b.firstName)
+      && _normName(a.lastName)  === _normName(b.lastName)
+      && _normName(a.middleName) === _normName(b.middleName);
+}
+
+/* ── GET /api/students/duplicates ─ Find students who are plausibly the
+   SAME real child entered more than once (2026-09, extended 2026-10-19)
+   ──────────────────────────────────────────────────────────────────
    Detection only — never deletes anything on its own. v5.75.0 stopped
-   NEW duplicates from being created, but did nothing for ones already
-   sitting in the data (a manually-imported admission number the
-   counter never learned about, handed out again later). Admission
-   number is the same unambiguous "same person" signal already used by
-   every other duplicate check in this codebase (v5.70.0's CSV-import
-   check, v5.75.0's collision-safe counter) — a blank number is never
-   treated as a group of its own. */
+   NEW admission-number duplicates from being created, but did nothing
+   for ones already sitting in the data, and admission number alone
+   misses a re-import that didn't recognise the student already existed
+   and handed out a brand-new number instead of reusing the old one —
+   confirmed live: the exact same child (same first/middle/last name,
+   same date of birth, same stream) with THREE different admission
+   numbers, from a bulk import. Two independent passes, merged into one
+   list: admission-number groups (unchanged) and name+date-of-birth
+   groups (new) — see _sameStudentIdentity above for why DOB is
+   required alongside name, not name alone. */
 router.get('/duplicates', authMiddleware, PLAN, MODGATE, rbac('students', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
@@ -260,14 +311,38 @@ router.get('/duplicates', authMiddleware, PLAN, MODGATE, rbac('students', 'read'
     const Invoices = tenantModel('invoices', tenantContext(req));
     const Payments = tenantModel('payments', tenantContext(req));
 
-    const groups = await Students.aggregate([
+    const admGroups = await Students.aggregate([
       { $match: { schoolId, admissionNumber: { $nin: [null, ''] } } },
       { $group: { _id: '$admissionNumber', count: { $sum: 1 }, docs: { $push: '$$ROOT' } } },
       { $match: { count: { $gt: 1 } } },
       { $sort: { _id: 1 } },
     ]);
+    const admGroupedIdSets = admGroups.map(g => new Set(g.docs.map(d => d.id ?? String(d._id))));
 
-    if (groups.length === 0) {
+    // Name+DOB pass — pulled unfiltered (schoolId only) rather than via a
+    // $group on possibly-missing fields, since dateOfBirth needs the same
+    // normalization GET already applies for display; grouping is done in
+    // JS on the normalized key instead of in the aggregation pipeline.
+    const allActive = await Students.find({ schoolId, firstName: { $nin: [null, ''] }, lastName: { $nin: [null, ''] } })
+      .select('id firstName middleName lastName dateOfBirth admissionNumber gender classId className houseId status parentName parentEmail createdAt')
+      .lean();
+    const byNameDob = new Map();
+    for (const d of allActive) {
+      const dob = _normalizeDob(d.dateOfBirth);
+      if (!dob) continue; // no DOB on record — not enough to safely group by name alone
+      const key = `${_normName(d.firstName)}|${_normName(d.middleName)}|${_normName(d.lastName)}|${dob}`;
+      (byNameDob.get(key) ?? byNameDob.set(key, []).get(key)).push(d);
+    }
+    const nameGroups = [...byNameDob.entries()]
+      .filter(([, docs]) => docs.length > 1)
+      // Skip a name+DOB group that's an EXACT match (same set of ids) for
+      // a group already found by admission number — report it once, not twice.
+      .filter(([, docs]) => {
+        const ids = new Set(docs.map(d => d.id ?? String(d._id)));
+        return !admGroupedIdSets.some(admSet => admSet.size === ids.size && [...ids].every(id => admSet.has(id)));
+      });
+
+    if (admGroups.length === 0 && nameGroups.length === 0) {
       return ok(res, { groups: [], totalGroups: 0, totalDuplicateRecords: 0 });
     }
 
@@ -275,7 +350,10 @@ router.get('/duplicates', authMiddleware, PLAN, MODGATE, rbac('students', 'read'
     // every group — used only to suggest which record to keep (the one
     // actually in use); the admin always makes the final call, never an
     // automatic deletion.
-    const allIds = groups.flatMap(g => g.docs.map(d => d.id).filter(Boolean));
+    const allIds = [
+      ...admGroups.flatMap(g => g.docs.map(d => d.id ?? String(d._id))),
+      ...nameGroups.flatMap(([, docs]) => docs.map(d => d.id ?? String(d._id))),
+    ];
     const [invoiceCounts, paymentCounts] = await Promise.all([
       Invoices.aggregate([{ $match: { schoolId, studentId: { $in: allIds } } }, { $group: { _id: '$studentId', count: { $sum: 1 } } }]),
       Payments.aggregate([{ $match: { schoolId, studentId: { $in: allIds } } }, { $group: { _id: '$studentId', count: { $sum: 1 } } }]),
@@ -283,14 +361,14 @@ router.get('/duplicates', authMiddleware, PLAN, MODGATE, rbac('students', 'read'
     const invoiceCountById = Object.fromEntries(invoiceCounts.map(c => [c._id, c.count]));
     const paymentCountById = Object.fromEntries(paymentCounts.map(c => [c._id, c.count]));
 
-    const groupList = groups.map(g => {
-      const students = g.docs.map(d => {
+    function _buildGroup(docs, { groupKey, label, matchType }) {
+      const students = docs.map(d => {
         const id            = d.id ?? String(d._id);
         const invoiceCount  = invoiceCountById[id] ?? 0;
         const paymentCount  = paymentCountById[id] ?? 0;
         return {
           id, firstName: d.firstName, middleName: d.middleName, lastName: d.lastName,
-          gender: d.gender, dateOfBirth: d.dateOfBirth,
+          gender: d.gender, dateOfBirth: d.dateOfBirth, admissionNumber: d.admissionNumber,
           classId: d.classId, className: d.className,
           houseId: d.houseId, status: d.status,
           parentName: d.parentName, parentEmail: d.parentEmail,
@@ -313,13 +391,27 @@ router.get('/duplicates', authMiddleware, PLAN, MODGATE, rbac('students', 'read'
         : 'Created first — none of these have any invoices or payments yet.';
 
       return {
-        admissionNumber: g._id,
-        count: g.count,
+        groupKey, label, matchType,
+        admissionNumber: matchType === 'admissionNumber' ? docs[0].admissionNumber : null,
+        count: docs.length,
         students,
         recommendedKeepId: recommended.id,
         recommendedReason,
       };
-    });
+    }
+
+    const groupList = [
+      ...admGroups.map(g => _buildGroup(g.docs, {
+        groupKey: `adm:${g._id}`, label: `Admission No. ${g._id}`, matchType: 'admissionNumber',
+      })),
+      ...nameGroups.map(([key, docs]) => {
+        const sample = docs[0];
+        const fullName = [sample.firstName, sample.middleName, sample.lastName].filter(Boolean).join(' ');
+        return _buildGroup(docs, {
+          groupKey: `name:${key}`, label: `${fullName} (same name & date of birth)`, matchType: 'nameAndDateOfBirth',
+        });
+      }),
+    ];
 
     return ok(res, {
       groups: groupList,
@@ -333,11 +425,14 @@ router.get('/duplicates', authMiddleware, PLAN, MODGATE, rbac('students', 'read'
 });
 
 /* ── POST /api/students/duplicates/resolve ─ Keep one, merge the rest
-   of a duplicate-admission-number group into it (2026-09) ───────────
-   Deliberately narrow: every id in `removeIds` must share the SAME
-   admission number as `keepId` — this can only ever resolve a genuine
+   of a duplicate group into it (2026-09, extended 2026-10-19) ───────
+   Deliberately narrow: every id in `removeIds` must match `keepId` on
+   _sameStudentIdentity (same admission number, OR same first/middle/
+   last name AND date of birth) — this can only ever resolve a genuine
    duplicate group from GET /duplicates above, never touch an unrelated
-   student by a mistaken or tampered id.
+   student by a mistaken or tampered id. Re-derived from the live DB
+   documents here, never trusted from the client's request — the exact
+   same discipline the admission-number-only version already had.
 
    MERGES, does not just delete (2026-09 audit — "how do you ensure the
    database is also aligned... no dead code after the delete"): the two
@@ -369,23 +464,22 @@ router.post('/duplicates/resolve', authMiddleware, PLAN, MODGATE, rbac('students
     const ctx      = tenantContext(req);
     const Students = tenantModel('students', ctx);
 
-    const keeper = await Students.findOne({ id: keepId, schoolId }).select('id admissionNumber firstName lastName').lean();
+    const keeper = await Students.findOne({ id: keepId, schoolId }).select('id admissionNumber firstName middleName lastName dateOfBirth').lean();
     if (!keeper) return E.notFound(res, 'The student to keep was not found');
-    if (!keeper.admissionNumber) return E.badRequest(res, 'The student to keep has no admission number — nothing to resolve');
 
-    const toRemove = await Students.find({
-      id: { $in: removeIds }, schoolId, admissionNumber: keeper.admissionNumber,
-    }).select('id _id firstName lastName').lean();
+    const candidates = await Students.find({ id: { $in: removeIds }, schoolId })
+      .select('id _id firstName middleName lastName dateOfBirth admissionNumber').lean();
+    const toRemove = candidates.filter(c => _sameStudentIdentity(keeper, c));
 
     if (toRemove.length === 0) {
-      return E.badRequest(res, 'None of removeIds share an admission number with keepId — nothing was removed');
+      return E.badRequest(res, 'None of removeIds match keepId on admission number or on name + date of birth — nothing was removed');
     }
     if (toRemove.length !== removeIds.length) {
-      // Some requested ids didn't match — either a different admission
-      // number (not part of THIS duplicate group) or don't exist at all.
-      // Refuse the whole request rather than silently deleting a subset,
-      // since the client's idea of the group no longer matches reality.
-      return E.badRequest(res, `${removeIds.length - toRemove.length} of the given record(s) do not share this admission number — refresh and try again`);
+      // Some requested ids didn't match — not part of THIS duplicate
+      // group, or don't exist at all. Refuse the whole request rather
+      // than silently deleting a subset, since the client's idea of the
+      // group no longer matches reality.
+      return E.badRequest(res, `${removeIds.length - toRemove.length} of the given record(s) do not match this group — refresh and try again`);
     }
 
     const mergedCounts = {};
@@ -421,9 +515,9 @@ router.post('/duplicates/resolve', authMiddleware, PLAN, MODGATE, rbac('students
 });
 
 /* ── POST /api/students/duplicates/resolve-bulk ─ Resolve several
-   duplicate groups in one request (2026-09) ─────────────────────────
+   duplicate groups in one request (2026-09, extended 2026-10-19) ────
    Same per-group validation as POST /duplicates/resolve above — every
-   removeId is re-checked against its own keepId's admission number —
+   removeId is re-checked against its own keepId via _sameStudentIdentity —
    but applied independently per resolution, matching this codebase's
    established bulk-import convention (v5.70.0/v5.71.0/v5.74.0): one
    bad group is reported in `errors` and skipped, it never fails the
@@ -465,23 +559,20 @@ router.post('/duplicates/resolve-bulk', authMiddleware, PLAN, MODGATE, rbac('stu
         results.errors.push({ row, keepId, message: 'removeIds array is required' }); continue;
       }
 
-      const keeper = await Students.findOne({ id: keepId, schoolId }).select('id admissionNumber firstName lastName').lean();
+      const keeper = await Students.findOne({ id: keepId, schoolId }).select('id admissionNumber firstName middleName lastName dateOfBirth').lean();
       if (!keeper) {
         results.errors.push({ row, keepId, message: 'Student to keep was not found' }); continue;
       }
-      if (!keeper.admissionNumber) {
-        results.errors.push({ row, keepId, message: 'Student to keep has no admission number' }); continue;
-      }
 
-      const toRemove = await Students.find({
-        id: { $in: removeIds }, schoolId, admissionNumber: keeper.admissionNumber,
-      }).select('id _id firstName lastName').lean();
+      const candidates = await Students.find({ id: { $in: removeIds }, schoolId })
+        .select('id _id firstName middleName lastName dateOfBirth admissionNumber').lean();
+      const toRemove = candidates.filter(c => _sameStudentIdentity(keeper, c));
 
       if (toRemove.length !== removeIds.length) {
         // Same rule as the single-resolve route: refuse THIS group
         // rather than silently deleting a subset of it — every other
         // valid group in the batch still proceeds.
-        results.errors.push({ row, keepId, message: `${removeIds.length - toRemove.length} of the given record(s) for this group do not share its admission number — group skipped` });
+        results.errors.push({ row, keepId, message: `${removeIds.length - toRemove.length} of the given record(s) for this group do not match keepId — group skipped` });
         continue;
       }
 
