@@ -6758,7 +6758,52 @@ Extended test file: 25/25 passing. Full suite: 313/313 suites, 3217/3217 tests.
 
 Reported with a screenshot: Overview showed blank Class for an active student whose Edit form correctly showed class and stream. Confirmed live (Nathaniel Maina, Trinitas): `classId`/`streamId` were valid, but denormalized `className`/`streamName` were blank — Overview trusts the stored fields as-is; Edit resolves live against the class/stream lists and was unaffected. Fixed in `server/routes/students.js`'s `GET /:id`: resolves `className`/`streamName` live from `classId`/`streamId` whenever present, overriding whatever's stored, so display can never drift from the real reference again — no backfill migration needed, since this self-heals every read. Tests: 2 new in `students.test.js` (resolves a blank stored value; no lookup attempted when classId/streamId are absent). Full suite: 313/313 suites, 3219/3219 tests.
 
-## 126. Kindergarten Indicators Move From the Template to the Markbook (v5.195.0)
+## 126. MarkList — Every Subject's Mark-Entry Status in One Table (v5.196.0)
+
+Raised directly: an exam officer had to open the Markbook one subject at a time to see whose marks were still missing for a sitting. New "Mark List" tab in **Exams** (not Report Cards — report cards only ever read already-entered marks and have no completeness concept; this is about catching gaps while marks are still being entered). `GET /api/assessment/mark-list` → `_computeMarkList(req)` in `assessment.js`: every subject for a class as columns, blank when a student isn't enrolled in an elective, `MISSING` when enrolled but no mark exists for that sitting.
+
+**RBAC**: new `reports__mark_list_school_wide` sub-grant (`moduleRegistry.js` + `SettingsPage.jsx` mirror), same `hasExplicitSubGrant` pattern Assessment Analytics uses. Checked against the narrow `ASSESSMENT_FLOOR_ROLES` floor (`resolveAssessmentScope` itself uses), deliberately not the generic `ScopeEngine.isUnrestricted` — a `'school'`-level role for most other modules (exams_officer, admissions_officer, finance, hr, timetabler, discipline_committee) gets `req.scope===null` generically, which would silently grant the whole-school view with no explicit permission.
+
+Caught before shipping: `taughtPairs()` returns `null` to mean "management — sees everything" (its own `MANAGEMENT_ROLES`, which includes `hod`, a role outside `ASSESSMENT_FLOOR_ROLES`) — naively coercing that `null` into an empty pairs list would show `hod` zero subjects instead of all of them.
+
+## 127. MarkList CSV Export; `isPublished` Sync Gap With Report Cards Closed (v5.197.0)
+
+`GET /mark-list/export` calls the exact same `_computeMarkList()` the on-screen `GET /mark-list` uses — one computation, called twice, so the file can never drift from the screen. Found while verifying "no gap or assumptions": `academic-calc.js`'s `aggregateAssessmentMarks` (what Report Cards reads) filters `isPublished:true`; MarkList's own query didn't — harmless today (every live mark has `isPublished:true`) but a real future gap, since the field exists precisely for a mark the report card would silently exclude. Fixed with the same filter + a regression test seeding an `isPublished:false` mark.
+
+## 128. Bulk Report-Card PDF Now Matches the Single-Student Render; Publish-Time Display Strings No Longer Freeze Blank (v5.198.0)
+
+Two fixes in `report-cards.js`, found via a side-by-side PDF comparison on a real published snapshot:
+
+- `GET /bulk-pdf` built its own `extra` object instead of reusing `_loadRenderExtras` (what `GET /:id/pdf`/`GET /:id/html` call) — missing `subjectNames` entirely (printing raw subject IDs) and never resolving `behaviour`/`deviations` at all, on a stale "neither layout needs them in bulk" assumption that stopped being true once `subject_paired`/`marks_then_comments` started rendering a Behaviour section and Dev column. Fixed: `subjectNames`/`subjectTeacherNames` resolved once per class, `behaviour`/`deviations` resolved per-student within the same per-chunk loop attendance already uses.
+- `PublishSchema`'s `className`/`termName`/`academicYear` are optional display strings the server trusted the client to send — but `ReportCardsTab.jsx`'s publish call never sends them, so **every snapshot ever published platform-wide has them frozen blank forever** (confirmed directly: real demo-school snapshots showing "Class —" / blank "Academic Year ·"). Fixed at the source: `POST /publish`/`POST /kg/publish` now resolve `className`/`academicYear`/`termName` server-side via a new `_resolveDisplayNames(schoolId, ctx, {classId, academicYearId, termId})` helper, from the same IDs `_resolveTermScope` already resolves — the client value is now only a last-resort fallback. Does not retroactively fix already-published snapshots (immutable by design); only a republish picks up the resolved values.
+
+## 129. ReportCardsTab: Silent Fetch Failures Now Surface a Retry Banner (v5.199.0)
+
+Six of seven data queries in `ReportCardsTab.jsx` (students, instance marks, comments, behaviour, attendance, snapshots) had no `isError`/`refetch` handling at all — a failed request rendered identically to "nothing exists," indistinguishable from genuinely-empty data. Investigated directly against live data for several "marks/comments disappeared" reports this session; the data was intact every time, pointing at this display-layer gap rather than real loss. One combined `anyLoadError` banner + `retryAllLoads()`, not five separate banners — mirrors the fix already applied to `ExamsPage.jsx`'s Markbook marks query earlier in the same investigation.
+
+## 130. Publish Auto-Lock No Longer Silently Aborts Partway Through a Class (v5.200.0)
+
+`mark_submissions`' only unique index (`indexes.js`'s `mksub_composite`) is `{schoolId, classId, subjectId, termNumber, assessmentType, instance}` — `streamId` is **not** part of a submission's identity. The `/publish`/`/kg/publish` auto-lock step (introduced §108, 2026-10-13) conditionally included `streamId` in its own lookup filter; that filter can't find a pre-existing stream-naive doc, falls through to `create()`, and throws a duplicate-key error against that same index — which the single outer `try/catch` around the whole lock loop logs once and silently abandons every combo still left to process. Confirmed live: 4 of 11 real combos in an already-published class never got their `mark_submissions` doc flipped to `locked`, leaving the Moderation queue showing a stale status for an already-finalized subject. `assessment_marks.isLocked`/`indicator_marks.isLocked` (set by the unconditional `updateMany` that runs *before* the loop) were never affected — report-card correctness and write-protection were never at risk.
+
+Fixed with a shared `_lockSubmissionCombos` helper (both `/publish` and `/kg/publish` call it), deduped by the real unique-index tuple (no `streamId`), with each combo now wrapped in its own `try/catch` so one failure can't take out the rest of the batch.
+
+## 131. Comments Lock at Publish, Same as Marks (v5.201.0)
+
+Publish already locks every mark via auto-lock (§108/§130) — comments had no equivalent, so a subject's comment text could keep changing after the report was published with no gate at all. New `commentsLocked`/`commentsLockedAt` fields on `report_card_snapshots`, set `true` at publish time (both `/publish` and `/kg/publish`). `PUT /:id/comments`, `PUT /draft-comments/:studentId`, its per-subject counterpart, and the report-comment-approval advance route all now refuse an edit via `_publishedCommentsLockFor(schoolId, ctx, studentId, termNumber)` — true whenever a non-superseded published snapshot for that student+term has `commentsLocked:true`.
+
+New `POST /:id/comments/unlock`: admin-only, mandatory reason, audit-logged (`report_card.comments_unlocked`), schedules a 24h auto-relock via the existing durable job queue (a dedicated `comments_relock` job type — the payload is a snapshot id, not a `mark_submissions` id, so it can't be confused with `marks_relock`). Mirrors `mark-submissions.js`'s own unlock exactly, at the same no-workflow-config default behavior every school actually uses.
+
+Deliberately a **different axis** from the `commentLockState` removed 2026-10-11 (`comment-scope.js`) — that one blocked a write based on that subject's OWN marks-submission state, pre-publish; this one blocks only once the report has actually been published.
+
+## 132. Cover Page Principal Label and Sign-Off Stacking (v5.195.0)
+
+Two gaps in the shared cover/sign-off components (`subject_paired`/`marks_then_comments`): the cover page's meta row had its own hardcoded `'Principal'` string in `report-layouts.js`, never reading `config.principalSignatureLabel` the sign-off block itself already respects — now carries `cover.principalLabel` through. And the class-teacher/principal comment+signature blocks sat in a side-by-side 2-column grid in HTML while the PDF renderer already drew them full-width, stacked — a short block (e.g. principal's, with no comment) sat flush against the OTHER signer's comment banner, reading as paired with it. HTML now stacks to match the PDF.
+
+## 133. Per-Student Report Preview: Academic Year No Longer Blank (v5.202.0)
+
+Cover page read "Academic Year · Mid Term 1" with nothing between — but only in the **live, unpublished preview** (`POST /preview-html`, used by `StudentReportCard.jsx`'s print button when no published snapshot exists yet), not already-published reports (those get `academicYear` correctly via §128's `_resolveDisplayNames` fix). Root cause, client-side: `ReportCardsTab.jsx`'s `displayAcademicYear` fell back to `academicYear` (= `school.academicYear`) whenever no year was explicitly picked from the dropdown (the common default) — a raw string field on the `schools` doc that nothing has ever populated, always `''`. `useCurrentAcademicPeriod()` (already used elsewhere in the same file for the picker's own placeholder text) now sits ahead of that dead field in the fallback chain: `selectedYearDoc?.name ?? currentPeriod.academicYear ?? academicYear`.
+
+## 134. Kindergarten Indicators Move From the Template to the Markbook (v5.203.0)
 
 Direct pushback on the design established in §108-112: "whoever is setting the template is like an admin, he doesn't know all the indicators per subject, and these indicators vary depending on what content was set, so they can't be static — they have to be added manually in the Markbook." Confirmed live: the one real KG template (`sch_demo`) had performance bands configured but **zero subjects/indicators** — there was genuinely nowhere for the admin to author per-subject competency text that tracked what was actually taught.
 
