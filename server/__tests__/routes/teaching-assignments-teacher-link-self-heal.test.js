@@ -37,7 +37,10 @@ function mockMatches(doc, filter) {
 function makeCollection(seed = []) {
   const docs = [...seed];
   return {
-    find:    jest.fn((filter) => ({ lean: () => Promise.resolve(docs.filter(d => mockMatches(d, filter))) })),
+    find:    jest.fn((filter) => ({
+      sort: () => ({ lean: () => Promise.resolve(docs.filter(d => mockMatches(d, filter))) }),
+      lean: () => Promise.resolve(docs.filter(d => mockMatches(d, filter))),
+    })),
     findOne: jest.fn((filter) => mockChainObj(docs.find(d => mockMatches(d, filter)) || null)),
     countDocuments: jest.fn((filter) => Promise.resolve(docs.filter(d => mockMatches(d, filter)).length)),
     create:  jest.fn(async (doc) => { docs.push(doc); return { ...doc, toObject: () => doc }; }),
@@ -168,5 +171,67 @@ describe('POST /api/teaching-assignments — teacher.userId self-heal', () => {
     expect(res.status).toBe(201);
     expect(res.body.data.teacherId).toBe('usr_linked');
     expect(mockUsers.findOne).not.toHaveBeenCalled();
+  });
+});
+
+describe('GET /api/teaching-assignments?teacherId= — canonical resolution', () => {
+  // Reported live: an assignment that did not show up in this list still
+  // blocked a re-add as a duplicate — because POST resolves teacherId to
+  // the canonical login id, but this route used to filter by whatever the
+  // query param said, verbatim. A caller whose cached teacher object only
+  // has teachers.id (no userId — e.g. a stale client cache, or a
+  // limited-projection fetch) got an empty/partial list here even though
+  // the real, correctly-keyed row existed all along.
+  test('querying by teacher.id (not the login id) still finds rows stored under the login id', async () => {
+    mockTeachers = makeCollection([
+      { id: 'tch_maureen', schoolId: SCHOOL, userId: 'usr_maureen', email: 'maureen@school.com', firstName: 'Maureen', lastName: 'Chepngeno' },
+    ]);
+    mockUsers = makeCollection([]);
+    mockAssignments = makeCollection([
+      { id: 'ta_1', schoolId: SCHOOL, teacherId: 'usr_maureen', classId: electiveClass.id, subjectId: subject.id, subjectName: subject.name, className: electiveClass.name },
+    ]);
+    mockJwtUser = { userId: 'usr_admin', schoolId: SCHOOL, role: 'admin', roles: ['admin'] };
+
+    const res = await supertest(buildApp())
+      .get('/api/teaching-assignments')
+      .query({ teacherId: 'tch_maureen' }); // the admin's client sent teacher.id, not her login id
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].id).toBe('ta_1');
+  });
+
+  test('querying by the login id directly still works (unchanged)', async () => {
+    mockTeachers = makeCollection([
+      { id: 'tch_maureen', schoolId: SCHOOL, userId: 'usr_maureen', email: 'maureen@school.com', firstName: 'Maureen', lastName: 'Chepngeno' },
+    ]);
+    mockUsers = makeCollection([]);
+    mockAssignments = makeCollection([
+      { id: 'ta_1', schoolId: SCHOOL, teacherId: 'usr_maureen', classId: electiveClass.id, subjectId: subject.id, subjectName: subject.name, className: electiveClass.name },
+    ]);
+    mockJwtUser = { userId: 'usr_admin', schoolId: SCHOOL, role: 'admin', roles: ['admin'] };
+
+    const res = await supertest(buildApp())
+      .get('/api/teaching-assignments')
+      .query({ teacherId: 'usr_maureen' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
+  });
+
+  test('a teacherId matching no teacher record at all falls back to a literal match (never errors)', async () => {
+    mockTeachers = makeCollection([]);
+    mockUsers = makeCollection([]);
+    mockAssignments = makeCollection([
+      { id: 'ta_legacy', schoolId: SCHOOL, teacherId: 'some_legacy_value', classId: electiveClass.id, subjectId: subject.id },
+    ]);
+    mockJwtUser = { userId: 'usr_admin', schoolId: SCHOOL, role: 'admin', roles: ['admin'] };
+
+    const res = await supertest(buildApp())
+      .get('/api/teaching-assignments')
+      .query({ teacherId: 'some_legacy_value' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
   });
 });

@@ -176,7 +176,21 @@ router.get('/', authMiddleware, async (req, res) => { // rbac: self-scoped below
     }
 
     // Query filters
-    if (req.query.teacherId)  filter.teacherId  = req.query.teacherId;
+    if (req.query.teacherId) {
+      // Resolve to the SAME canonical id POST uses (teacher's login id when
+      // linked), never the raw query value — otherwise a caller whose
+      // cached teacher object only has teachers.id (no userId, e.g. a
+      // stale client cache or a limited-projection fetch) gets an empty or
+      // partial list here, while POST's own canonical lookup still finds
+      // the real row and correctly rejects it as "already assigned". That
+      // exact split was reported live: an assignment that didn't show up
+      // in this list still blocked a re-add as a duplicate.
+      const qTeacher = await tenantModel('teachers', tenantContext(req)).findOne({
+        schoolId,
+        $or: [{ userId: req.query.teacherId }, { id: req.query.teacherId }],
+      }).select('id userId').lean();
+      filter.teacherId = qTeacher?.userId || qTeacher?.id || req.query.teacherId;
+    }
     if (req.query.classId)    filter.classId    = req.query.classId;
     if (req.query.subjectId)  filter.subjectId  = req.query.subjectId;
     // Timetable auto-fill lookup (?classId=X&subjectId=Y&streamId=Z) needs
