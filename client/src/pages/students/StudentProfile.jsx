@@ -24,6 +24,7 @@ import {
   settings   as settingsApi,
   classes    as classesApi,
   streams    as streamsApi,
+  _csrfToken,
 } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 import { useToast } from '@/hooks/useToast.jsx';
@@ -1658,9 +1659,10 @@ function PortalTab({ student, canEdit }) {
     setWorking(key); setError('');
     try {
       const sid = student.id || student._id;
+      const csrf = _csrfToken();
       const res  = await fetch(`/api/students/${sid}${path}`, {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(csrf ? { 'X-CSRF-Token': csrf } : {}) },
         credentials: 'include',
         ...(body ? { body: JSON.stringify(body) } : {}),
       });
@@ -1678,9 +1680,10 @@ function PortalTab({ student, canEdit }) {
     setDeactivating(true); setError('');
     try {
       const sid = student.id || student._id;
+      const csrf = _csrfToken();
       const res  = await fetch(`/api/students/${sid}/deactivate`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(csrf ? { 'X-CSRF-Token': csrf } : {}) },
         credentials: 'include',
         body: JSON.stringify({ reason: 'withdrawn', notes: '' }),
       });
@@ -1913,7 +1916,12 @@ function PortalTab({ student, canEdit }) {
                 setError('');
                 try {
                   const sid = student.id || student._id;
-                  const res  = await fetch(`/api/students/${sid}/reactivate`, { method: 'PATCH', credentials: 'include' });
+                  const csrf = _csrfToken();
+                  const res  = await fetch(`/api/students/${sid}/reactivate`, {
+                    method: 'PATCH',
+                    credentials: 'include',
+                    ...(csrf ? { headers: { 'X-CSRF-Token': csrf } } : {}),
+                  });
                   const json = await res.json();
                   if (!json.success) { setError(json.error?.message || 'Failed to reactivate'); return; }
                   window.location.reload();

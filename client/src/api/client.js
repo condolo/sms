@@ -38,7 +38,10 @@ function isSessionActive() {
 // it back and echo it in a header on every state-changing request. See
 // server/utils/csrf.js for why SameSite=Strict alone isn't sufficient
 // (a sibling *.msingi.io subdomain is same-site, not cross-site).
-function _csrfToken() {
+// Exported: StudentProfile.jsx's account-action buttons (resend/create
+// portal credentials, deactivate, reactivate) call fetch() directly
+// instead of going through _req() below, so they need this too.
+export function _csrfToken() {
   const m = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/);
   return m ? decodeURIComponent(m[1]) : null;
 }
