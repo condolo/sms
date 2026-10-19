@@ -19,7 +19,7 @@ jest.mock('../../middleware/auth', () => ({
     next();
   },
 }));
-jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => next() }));
+jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => next(), hasExplicitSubGrant: async () => false }));
 jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) => next() }));
 jest.mock('../../utils/archival', () => ({
   isYearArchived: jest.fn().mockResolvedValue(false),

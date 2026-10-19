@@ -18,6 +18,11 @@ function mockChain(result) {
 
 let mockAcademicConfig;
 let mockAssignmentDocs;
+let mockSchoolWideGrant;
+
+jest.mock('../middleware/rbac', () => ({
+  hasExplicitSubGrant: jest.fn(() => Promise.resolve(mockSchoolWideGrant)),
+}));
 
 jest.mock('../utils/tenant-model', () => ({
   tenantModel: jest.fn((col) => {
@@ -45,6 +50,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockAcademicConfig = { subjectAssignmentEnforced: true };
   mockAssignmentDocs = [];
+  mockSchoolWideGrant = false;
 });
 
 describe('isSubjectAssignmentEnforced', () => {
@@ -92,6 +98,18 @@ describe('canWriteSubject', () => {
     await canWriteSubject(reqAs('teacher'), 'cls_1', 'subj_math');
     expect(tenantModel).not.toHaveBeenCalledWith('academic_config');
   });
+
+  test('the explicit reports__mark_list_school_wide grant passes even with no matching assignment', async () => {
+    mockAssignmentDocs = [];
+    mockSchoolWideGrant = true;
+    expect(await canWriteSubject(reqAs('exams_officer'), 'cls_1', 'subj_math')).toBe(true);
+  });
+
+  test('without the grant, a non-management role with no assignment is still denied', async () => {
+    mockAssignmentDocs = [];
+    mockSchoolWideGrant = false;
+    expect(await canWriteSubject(reqAs('exams_officer'), 'cls_1', 'subj_math')).toBe(false);
+  });
 });
 
 describe('unassignedPairs', () => {
@@ -128,5 +146,12 @@ describe('unassignedPairs', () => {
     ];
     const result = await unassignedPairs(reqAs('teacher'), pairs);
     expect(result).toEqual([{ classId: 'cls_1', subjectId: 'subj_english' }]);
+  });
+
+  test('the explicit reports__mark_list_school_wide grant clears every pair, even with zero assignments', async () => {
+    mockAssignmentDocs = [];
+    mockSchoolWideGrant = true;
+    const pairs = [{ classId: 'cls_1', subjectId: 'subj_math' }, { classId: 'cls_2', subjectId: 'subj_english' }];
+    expect(await unassignedPairs(reqAs('exams_officer'), pairs)).toEqual([]);
   });
 });

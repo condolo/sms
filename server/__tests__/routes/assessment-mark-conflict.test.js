@@ -34,6 +34,7 @@ jest.mock('../../middleware/auth', () => ({
 
 jest.mock('../../middleware/rbac', () => ({
   rbac: () => (_req, _res, next) => next(),
+  hasExplicitSubGrant: async () => false,
 }));
 
 jest.mock('../../middleware/plan', () => ({

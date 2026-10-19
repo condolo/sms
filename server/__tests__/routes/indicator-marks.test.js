@@ -28,7 +28,7 @@ jest.mock('../../utils/scopeEngine', () => ({ applyToFilter: jest.fn(), hasNoAss
 // here — this file's job is the subject-teacher scoping / score-
 // validation / archival guards INSIDE the handler, same split as
 // students.test.js vs students-sensitive-permissions.test.js.
-jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => next() }));
+jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => next(), hasExplicitSubGrant: async () => false }));
 
 /* ── In-memory stores with real-ish Mongo filter matching ── */
 let mockTeachingAssignments = [];

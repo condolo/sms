@@ -27,7 +27,7 @@ jest.mock('../../middleware/auth', () => ({
 const mockHasPermission = jest.fn(async () => false);
 jest.mock('../../middleware/rbac', () => ({
   rbac: () => (_req, _res, next) => next(),
-  hasExplicitSubGrant: jest.fn(async () => true),
+  hasExplicitSubGrant: jest.fn(async () => false),
   hasPermission: (...args) => mockHasPermission(...args),
 }));
 jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) => next() }));

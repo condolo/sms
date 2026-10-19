@@ -31,6 +31,7 @@
 'use strict';
 
 const { tenantModel, tenantContext } = require('./tenant-model');
+const { hasExplicitSubGrant } = require('../middleware/rbac');
 
 /* Same bypass set as teaching-assignments.js's canManage() FULL_MANAGE,
    plus 'hod' — a HOD may only *create* assignments within their own
@@ -48,6 +49,21 @@ function _effectiveRoles(req) {
 function _isManagement(req) {
   const eff = _effectiveRoles(req);
   return [...MANAGEMENT_ROLES].some(r => eff.has(r));
+}
+
+/* Raised directly: an exams_officer granted EVERY box this app has for
+   Exams/Assessment/Report Cards — including reports__mark_list_school_wide
+   with update/create/delete, not just read — still couldn't write a mark
+   for any class outside their own teaching_assignments, because this
+   file's write gate only ever bypassed for MANAGEMENT_ROLES. The grant
+   that already widens MarkList (assessment.js) and full report-card
+   visibility (report-view-scope.js) to "every subject, school-wide" is
+   reused here for WRITE too, checked on its own 'update' action — a
+   school that ticked update (not just read) on this one Settings row has
+   already made the call that this role may enter/correct marks anywhere,
+   not just see that they're missing. */
+async function _hasSchoolWideMarkGrant(req) {
+  return hasExplicitSubGrant(req, 'reports', 'mark_list_school_wide', 'update');
 }
 
 /** Whether this school has opted into subject-teacher scoping. */
@@ -82,6 +98,7 @@ function _streamOr(streamId) {
  */
 async function canWriteSubject(req, classId, subjectId, streamId) {
   if (_isManagement(req)) return true;
+  if (await _hasSchoolWideMarkGrant(req)) return true;
 
   const { schoolId, userId } = req.jwtUser;
   const doc = await tenantModel('teaching_assignments', tenantContext(req))
@@ -100,6 +117,7 @@ async function canWriteSubject(req, classId, subjectId, streamId) {
 async function unassignedPairs(req, pairs) {
   if (pairs.length === 0) return [];
   if (_isManagement(req)) return [];
+  if (await _hasSchoolWideMarkGrant(req)) return [];
 
   const { schoolId, userId } = req.jwtUser;
   const assigned = await tenantModel('teaching_assignments', tenantContext(req))

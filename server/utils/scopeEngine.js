@@ -14,6 +14,7 @@
 const { tenantModel, tenantContext } = require('./tenant-model');
 const { resolveTeacher } = require('./resolveTeacher');
 const { _loadAssigned } = require('../middleware/scopeMiddleware');
+const { hasExplicitSubGrant } = require('../middleware/rbac');
 
 /* ── Module → MongoDB field mapping ────────────────────────── */
 // Maps each module to the field used to restrict records and which scope
@@ -537,9 +538,19 @@ async function resolveLessonsClassPickerScope(req) {
  * an opt-in `assessmentScope=true` floor to use instead, mirroring
  * `attendanceScope`/`lessonsScope` exactly.
  *
+ * Raised directly: an exams_officer granted every box this app has for
+ * Exams/Assessment/Report Cards — including reports__mark_list_school_wide
+ * with every action ticked, not just read — still saw only their own
+ * assigned classes in the Markbook roster, because this floor only ever
+ * bypassed for ASSESSMENT_FLOOR_ROLES, with no grant-based override at
+ * all (unlike Attendance/Timetable's own scope functions). The SAME grant
+ * MarkList (assessment.js) and full report-card visibility
+ * (report-view-scope.js) already honor for school-wide READ is reused
+ * here — a school that ticked this row has already made that call.
+ *
  * @param {import('express').Request} req
  * @returns {Promise<null|{level:string, classIds:string[], subjectIds:string[], streamIds:string[]}>}
- *   null = unrestricted (floor role)
+ *   null = unrestricted (floor role, or the explicit school-wide grant)
  */
 const ASSESSMENT_FLOOR_ROLES = new Set(['admin', 'superadmin', 'principal', 'deputy_principal', 'deputy']);
 
@@ -547,6 +558,7 @@ async function resolveAssessmentScope(req) {
   const { userId, schoolId, role, roles = [] } = req.jwtUser ?? {};
   const effectiveRole = role || roles[0] || '';
   if (ASSESSMENT_FLOOR_ROLES.has(effectiveRole)) return null;
+  if (await hasExplicitSubGrant(req, 'reports', 'mark_list_school_wide', 'read')) return null;
   if (!userId || !schoolId) return { level: 'assigned', classIds: [], subjectIds: [], streamIds: [] };
 
   // Teaching assignments only. A form tutor's homeroom stream is not marks authority
