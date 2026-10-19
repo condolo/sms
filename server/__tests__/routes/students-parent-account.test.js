@@ -82,7 +82,11 @@ jest.mock('../../utils/tenant-model', () => ({
     }
     if (collection === 'users') {
       return {
-        findOne: (filter) => mockChain(mockUsersDocs.find((u) => u.email === filter.email && u.schoolId === filter.schoolId && u.role === filter.role) ?? null),
+        findOne: (filter) => mockChain(mockUsersDocs.find((u) => {
+          if (u.email !== filter.email || u.schoolId !== filter.schoolId) return false;
+          if (filter.role && typeof filter.role === 'object' && '$ne' in filter.role) return u.role !== filter.role.$ne;
+          return u.role === filter.role;
+        }) ?? null),
         create: (doc) => { const d = { ...doc, _id: `uid_${mockUsersDocs.length + 1}` }; mockUsersDocs.push(d); return Promise.resolve(d); },
         updateOne: (filter, update) => {
           const d = mockUsersDocs.find((u) => u._id === filter._id);
@@ -214,5 +218,48 @@ describe('sibling-aware per guardian', () => {
     const father = mockUsersDocs.find((u) => u.email === 'kofi@example.com');
     expect(father.studentIds).toEqual(['stu_sibling']);
     expect(mockUsersDocs).toHaveLength(2);
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════
+   A guardian's email already belongs to a non-parent account
+   (2026-10-19) — reported directly: "there are teachers who are also
+   parents in the same school." One login can't hold two roles today
+   (every account has exactly one role), so this can only ever be
+   caught and explained clearly, never silently merged or silently
+   allowed to crash on the schoolId+email unique index.
+══════════════════════════════════════════════════════════════ */
+describe('guardian email collides with an existing non-parent account', () => {
+  test('a parent email matching an existing TEACHER account is refused with a clear message, not a crash', async () => {
+    mockUsersDocs = [{
+      _id: 'uid_teacher', id: 'u_teacher', schoolId: SCHOOL, role: 'teacher',
+      name: 'Mr Robert Mukhwana', email: 'adjoa@example.com',
+    }];
+    const res = await supertest(buildApp()).post('/api/students/stu_001/parent-account').send({});
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toMatch(/already the login for an existing teacher account/i);
+    expect(res.body.error.message).toMatch(/Mr Robert Mukhwana/);
+    expect(mockUsersDocs).toHaveLength(1); // nothing created, nothing touched
+  });
+
+  test('same check applies to a Mother/Father-specific call', async () => {
+    mockUsersDocs = [{
+      _id: 'uid_admin', id: 'u_admin', schoolId: SCHOOL, role: 'admin',
+      name: 'Ms Jane Admin', email: 'kofi@example.com',
+    }];
+    const res = await supertest(buildApp()).post('/api/students/stu_001/parent-account').send({ guardian: 'father' });
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toMatch(/already the login for an existing admin account/i);
+    expect(mockUsersDocs).toHaveLength(1);
+  });
+
+  test('a parent email matching an EXISTING parent account is unaffected (the normal sibling case)', async () => {
+    mockUsersDocs = [{
+      _id: 'uid_existing', id: 'u1', schoolId: SCHOOL, role: 'parent',
+      name: 'Adjoa Osei', email: 'adjoa@example.com', studentIds: ['stu_sibling'], guardianOf: ['stu_sibling'],
+    }];
+    const res = await supertest(buildApp()).post('/api/students/stu_001/parent-account').send({});
+    expect(res.status).toBe(200);
+    expect(res.body.data.action).toBe('updated');
   });
 });

@@ -2189,6 +2189,30 @@ router.post('/:id/parent-account', authMiddleware, PLAN, MODGATE, rbac('students
     // school — sibling-aware for whichever guardian this call is for.
     let existing = await Users.findOne({ email: parentEmail, schoolId, role: 'parent' }).lean();
 
+    // Reported directly: "there are teachers who are also parents in the
+    // same school." A genuinely common case — a staff member's own child
+    // enrolled — that this route had no answer for: the lookup above only
+    // ever matches an EXISTING role:'parent' account, so a staff member's
+    // email (role teacher/admin/etc.) never matches it, and the code fell
+    // through to creating a brand-new user with that same email — which
+    // the schoolId+email unique index (users_school_email_str) then
+    // rejected, surfacing as an opaque 500 with no indication of why.
+    // One login can't hold two roles today (every account is created
+    // with exactly one role, everywhere in this codebase — true role-
+    // switching on one login is a real feature, not something to add as
+    // a side effect of this fix), so this can't be silently merged into
+    // their staff account either. Caught here with a clear, actionable
+    // message instead of a crash: use a different email for this
+    // guardian (a personal address, or the other parent's), since a
+    // parent portal login needs one that isn't already someone's staff
+    // login at this school.
+    if (!existing) {
+      const conflicting = await Users.findOne({ email: parentEmail, schoolId, role: { $ne: 'parent' } }).select('role name').lean();
+      if (conflicting) {
+        return E.badRequest(res, `"${parentEmail}" is already the login for an existing ${conflicting.role} account (${conflicting.name || 'no name on record'}) at this school. A parent portal login needs its own, different email address — use a personal email for this guardian instead of their staff one.`);
+      }
+    }
+
     if (existing) {
       // Add this student to their children if not already there
       const currentIds = Array.isArray(existing.studentIds) ? existing.studentIds : [];
