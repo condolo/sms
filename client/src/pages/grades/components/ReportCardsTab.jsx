@@ -429,8 +429,19 @@ export default function ReportCardsTab() {
   // value (school.academicYear) regardless of which year's term the
   // admin actually generated. Once a year is explicitly picked above,
   // its own name must be what renders — not whatever "now" resolves to.
+  //
+  // Reported directly again (2026-10-19, cover page read "Academic Year
+  // · Mid Term 1" with nothing between): when no year is explicitly
+  // picked (the common default — "Current year" placeholder), this fell
+  // all the way back to `academicYear` = school.academicYear, a raw
+  // string field on the schools doc that nothing ever populates — it was
+  // always ''. useCurrentAcademicPeriod() (already used elsewhere in
+  // this file, line 37) resolves the real current year server-side from
+  // academic_years.isCurrent, same source the year picker's own
+  // placeholder text already trusts — that belongs in this fallback
+  // chain ahead of the dead school.academicYear field, not after it.
   const selectedYearDoc = yearId ? yearsList.find(y => (y.id ?? y._id) === yearId) : null;
-  const displayAcademicYear = selectedYearDoc?.name ?? academicYear;
+  const displayAcademicYear = selectedYearDoc?.name ?? currentPeriod.academicYear ?? academicYear;
 
   // Student info map from class students list
   const studentInfoMap = Object.fromEntries(
