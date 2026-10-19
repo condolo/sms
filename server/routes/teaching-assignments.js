@@ -241,7 +241,29 @@ router.post('/', authMiddleware, async (req, res) => { // rbac: canManage() belo
     // login existed and never re-keyed once it did. This stops new rows
     // from joining that set; see the migration note on invalidateScopeCache
     // in teachers.js/import-export.js/timetable.js for the other half.
-    const canonicalTeacherId = teacher.userId || teacher.id;
+    //
+    // A second, distinct case confirmed live the same day: teacher.userId
+    // can be unset even though an active login with the EXACT matching
+    // email already exists — the one-time email-match at teacher-creation
+    // (teachers.js POST) only fires if that login already existed AT THAT
+    // moment; a login created afterward via a plain invite (no staffId)
+    // never links back. Nothing upstream of this route guarantees the link
+    // exists before an assignment gets created for this teacher, so self-heal
+    // it here too — same by-email match timetable.js's GET /my already does
+    // lazily, just exercised at the one place that can't wait for the
+    // teacher to visit Timetable first.
+    let canonicalTeacherId = teacher.userId;
+    if (!canonicalTeacherId && teacher.email) {
+      const matchingUser = await tenantModel('users', tenantContext(req))
+        .findOne({ schoolId, email: teacher.email.toLowerCase(), isActive: { $ne: false } }).select('id').lean();
+      if (matchingUser) {
+        canonicalTeacherId = matchingUser.id;
+        tenantModel('teachers', tenantContext(req))
+          .updateOne({ schoolId, id: teacher.id }, { $set: { userId: matchingUser.id } })
+          .catch(() => {});
+      }
+    }
+    canonicalTeacherId = canonicalTeacherId || teacher.id;
 
     // Same normalization GET /classes already applies for its own dropdowns
     // (see that route's "Normalize" comment) — a legacy class matched only
