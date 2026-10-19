@@ -2,6 +2,20 @@
    Msingi — What a teacher may see of a report card.
 
    • Management sees every report in full.
+   • Anyone explicitly granted school-wide assessment visibility
+     (reports__mark_list_school_wide — assessment.js's MarkList feature)
+     also sees every report in full. Reported directly: an exams_officer
+     with that exact grant (full oversight of the assessment/report-card
+     pipeline is the whole point of the role) still got the stripped-
+     down "subjects I personally teach" view on every report outside
+     their own teaching assignments, or an outright 403 on the rest —
+     because isManagement()'s role list (subject-scope.js) was never
+     meant to answer "who manages report cards," only "who bypasses
+     subject-teacher scoping for marks/comments entry," and exams_officer
+     was never on it. Reusing the SAME grant MarkList already uses
+     rather than inventing a second "can see all report cards" key —
+     a school that already trusted this person with whole-school
+     assessment data has already made this exact call.
    • A stream's form tutor sees that stream's reports in full
      (form tutor = streams.formTeacherId for the caller's own streams).
    • Any other teacher sees only the subjects they teach in that class:
@@ -14,14 +28,17 @@
 const ScopeEngine = require('./scopeEngine');
 const { isManagement } = require('./subject-scope');
 const { taughtPairs } = require('./teaching-scope');
+const { hasExplicitSubGrant } = require('../middleware/rbac');
 
 // Parents, guardians and students see their own child's report through their own ownership
 // checks (report-cards.js), never through this teaching rule.
 const FAMILY_ROLES = ['parent', 'guardian', 'student'];
 
-/** Management, or the form tutor of this exact stream, may see a report in full. */
+/** Management, the form tutor of this exact stream, or anyone explicitly
+ *  granted school-wide assessment visibility, may see a report in full. */
 async function canViewFullReport(req, streamId) {
   if (isManagement(req) || FAMILY_ROLES.includes(req.jwtUser?.role)) return true;
+  if (await hasExplicitSubGrant(req, 'reports', 'mark_list_school_wide', 'read')) return true;
   if (!streamId) return false;
   const formStreamIds = await ScopeEngine.resolveHomeroomStreamIds(req);
   return formStreamIds.includes(streamId);

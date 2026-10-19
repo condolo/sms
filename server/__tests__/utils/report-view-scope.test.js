@@ -12,6 +12,7 @@ let mockUser = null;
 let mockFormStreams = [];
 let mockAssignments = [];
 let mockClassSubjects = [];
+let mockHasExplicitSubGrant = false;
 
 jest.mock('../../utils/scopeEngine', () => ({
   resolveHomeroomStreamIds: async () => mockFormStreams,
@@ -28,6 +29,13 @@ jest.mock('../../utils/tenant-model', () => ({
       }))),
     };
   },
+}));
+// hasExplicitSubGrant itself (floor-role-or-DB-grant check) is exercised by
+// rbac-subkey.test.js; here it's mocked so this file's own job — what
+// canViewFullReport does with a true/false answer — doesn't depend on a
+// real DB connection.
+jest.mock('../../middleware/rbac', () => ({
+  hasExplicitSubGrant: async () => mockHasExplicitSubGrant,
 }));
 
 const { viewReportFor, canViewFullReport } = require('../../utils/report-view-scope');
@@ -48,6 +56,7 @@ beforeEach(() => {
     { schoolId: SCHOOL, classId: 'c9', subjectId: 'maths', isCompulsoryForClass: true },
     { schoolId: SCHOOL, classId: 'c9', subjectId: 'french', isCompulsoryForClass: false },
   ];
+  mockHasExplicitSubGrant = false;
 });
 
 const req = () => ({ jwtUser: { ...mockUser } });
@@ -100,5 +109,22 @@ describe('management and family see the report in full', () => {
   test('a parent sees their child\'s full report (ownership is checked by the route)', async () => {
     mockUser = { userId: 'p1', schoolId: SCHOOL, role: 'parent', roles: ['parent'] };
     expect(await viewReportFor(req(), REPORT)).toBe(REPORT);
+  });
+});
+
+describe('an explicit reports__mark_list_school_wide grant sees every report in full', () => {
+  test('a non-management, non-form-tutor role (e.g. exams_officer) with the grant sees the full report', async () => {
+    mockUser = { userId: 'e1', schoolId: SCHOOL, role: 'exams_officer', roles: ['exams_officer'] };
+    mockAssignments = []; // no teaching assignments of their own
+    mockHasExplicitSubGrant = true;
+    expect(await viewReportFor(req(), REPORT)).toBe(REPORT);
+    expect(await canViewFullReport(req(), 'stream_A')).toBe(true);
+  });
+
+  test('the same role without the grant falls back to the ordinary teaching rule', async () => {
+    mockUser = { userId: 'e1', schoolId: SCHOOL, role: 'exams_officer', roles: ['exams_officer'] };
+    mockAssignments = [];
+    mockHasExplicitSubGrant = false;
+    expect(await viewReportFor(req(), REPORT)).toBeNull();
   });
 });
