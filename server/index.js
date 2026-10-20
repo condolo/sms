@@ -270,7 +270,8 @@ app.use('/api/platform', platformLimiter);
 console.log('[Security] rate limiting active — general: 10000/15min per user (IP for anonymous), auth: 20/15min per IP (login+force-change+change-password+revoke-all), platform: 300/15min per IP');
 
 /* ── API Routes ─────────────────────────────────────────────── */
-app.use('/api/public',      require('./routes/public'));   // no auth — school branding
+app.use('/api/public',      require('./routes/public'));   // no auth - school branding
+app.use('/api/demo',        require('./routes/demo'));     // no auth - self-serve demo requests
 app.use('/api/auth',        require('./routes/auth'));
 app.use('/api/onboard',     require('./routes/onboard'));
 app.use('/api/sync',        require('./routes/sync'));
@@ -370,6 +371,7 @@ app.use('/api/weekly-snapshots',       require('./routes/weekly-snapshots'));
 
 app.use('/api/ops',                    require('./routes/ops'));
 app.use('/api/audit',                  require('./routes/audit'));
+app.use('/api/support',                require('./routes/support'));   // user-facing support tickets
 
 /* ── School-facing announcement routes (JWT auth, not platform key) ── */
 const { authMiddleware } = require('./middleware/auth');
@@ -730,6 +732,43 @@ async function _migrateReportIds() {
 }
 
 /* ── Start ──────────────────────────────────────────────────── */
+/**
+ * _migrateReportCardDefaults - idempotent startup migration.
+ *
+ * Two per-school defaults the report-card engine needs, which a school
+ * created before that engine existed simply does not have:
+ *   - a grade scale. Without one, POST /api/report-cards/generate
+ *     refuses with "No grade scale is set for this class's section".
+ *   - a report-card template. Without one, publishing falls back to the
+ *     frozen legacy layout, whose HTML (what a card prints) and PDF
+ *     (what a class batch downloads) are two different documents.
+ *
+ * Additive only: a school that already configured its own scale or
+ * template is never touched, and published snapshots are never
+ * rewritten - only FUTURE publishes pick the defaults up.
+ *
+ * Set SKIP_REPORT_CARD_DEFAULTS_BACKFILL=true to turn this off and run
+ * server/scripts/backfill-report-card-defaults.js by hand instead.
+ */
+async function _migrateReportCardDefaults() {
+  try {
+    if (String(process.env.SKIP_REPORT_CARD_DEFAULTS_BACKFILL).toLowerCase() === 'true') {
+      console.log('[Migration] report-card defaults: skipped (SKIP_REPORT_CARD_DEFAULTS_BACKFILL=true)');
+      return;
+    }
+    const { runBackfill } = require('./scripts/backfill-report-card-defaults');
+    const report = await runBackfill({ apply: true, log: null });
+    if (report.created || report.updated) {
+      console.log(`[Migration] report-card defaults: ${report.created} created, ${report.updated} updated across ${report.schools.length} school(s)`);
+    }
+    if (report.review) {
+      console.warn(`[Migration] report-card defaults: ${report.review} school(s) need a human decision (scales/templates exist but none is a default) - run server/scripts/backfill-report-card-defaults.js for the details.`);
+    }
+  } catch (err) {
+    console.error('[Migration] _migrateReportCardDefaults failed:', err.message);
+  }
+}
+
 async function start() {
   await connect();        // Connect to MongoDB (no-op if MONGODB_URI not set)
   await ensureIndexes();  // Idempotent — safe to run on every startup
@@ -766,8 +805,14 @@ async function start() {
       .catch(err => console.error('[_migrateSectionHeadId] Unhandled error:', err));
 
     // Backfill reportId + sha256Hash on existing published snapshots that pre-date RC-3
-    _migrateReportIds()
+        _migrateReportIds()
       .catch(err => console.error('[_migrateReportIds] Unhandled error:', err));
+
+    // Give schools that predate the report-card engine the two defaults it
+    // needs (a grade scale and a report-card template) - idempotent, and a
+    // no-op for every school that already has them.
+    _migrateReportCardDefaults()
+      .catch(err => console.error('[_migrateReportCardDefaults] Unhandled error:', err));
 
     // Phase A (C1/C2): provision a 1:1 Organization for every existing school.
     // Purely additive — nothing reads organizationId yet. Self-heals a freshly
@@ -802,6 +847,22 @@ async function start() {
       startBillingCron();
     } catch (err) {
       console.error('[billing-cron] Failed to start:', err.message);
+    }
+
+    // Demo lifecycle cron — notices, expiry, purge (hourly)
+    try {
+      const { startDemoCron } = require('./utils/demo-cron');
+      startDemoCron();
+    } catch (err) {
+      console.error('[demo-cron] Failed to start:', err.message);
+    }
+
+    // Subscription expiry reminders (daily; 30/14/7/1/0 days)
+    try {
+      const { startPlanCron } = require('./utils/plan-cron');
+      startPlanCron();
+    } catch (err) {
+      console.error('[plan-cron] Failed to start:', err.message);
     }
 
     // Nightly backup cron — full school data export to disk (daily 02:00 Kenya)

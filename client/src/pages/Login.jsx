@@ -657,6 +657,10 @@ export default function Login() {
       setSession({ user: res.user, school: res.school, absoluteExpiry: res.absoluteExpiry, moduleRegistry: res.moduleRegistry });
       navigate(from || _defaultDest(res.user?.role), { replace: true });
     } catch (err) {
+      if (err instanceof APIError && err.code === 'DEMO_EXPIRED') {
+        navigate(`/demo-expired${slug ? `?school=${encodeURIComponent(slug)}` : ''}`, { replace: true });
+        return;
+      }
       if (err instanceof APIError && err.status === 429 && err.extra?.retryAfter) {
         setLockoutUntil(Date.now() + err.extra.retryAfter * 1000);
       }

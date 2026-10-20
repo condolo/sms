@@ -1,3 +1,7 @@
+
+/* Portal access is now tier-gated (parent → family, student → student).
+   These suites test route behaviour, not billing, so the gate is a pass-through. */
+jest.mock('../../middleware/plan', () => ({ planGate: () => (req, _res, next) => next() }));
 /* ============================================================
    server/routes/student-portal.js — GET /dashboard fee visibility
    Security Baseline Register, CFG-09 (Critical).

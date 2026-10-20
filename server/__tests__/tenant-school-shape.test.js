@@ -218,7 +218,10 @@ describe('_mapSchoolDoc — no undefined required fields', () => {
   // Every field a client module reads must be present (null is ok; undefined is a bug)
   const REQUIRED_FIELDS = [
     'id', 'slug', 'name', 'shortName', 'logoUrl', 'systemEmail', 'adminEmail',
-    'plan', 'addOns', 'isActive', 'planExpiresAt',
+    'plan', 'addOns', 'isActive', 'planExpiresAt', 'planExpired',
+    // Demo lifecycle — read by login (MFA bypass / expiry) and by every
+    // signed-in request in middleware/auth.js.
+    'status', 'isDemo', 'expiresAt', 'demoExpired',
     'primaryColor', 'accentColor', 'themePreset', 'faviconUrl',
     'moduleConfig',
     'portalConfig',
@@ -226,6 +229,14 @@ describe('_mapSchoolDoc — no undefined required fields', () => {
     'currency', 'currencySymbol', 'timezone', 'country',
     'academicYear', 'termsPerYear',
   ];
+
+  test('demo fields default safely for a non-demo school', () => {
+    const result = _mapSchoolDoc(minimalDoc());
+    expect(result.isDemo).toBe(false);
+    expect(result.expiresAt).toBeNull();
+    expect(result.demoExpired).toBe(false);
+    expect(result.status).toBeNull();
+  });
 
   test('all required fields are present (not undefined) on a minimal doc', () => {
     const result = _mapSchoolDoc(minimalDoc());

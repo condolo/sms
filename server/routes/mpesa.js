@@ -671,6 +671,10 @@ router.post('/subscription/callback', async (req, res) => {
       },
     });
 
+    /* Renewal must restore portal access immediately, not on the next cache
+       tick (60s) — the school has just paid. */
+    try { require('../middleware/plan').invalidatePlanCache(txn.schoolId); } catch { /* non-fatal */ }
+
     // Mark the billing snapshot as paid (if one exists for this term)
     const Snapshots = tenantModel('billing_snapshots', { schoolId: txn.schoolId });
     await Snapshots.updateOne(

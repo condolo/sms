@@ -188,6 +188,47 @@ async function _entityIdForms(col, schoolId, value) {
   return [...forms];
 }
 
+/* ── Display-name resolver (list pages) ─────────────────────────
+   `className` is a denormalised DISPLAY copy of the class a student is
+   in. Records written by imports, the demo seeder, or before that field
+   existed carry a perfectly valid classId with no name, which rendered
+   as a dash in the students list. GET /:id already resolves this live
+   (see its own comment); this is the same fix batched for a whole page -
+   one query, never one per row, so a page of 100 students still costs a
+   single lookup. Display-only: a failed lookup must never block a list. */
+async function _resolveClassNames(req, docs) {
+  const ids = [...new Set(
+    docs.filter(d => d.classId && !d.className).map(d => String(d.classId))
+  )];
+  if (!ids.length) return docs;
+
+  const mongoose = require('mongoose');
+  const or = [{ id: { $in: ids } }];
+  const oids = ids.filter(v => mongoose.Types.ObjectId.isValid(v) && v.length === 24);
+  if (oids.length) or.push({ _id: { $in: oids } });
+
+  let classes = [];
+  try {
+    // tenantModel injects schoolId; $or only widens the identifier form.
+    classes = await tenantModel('classes', tenantContext(req))
+      .find({ $or: or })
+      .select('id name')
+      .lean();
+  } catch (_) { /* display-only */ }
+
+  const nameById = {};
+  for (const c of classes) {
+    if (c.id)  nameById[String(c.id)]  = c.name;
+    if (c._id) nameById[String(c._id)] = c.name;
+  }
+  for (const d of docs) {
+    if (!d.className && d.classId && nameById[String(d.classId)]) {
+      d.className = nameById[String(d.classId)];
+    }
+  }
+  return docs;
+}
+
 /* ── GET /api/students/stats ─ Aggregate overview for dashboard ─ */
 router.get('/stats', authMiddleware, PLAN, MODGATE, rbac('students', 'read'), async (req, res) => {
   try {
@@ -326,6 +367,12 @@ router.get('/duplicates', authMiddleware, PLAN, MODGATE, rbac('students', 'read'
     const allActive = await Students.find({ schoolId, firstName: { $nin: [null, ''] }, lastName: { $nin: [null, ''] } })
       .select('id firstName middleName lastName dateOfBirth admissionNumber gender classId className houseId status parentName parentEmail createdAt')
       .lean();
+
+    // Same classId-without-className gap as the list (imports, seed data and
+    // pre-backfill records) shows up in each duplicate group's "Class: —"
+    // line. Resolved here for both passes at once — one lookup for the whole
+    // set, never one per student.
+    await _resolveClassNames(req, [...admGroups.flatMap(g => g.docs), ...allActive]);
     const byNameDob = new Map();
     for (const d of allActive) {
       const dob = _normalizeDob(d.dateOfBirth);
@@ -730,6 +777,7 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('students', 'read'), scopeMi
       Students.countDocuments(filter)
     ]);
 
+    await _resolveClassNames(req, docs);
     return ok(res, docs, paginate(page, limit, total));
   } catch (err) {
     console.error('[students GET]', err);

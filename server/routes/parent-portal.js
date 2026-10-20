@@ -10,6 +10,12 @@
 
 const express            = require('express');
 const { authMiddleware } = require('../middleware/auth');
+const { planGate }       = require('../middleware/plan');
+
+/* Portal access is the tier boundary: student portals need 'student', parent
+   portals need 'family'. Before this, the tiers existed only as prices — a
+   Base school's parents and students could still log in. */
+const PLAN = planGate('parent_portal');
 const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { isTimetablePublished, publishedReader } = require('../utils/timetable-publish');
@@ -40,7 +46,7 @@ function _requireParent(req, res) {
    Aggregate totals across ALL linked children — one call for the
    family hero strip (total balance, today's attendance, messages).
    ══════════════════════════════════════════════════════════════ */
-router.get('/family-summary', authMiddleware, async (req, res) => {
+router.get('/family-summary', authMiddleware, PLAN, async (req, res) => {
   if (!_requireParent(req, res)) return;
   try {
     const { schoolId, studentIds = [], guardianOf = [], userId, role } = req.jwtUser;
@@ -97,7 +103,7 @@ router.get('/family-summary', authMiddleware, async (req, res) => {
    GET /api/parent-portal/children
    List all children linked to this parent account.
    ══════════════════════════════════════════════════════════════ */
-router.get('/children', authMiddleware, async (req, res) => {
+router.get('/children', authMiddleware, PLAN, async (req, res) => {
   if (!_requireParent(req, res)) return;
   try {
     const { schoolId, studentIds = [], guardianOf = [] } = req.jwtUser;
@@ -128,7 +134,7 @@ router.get('/children', authMiddleware, async (req, res) => {
    Full dashboard payload for one child.
    Parent must be linked to that childId.
    ══════════════════════════════════════════════════════════════ */
-router.get('/dashboard/:childId', authMiddleware, async (req, res) => {
+router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
   if (!_requireParent(req, res)) return;
   try {
     const { schoolId, studentIds = [], guardianOf = [] } = req.jwtUser;
@@ -420,7 +426,7 @@ router.get('/dashboard/:childId', authMiddleware, async (req, res) => {
    helper reading req.jwtUser.studentIds/guardianOf, same as every
    other child-scoped route in this file already checks manually.
    ══════════════════════════════════════════════════════════════ */
-router.get('/weekly-snapshot/:childId/weeks', authMiddleware, async (req, res) => {
+router.get('/weekly-snapshot/:childId/weeks', authMiddleware, PLAN, async (req, res) => {
   if (!_requireParent(req, res)) return;
   try {
     const result = await weeklySnapshotHelpers.getWeeksForStudent(req, req.params.childId);
@@ -433,7 +439,7 @@ router.get('/weekly-snapshot/:childId/weeks', authMiddleware, async (req, res) =
   }
 });
 
-router.get('/weekly-snapshot/:childId/:weekStart', authMiddleware, async (req, res) => {
+router.get('/weekly-snapshot/:childId/:weekStart', authMiddleware, PLAN, async (req, res) => {
   if (!_requireParent(req, res)) return;
   try {
     const result = await weeklySnapshotHelpers.getSnapshotDetail(req, req.params.childId, req.params.weekStart);
@@ -446,7 +452,7 @@ router.get('/weekly-snapshot/:childId/:weekStart', authMiddleware, async (req, r
   }
 });
 
-router.get('/weekly-snapshot/:childId/:weekStart/pdf', authMiddleware, async (req, res) => {
+router.get('/weekly-snapshot/:childId/:weekStart/pdf', authMiddleware, PLAN, async (req, res) => {
   if (!_requireParent(req, res)) return;
   try {
     await weeklySnapshotHelpers.streamSnapshotPdf(req, res, req.params.childId, req.params.weekStart);
@@ -465,7 +471,7 @@ router.get('/weekly-snapshot/:childId/:weekStart/pdf', authMiddleware, async (re
    every category here is resolved from real assignment/role data, and
    deliberately never includes another parent, guardian, or student.
    ══════════════════════════════════════════════════════════════ */
-router.get('/message-recipients', authMiddleware, async (req, res) => {
+router.get('/message-recipients', authMiddleware, PLAN, async (req, res) => {
   if (!_requireParent(req, res)) return;
   try {
     const { studentIds = [], guardianOf = [] } = req.jwtUser;
@@ -493,7 +499,7 @@ router.get('/message-recipients', authMiddleware, async (req, res) => {
    another parent, guardian, or student through this route — there is
    no code path here that can resolve to one.
    ══════════════════════════════════════════════════════════════ */
-router.post('/messages', authMiddleware, async (req, res) => {
+router.post('/messages', authMiddleware, PLAN, async (req, res) => {
   if (!_requireParent(req, res)) return;
   try {
     const { schoolId, userId, studentIds = [], guardianOf = [] } = req.jwtUser;

@@ -1,575 +1,701 @@
 /* ============================================================
-   MessagesPage — In-app Messaging & Announcements
-   Two-panel layout: message list + detail.
-   Supports group recipients (Everyone, Teachers, Parents,
-   Students, Staff) and announcements vs direct messages.
+   MessagesPage — conversations, announcements & saved groups
+   ------------------------------------------------------------
+   Three ways to reach people:
+   • Direct  — one person or a hand-picked set of people
+   • Announcement — a staff broadcast to a school audience
+   • Group   — a reusable recipient list (class, team, committee)
+
+   The server owns the real authority checks; this page reflects them
+   so nobody is offered a mode their role cannot use.
    ============================================================ */
-import { useState, useEffect } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useMemo, useRef, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { AnimatePresence, motion } from 'framer-motion';
 import {
-  MessageSquare, Plus, Trash2, X, Send, ChevronLeft,
-  Check, Inbox, Clock, Users, Globe, Megaphone,
-  AlertTriangle, CheckCheck,
+  Check, ChevronRight, Inbox, MessageSquare,
+  Plus, Search, Send, Sparkles, Users, X,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { messages as msgsApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
+import {
+  canBroadcast, isPortalRole, matchesSearch, reSubject, roleLabel,
+} from './constants.js';
+import Avatar from './components/Avatar.jsx';
+import ComposePanel from './components/ComposePanel.jsx';
+import GroupDetail from './components/GroupDetail.jsx';
+import MessageDetail from './components/MessageDetail.jsx';
+import MessageRow from './components/MessageRow.jsx';
 
-/* ── constants ───────────────────────────────────────────── */
-const RECIPIENT_OPTIONS = [
-  { value: 'all',      label: 'Everyone',     desc: 'All active school users' },
-  { value: 'teachers', label: 'All Teachers', desc: 'Teachers & section heads' },
-  { value: 'parents',  label: 'All Parents',  desc: 'Parent / guardian accounts' },
-  { value: 'students', label: 'All Students', desc: 'Student accounts' },
-  { value: 'staff',    label: 'All Staff',    desc: 'All non-admin staff roles' },
+const MESSAGE_FILTERS = [
+  { id: 'all', label: 'All' },
+  { id: 'unread', label: 'Unread' },
+  { id: 'announcements', label: 'Announcements' },
+  { id: 'direct', label: 'Direct' },
+  { id: 'groups', label: 'Groups' },
 ];
 
-const RECIPIENT_LABELS = {
-  all: 'Everyone', teachers: 'All Teachers', parents: 'All Parents',
-  students: 'All Students', staff: 'All Staff',
-};
-
-function recipientLabel(r) {
-  return RECIPIENT_LABELS[r] ?? 'Direct';
+function msgKey(m) {
+  return m?.id ?? m?._id;
 }
 
-/* ── date formatter ──────────────────────────────────────── */
-function fmtDate(iso) {
-  if (!iso) return '';
-  const d   = new Date(iso);
-  const now = new Date();
-  const diff = now - d;
-  const days = Math.floor(diff / 86_400_000);
-  if (days === 0) return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-  if (days === 1) return 'Yesterday';
-  if (days < 7)  return d.toLocaleDateString('en-US', { weekday: 'short' });
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
+/* ── empty states ─────────────────────────────────────────── */
+function EmptyDetail({ tab, onCreateGroup, onCompose }) {
+  if (tab === 'groups') {
+    return (
+      <div className="flex h-full flex-col items-center justify-center bg-slate-50 px-8 text-center">
+        <div className="relative mb-5">
+          <div className="absolute inset-0 rounded-3xl bg-gradient-to-br from-violet-200 to-blue-200 blur-2xl" />
+          <div className="relative flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-violet-600 via-indigo-600 to-blue-600 text-white shadow-xl shadow-violet-200">
+            <Users size={34} />
+          </div>
+        </div>
+        <h3 className="text-sm font-bold text-slate-800">Reusable groups, one click away</h3>
+        <p className="mt-1 max-w-xs text-xs leading-relaxed text-slate-400">
+          Build a group once for a class, department or committee, then message everyone in it without picking names each time.
+        </p>
+        <button
+          onClick={onCreateGroup}
+          className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-violet-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm shadow-violet-200 transition hover:bg-violet-700"
+        >
+          <Plus size={13} /> Create a group
+        </button>
+      </div>
+    );
+  }
 
-function fmtDateLong(iso) {
-  if (!iso) return '';
-  return new Date(iso).toLocaleString('en-US', {
-    weekday: 'short', month: 'short', day: 'numeric',
-    year: 'numeric', hour: 'numeric', minute: '2-digit',
-  });
-}
-
-/* ── sender avatar ───────────────────────────────────────── */
-function Avatar({ name = '?', size = 'md' }) {
-  const initials = name.trim().split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 2);
-  const colors = ['bg-violet-500','bg-blue-500','bg-emerald-500','bg-amber-500','bg-rose-500','bg-cyan-500'];
-  const color  = colors[name.charCodeAt(0) % colors.length];
   return (
-    <div className={clsx('shrink-0 rounded-full flex items-center justify-center text-white font-semibold select-none',
-      color,
-      size === 'lg' ? 'h-11 w-11 text-base' : 'h-9 w-9 text-sm')}>
-      {initials}
+    <div className="relative flex h-full flex-col items-center justify-center overflow-hidden bg-slate-50 px-8 text-center">
+      <div className="pointer-events-none absolute -right-16 -top-20 h-64 w-64 rounded-full bg-violet-100/70 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-24 -left-16 h-64 w-64 rounded-full bg-blue-100/60 blur-3xl" />
+      <div className="relative mb-5">
+        <div className="absolute inset-0 rounded-3xl bg-gradient-to-br from-violet-200 to-blue-200 blur-2xl" />
+        <div className="relative flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-violet-600 via-indigo-600 to-blue-600 text-white shadow-xl shadow-violet-200">
+          <MessageSquare size={34} />
+        </div>
+        <span className="absolute -right-2 -top-2 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-50 bg-emerald-500 text-white">
+          <Check size={13} strokeWidth={3} />
+        </span>
+      </div>
+      <h3 className="relative text-sm font-bold text-slate-800">Your inbox, minus the noise</h3>
+      <p className="relative mt-1 max-w-xs text-xs leading-relaxed text-slate-400">
+        Pick a conversation on the left to read it, or start a direct message to one person, several people, or a saved group.
+      </p>
+      <button
+        onClick={() => onCompose?.()}
+        className="relative mt-4 inline-flex items-center gap-1.5 rounded-xl bg-violet-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm shadow-violet-200 transition hover:bg-violet-700"
+      >
+        <Plus size={13} /> New message
+      </button>
     </div>
   );
 }
 
-/* ── compose slide-over ──────────────────────────────────── */
-function ComposeSlideOver({ open, onClose, onSent }) {
-  const [form, setForm] = useState({ to: 'all', type: 'announcement', subject: '', body: '' });
-  const [sending, setSending] = useState(false);
-  const [error, setError]     = useState('');
-
-  function set(k, v) { setForm(f => ({ ...f, [k]: v })); setError(''); }
-
-  async function handleSend() {
-    if (!form.subject.trim()) { setError('Subject is required'); return; }
-    if (!form.body.trim())    { setError('Message body is required'); return; }
-    setSending(true);
-    try {
-      await msgsApi.send({
-        subject:    form.subject.trim(),
-        body:       form.body.trim(),
-        recipients: [form.to],
-        type:       form.type,
-      });
-      setForm({ to: 'all', type: 'announcement', subject: '', body: '' });
-      onSent?.();
-      onClose();
-    } catch (err) {
-      setError(err.message || 'Failed to send message');
-    } finally {
-      setSending(false);
-    }
-  }
-
+function ListSkeleton() {
   return (
-    <AnimatePresence>
-      {open && (
-        <>
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/30 z-40" onClick={onClose} />
-          <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
-            transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-            className="fixed inset-y-0 right-0 z-50 w-full max-w-lg bg-white shadow-2xl flex flex-col">
-
-            {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-              <div className="flex items-center gap-2">
-                <Send size={17} className="text-violet-600" />
-                <h2 className="text-base font-semibold text-slate-900">New Message</h2>
-              </div>
-              <button onClick={onClose} className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100">
-                <X size={18} />
-              </button>
-            </div>
-
-            {/* Body */}
-            <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
-
-              {/* To */}
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">To <span className="text-red-500">*</span></label>
-                <select value={form.to} onChange={e => set('to', e.target.value)}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-500">
-                  {RECIPIENT_OPTIONS.map(opt => (
-                    <option key={opt.value} value={opt.value}>{opt.label} — {opt.desc}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Type */}
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">Type</label>
-                <div className="flex gap-2">
-                  {[
-                    { v: 'announcement', icon: <Megaphone size={14} />, label: 'Announcement' },
-                    { v: 'direct',       icon: <MessageSquare size={14} />, label: 'Direct Message' },
-                  ].map(({ v, icon, label }) => (
-                    <button key={v} type="button" onClick={() => set('type', v)}
-                      className={clsx('flex-1 flex items-center justify-center gap-2 rounded-lg border py-2 text-sm font-medium transition',
-                        form.type === v
-                          ? 'bg-violet-50 border-violet-400 text-violet-700'
-                          : 'border-slate-300 text-slate-600 hover:border-slate-400')}>
-                      {icon}{label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Subject */}
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Subject <span className="text-red-500">*</span></label>
-                <input value={form.subject} onChange={e => set('subject', e.target.value)}
-                  placeholder="Message subject…"
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500" />
-              </div>
-
-              {/* Body */}
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Message <span className="text-red-500">*</span></label>
-                <textarea value={form.body} onChange={e => set('body', e.target.value)}
-                  rows={10} placeholder="Write your message here…"
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 resize-none" />
-              </div>
-
-              {error && (
-                <div className="flex items-center gap-2 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-600">
-                  <AlertTriangle size={14} className="shrink-0" />
-                  {error}
-                </div>
-              )}
-            </div>
-
-            {/* Footer */}
-            <div className="shrink-0 flex justify-end gap-3 px-6 py-4 border-t border-slate-200 bg-slate-50">
-              <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-slate-700 hover:bg-slate-200 transition">
-                Discard
-              </button>
-              <button onClick={handleSend} disabled={sending || !form.subject.trim() || !form.body.trim()}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition font-medium">
-                <Send size={14} />
-                {sending ? 'Sending…' : 'Send Message'}
-              </button>
-            </div>
-          </motion.div>
-        </>
-      )}
-    </AnimatePresence>
+    <div className="divide-y divide-slate-100">
+      {[0, 1, 2, 3, 4].map(i => (
+        <div key={i} className="flex animate-pulse items-start gap-3 px-4 py-3.5">
+          <div className="h-9 w-9 rounded-full bg-slate-100" />
+          <div className="flex-1 space-y-2">
+            <div className="h-2.5 w-1/2 rounded bg-slate-100" />
+            <div className="h-2.5 w-3/4 rounded bg-slate-100" />
+            <div className="h-2 w-2/3 rounded bg-slate-50" />
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 
-/* ── message list item ───────────────────────────────────── */
-function MessageItem({ msg, selected, isUnread, isSent, onClick }) {
-  const preview = (msg.body ?? '').replace(/\n+/g, ' ').slice(0, 90);
-  const recs    = (msg.recipients ?? []).map(recipientLabel).join(', ');
-
+/* ── group list card ─────────────────────────────────────── */
+function GroupRow({ group, selected, onClick }) {
+  const preview = (group.members ?? []).slice(0, 3);
   return (
     <button
+      type="button"
       onClick={onClick}
       className={clsx(
-        'w-full text-left flex items-start gap-3 px-4 py-3.5 border-b border-slate-100 transition hover:bg-slate-50',
-        selected && 'bg-violet-50 border-l-2 border-l-violet-500 hover:bg-violet-50',
+        'group relative w-full border-b border-slate-100 px-4 py-3.5 text-left transition hover:bg-slate-50',
+        selected && 'bg-violet-50/80 hover:bg-violet-50',
       )}
     >
-      <Avatar name={isSent ? 'Me' : (msg.senderName ?? '?')} />
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between gap-2 mb-0.5">
-          <span className={clsx('text-sm truncate', isUnread ? 'font-semibold text-slate-900' : 'font-medium text-slate-700')}>
-            {isSent ? `To: ${recs}` : (msg.senderName ?? 'Unknown')}
-          </span>
-          <span className="text-[11px] text-slate-400 shrink-0">{fmtDate(msg.createdAt)}</span>
+      <span className={clsx(
+        'absolute inset-y-2 left-0 w-[3px] rounded-r-full',
+        selected ? 'bg-violet-600' : 'bg-transparent group-hover:bg-slate-200',
+      )} />
+      <div className="flex items-center gap-3 pl-1">
+        <Avatar group name={group.name} size="md" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <p className="truncate text-[13px] font-semibold text-slate-800">{group.name}</p>
+            <span className="shrink-0 text-[10px] text-slate-400">{group.memberCount ?? 0}</span>
+          </div>
+          <p className="truncate text-[11px] text-slate-400">
+            {group.memberCount ?? 0} members{group.createdByName ? ` · ${group.createdByName}` : ''}
+          </p>
+          <div className="mt-1.5 flex items-center gap-1">
+            {preview.map(m => (
+              <Avatar key={m.id} name={m.name} size="xs" className="!h-5 !w-5 !text-[8px] !ring-1" />
+            ))}
+            {(group.memberCount ?? 0) > 3 && (
+              <span className="ml-0.5 rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-semibold text-slate-500">
+                +{(group.memberCount ?? 0) - 3}
+              </span>
+            )}
+          </div>
         </div>
-        <p className={clsx('text-sm truncate mb-1', isUnread ? 'text-slate-800 font-medium' : 'text-slate-600')}>
-          {msg.subject}
-        </p>
-        <p className="text-[12px] text-slate-400 truncate">{preview}</p>
-        <div className="flex items-center gap-1.5 mt-1.5">
-          {msg.type === 'announcement' ? (
-            <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">
-              <Megaphone size={9} />Announcement
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-medium text-blue-700">
-              <MessageSquare size={9} />Direct
-            </span>
-          )}
-          {isUnread && (
-            <span className="h-2 w-2 rounded-full bg-violet-500 shrink-0" />
-          )}
-        </div>
+        <ChevronRight size={15} className="shrink-0 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-slate-400" />
       </div>
     </button>
   );
 }
 
-/* ── message detail ──────────────────────────────────────── */
-function MessageDetail({ msg, userId, userRole, onDelete, deleting, onBack }) {
-  const can      = useAuthStore(s => s.can.bind(s));
-  const recs     = (msg.recipients ?? []).map(recipientLabel).join(', ');
-  /* Was: ['superadmin','admin','deputy_principal'].includes(userRole) — a
-     hardcoded moderation floor with no Settings equivalent, mirrored (and
-     also fixed) server-side in messages.js. MODERATE_FLOOR there is the
-     exact same 3 roles, kept here only as the isAdminLevel-style fast path;
-     can('messages__moderate','delete') is the real, live-configurable grant. */
-  const isModerateFloor = ['superadmin', 'admin', 'deputy_principal'].includes(userRole);
-  const canDelete = msg.senderId === userId || isModerateFloor || can('messages__moderate', 'delete');
-  const [confirmDel, setConfirmDel] = useState(false);
-
-  return (
-    <div className="flex flex-col h-full">
-      {/* Top bar */}
-      <div className="flex items-center gap-3 px-6 py-4 border-b border-slate-200 shrink-0">
-        {/* Mobile back */}
-        <button onClick={onBack} className="lg:hidden p-1.5 rounded-lg text-slate-500 hover:bg-slate-100">
-          <ChevronLeft size={18} />
-        </button>
-        <div className="flex-1 min-w-0">
-          <h2 className="font-semibold text-slate-900 truncate">{msg.subject}</h2>
-          <p className="text-xs text-slate-500 mt-0.5">{fmtDateLong(msg.createdAt)}</p>
-        </div>
-        {canDelete && (
-          <button
-            onClick={() => setConfirmDel(true)}
-            className="p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition shrink-0"
-            title="Delete message"
-          >
-            <Trash2 size={16} />
-          </button>
-        )}
-      </div>
-
-      {/* Meta row */}
-      <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 shrink-0">
-        <div className="flex items-start gap-3">
-          <Avatar name={msg.senderName ?? '?'} size="lg" />
-          <div>
-            <p className="font-medium text-slate-900 text-sm">{msg.senderName ?? 'Unknown'}</p>
-            <p className="text-xs text-slate-500 capitalize">{(msg.senderRole ?? '').replace(/_/g, ' ')}</p>
-            <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-              <span className="inline-flex items-center gap-1 text-xs text-slate-500">
-                <Users size={11} />To: {recs}
-              </span>
-              {msg.type === 'announcement' ? (
-                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">
-                  <Megaphone size={9} />Announcement
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-medium text-blue-700">
-                  <MessageSquare size={9} />Direct Message
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Body */}
-      <div className="flex-1 overflow-y-auto px-6 py-6">
-        <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{msg.body}</p>
-      </div>
-
-      {/* Delete confirm */}
-      <AnimatePresence>
-        {confirmDel && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-            <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
-              <div className="flex items-start gap-3 mb-4">
-                <AlertTriangle className="text-red-500 shrink-0 mt-0.5" size={20} />
-                <div>
-                  <p className="font-semibold text-slate-900 text-sm">Delete message?</p>
-                  <p className="text-slate-500 text-sm mt-1">
-                    "<strong>{msg.subject}</strong>" will be permanently removed for all recipients.
-                  </p>
-                </div>
-              </div>
-              <div className="flex justify-end gap-3">
-                <button onClick={() => setConfirmDel(false)} className="px-4 py-2 rounded-lg text-sm text-slate-700 hover:bg-slate-100">Cancel</button>
-                <button onClick={() => { setConfirmDel(false); onDelete(msg.id); }}
-                  disabled={deleting}
-                  className="px-4 py-2 rounded-lg text-sm bg-red-600 text-white hover:bg-red-700 disabled:opacity-50">
-                  {deleting ? 'Deleting…' : 'Delete'}
-                </button>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
-
-/* ── empty state ─────────────────────────────────────────── */
-function EmptyDetail() {
-  return (
-    <div className="flex flex-col items-center justify-center h-full text-center px-8 bg-slate-50/40">
-      <MessageSquare size={40} className="text-slate-200 mb-3" />
-      <p className="text-sm font-medium text-slate-400">Select a message to read</p>
-      <p className="text-xs text-slate-400 mt-1">Choose from the list on the left</p>
-    </div>
-  );
-}
-
 /* ── main page ───────────────────────────────────────────── */
 export default function MessagesPage() {
-  const user       = useAuthStore(s => s.session?.user);
-  const userId     = user?.id;
-  const userRole   = user?.role ?? '';
-  const qc         = useQueryClient();
+  const user = useAuthStore(s => s.session?.user);
+  const userId = user?.id;
+  const userRole = user?.role ?? '';
+  const portal = isPortalRole(userRole);
+  const broadcastAllowed = canBroadcast(userRole);
+  const qc = useQueryClient();
 
-  const [tab, setTab]         = useState('inbox');
-  const [selected, setSelected] = useState(null);
-  const [composing, setComposing] = useState(false);
-  const [toast, setToast]     = useState(null);
-  const [showDetail, setShowDetail] = useState(false); // mobile: show right panel
+  const [tab, setTab] = useState('inbox');
+  const [filter, setFilter] = useState('all');
+  const [search, setSearch] = useState('');
+  const [selectedId, setSelectedId] = useState(null);
+  const [selectedGroupId, setSelectedGroupId] = useState(null);
+  const [showMobileDetail, setShowMobileDetail] = useState(false);
+  const [composing, setComposing] = useState(null);
+  const [toast, setToast] = useState(null);
+  const toastTimer = useRef(null);
 
-  /* ── queries ─────────────────────────────────────────────── */
-  const { data, isLoading, refetch } = useQuery({
+  const messageQuery = useQuery({
     queryKey: ['messages', tab],
-    queryFn:  () => msgsApi.list({ tab, limit: 100 }),
+    queryFn: () => msgsApi.list({ tab, limit: 100 }),
+    enabled: tab !== 'groups',
+    staleTime: 15_000,
+  });
+
+  const groupsQuery = useQuery({
+    queryKey: ['message-groups'],
+    queryFn: () => msgsApi.groups.list(),
     staleTime: 30_000,
   });
 
-  const msgs = data?.data ?? [];
+  const unreadQuery = useQuery({
+    queryKey: ['messages', 'unread-count'],
+    queryFn: () => msgsApi.unreadCount(),
+    staleTime: 20_000,
+  });
 
-  /* ── unread count ─────────────────────────────────────────── */
-  const unreadCount = tab === 'inbox'
-    ? msgs.filter(m => !m.isRead?.[userId]).length
-    : 0;
+  const msgs = tab === 'groups' ? [] : (messageQuery.data?.data ?? []);
+  const groups = groupsQuery.data?.data ?? [];
+  const selected = msgs.find(m => msgKey(m) === selectedId) ?? null;
+  const selectedGroup = groups.find(g => g.id === selectedGroupId) ?? null;
+  const unreadCount = unreadQuery.data?.data?.count ?? 0;
 
-  /* ── mutations ───────────────────────────────────────────── */
+  const filteredMessages = useMemo(() => {
+    return msgs.filter(m => {
+      if (!matchesSearch(m, search)) return false;
+      if (filter === 'unread') return tab === 'inbox' && !m.isRead?.[userId];
+      if (filter === 'announcements') return m.type === 'announcement';
+      if (filter === 'direct') return m.type !== 'announcement' && !m.groupId;
+      if (filter === 'groups') return !!m.groupId;
+      return true;
+    });
+  }, [msgs, search, filter, tab, userId]);
+
+  const filteredGroups = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return groups;
+    return groups.filter(g =>
+      g.name?.toLowerCase().includes(needle)
+      || (g.members ?? []).some(m => m.name?.toLowerCase().includes(needle)),
+    );
+  }, [groups, search]);
+
+  function flash(msg, type = 'success') {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast({ msg, type });
+    toastTimer.current = setTimeout(() => setToast(null), 3200);
+  }
+
+  /* ── mark read ─────────────────────────────────────────── */
   const markRead = useMutation({
     mutationFn: id => msgsApi.markRead(id),
     onSuccess: (_, id) => {
-      qc.setQueryData(['messages', tab], old => {
-        if (!old) return old;
+      qc.setQueriesData({ queryKey: ['messages'] }, old => {
+        if (!old?.data || !Array.isArray(old.data)) return old;
         return {
           ...old,
-          data: old.data.map(m => m.id === id
+          data: old.data.map(m => msgKey(m) === id
             ? { ...m, isRead: { ...(m.isRead ?? {}), [userId]: true } }
-            : m
-          ),
+            : m),
         };
       });
-      // NotificationBell (TopBar) has its own separate unread count, polled
-      // on an interval — without this it kept showing the pre-read count
-      // until the next poll or a route change, even though this page had
-      // just marked everything read.
+      qc.invalidateQueries({ queryKey: ['messages', 'unread-count'] });
       window.dispatchEvent(new CustomEvent('messages:read'));
     },
   });
 
   async function markAllRead() {
     const unread = msgs.filter(m => !m.isRead?.[userId]);
-    await Promise.allSettled(unread.map(m => msgsApi.markRead(m.id ?? m._id)));
-    qc.invalidateQueries({ queryKey: ['messages', 'inbox'] });
+    await Promise.allSettled(unread.map(m => msgsApi.markRead(msgKey(m))));
+    qc.invalidateQueries({ queryKey: ['messages'] });
     window.dispatchEvent(new CustomEvent('messages:read'));
+    flash('Inbox marked as read');
   }
 
+  function openMessage(msg) {
+    setSelectedId(msgKey(msg));
+    setShowMobileDetail(true);
+    if (tab === 'inbox' && !msg.isRead?.[userId]) {
+      markRead.mutate(msgKey(msg));
+    }
+  }
+
+  function switchTab(next) {
+    setTab(next);
+    setFilter('all');
+    setSearch('');
+    setSelectedId(null);
+    setSelectedGroupId(null);
+    setShowMobileDetail(false);
+  }
+
+  function selectGroup(group) {
+    setSelectedGroupId(group.id);
+    setShowMobileDetail(true);
+  }
+
+  /* ── delete ────────────────────────────────────────────── */
   const deleteMsg = useMutation({
     mutationFn: id => msgsApi.remove(id),
     onSuccess: () => {
-      setSelected(null);
-      setShowDetail(false);
+      setSelectedId(null);
+      setShowMobileDetail(false);
       qc.invalidateQueries({ queryKey: ['messages'] });
       flash('Message deleted');
     },
     onError: err => flash(err.message || 'Delete failed', 'error'),
   });
 
-  /* ── select a message ────────────────────────────────────── */
-  function handleSelect(msg) {
-    setSelected(msg);
-    setShowDetail(true);
-    if (tab === 'inbox' && !msg.isRead?.[userId]) {
-      markRead.mutate(msg.id);
+  /* ── quick reply ───────────────────────────────────────── */
+  const quickReply = useMutation({
+    mutationFn: ({ msg, body }) => {
+      const payload = {
+        subject: reSubject(msg.subject),
+        body,
+        type: 'direct',
+      };
+      if (msg.groupId) payload.groupId = msg.groupId;
+      else payload.recipients = [msg.senderId];
+      return msgsApi.send(payload);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['messages'] });
+      flash('Reply sent');
+    },
+    onError: err => flash(err.message || 'Reply failed', 'error'),
+  });
+
+  /* ── groups ────────────────────────────────────────────── */
+  const updateGroup = useMutation({
+    mutationFn: ({ id, data }) => msgsApi.groups.update(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['message-groups'] });
+      flash('Group updated');
+    },
+    onError: err => flash(err.message || 'Could not update group', 'error'),
+  });
+
+  const deleteGroup = useMutation({
+    mutationFn: id => msgsApi.groups.remove(id),
+    onSuccess: () => {
+      setSelectedGroupId(null);
+      setShowMobileDetail(false);
+      qc.invalidateQueries({ queryKey: ['message-groups'] });
+      flash('Group deleted');
+    },
+    onError: err => flash(err.message || 'Could not delete group', 'error'),
+  });
+
+  /* ── compose prefill ───────────────────────────────────── */
+  function openCompose(initial = {}) {
+    setComposing(initial);
+  }
+
+  function replyPrefill(msg, includeAll = false) {
+    const subject = reSubject(msg.subject);
+    if (msg.groupId) {
+      return openCompose({ mode: 'group', groupId: msg.groupId, subject });
     }
+    if (msg.senderId === userId) {
+      if (msg.type === 'announcement') {
+        const audience = (msg.recipients ?? []).find(r => ['all', 'teachers', 'parents', 'students', 'staff'].includes(r)) ?? 'all';
+        return openCompose({ mode: 'announcement', audience, subject });
+      }
+      return openCompose({
+        recipients: (msg.recipientUsers ?? []).map(u => ({
+          id: u.id, name: u.name, role: u.role, roleLabel: u.roleLabel,
+        })),
+        subject,
+      });
+    }
+
+    const ids = new Set();
+    if (msg.senderId) ids.add(msg.senderId);
+    if (includeAll) {
+      for (const u of msg.recipientUsers ?? []) ids.add(u.id);
+    }
+    ids.delete(userId);
+
+    const recipients = [...ids].map(id => {
+      const known = (msg.recipientUsers ?? []).find(u => u.id === id);
+      if (known) return { id, name: known.name, role: known.role, roleLabel: known.roleLabel };
+      if (id === msg.senderId) {
+        return {
+          id,
+          name: msg.senderName ?? 'Sender',
+          role: msg.senderRole,
+          roleLabel: roleLabel(msg.senderRole),
+        };
+      }
+      return { id, name: 'Recipient', role: '' };
+    });
+
+    openCompose({
+      recipients,
+      subject,
+      mode: 'direct',
+    });
   }
 
-  /* ── tab change ──────────────────────────────────────────── */
-  function switchTab(t) {
-    setTab(t);
-    setSelected(null);
-    setShowDetail(false);
+  function handleSent() {
+    qc.invalidateQueries({ queryKey: ['messages'] });
+    qc.invalidateQueries({ queryKey: ['message-groups'] });
+    flash('Message sent');
   }
 
-  function flash(msg, type = 'success') {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 3000);
-  }
+  const messageTabs = [
+    { id: 'inbox', label: 'Inbox', icon: Inbox },
+    { id: 'sent', label: 'Sent', icon: Send },
+    ...(!portal ? [{ id: 'groups', label: 'Groups', icon: Users }] : []),
+  ];
+
+  const visibleFilters = MESSAGE_FILTERS.filter(f => f.id !== 'unread' || tab === 'inbox');
+  const listLoading = tab === 'groups' ? groupsQuery.isLoading : messageQuery.isLoading;
 
   return (
-    <div className="flex flex-col h-full min-h-screen bg-slate-50">
-      {/* ── Page header ─────────────────────────────────────── */}
-      <div className="bg-white border-b border-slate-200 px-6 py-4 shrink-0">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-violet-100">
-              <MessageSquare size={18} className="text-violet-600" />
+    <div className="flex h-full min-h-0 flex-col bg-slate-50/80">
+      {/* Page header */}
+      <div className="shrink-0 px-4 pt-4 sm:px-6 sm:pt-5">
+        <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm sm:px-5">
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(139,92,246,0.13),transparent_42%),radial-gradient(circle_at_bottom_left,rgba(59,130,246,0.10),transparent_38%)]" />
+          <div className="relative flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 via-indigo-600 to-blue-600 text-white shadow-lg shadow-violet-200">
+                <MessageSquare size={21} />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <h1 className="truncate text-lg font-bold text-slate-900">Messages</h1>
+                  <span className="hidden rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-violet-600 sm:inline-flex">
+                    Communication
+                  </span>
+                </div>
+                <p className="truncate text-[11px] text-slate-400 sm:text-xs">
+                  Direct conversations, school announcements and reusable groups.
+                </p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-lg font-bold text-slate-900">Messages</h1>
-              <p className="text-xs text-slate-500">School announcements &amp; direct messages</p>
+
+            <div className="flex shrink-0 items-center gap-2">
+              <span className={clsx(
+                'hidden items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold sm:inline-flex',
+                unreadCount > 0
+                  ? 'border-violet-200 bg-violet-50 text-violet-700'
+                  : 'border-emerald-200 bg-emerald-50 text-emerald-700',
+              )}>
+                {unreadCount > 0 ? `${unreadCount} unread` : 'All caught up'}
+              </span>
+              <button
+                onClick={() => openCompose({})}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-violet-600 px-3.5 py-2.5 text-xs font-semibold text-white shadow-sm shadow-violet-200 transition hover:bg-violet-700 active:scale-[0.98]"
+              >
+                <Plus size={14} /> <span className="hidden sm:inline">Compose</span><span className="sm:hidden">New</span>
+              </button>
             </div>
           </div>
-          <button
-            onClick={() => setComposing(true)}
-            className="flex items-center gap-2 rounded-lg bg-violet-600 px-3 py-2 text-sm text-white hover:bg-violet-700 transition font-medium"
-          >
-            <Plus size={15} />
-            Compose
-          </button>
         </div>
       </div>
 
-      {/* ── Two-panel body ───────────────────────────────────── */}
-      <div className="flex flex-1 overflow-hidden">
-
-        {/* ── Left: message list ──────────────────────────────── */}
+      {/* Two-panel workspace */}
+      <div className="flex min-h-0 flex-1 gap-4 px-4 pb-4 pt-4 sm:px-6 sm:pb-5">
+        {/* Left column */}
         <div className={clsx(
-          'flex flex-col bg-white border-r border-slate-200 w-full lg:w-80 xl:w-96 shrink-0',
-          showDetail ? 'hidden lg:flex' : 'flex',
+          'min-h-0 w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm',
+          'lg:flex lg:w-[380px] xl:w-[420px] lg:shrink-0',
+          showMobileDetail ? 'hidden lg:flex' : 'flex',
         )}>
           {/* Tabs */}
-          <div className="flex border-b border-slate-200">
-            {[
-              { id: 'inbox', label: 'Inbox', Icon: Inbox },
-              { id: 'sent',  label: 'Sent',  Icon: Clock },
-            ].map(({ id, label, Icon }) => (
-              <button
-                key={id}
-                onClick={() => switchTab(id)}
-                className={clsx(
-                  'flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium border-b-2 transition',
-                  tab === id
-                    ? 'border-violet-600 text-violet-600'
-                    : 'border-transparent text-slate-500 hover:text-slate-700',
-                )}
-              >
-                <Icon size={15} />
-                {label}
-                {id === 'inbox' && unreadCount > 0 && (
-                  <span className="ml-0.5 rounded-full bg-violet-600 px-1.5 py-0.5 text-[10px] text-white font-bold min-w-[18px] text-center">
-                    {unreadCount}
-                  </span>
-                )}
-              </button>
-            ))}
+          <div className="shrink-0 border-b border-slate-200 px-3 pt-3">
+            <div className="flex gap-1 rounded-xl bg-slate-100/80 p-1">
+              {messageTabs.map(({ id, label, icon: Icon }) => (
+                <button
+                  key={id}
+                  onClick={() => switchTab(id)}
+                  className={clsx(
+                    'relative flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[11px] font-semibold transition',
+                    tab === id
+                      ? 'bg-white text-violet-700 shadow-sm'
+                      : 'text-slate-500 hover:text-slate-700',
+                  )}
+                >
+                  <Icon size={13} />
+                  {label}
+                  {id === 'inbox' && unreadCount > 0 && (
+                    <span className="ml-0.5 rounded-full bg-violet-600 px-1.5 py-0.5 text-[8px] font-bold leading-none text-white">
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </span>
+                  )}
+                  {id === 'groups' && groups.length > 0 && (
+                    <span className="ml-0.5 rounded-full bg-slate-200 px-1.5 py-0.5 text-[8px] font-bold leading-none text-slate-600">
+                      {groups.length}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
           </div>
 
-          {/* Mark all read strip */}
-          {tab === 'inbox' && unreadCount > 0 && (
-            <div className="flex items-center justify-between px-4 py-2 bg-violet-50 border-b border-violet-100">
-              <span className="text-xs text-violet-700 font-medium">{unreadCount} unread</span>
+          {/* Search */}
+          <div className="shrink-0 px-3 py-3">
+            <div className="relative">
+              <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder={tab === 'groups' ? 'Search groups or members…' : 'Search messages or people…'}
+                className="w-full rounded-xl border border-slate-200 bg-slate-50/60 py-2 pr-8 text-xs text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:bg-white focus:ring-4 focus:ring-violet-100"
+                style={{ paddingLeft: '2.1rem' }}
+              />
+              {search && (
+                <button
+                  onClick={() => setSearch('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                  aria-label="Clear search"
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Filter chips / group action */}
+          {tab === 'groups' ? (
+            <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-3 pb-2.5">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                {groups.length} saved {groups.length === 1 ? 'group' : 'groups'}
+              </p>
+              <button
+                onClick={() => openCompose({ mode: 'group', createNew: true })}
+                className="inline-flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-2 py-1 text-[10px] font-semibold text-violet-700 transition hover:bg-violet-100"
+              >
+                <Plus size={10} /> New group
+              </button>
+            </div>
+          ) : (
+            <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-slate-100 px-3 pb-2.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {visibleFilters.map(f => (
+                <button
+                  key={f.id}
+                  onClick={() => setFilter(f.id)}
+                  className={clsx(
+                    'whitespace-nowrap rounded-full border px-2 py-1 text-[10px] font-semibold transition',
+                    filter === f.id
+                      ? 'border-violet-300 bg-violet-100 text-violet-700'
+                      : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700',
+                  )}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Mark all read */}
+          {tab === 'inbox' && unreadCount > 0 && filteredMessages.some(m => !m.isRead?.[userId]) && (
+            <div className="flex shrink-0 items-center justify-between border-b border-violet-100 bg-violet-50/70 px-3 py-1.5">
+              <span className="text-[10px] font-semibold text-violet-700">
+                {filteredMessages.filter(m => !m.isRead?.[userId]).length} unread in view
+              </span>
               <button
                 onClick={markAllRead}
-                className="flex items-center gap-1 text-xs font-semibold text-violet-600 hover:text-violet-800 transition"
+                className="inline-flex items-center gap-1 text-[10px] font-semibold text-violet-700 transition hover:text-violet-900"
               >
-                <CheckCheck size={12} />
-                Mark all read
+                <Check size={11} /> Mark all read
               </button>
             </div>
           )}
 
-          {/* Message list */}
-          <div className="flex-1 overflow-y-auto">
-            {isLoading ? (
-              <div className="py-20 text-center text-sm text-slate-400">Loading…</div>
-            ) : msgs.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-20 px-6 text-center">
-                <MessageSquare size={32} className="text-slate-200 mb-3" />
-                <p className="text-sm text-slate-500">
-                  {tab === 'inbox' ? 'No messages in your inbox' : 'No messages sent yet'}
+          {/* List */}
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {listLoading ? (
+              <ListSkeleton />
+            ) : tab === 'groups' ? (
+              filteredGroups.length === 0 ? (
+                <div className="flex flex-col items-center px-6 py-14 text-center">
+                  <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-300">
+                    <Users size={22} />
+                  </div>
+                  <p className="text-xs font-semibold text-slate-600">
+                    {search ? 'No groups match that search' : 'No saved groups yet'}
+                  </p>
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    {search ? 'Try a different name or member.' : 'Create one for a class, department or committee.'}
+                  </p>
+                  {!search && (
+                    <button
+                      onClick={() => openCompose({ mode: 'group', createNew: true })}
+                      className="mt-3 inline-flex items-center gap-1 rounded-lg bg-violet-600 px-3 py-1.5 text-[10px] font-semibold text-white hover:bg-violet-700"
+                    >
+                      <Plus size={11} /> New group
+                    </button>
+                  )}
+                </div>
+              ) : (
+                filteredGroups.map(g => (
+                  <GroupRow
+                    key={g.id}
+                    group={g}
+                    selected={selectedGroupId === g.id}
+                    onClick={() => selectGroup(g)}
+                  />
+                ))
+              )
+            ) : filteredMessages.length === 0 ? (
+              <div className="flex flex-col items-center px-6 py-14 text-center">
+                <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-300">
+                  <MessageSquare size={22} />
+                </div>
+                <p className="text-xs font-semibold text-slate-600">
+                  {search || filter !== 'all' ? 'Nothing matches these filters' : tab === 'sent' ? 'No messages sent yet' : 'Your inbox is clear'}
                 </p>
+                <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+                  {search || filter !== 'all'
+                    ? 'Try clearing the search or switching back to All.'
+                    : tab === 'sent'
+                      ? 'Messages you send will appear here.'
+                      : 'New direct messages and announcements will land here.'}
+                </p>
+                {(search || filter !== 'all') && (
+                  <button
+                    onClick={() => { setSearch(''); setFilter('all'); }}
+                    className="mt-3 rounded-lg border border-slate-200 px-3 py-1.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-50"
+                  >
+                    Clear filters
+                  </button>
+                )}
               </div>
             ) : (
-              msgs.map(msg => (
-                <MessageItem
-                  key={msg.id ?? msg._id}
-                  msg={msg}
-                  selected={selected?.id === (msg.id ?? msg._id)}
-                  isUnread={tab === 'inbox' && !msg.isRead?.[userId]}
-                  isSent={tab === 'sent'}
-                  onClick={() => handleSelect(msg)}
+              filteredMessages.map(m => (
+                <MessageRow
+                  key={msgKey(m)}
+                  msg={m}
+                  selected={selectedId === msgKey(m)}
+                  unread={tab === 'inbox' && !m.isRead?.[userId]}
+                  sent={tab === 'sent'}
+                  onClick={() => openMessage(m)}
                 />
               ))
             )}
           </div>
+
+          {/* Footer hint */}
+          <div className="hidden shrink-0 items-center gap-1.5 border-t border-slate-100 bg-slate-50/60 px-3 py-2 text-[9px] text-slate-400 lg:flex">
+            <Sparkles size={10} className="text-violet-400" />
+            {portal
+              ? 'You can message staff directly. Saved groups are managed by staff.'
+              : broadcastAllowed
+                ? 'Tip: use saved groups for classes, teams and committees.'
+                : 'Direct messages support one or many recipients.'}
+          </div>
         </div>
 
-        {/* ── Right: message detail ────────────────────────────── */}
+        {/* Right column */}
         <div className={clsx(
-          'flex-1 overflow-hidden',
-          showDetail ? 'flex flex-col' : 'hidden lg:flex lg:flex-col',
+          'min-h-0 flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm',
+          showMobileDetail ? 'flex flex-col' : 'hidden lg:flex lg:flex-col',
         )}>
-          {selected ? (
+          {tab === 'groups' ? (
+            selectedGroup ? (
+              <GroupDetail
+                group={selectedGroup}
+                userId={userId}
+                userRole={userRole}
+                onMessage={g => openCompose({ mode: 'group', groupId: g.id })}
+                onUpdate={(id, data) => updateGroup.mutateAsync({ id, data })}
+                onDelete={id => deleteGroup.mutate(id)}
+                saving={updateGroup.isPending}
+                deleting={deleteGroup.isPending}
+                onBack={() => { setShowMobileDetail(false); setSelectedGroupId(null); }}
+              />
+            ) : (
+              <EmptyDetail
+                tab="groups"
+                onCreateGroup={() => openCompose({ mode: 'group', createNew: true })}
+                onCompose={() => openCompose({})}
+              />
+            )
+          ) : selected ? (
             <MessageDetail
+              key={selectedId}
               msg={selected}
               userId={userId}
               userRole={userRole}
               onDelete={id => deleteMsg.mutate(id)}
               deleting={deleteMsg.isPending}
-              onBack={() => { setShowDetail(false); setSelected(null); }}
+              onBack={() => { setShowMobileDetail(false); setSelectedId(null); }}
+              onReply={m => replyPrefill(m, false)}
+              onReplyAll={m => replyPrefill(m, true)}
+              onQuickReply={(m, text) => quickReply.mutateAsync({ msg: m, body: text })}
+              replying={quickReply.isPending}
             />
           ) : (
-            <EmptyDetail />
+            <EmptyDetail
+              tab={tab}
+              onCreateGroup={() => openCompose({ mode: 'group', createNew: true })}
+              onCompose={() => openCompose({})}
+            />
           )}
         </div>
       </div>
 
-      {/* ── Compose ──────────────────────────────────────────── */}
-      <ComposeSlideOver
-        open={composing}
-        onClose={() => setComposing(false)}
-        onSent={() => {
-          refetch();
-          flash('Message sent');
-        }}
+      {/* Compose */}
+      <ComposePanel
+        open={!!composing}
+        initial={composing}
+        currentRole={userRole}
+        onClose={() => setComposing(null)}
+        onSent={handleSent}
       />
 
-      {/* ── Toast ────────────────────────────────────────────── */}
+      {/* Toast */}
       <AnimatePresence>
         {toast && (
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }}
-            className={clsx('fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium shadow-lg',
-              toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-slate-900 text-white')}>
-            {toast.type !== 'error' && <Check size={15} />}
+          <motion.div
+            initial={{ opacity: 0, y: 16, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 12, scale: 0.98 }}
+            className={clsx(
+              'fixed bottom-6 right-6 z-[60] flex items-center gap-2 rounded-xl px-4 py-3 text-xs font-semibold shadow-xl',
+              toast.type === 'error' ? 'bg-rose-600 text-white' : 'bg-slate-900 text-white',
+            )}
+          >
+            {toast.type !== 'error' && <Check size={14} />}
             {toast.msg}
           </motion.div>
         )}

@@ -5,6 +5,8 @@
    GET  /api/settings/school       — school profile (admin only)
    PUT  /api/settings/school       — update school profile (admin only)
    GET  /api/settings/users        — list users in school (admin only)
+                                   (optional ?page/&limit/&role/&q for
+                                   server-side filtering + pagination)
    POST /api/settings/users/invite — invite a new user (admin only)
    PUT  /api/settings/users/:id    — update user role/details (admin only)
    DELETE /api/settings/users/:id              — remove user from school (admin only)
@@ -18,6 +20,8 @@ const nodemailer = require('nodemailer');
 const { authMiddleware }    = require('../middleware/auth');
 const { _model }            = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
+const { parsePagination, strParam } = require('../utils/response');
+const { escapeRegex } = require('../utils/escape-regex');
 const { revokeUserTokens, revokeIdentityTokens } = require('../utils/token-version');
 const emailUtil             = require('../utils/email');
 const { encrypt, smtpEncryptReady } = require('../utils/smtpEncrypt');
@@ -852,20 +856,86 @@ router.delete('/school/login-bg', authMiddleware, rbac('settings', 'update'), as
    the database, but was previously invisible from EVERY list view, which
    is exactly what made a stuck email address look like it had vanished
    without a trace. Default (no param) keeps the original active-only
-   behavior so nothing else that depends on this route changes. */
+   behavior so nothing else that depends on this route changes.
+
+   OPTIONAL server-side filtering + pagination (page, limit, role, q).
+   These are opt-in: a caller that passes none of them keeps receiving the
+   full, unpaginated list exactly as before, so the route's other consumers
+   (HR's staff picker, Inventory's requisitions) are untouched. When they
+   ARE used the response gains a `pagination` block and a `stats` block
+   (active/removed totals and a per-role breakdown) — the numbers behind
+   the KPI row in Settings → Users. */
 router.get('/users', authMiddleware, rbac('settings', 'read'), async (req, res) => {
   try {
     const wantRemoved = req.query.status === 'removed';
     const Users = tenantModel('users', tenantContext(req));
-    const users = await Users.find(
-      { schoolId: req.jwtUser.schoolId, isActive: wantRemoved ? false : { $ne: false } },
-      { password: 0, passwordHash: 0 }   // exclude both field names
-    ).sort({ name: 1 }).lean();
+
+    const filter = {
+      schoolId: req.jwtUser.schoolId,
+      isActive: wantRemoved ? false : { $ne: false },
+    };
+
+    // Free-text search over name + email. The term is regex-escaped (see
+    // utils/escape-regex.js) so an unbalanced "[" can't crash the query and
+    // a pattern can't make the database walk far more than intended.
+    const term = strParam(req.query.q)?.trim();
+    if (term) {
+      const rx = new RegExp(escapeRegex(term), 'i');
+      filter.$or = [{ name: rx }, { email: rx }];
+    }
+    const role = strParam(req.query.role);
+    if (role) filter.role = role;
+
+    const wantsPaged = req.query.page !== undefined
+      || req.query.limit !== undefined
+      || req.query.q    !== undefined
+      || req.query.role !== undefined;
+
+    const projection = { password: 0, passwordHash: 0 };
+
     // Normalize: ensure every user document has a string `id` field so
     // the frontend can reliably use it for PUT/DELETE without falling back
     // to the ObjectId _id (which the server routes also need to handle).
-    const safeUsers = users.map(u => ({ ...u, id: u.id || u._id?.toString() }));
-    res.json({ success: true, data: safeUsers });
+    const _safe = rows => rows.map(u => ({ ...u, id: u.id || u._id?.toString() }));
+
+    if (!wantsPaged) {
+      const users = await Users.find(filter, projection).sort({ name: 1 }).lean();
+      return res.json({ success: true, data: _safe(users) });
+    }
+
+    const { page, limit } = parsePagination(req.query);
+    const skip  = (page - 1) * limit;
+
+    const [users, total, roleAgg, removedTotal] = await Promise.all([
+      Users.find(filter, projection).sort({ name: 1 }).skip(skip).limit(limit).lean(),
+      Users.countDocuments(filter),
+      // Role breakdown is always computed over ACTIVE accounts, never over
+      // the current filter — the KPI row describes the school, while the
+      // table describes the current filter. Removed accounts get their own
+      // counter instead.
+      Users.aggregate([
+        { $match: { schoolId: req.jwtUser.schoolId, isActive: { $ne: false } } },
+        { $group: { _id: '$role', count: { $sum: 1 } } },
+      ]),
+      Users.countDocuments({ schoolId: req.jwtUser.schoolId, isActive: false }),
+    ]);
+
+    const byRole = {};
+    for (const row of roleAgg) {
+      const key = typeof row._id === 'string' && row._id ? row._id : 'unknown';
+      byRole[key] = row.count;
+    }
+
+    return res.json({
+      success: true,
+      data: _safe(users),
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) || 1 },
+      stats: {
+        activeTotal: Object.values(byRole).reduce((a, b) => a + b, 0),
+        removedTotal: removedTotal,
+        byRole,
+      },
+    });
   } catch (err) {
     console.error('[settings] GET /users error:', err);
     res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Failed to fetch users' } });
@@ -1175,7 +1245,14 @@ router.put('/users/:id', authMiddleware, rbac('settings', 'update'), async (req,
       } catch (cascErr) {
         console.warn('[settings] teacher staffType cascade (non-fatal):', cascErr.message);
       }
-      revokeUserTokens(req.params.id).catch(err =>
+      // Revoke against the CANONICAL app id, never the raw route param.
+      // putFilter above accepts either `id` or a Mongo `_id`, but
+      // revokeUserTokens() increments `{ id: userId }` and keys its cache by
+      // that same value — passing an _id would match no document and leave
+      // the old token valid (with its old role claim) for its full 7-day
+      // life. priorUser is the pre-update fetch, so it carries the real id.
+      const revokeId = priorUser?.id ?? req.params.id;
+      revokeUserTokens(revokeId).catch(err =>
         console.warn('[settings] token revocation (non-fatal):', err.message)
       );
       // Scope (scopeMiddleware.js — which records within a permitted module
@@ -1189,8 +1266,7 @@ router.put('/users/:id', authMiddleware, rbac('settings', 'update'), async (req,
       // minutes despite the token already being correct. Drop it under
       // every identifier form this person might be cached under, same
       // defensive reasoning as invalidateScopeCacheForRole's own comment.
-      invalidateScopeCache(req.params.id, req.jwtUser.schoolId);
-      if (priorUser?.id) invalidateScopeCache(priorUser.id, req.jwtUser.schoolId);
+      invalidateScopeCache(revokeId, req.jwtUser.schoolId);
       if (priorUser?._id) invalidateScopeCache(String(priorUser._id), req.jwtUser.schoolId);
       if (priorUser && priorUser.role !== role) {
         AuditService.log({
@@ -1247,8 +1323,12 @@ router.delete('/users/:id', authMiddleware, rbac('settings', 'delete'), async (r
       console.warn('[settings] teacher deactivation cascade (non-fatal):', cascErr.message);
     }
 
-    // Revoke all outstanding tokens so session ends immediately
-    revokeUserTokens(req.params.id).catch(err =>
+    // Revoke all outstanding tokens so session ends immediately.
+    // targetUser.id is the canonical app id — the route accepts either that
+    // or a Mongo `_id` (delFilter above), but revokeUserTokens() increments
+    // `{ id: userId }` and caches under that key, so an _id would silently
+    // match nothing and leave the removed user's session alive.
+    revokeUserTokens(targetUser.id).catch(err =>
       console.warn('[settings] token revocation on delete (non-fatal):', err.message)
     );
 

@@ -401,6 +401,13 @@ const StudentReportCard = forwardRef(function StudentReportCard({
   const [printing, setPrinting] = useState(false);
 
   async function printCard() {
+    // Printing stays on the HTML adapter (the accepted school standard:
+    // cover + academic page + comments/sign-off, rendered by the
+    // browser's own print-to-PDF). The class-wide bulk action on the
+    // Report Cards tab renders every student through this SAME route,
+    // so "Print Class" and "Print this student" are byte-for-byte the
+    // same document - a published snapshot uses its frozen render,
+    // a draft uses the live preview.
     setPrinting(true);
     try {
       const { data } = snapshot?.id
@@ -443,8 +450,11 @@ const StudentReportCard = forwardRef(function StudentReportCard({
         </div>
         <div className="flex items-center gap-3 shrink-0">
           {snapshot?.reportId && (
-            <span className="hidden sm:flex items-center gap-1 text-[10px] font-mono font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-0.5" title="Published report ID">
-              <CheckCircle size={10} /> {snapshot.reportId}
+            <span
+              className="hidden sm:flex items-center gap-1 text-[10px] font-mono font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-0.5"
+              title={`Published - report ID ${snapshot.reportId}${snapshot.version ? ` (version ${snapshot.version})` : ''}${snapshot.publishedAt ? `, published ${new Date(snapshot.publishedAt).toLocaleString()}` : ''}. The Markbook for this class and term is locked, so marks and comments for this student are read-only.`}
+            >
+              <CheckCircle size={10} /> Published{snapshot.version ? ` v${snapshot.version}` : ''} · {snapshot.reportId}
             </span>
           )}
           <div className="text-right hidden sm:block">

@@ -64,6 +64,9 @@ const mockUsersCreate    = jest.fn().mockResolvedValue({ id: 'usr_new', schoolId
 // GET /:id's live className/streamName resolution — default null (no
 // match), overridden per-test to prove the resolution actually happens.
 const mockClassesFindOne = jest.fn().mockReturnValue({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) }) });
+// GET /api/students (list)'s batched className resolution — one .find()
+// per page, never one per row. Default: no classes (nothing to fill in).
+const mockClassesFind = jest.fn().mockReturnValue({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([]) }) });
 const mockStreamsFindOne = jest.fn().mockReturnValue({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) }) });
 
 jest.mock('../../utils/model', () => ({
@@ -90,7 +93,7 @@ jest.mock('../../utils/model', () => ({
     if (collection === 'users') {
       return { find: mockUsersFind, findOne: mockUsersFindOne, updateOne: mockUsersUpdateOne, create: mockUsersCreate };
     }
-    if (collection === 'classes') return { findOne: mockClassesFindOne };
+    if (collection === 'classes') return { findOne: mockClassesFindOne, find: mockClassesFind };
     if (collection === 'streams') return { findOne: mockStreamsFindOne };
     // A real school doc (not null) — bulk portal/parent-account routes read
     // school.name/plan directly (no optional chaining) once they actually
@@ -285,6 +288,41 @@ describe('GET /api/students', () => {
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.data)).toBe(true);
     expect(res.body.data).toHaveLength(2);
+  });
+
+  /* className is a denormalised DISPLAY field. Imports, seed data, and
+     enrolments that predate it carry a valid classId with no name — which
+     rendered as a dash in every row of the list. GET /:id already resolved
+     this live; the list must too, batched once per page. */
+  test('resolves className from classId instead of showing a blank', async () => {
+    const students = [
+      makeStudent({ id: 'stu_a', classId: 'cls_001' }),
+      makeStudent({ id: 'stu_b', classId: 'cls_002', className: 'Stored Name' }),
+    ];
+    mockStudentsFind.mockReturnValue({
+      sort:   jest.fn().mockReturnThis(),
+      skip:   jest.fn().mockReturnThis(),
+      limit:  jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      lean:   jest.fn().mockResolvedValue(students),
+    });
+    mockStudentsCountDocuments.mockResolvedValue(2);
+    mockClassesFind.mockReturnValueOnce({
+      select: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue([{ id: 'cls_001', name: 'Standard 4A' }]),
+      }),
+    });
+
+    const res = await supertest(buildApp())
+      .get('/api/students')
+      .set('Authorization', 'Bearer fake-token');
+
+    expect(res.status).toBe(200);
+    expect(res.body.data[0].className).toBe('Standard 4A');
+    // A stored name is authoritative — the lookup only fills gaps.
+    expect(res.body.data[1].className).toBe('Stored Name');
+    // One lookup for the whole page, not one per student.
+    expect(mockClassesFind).toHaveBeenCalledTimes(1);
   });
 
   test('scopes list query to schoolId from JWT', async () => {

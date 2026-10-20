@@ -11,6 +11,7 @@ import FloatingWidgets from '@/components/FloatingWidgets.jsx';
 import CookieConsentBanner from '@/components/CookieConsentBanner.jsx';
 import { initAnalyticsIfConsented } from '@/utils/analytics.js';
 import { detectSchool } from '@/utils/schoolDetect.js';
+import useAuthStore from '@/store/auth.js';
 
 // Marketing analytics (GA) and its consent banner belong to the public
 // marketing site, not a school's own portal — a school subdomain is a
@@ -88,6 +89,26 @@ const queryClient = new QueryClient({
       retry: 0,
     },
   },
+});
+
+/* ── Clear the query cache whenever the signed-in identity changes ──────
+   Query keys are keyed by RESOURCE only — ['students','stats'],
+   ['finance','summary',…] — never by school or user. Logout and login are
+   both client-side (no page reload), so signing out and back in as someone
+   else in the SAME tab leaves the previous account's entries in memory.
+   Those entries are still inside staleTime, so React Query serves them
+   WITHOUT refetching: the new user can briefly see another school's totals.
+   Clears on login, logout, and the 401 path (store/auth.js's
+   'api:unauthorized' handler calls logout()).
+   Compares ids — not the whole session — so patchUser()/patchSchool()
+   permission and branding refreshes don't wipe a warm cache. School
+   switching is unaffected: TopBar hard-reloads for that. */
+let _sessionUserId = useAuthStore.getState().session?.user?.id ?? null;
+useAuthStore.subscribe((state) => {
+  const nextUserId = state.session?.user?.id ?? null;
+  if (nextUserId === _sessionUserId) return;
+  _sessionUserId = nextUserId;
+  queryClient.clear();
 });
 
 ReactDOM.createRoot(document.getElementById('root')).render(

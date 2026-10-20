@@ -1,6 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useCallback } from 'react';
-import { Outlet, useLocation } from 'react-router-dom';
+import { Outlet, useLocation, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import { AlertTriangle } from 'lucide-react';
 import Sidebar from './Sidebar.jsx';
 import TopBar  from './TopBar.jsx';
 import useAuthStore from '@/store/auth.js';
@@ -9,6 +10,7 @@ import useIdleTimer from '@/hooks/useIdleTimer.js';
 import IdleWarningModal from '@/components/session/IdleWarningModal.jsx';
 import { ToastProvider } from '@/hooks/useToast.jsx';
 import Toaster from '@/components/ui/Toaster.jsx';
+import FloatingHelp from '@/components/help/FloatingHelp.jsx';
 import { setFavicon, DEFAULT_FAVICON, DEFAULT_TITLE } from '@/utils/favicon.js';
 
 const W_EXPANDED  = 256;  // 16rem
@@ -122,6 +124,13 @@ export default function AppShell() {
     });
   }
 
+  // Session data is cached at login. Prefer the date over the cached boolean:
+  // renewing patches planExpiresAt in the session, and a stale `planExpired:
+  // true` must not keep the banner up after the school has paid.
+  const planExpired = school?.planExpiresAt
+    ? new Date(school.planExpiresAt) < new Date()
+    : !!school?.planExpired;
+
   return (
     <ToastProvider>
       <div className="flex h-full">
@@ -162,6 +171,21 @@ export default function AppShell() {
         {/* ── Main content ───────────────────────────────────────── */}
         <div className="flex flex-1 flex-col min-w-0 h-full">
           <TopBar onMenuClick={() => setSidebarOpen(true)} collapsed={collapsed} onExpand={toggleCollapse} />
+          {planExpired && (
+            <div className="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2 text-[13px] text-amber-900">
+              <AlertTriangle size={14} className="shrink-0 text-amber-600" />
+              <span>
+                Subscription expired
+                {school?.planExpiresAt
+                  ? ` on ${new Date(school.planExpiresAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}`
+                  : ''}.
+                Staff features stay available; student and parent portals pause after the grace period.
+              </span>
+              <Link to="/settings?tab=subscription" className="ml-auto shrink-0 font-semibold underline">
+                Renew
+              </Link>
+            </div>
+          )}
           <main className="flex-1 overflow-y-auto">
             <Outlet />
           </main>
@@ -169,6 +193,7 @@ export default function AppShell() {
 
         {/* Toaster lives inside the flex root so it shares the same stacking context */}
         <Toaster />
+        <FloatingHelp />
       </div>
     </ToastProvider>
   );

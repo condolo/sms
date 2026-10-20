@@ -154,6 +154,17 @@ async function _send(to, subject, html, opts = {}) {
      schoolId     — if provided, enables custom SMTP lookup
 */
 async function _sendAsSchool(to, subject, html, { schoolName, schoolEmail, schoolId } = {}) {
+  /* Demo sandbox: never let a demo tenant send real mail to third parties.
+     Platform-level mail (credentials, lifecycle) goes through _send and is
+     unaffected. Lazy require avoids a circular import at module load. */
+  if (schoolId) {
+    const { isDemoSchool } = require('./demo');
+    if (await isDemoSchool(schoolId)) {
+      console.warn(`[EMAIL] Demo tenant ${schoolId}: outbound "${subject}" suppressed.`);
+      return false;
+    }
+  }
+
   const resolved = await _resolveTransporter(schoolId, { schoolName, schoolEmail });
 
   const result = await _send(to, subject, html, {
@@ -994,10 +1005,145 @@ async function sendContactConfirmation({ name, email, institution, contactPhone 
   return _send(email, `We've received your enquiry — Msingi`, html);
 }
 
+/* ══════════════════════════════════════════════════════════════
+   DEMO TENANT EMAILS — request OTP, credentials, lifecycle
+   ══════════════════════════════════════════════════════════════ */
+
+const _fmtDate = (d) => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+
+async function sendDemoOtp({ to, name, code, schoolName }) {
+  const html = _wrap(`
+    <h2>Verify your demo request</h2>
+    <p>Hi ${_escapeHtml(name || 'there')},</p>
+    <p>Use the code below to confirm your email for the <strong>${_escapeHtml(schoolName || 'your school')}</strong> demo.</p>
+    <div class="info" style="text-align:center">
+      <p style="font-size:34px;letter-spacing:10px;font-weight:700;color:#1e1b4b;margin:6px 0">${code}</p>
+      <p style="font-size:13px;color:#6b7280">Valid for 10 minutes · one use only</p>
+    </div>
+    <p>If you didn't request this, you can safely ignore the email — no account is created without the code.</p>
+  `);
+  return _send(to, `Your Msingi demo code: ${code}`, html);
+}
+
+async function sendDemoCredentials({ to, name, schoolName, slug, password, expiresAt, trialDays }) {
+  const url = `${String(APP_URL).replace(/\/$/, '')}/login?school=${encodeURIComponent(slug)}`;
+  const html = _wrap(`
+    <h2>Your demo is ready 🎉</h2>
+    <p>Hi ${_escapeHtml(name || 'there')},</p>
+    <p><strong>${_escapeHtml(schoolName)}</strong> is set up and ready to explore for the next <strong>${trialDays} days</strong>.</p>
+    <div class="info">
+      <p><strong>Login page:</strong> <a href="${url}" style="color:#4f46e5">${url}</a></p>
+      <p><strong>Works until:</strong> ${_fmtDate(expiresAt)}</p>
+    </div>
+    <h2 style="margin-top:24px">Role logins</h2>
+    <div class="info">
+      <p><strong>Administrator:</strong> admin — full access</p>
+      <p><strong>Deputy Principal:</strong> principal</p>
+      <p><strong>Teacher:</strong> teacher</p>
+      <p><strong>Finance Officer:</strong> finance</p>
+      <p><strong>Parent:</strong> parent</p>
+      <p><strong>Student:</strong> student</p>
+      <p style="margin-top:10px"><strong>Password (all roles):</strong> <code style="background:#eef2ff;padding:2px 6px;border-radius:4px">${password}</code></p>
+    </div>
+    <p style="margin-top:8px"><a class="btn" href="${url}">Open the demo →</a></p>
+    <p style="font-size:13px;color:#6b7280">This demo uses fictional school data and a sandbox payment environment. It expires automatically — reply to this email if you need more time or want a walkthrough.</p>
+  `);
+  return _send(to, `Your ${schoolName} demo is ready — login details inside`, html);
+}
+
+async function sendDemoLifecycle({ to, name, schoolName, kind, daysLeft, loginUrl }) {
+  const copy = {
+    nudge:   { subject: `Getting started with your ${schoolName} demo`, heading: 'Make the demo yours',
+               body: 'A quick win: open Students → add a learner, then mark the register for today. Everything you change is isolated to your demo tenant.' },
+    warning: { subject: `${schoolName} demo: ${daysLeft} day(s) left`, heading: 'Your demo is ending soon',
+               body: `You have <strong>${daysLeft} day(s)</strong> left. Reply to this email if you would like a walkthrough, pricing, or more time.` },
+    final:   { subject: `${schoolName} demo expires tomorrow`, heading: 'Last day of your demo',
+               body: 'Your demo expires in less than 24 hours. After that the workspace freezes for 30 days, then it is deleted.' },
+  }[kind] || { subject: `Update on your ${schoolName} demo`, heading: 'Demo update', body: '' };
+
+  const html = _wrap(`
+    <h2>${copy.heading}</h2>
+    <p>Hi ${_escapeHtml(name || 'there')},</p>
+    <p>${copy.body}</p>
+    ${loginUrl ? `<p><a class="btn" href="${loginUrl}">Open ${_escapeHtml(schoolName)} →</a></p>` : ''}
+  `);
+  return _send(to, copy.subject, html);
+}
+
+async function sendDemoExtended({ to, name, schoolName, expiresAt }) {
+  const html = _wrap(`
+    <h2>Your demo was extended</h2>
+    <p>Hi ${_escapeHtml(name || 'there')},</p>
+    <p><strong>${_escapeHtml(schoolName)}</strong> now stays open until <strong>${_fmtDate(expiresAt)}</strong>.</p>
+    <p>When you are ready, we can convert this workspace to a paid school without re-entering anything.</p>
+  `);
+  return _send(to, `${schoolName} demo extended`, html);
+}
+
+async function sendDemoExpired({ to, name, schoolName }) {
+  const html = _wrap(`
+    <h2>Your demo has ended</h2>
+    <p>Hi ${_escapeHtml(name || 'there')},</p>
+    <p>The <strong>${_escapeHtml(schoolName)}</strong> demo has expired and its workspace is now read-locked. Your data stays available for 30 days.</p>
+    <p>Reply to this email to reopen it, extend it, or move to a paid school — nothing you entered is lost.</p>
+  `);
+  return _send(to, `${schoolName} demo has ended`, html);
+}
+
+async function sendDemoRejected({ to, name, schoolName, reason }) {
+  const html = _wrap(`
+    <h2>About your demo request</h2>
+    <p>Hi ${_escapeHtml(name || 'there')},</p>
+    <p>We could not approve the demo for <strong>${_escapeHtml(schoolName)}</strong> right now.</p>
+    ${reason ? `<div class="info"><p><strong>Reason:</strong> ${_escapeHtml(reason)}</p></div>` : ''}
+    <p>Reply to this email and our team will help you find another way to see the platform.</p>
+  `);
+  return _send(to, `Update on your Msingi demo request`, html);
+}
+
+async function sendPlanExpiryReminder({ adminName, adminEmail, schoolName, plan, daysLeft, expiresAt }) {
+  const isExpired = !daysLeft || daysLeft <= 0;
+  const subject = isExpired
+    ? `${schoolName}: your Msingi subscription has expired`
+    : `${schoolName}: your Msingi plan expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'}`;
+  const html = _wrap(`
+    <h2>${isExpired ? 'Your subscription has expired' : 'Your subscription is ending soon'}</h2>
+    <p>Hi ${_escapeHtml(adminName || 'there')},</p>
+    ${isExpired
+      ? `<p><strong>${_escapeHtml(schoolName)}</strong>'s <strong>${_escapeHtml(plan)}</strong> plan ended on <strong>${_escapeHtml(expiresAt)}</strong>.</p>
+         <p>Your school data and all staff (admin / teacher) features remain available. Student and parent portal access pauses after the grace period until the subscription is renewed.</p>`
+      : `<p><strong>${_escapeHtml(schoolName)}</strong>'s <strong>${_escapeHtml(plan)}</strong> plan is active until <strong>${_escapeHtml(expiresAt)}</strong> — ${daysLeft} day${daysLeft === 1 ? '' : 's'} left.</p>
+         <p>Renew from Settings → Subscription (M-Pesa) to keep every portal open without interruption.</p>`}
+    <p>Reply to this email if you need an invoice, a different tier, or more time.</p>
+  `);
+  return _send(adminEmail, subject, html);
+}
+
+async function sendSupportReply({ to, name, ref, subject, body, schoolName }) {
+  const url = `${String(APP_URL).replace(/\/$/, '')}/support`;
+  const html = _wrap(`
+    <h2>Your support ticket has a reply</h2>
+    <p>Hi ${_escapeHtml(name || 'there')},</p>
+    <p><strong>${_escapeHtml(ref)} · ${_escapeHtml(subject)}</strong></p>
+    <div class="info"><p style="white-space:pre-wrap">${_escapeHtml(body)}</p></div>
+    <p><a class="btn" href="${url}">Open the ticket →</a></p>
+    <p style="font-size:13px;color:#6b7280">Reply from the same page to keep the conversation in one place.</p>
+  `);
+  return _send(to, `[${ref}] Reply to your support ticket`, html);
+}
+
 module.exports = {
   invalidateSmtpCache,
   sendContactEnquiry,
   sendContactConfirmation,
+  sendDemoOtp,
+  sendDemoCredentials,
+  sendDemoLifecycle,
+  sendDemoExtended,
+  sendDemoExpired,
+  sendDemoRejected,
+  sendPlanExpiryReminder,
+  sendSupportReply,
   sendRegistrationPending,
   sendAdminNewSchoolAlert,
   sendApprovalWelcome,

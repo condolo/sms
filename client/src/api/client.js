@@ -89,6 +89,15 @@ async function _req(method, path, body = null, params = null, opts = {}) {
 
   const json = await res.json().catch(() => null);
 
+  /* Expired demo tenant: the server blocks every authenticated request.
+     Send the user to the branded expiry page (data is still recoverable). */
+  if (res.status === 403 && json?.error?.code === 'DEMO_EXPIRED') {
+    const { slug } = detectSchool();
+    localStorage.removeItem('msingi_session');
+    window.location.assign(`/demo-expired${slug ? `?school=${encodeURIComponent(slug)}` : ''}`);
+    throw new APIError('DEMO_EXPIRED', json?.error?.message || 'This demo has ended.', 403);
+  }
+
   if (res.status === 401) {
     // Only treat as session expiry if a session was active.
     // Unauthenticated requests (login, OTP verify, etc.) should show the
@@ -597,8 +606,11 @@ export const settings = {
     },
   },
   users: {
-    list:        ()         => _get('/settings/users'),
-    listRemoved: ()         => _get('/settings/users', { status: 'removed' }),
+    // `params` is OPTIONAL and additive: pass { page, limit, role, q } for
+    // server-side filtering + pagination (Settings → Users). Callers that
+    // pass nothing still get the full, unpaginated list exactly as before.
+    list:        (params)    => _get('/settings/users', params),
+    listRemoved: (params)    => _get('/settings/users', { status: 'removed', ...(params || {}) }),
     invite:      (data)     => _post('/settings/users/invite', data),
     bulkInvite:  (staff)    => _post('/settings/users/bulk-invite', { staff }),
     update:      (id, data) => _put(`/settings/users/${id}`, data),
@@ -616,6 +628,14 @@ export const settings = {
     update: (key, data)  => _put(`/settings/custom-roles/${key}`, data),
     remove: (key)        => _delete(`/settings/custom-roles/${key}`),
   },
+};
+
+/* Audit log — Settings → Audit Log. Admin-only server-side; the client
+   just forwards the filter/pagination params. */
+export const audit = {
+  list:    (params) => _get('/audit', params),
+  actions: ()      => _get('/audit/actions'),
+  stats:   (params) => _get('/audit/stats', params),
 };
 
 export const academicConfig = {
@@ -714,6 +734,13 @@ export const messages = {
   markRead:    (id)     => _patch(`/messages/${id}/read`, {}),
   remove:      (id)     => _delete(`/messages/${id}`),
   unreadCount: ()       => _get('/messages/unread-count'),
+  recipients:  (params) => _get('/messages/recipients', params),
+  groups: {
+    list:   ()         => _get('/messages/groups'),
+    create: (data)     => _post('/messages/groups', data),
+    update: (id, data) => _patch(`/messages/groups/${id}`, data),
+    remove: (id)       => _delete(`/messages/groups/${id}`),
+  },
 };
 
 // Parent-safe compose — recipients are a server-resolved category list
@@ -1046,6 +1073,15 @@ export const markSubmissions = {
   review:  (id, data) => _post(`/mark-submissions/${id}/review`, data),
   lock:    (id)     => _post(`/mark-submissions/${id}/lock`),
   unlock:  (id, reason) => _post(`/mark-submissions/${id}/unlock`, { reason }),
+};
+
+/* User-facing support tickets (any authenticated school user). The platform
+   console uses its own /platform/tickets endpoints. */
+export const supportApi = {
+  list:   ()         => _get('/support/tickets'),
+  get:    (id)       => _get(`/support/tickets/${id}`),
+  create: (data)     => _post('/support/tickets', data),
+  reply:  (id, body) => _post(`/support/tickets/${id}/messages`, { body }),
 };
 
 export const reportCards = {

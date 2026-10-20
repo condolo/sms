@@ -6,6 +6,8 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "nodemon server/index.js",
+    "db:local": "node scripts/dev-mongo.js",
+    "mail:dev": "node scripts/dev-mail.js",
     "dev:react": "cd client && npm run dev",
     "build:react": "cd client && npm install && npm run build",
     "build": "npm run build:react",

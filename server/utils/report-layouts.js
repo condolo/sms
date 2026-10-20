@@ -56,6 +56,26 @@ function _registerReportFonts(doc) {
   doc._rcFontsRegistered = true;
 }
 
+/* Draw a report's bottom-of-page footer without PDFKit silently starting a
+   new page for it. Every layout positions the footer near the physical
+   bottom edge (page.height - 55/56); PDFKit's page.maxY() is height minus
+   the 40pt bottom margin, so each footer `.text()` call below the content
+   box was treated as overflow and appended a fresh page. A 3-student bulk
+   download came out as 12 pages (one real report + 3 near-blank footer
+   pages per student) even though the individual report itself fit on one
+   page. Temporarily zeroing the bottom margin lets the footer draw in
+   place; restoring it afterwards keeps every other layout/page calculation
+   unchanged. */
+function _drawFooterInPlace(doc, draw) {
+  const previousBottom = doc.page?.margins?.bottom;
+  if (doc.page?.margins) doc.page.margins.bottom = 0;
+  try {
+    draw();
+  } finally {
+    if (doc.page?.margins && previousBottom != null) doc.page.margins.bottom = previousBottom;
+  }
+}
+
 const INK = '#15171c', INK_SOFT = '#5b5f68', INK_FAINT = '#9195a0';
 const SURFACE = '#f4f3f0', RULE = '#d8d6d0', RULE_SOFT = '#e8e6e1';
 const BRAND = '#1f2d3d', BRAND_WASH = '#eef1f4', ACCENT = '#8a5a2b';
@@ -392,23 +412,27 @@ function _renderLegacyTabularPdf(doc, s, images, isFirstPage) {
      .text(s.signatures.classTeacherLabel, 40, sigY + 24, { width: sigW })
      .text(s.signatures.principalLabel,    40 + sigW + 10, sigY + 24, { width: sigW });
 
-  /* FOOTER */
+  /* FOOTER — drawn with the bottom margin temporarily removed so PDFKit
+     does not treat each near-bottom line as overflow and append a fresh
+     page (see _drawFooterInPlace's comment). */
   const footerY = doc.page.height - 55;
-  doc.rect(40, footerY, PAGE_WIDTH, 0.5).fill(BORDER);
-  doc.fillColor(GRAY).fontSize(7.5).font('Helvetica')
-     .text(s.footer.footerNote, 40, footerY + 6, { width: PAGE_WIDTH, align: 'center' });
-  if (s.footer.reportId) {
-    const verifyRow = footerY + 18;
-    doc.fillColor(DARK).fontSize(7).font('Helvetica-Bold')
-       .text(`Report ID: ${s.footer.reportId}`, 40, verifyRow, { width: PAGE_WIDTH / 2 });
-    doc.fillColor(GRAY).fontSize(7).font('Helvetica')
-       .text(`Verify at: /verify/${s.footer.reportId}`, 40 + PAGE_WIDTH / 2, verifyRow, { width: PAGE_WIDTH / 2, align: 'right' });
-    doc.fillColor(GRAY).fontSize(6.5).font('Helvetica')
-       .text(s.footer.genLine, 40, footerY + 28, { width: PAGE_WIDTH, align: 'center' });
-  } else {
+  _drawFooterInPlace(doc, () => {
+    doc.rect(40, footerY, PAGE_WIDTH, 0.5).fill(BORDER);
     doc.fillColor(GRAY).fontSize(7.5).font('Helvetica')
-       .text(s.footer.genLine, 40, footerY + 18, { width: PAGE_WIDTH, align: 'center' });
-  }
+       .text(s.footer.footerNote, 40, footerY + 6, { width: PAGE_WIDTH, align: 'center' });
+    if (s.footer.reportId) {
+      const verifyRow = footerY + 18;
+      doc.fillColor(DARK).fontSize(7).font('Helvetica-Bold')
+         .text(`Report ID: ${s.footer.reportId}`, 40, verifyRow, { width: PAGE_WIDTH / 2 });
+      doc.fillColor(GRAY).fontSize(7).font('Helvetica')
+         .text(`Verify at: /verify/${s.footer.reportId}`, 40 + PAGE_WIDTH / 2, verifyRow, { width: PAGE_WIDTH / 2, align: 'right' });
+      doc.fillColor(GRAY).fontSize(6.5).font('Helvetica')
+         .text(s.footer.genLine, 40, footerY + 28, { width: PAGE_WIDTH, align: 'center' });
+    } else {
+      doc.fillColor(GRAY).fontSize(7.5).font('Helvetica')
+         .text(s.footer.genLine, 40, footerY + 18, { width: PAGE_WIDTH, align: 'center' });
+    }
+  });
 }
 
 /* HTML renderer — the second adapter over the same IR the PDF renderer
@@ -1218,19 +1242,17 @@ function _renderSubjectPairedPdf(doc, s, images, isFirstPage) {
     }
   }
 
-  /* FOOTER — RCE8: was `doc.page.height - 40`, i.e. flush with the
-     bottom margin itself; PDFKit treats text drawn right at the margin
-     as overflowing it and silently adds a trailing near-blank page just
-     to fit it, producing exactly the "near-blank page" the reviewer's
-     QA explicitly checks for. -56 matches legacy_tabular's own
-     (already-safe) footer offset. */
+  /* FOOTER — see _drawFooterInPlace: keeping PDFKit's normal bottom margin
+     made each footer line below the content box spawn a near-blank page. */
   const footerY = doc.page.height - 56;
-  doc.fillColor(INK_FAINT).font(FONTS.sansRegular).fontSize(7.5)
-     .text(s.footer.footerNote, X, footerY, { width: PAGE_WIDTH, align: 'center' });
-  if (s.footer.reportId) {
-    doc.fillColor(INK_FAINT).font(FONTS.monoRegular).fontSize(6.5)
-       .text(`Report ID: ${s.footer.reportId}  |  ${s.footer.genLine}`, X, footerY + 12, { width: PAGE_WIDTH, align: 'center' });
-  }
+  _drawFooterInPlace(doc, () => {
+    doc.fillColor(INK_FAINT).font(FONTS.sansRegular).fontSize(7.5)
+       .text(s.footer.footerNote, X, footerY, { width: PAGE_WIDTH, align: 'center' });
+    if (s.footer.reportId) {
+      doc.fillColor(INK_FAINT).font(FONTS.monoRegular).fontSize(6.5)
+         .text(`Report ID: ${s.footer.reportId}  |  ${s.footer.genLine}`, X, footerY + 12, { width: PAGE_WIDTH, align: 'center' });
+    }
+  });
 }
 
 function _renderSubjectPairedHtml(s) {
@@ -1628,15 +1650,16 @@ function _renderMarksThenCommentsPdf(doc, s, images, isFirstPage) {
     }
   }
 
-  /* FOOTER — RCE8: see subject_paired's identical fix for why this is
-     -56, not the bottom margin itself (-40). */
+  /* FOOTER — same _drawFooterInPlace fix as the other PDF layouts. */
   const footerY = doc.page.height - 56;
-  doc.fillColor(INK_FAINT).font(FONTS.sansRegular).fontSize(7.5)
-     .text(s.footer.footerNote, X, footerY, { width: PAGE_WIDTH, align: 'center' });
-  if (s.footer.reportId) {
-    doc.fillColor(INK_FAINT).font(FONTS.monoRegular).fontSize(6.5)
-       .text(`Report ID: ${s.footer.reportId}  |  ${s.footer.genLine}`, X, footerY + 12, { width: PAGE_WIDTH, align: 'center' });
-  }
+  _drawFooterInPlace(doc, () => {
+    doc.fillColor(INK_FAINT).font(FONTS.sansRegular).fontSize(7.5)
+       .text(s.footer.footerNote, X, footerY, { width: PAGE_WIDTH, align: 'center' });
+    if (s.footer.reportId) {
+      doc.fillColor(INK_FAINT).font(FONTS.monoRegular).fontSize(6.5)
+         .text(`Report ID: ${s.footer.reportId}  |  ${s.footer.genLine}`, X, footerY + 12, { width: PAGE_WIDTH, align: 'center' });
+    }
+  });
 }
 
 function _renderMarksThenCommentsHtml(s) {
@@ -1980,12 +2003,14 @@ function _renderKindergartenPdf(doc, s, images, isFirstPage) {
   }
 
   const footerY = doc.page.height - 56;
-  doc.fillColor(INK_FAINT).font(FONTS.sansRegular).fontSize(7.5)
-     .text(s.footer.footerNote, X, footerY, { width: PAGE_WIDTH, align: 'center' });
-  if (s.footer.reportId) {
-    doc.fillColor(INK_FAINT).font(FONTS.monoRegular).fontSize(6.5)
-       .text(`Report ID: ${s.footer.reportId}  |  ${s.footer.genLine}`, X, footerY + 12, { width: PAGE_WIDTH, align: 'center' });
-  }
+  _drawFooterInPlace(doc, () => {
+    doc.fillColor(INK_FAINT).font(FONTS.sansRegular).fontSize(7.5)
+       .text(s.footer.footerNote, X, footerY, { width: PAGE_WIDTH, align: 'center' });
+    if (s.footer.reportId) {
+      doc.fillColor(INK_FAINT).font(FONTS.monoRegular).fontSize(6.5)
+         .text(`Report ID: ${s.footer.reportId}  |  ${s.footer.genLine}`, X, footerY + 12, { width: PAGE_WIDTH, align: 'center' });
+    }
+  });
 }
 
 function _renderKindergartenHtml(s) {

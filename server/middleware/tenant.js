@@ -1,4 +1,23 @@
 const { _model } = require('../utils/model');
+const demo = require('../utils/demo');
+
+/* Demo tenants are real schools with an expiry date. Block resolution (and
+   therefore login) the moment that date passes — the operator console can
+   still see them, and the sweep freezes/purges them later. */
+function _rejectExpiredDemo(res, doc) {
+  if (demo.isDemoSchoolDoc(doc) && doc.expiresAt && new Date(doc.expiresAt) < new Date()) {
+    res.status(403).json({
+      success: false,
+      error: {
+        code: 'DEMO_EXPIRED',
+        message: 'This demo has ended. Your data is kept for 30 days — contact us to reopen it or move to a paid school.',
+        loginUrl: '/demo-expired',
+      },
+    });
+    return true;
+  }
+  return false;
+}
 
 /* ── Tenant resolution ───────────────────────────────────────────
    Reads the school from one of:
@@ -15,6 +34,7 @@ async function tenantMiddleware(req, res, next) {
       const doc = await _findSchool({ id: req.jwtUser.schoolId });
       if (!doc) return res.status(404).json({ error: 'School not found' });
       if (!doc.isActive) return res.status(403).json({ error: 'School account is inactive' });
+      if (_rejectExpiredDemo(res, doc)) return;
       req.school = doc;
       return next();
     }
@@ -25,6 +45,7 @@ async function tenantMiddleware(req, res, next) {
       const doc = await _findSchool({ slug });
       if (!doc) return res.status(404).json({ error: `School '${slug}' not found` });
       if (!doc.isActive) return res.status(403).json({ error: 'School account is inactive' });
+      if (_rejectExpiredDemo(res, doc)) return;
       req.school = doc;
       return next();
     }
@@ -36,13 +57,21 @@ async function tenantMiddleware(req, res, next) {
       const subSlug = parts[0];
       if (subSlug !== 'www' && subSlug !== 'app') {
         const doc = await _findSchool({ slug: subSlug });
-        if (doc?.isActive) { req.school = doc; return next(); }
+        if (doc?.isActive) {
+          if (_rejectExpiredDemo(res, doc)) return;
+          req.school = doc;
+          return next();
+        }
       }
     }
 
     // 4. From custom domain
     const doc = await _findSchool({ customDomain: host });
-    if (doc?.isActive) { req.school = doc; return next(); }
+    if (doc?.isActive) {
+      if (_rejectExpiredDemo(res, doc)) return;
+      req.school = doc;
+      return next();
+    }
 
     return res.status(400).json({ error: 'Could not resolve school from request' });
   } catch (err) {
@@ -86,6 +115,15 @@ function _mapSchoolDoc(doc) {
     addOns:         doc.addOns       || [],
     isActive:       doc.isActive !== false,
     planExpiresAt:  doc.planExpiresAt || null,
+    /* Display-only signal for the staff banner; enforcement lives in
+       middleware/plan.js (ENFORCE_PLAN_EXPIRY + PLAN_GRACE_DAYS). */
+    planExpired:    !!(doc.planExpiresAt && new Date(doc.planExpiresAt) < new Date()),
+    /* Demo tenant lifecycle (see utils/demo.js). Kept in the mapped shape
+       because login/MFA bypass and expiry checks read it from req.school. */
+    status:         doc.status        || null,
+    isDemo:         !!doc.isDemo,
+    expiresAt:      doc.expiresAt     || null,
+    demoExpired:    !!doc.demoExpired,
     /* ── Branding / theme ── */
     primaryColor:   doc.primaryColor || '#4f46e5',
     accentColor:    doc.accentColor  || '#7c3aed',

@@ -66,6 +66,14 @@
         <i class="fas fa-hourglass-half"></i> Pending
         <span class="pa-badge" id="pending-badge" style="display:none">0</span>
       </button>
+      <button class="pa-nav-item" onclick="showView('demos')" id="nav-demos">
+        <i class="fas fa-rocket"></i> Demo Requests
+        <span class="pa-badge" id="demo-badge" style="display:none">0</span>
+      </button>
+      <button class="pa-nav-item" onclick="showView('tickets')" id="nav-tickets">
+        <i class="fas fa-headset"></i> Support Tickets
+        <span class="pa-badge" id="ticket-badge" style="display:none">0</span>
+      </button>
       <button class="pa-nav-item" onclick="showView('schools')" id="nav-schools">
         <i class="fas fa-school"></i> All Schools
       </button>
@@ -307,14 +315,279 @@ function showView(view) {
   document.querySelectorAll('.pa-nav-item').forEach(el => el.classList.remove('active'));
   document.getElementById('nav-' + view)?.classList.add('active');
 
-  const titles = { overview:'Overview', pending:'Pending Approvals', schools:'Registered Schools', organizations:'Organizations', provision:'Provision New School', announcements:'System Announcements', diagnostics:'System Diagnostics', branding:'Branding & Platform Settings', landing:'Landing Page CMS', billing:'Billing Overview' };
+  const titles = { overview:'Overview', pending:'Pending Approvals', demos:'Demo Requests', tickets:'Support Tickets', schools:'Registered Schools', organizations:'Organizations', provision:'Provision New School', announcements:'System Announcements', diagnostics:'System Diagnostics', branding:'Branding & Platform Settings', landing:'Landing Page CMS', billing:'Billing Overview' };
   document.getElementById('view-title').textContent = titles[view] || view;
 
-  const views = { overview: renderOverview, pending: renderPending, schools: renderSchools, organizations: renderOrganizations, provision: renderProvision, announcements: renderAnnouncements, diagnostics: renderDiagnostics, branding: renderBranding, landing: renderLandingCMS, billing: renderBillingOverview };
+  const views = { overview: renderOverview, pending: renderPending, demos: renderDemoRequests, tickets: renderTickets, schools: renderSchools, organizations: renderOrganizations, provision: renderProvision, announcements: renderAnnouncements, diagnostics: renderDiagnostics, branding: renderBranding, landing: renderLandingCMS, billing: renderBillingOverview };
   (views[view] || (() => {}))();
 }
 
 /* ── OVERVIEW ───────────────────────────────────────────── */
+/* ── DEMO REQUESTS ───────────────────────────────────────── */
+const _DEMO_STATUS_STYLE = {
+  pending_otp:     'background:#f1f5f9;color:#475569',
+  verified:        'background:#e0e7ff;color:#3730a3',
+  pending_review:  'background:#fef3c7;color:#92400e',
+  provisioned:     'background:#d1fae5;color:#065f46',
+  rejected:        'background:#fee2e2;color:#991b1b',
+  failed:          'background:#fee2e2;color:#991b1b',
+  purged:          'background:#f1f5f9;color:#94a3b8',
+};
+function _demoBadge(status) {
+  const style = _DEMO_STATUS_STYLE[status] || 'background:#f1f5f9;color:#475569';
+  return `<span style="${style};padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700">${_esc(status || 'unknown')}</span>`;
+}
+function _fmtWhen(v) {
+  if (!v) return '-';
+  const d = new Date(v);
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+async function renderDemoRequests() {
+  const el = document.getElementById('pa-content');
+  el.innerHTML = '<div class="pa-loading"><i class="fas fa-circle-notch fa-spin"></i> Loading demo requests.</div>';
+  try {
+    const data = await api('GET', '/demo-requests');
+    const requests = data.requests || [];
+    const pending = requests.filter(r => r.status === 'pending_review').length;
+    const badge = document.getElementById('demo-badge');
+    if (badge) { badge.textContent = pending; badge.style.display = pending ? 'inline-flex' : 'none'; }
+
+    if (!requests.length) {
+      el.innerHTML = `<div class="pa-card"><div class="pa-empty">
+        <i class="fas fa-rocket" style="color:#6366f1;font-size:34px;margin-bottom:12px"></i>
+        <p style="font-weight:600;color:#374151">No demo requests yet</p>
+        <p style="color:#9ca3af;font-size:13px">Requests from the public /demo form appear here.</p>
+      </div></div>`;
+      return;
+    }
+
+    el.innerHTML = `
+      <div class="pa-card">
+        <div class="pa-card-header">
+          <h3>Demo pipeline (${requests.length})</h3>
+          <button class="pa-btn" onclick="renderDemoRequests()"><i class="fas fa-sync-alt"></i> Refresh</button>
+        </div>
+        <div style="padding:8px 0">
+          ${requests.map(r => _demoRequestCard(r)).join('')}
+        </div>
+      </div>`;
+  } catch (err) {
+    el.innerHTML = `<div class="pa-card"><div style="padding:20px;font-size:13px;color:var(--gray-500)">
+      <i class="fas fa-triangle-exclamation" style="color:#f59e0b;margin-right:8px"></i>${_esc(_apiErrorMessage(err))}
+    </div></div>`;
+  }
+}
+
+function _demoRequestCard(r) {
+  const tenant = r.tenantId
+    ? `<span class="pending-meta"><i class="fas fa-school"></i> ${_esc(r.tenantSlug || r.tenantId)} · expires ${_fmtWhen(r.expiresAt)}</span>`
+    : '';
+  const actions = [];
+  if (r.status === 'pending_review') {
+    actions.push(`<button class="pa-btn success" onclick="demoApprove('${r.id}')"><i class="fas fa-check"></i> Approve</button>`);
+    actions.push(`<button class="pa-btn danger" onclick="demoReject('${r.id}')"><i class="fas fa-times"></i> Reject</button>`);
+  }
+  if (r.status === 'provisioned' && r.tenantId) {
+    actions.push(`<button class="pa-btn" onclick="demoExtend('${r.tenantId}')"><i class="fas fa-calendar-plus"></i> +7 days</button>`);
+    actions.push(`<a class="pa-btn" href="/login?school=${encodeURIComponent(r.tenantSlug || '')}" target="_blank"><i class="fas fa-arrow-up-right-from-square"></i> Open</a>`);
+  }
+  if (r.status === 'failed') {
+    actions.push(`<button class="pa-btn" onclick="demoApprove('${r.id}')"><i class="fas fa-rotate"></i> Retry</button>`);
+  }
+  return `
+    <div class="pending-card">
+      <div class="pending-card-top">
+        <div class="pending-card-info">
+          <h4>${_esc(r.schoolName)} ${_demoBadge(r.status)}</h4>
+          <span class="pending-meta"><i class="fas fa-user"></i> ${_esc(r.name)} — ${_esc(r.email)}</span>
+          <span class="pending-meta"><i class="fas fa-briefcase"></i> ${_esc(r.role) || '-'} · ${_esc(r.schoolSize) || '-'}</span>
+          <span class="pending-meta"><i class="fas fa-phone"></i> ${_esc(r.phone) || '-'}</span>
+          ${tenant}
+        </div>
+        <div class="pending-card-right">
+          <span style="font-size:11px;color:var(--gray-400)">${_fmtWhen(r.createdAt)}</span>
+        </div>
+      </div>
+      ${actions.length ? `<div class="pending-card-actions">${actions.join('')}</div>` : ''}
+    </div>`;
+}
+
+async function demoApprove(id) {
+  try {
+    await api('POST', `/demo-requests/${id}/approve`);
+    renderDemoRequests();
+  } catch (err) {
+    alert('Approve failed: ' + _apiErrorMessage(err));
+  }
+}
+async function demoReject(id) {
+  const reason = prompt('Reason for rejecting this demo request (emailed to the requester):');
+  if (reason === null) return;
+  try {
+    await api('POST', `/demo-requests/${id}/reject`, { reason });
+    renderDemoRequests();
+  } catch (err) {
+    alert('Reject failed: ' + _apiErrorMessage(err));
+  }
+}
+async function demoExtend(schoolId) {
+  try {
+    const res = await api('POST', `/schools/${schoolId}/extend-demo`, { days: 7 });
+    alert('Demo extended to ' + _fmtWhen(res?.data?.expiresAt));
+    renderDemoRequests();
+  } catch (err) {
+    alert('Extension failed: ' + _apiErrorMessage(err));
+  }
+}
+
+/* ── SUPPORT TICKETS ─────────────────────────────────────── */
+const _TICKET_STATUS_STYLE = {
+  open:        'background:#fee2e2;color:#991b1b',
+  in_progress: 'background:#e0e7ff;color:#3730a3',
+  waiting:     'background:#fef3c7;color:#92400e',
+  resolved:    'background:#d1fae5;color:#065f46',
+  closed:      'background:#f1f5f9;color:#475569',
+};
+function _ticketBadge(status) {
+  const style = _TICKET_STATUS_STYLE[status] || 'background:#f1f5f9;color:#475569';
+  return `<span style="${style};padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700">${_esc((status || '').replace('_', ' '))}</span>`;
+}
+
+let _ticketFilter = 'active';
+
+async function renderTickets() {
+  const el = document.getElementById('pa-content');
+  el.innerHTML = '<div class="pa-loading"><i class="fas fa-circle-notch fa-spin"></i> Loading tickets.</div>';
+  try {
+    const query = _ticketFilter === 'active' ? '?status=open,in_progress,waiting' : (_ticketFilter === 'closed' ? '?status=resolved,closed' : '');
+    const data = await api('GET', '/tickets' + query);
+    const tickets = data.tickets || [];
+
+    const allData = await api('GET', '/tickets?limit=500');
+    const activeCount = (allData.tickets || []).filter(t => ['open', 'in_progress', 'waiting'].includes(t.status)).length;
+    const badge = document.getElementById('ticket-badge');
+    if (badge) { badge.textContent = activeCount; badge.style.display = activeCount ? 'inline-flex' : 'none'; }
+
+    const tab = (key, label) => `<button class="pa-btn ${_ticketFilter === key ? 'primary' : ''}" onclick="_ticketFilter='${key}';renderTickets()">${label}</button>`;
+
+    el.innerHTML = `
+      <div class="pa-card">
+        <div class="pa-card-header">
+          <h3>Tickets (${tickets.length})</h3>
+          <div style="display:flex;gap:8px">
+            ${tab('active', 'Active')}${tab('closed', 'Closed')}${tab('all', 'All')}
+            <button class="pa-btn" onclick="newTicket()"><i class="fas fa-plus"></i> New</button>
+          </div>
+        </div>
+        <div style="padding:8px 0">
+          ${tickets.length ? tickets.map(t => _ticketCard(t)).join('') : `<div class="pa-empty"><p style="color:#9ca3af;font-size:13px">Nothing here.</p></div>`}
+        </div>
+      </div>`;
+  } catch (err) {
+    el.innerHTML = `<div class="pa-card"><div style="padding:20px;font-size:13px;color:var(--gray-500)">
+      <i class="fas fa-triangle-exclamation" style="color:#f59e0b;margin-right:8px"></i>${_esc(_apiErrorMessage(err))}
+    </div></div>`;
+  }
+}
+
+function _ticketCard(t) {
+  const prio = t.priority === 'urgent' || t.priority === 'high'
+    ? `<span style="font-size:11px;font-weight:700;color:#b91c1c">${_esc(t.priority)}</span>` : '';
+  return `
+    <div class="pending-card" id="ticket-${t.id}">
+      <div class="pending-card-top">
+        <div class="pending-card-info">
+          <h4>${_esc(t.ref)} · ${_esc(t.subject)} ${_ticketBadge(t.status)} ${prio}</h4>
+          <span class="pending-meta"><i class="fas fa-user"></i> ${_esc(t.requesterName) || '-'} ${t.requesterEmail ? '— ' + _esc(t.requesterEmail) : ''}</span>
+          <span class="pending-meta"><i class="fas fa-tag"></i> ${_esc(t.category)} · ${_esc(t.source || 'manual')}</span>
+          ${t.requesterRole ? `<span class="pending-meta"><i class="fas fa-user-tag"></i> ${_esc(t.requesterRole)}</span>` : ''}
+          ${t.schoolName ? `<span class="pending-meta"><i class="fas fa-school"></i> ${_esc(t.schoolName)}</span>` : ''}
+          ${t.tenantId ? `<span class="pending-meta"><i class="fas fa-school"></i> ${_esc(t.tenantId)}</span>` : ''}
+        </div>
+        <div class="pending-card-right">
+          <span style="font-size:11px;color:var(--gray-400)">${_fmtWhen(t.updatedAt)}</span>
+        </div>
+      </div>
+      <div class="pending-card-actions">
+        <button class="pa-btn" onclick="openTicket('${t.id}')"><i class="fas fa-comments"></i> Open</button>
+        ${t.status !== 'resolved' && t.status !== 'closed'
+          ? `<button class="pa-btn success" onclick="setTicketStatus('${t.id}','resolved')"><i class="fas fa-check"></i> Resolve</button>`
+          : `<button class="pa-btn" onclick="setTicketStatus('${t.id}','open')"><i class="fas fa-rotate-left"></i> Reopen</button>`}
+      </div>
+    </div>`;
+}
+
+async function openTicket(id) {
+  try {
+    const data = await api('GET', `/tickets/${id}`);
+    const t = data.ticket;
+    const messages = (t.messages || []).map(m => `
+      <div style="border-left:3px solid ${m.internal ? '#f59e0b' : '#6366f1'};padding:8px 12px;margin:8px 0;background:${m.internal ? '#fffbeb' : '#f8fafc'};border-radius:6px">
+        <p style="font-size:12px;color:#475569;margin:0 0 4px"><strong>${_esc(m.author)}</strong> · ${_fmtWhen(m.createdAt)}${m.internal ? ' · internal note' : ''}</p>
+        <p style="font-size:13px;color:#1f2937;margin:0;white-space:pre-wrap">${_esc(m.body)}</p>
+      </div>`).join('') || '<p style="font-size:13px;color:#9ca3af">No messages yet.</p>';
+
+    const html = `
+      <div style="padding:16px 18px">
+        <p style="font-size:13px;color:#374151;white-space:pre-wrap;margin:0 0 10px">${_esc(t.description) || '<em>No description</em>'}</p>
+        ${messages}
+        <textarea id="ticket-reply-${t.id}" rows="3" placeholder="Reply (visible in the platform console only)…"
+          style="width:100%;margin-top:10px;border:1px solid #e5e7eb;border-radius:8px;padding:10px;font-size:13px"></textarea>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="pa-btn primary" onclick="ticketReply('${t.id}', false)">Send reply</button>
+          <button class="pa-btn" onclick="ticketReply('${t.id}', true)">Add internal note</button>
+        </div>
+      </div>`;
+    const card = document.getElementById(`ticket-${id}`);
+    if (card) {
+      const existing = card.querySelector('.ticket-detail');
+      if (existing) { existing.remove(); return; }
+      const div = document.createElement('div');
+      div.className = 'ticket-detail';
+      div.style.borderTop = '1px solid var(--gray-200, #e5e7eb)';
+      div.innerHTML = html;
+      card.appendChild(div);
+    }
+  } catch (err) {
+    alert('Could not open ticket: ' + _apiErrorMessage(err));
+  }
+}
+
+async function ticketReply(id, internal) {
+  const box = document.getElementById(`ticket-reply-${id}`);
+  if (!box || !box.value.trim()) return;
+  try {
+    await api('POST', `/tickets/${id}/messages`, { body: box.value.trim(), internal });
+    openTicket(id); // collapse
+    openTicket(id); // reopen with the new message
+  } catch (err) {
+    alert('Reply failed: ' + _apiErrorMessage(err));
+  }
+}
+
+async function setTicketStatus(id, status) {
+  try {
+    await api('PATCH', `/tickets/${id}`, { status });
+    renderTickets();
+  } catch (err) {
+    alert('Update failed: ' + _apiErrorMessage(err));
+  }
+}
+
+async function newTicket() {
+  const subject = prompt('Ticket subject:');
+  if (!subject) return;
+  const description = prompt('Description (optional):') || '';
+  const email = prompt('Requester email (optional):') || '';
+  try {
+    await api('POST', '/tickets', { subject, description, requesterEmail: email, category: 'support' });
+    renderTickets();
+  } catch (err) {
+    alert('Could not create ticket: ' + _apiErrorMessage(err));
+  }
+}
+
 async function renderOverview() {
   const el = document.getElementById('pa-content');
   el.innerHTML = '<div class="pa-loading"><i class="fas fa-circle-notch fa-spin"></i> Loading stats…</div>';
@@ -596,6 +869,7 @@ function _renderSchoolsTable(el, schools) {
               <th>School</th>
               <th>Slug</th>
               <th>Plan</th>
+              <th>Plan Expires</th>
               <th>Status</th>
               <th>Students</th>
               <th>Staff</th>
@@ -615,7 +889,13 @@ function _schoolRow(s) {
   const trial = s.trialEnds ? new Date(s.trialEnds) : null;
   const trialStr = trial
     ? (trial < new Date() ? '<span style="color:#ef4444">Expired</span>' : trial.toLocaleDateString('en-GB'))
-    : '—';
+    : '-';
+  const planExp    = s.planExpiresAt ? new Date(s.planExpiresAt) : null;
+  const planExpStr = planExp
+    ? (planExp < new Date()
+        ? `<span style="color:#ef4444;font-weight:600">${planExp.toLocaleDateString('en-GB')} (expired)</span>`
+        : planExp.toLocaleDateString('en-GB'))
+    : '-';
   const status = !s.isActive ? 'inactive' : (trial && trial > new Date() ? 'trial' : 'active');
   const statusLabel = !s.isActive ? 'Suspended' : (status === 'trial' ? 'Trial' : 'Active');
 
@@ -627,6 +907,7 @@ function _schoolRow(s) {
       </td>
       <td><code style="font-size:12px;background:var(--gray-100);padding:2px 6px;border-radius:4px">${_esc(s.slug)||'—'}</code></td>
       <td><span class="plan-pill ${s.plan||'core'}">${_esc(s.plan)||'core'}</span></td>
+      <td>${planExpStr}</td>
       <td><span class="status-dot ${status}">${statusLabel}</span></td>
       <td>${s._stats?.students ?? '—'}</td>
       <td>${s._stats?.staff   ?? '—'}</td>
@@ -636,7 +917,7 @@ function _schoolRow(s) {
           <button class="pa-btn" title="Log in as admin" onclick="confirmImpersonate('${s._id}','${_esc(s.name)}')">
             <i class="fas fa-user-secret"></i> Log in
           </button>
-          <button class="pa-btn" title="Change plan" onclick="changePlan('${s._id}','${_esc(s.plan)}','${_esc(s.name)}')">
+          <button class="pa-btn" title="Change plan" onclick="changePlan('${s._id}','${_esc(s.plan)}','${_esc(s.name)}','${_esc(s.planExpiresAt || '')}')">
             <i class="fas fa-layer-group"></i> Plan
           </button>
           <button class="pa-btn" title="Edit school name (slug is fixed and cannot be changed)" onclick="editSchoolName('${s._id}','${_esc(s.name)}')">
@@ -1287,23 +1568,38 @@ async function doImpersonate(schoolId) {
 }
 
 /* ── Change Plan ────────────────────────────────────────── */
-function changePlan(schoolId, currentPlan, schoolName) {
+function changePlan(schoolId, currentPlan, schoolName, currentExpiry) {
   const PLAN_LABELS = {
-    base:       'Base — KSh 250/student/term',
-    student:    'Student Portal — KSh 300/student/term',
-    family:     'Family Portal — KSh 350/student/term',
-    enterprise: 'Enterprise — Custom pricing (contact sales)',
+    base:       'Base - KSh 250/student/term',
+    student:    'Student Portal - KSh 300/student/term',
+    family:     'Family Portal - KSh 350/student/term',
+    enterprise: 'Enterprise - Custom pricing (contact sales)',
   };
   const opts = ['base','student','family','enterprise']
     .map(p => `<option value="${p}" ${p===currentPlan?'selected':''}>${PLAN_LABELS[p]||p}</option>`)
     .join('');
 
+  // planExpiresAt drives the Settings → Subscription countdown and, once
+  // enforcement ships, the plan gate. Prefill the current value; blank
+  // means "no expiry" (e.g. enterprise / bootstrap). Use the operator's
+  // LOCAL calendar date — toISOString() would show the UTC day and can be
+  // one day off from the table (which formats in local time).
+  let expiryDay = '';
+  if (currentExpiry) {
+    const d = new Date(currentExpiry);
+    expiryDay = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
   showModal(
-    `Change Plan — ${schoolName}`,
+    `Change Plan - ${schoolName}`,
     `<label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">Select New Plan</label>
-     <select id="plan-select" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:14px;font-family:inherit">
+     <select id="plan-select" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:14px;font-family:inherit;margin-bottom:14px">
        ${opts}
-     </select>`,
+     </select>
+     <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">Plan expires on</label>
+     <input type="date" id="plan-expiry" value="${expiryDay}"
+       style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:14px;font-family:inherit" />
+     <p style="font-size:11px;color:#94a3b8;margin:6px 0 0">Leave blank for no expiry. The date is the last day the plan is active.</p>`,
     [
       { label:'Cancel', cls:'pa-btn', action:'closeModal()' },
       { label:'Update Plan', cls:'pa-btn primary', action:`doChangePlan('${schoolId}')` }
@@ -1314,9 +1610,13 @@ function changePlan(schoolId, currentPlan, schoolName) {
 async function doChangePlan(schoolId) {
   const plan = document.getElementById('plan-select')?.value;
   if (!plan) return;
+  const day = document.getElementById('plan-expiry')?.value;
+  // Interpret the picked day as the last active day in the operator's
+  // timezone, then normalise to ISO for storage.
+  const planExpiresAt = day ? new Date(`${day}T23:59:59`).toISOString() : null;
   closeModal();
   try {
-    await api('PATCH', `/schools/${schoolId}`, { plan });
+    await api('PATCH', `/schools/${schoolId}`, { plan, planExpiresAt });
     toast('Plan updated to ' + plan, 'success');
     renderSchools();
   } catch (err) {

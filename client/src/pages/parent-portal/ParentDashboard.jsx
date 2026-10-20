@@ -35,9 +35,11 @@ import {
   CheckCircle, Download, FileText, GraduationCap,
   Lock, LogOut, MessageSquare, Send, Star, Wallet,
   ChevronDown, ChevronLeft, ChevronRight, MonitorPlay, MapPin, BookOpen, CalendarCheck,
-  Menu, X, TrendingUp,
+  Menu, X, TrendingUp, LifeBuoy,
 } from 'lucide-react';
 import NotificationBell from '@/components/layout/NotificationBell.jsx';
+import FloatingHelp from '@/components/help/FloatingHelp.jsx';
+import MessagesPanel from './components/MessagesPanel.jsx';
 import { messages as messagesApi, parentMessaging } from '@/api/client.js';
 
 /* ── API helpers ────────────────────────────────────────────────── */
@@ -45,9 +47,18 @@ const API_BASE = import.meta.env.VITE_API_BASE || '';
 async function _fetch(path) {
   const res  = await fetch(`${API_BASE}${path}`, { credentials: 'include' });
   const json = await res.json();
-  if (res.status === 401 || res.status === 403) {
+  if (res.status === 401) {
     const err = new Error(json.error?.message || 'Session expired — please sign in again');
     err.code = 'auth_expired';
+    throw err;
+  }
+  /* A 403 is not an expired session. Portal access can be blocked for
+     reasons the parent/student must simply see (e.g. account unavailability
+     after a lapsed subscription) — logging them out here hid that message
+     and dropped them on the school-search screen. */
+  if (res.status === 403) {
+    const err = new Error(json.error?.message || 'Unable to access this account. Please contact your school administrator.');
+    err.code = json.error?.code || 'forbidden';
     throw err;
   }
   if (!json.success) throw new Error(json.error?.message || 'Request failed');
@@ -217,11 +228,21 @@ export default function ParentDashboard() {
   const [latestWeek,    setLatestWeek]    = useState(null); // most recent Weekly Snapshot for activeChildId, or undefined if none generated yet
   const [inboxMessages, setInboxMessages] = useState(null); // real /api/messages inbox — per parent, not per child
   const [inboxLoading,  setInboxLoading]  = useState(false);
+  const [inboxTotal,    setInboxTotal]    = useState(0);
+  const [inboxPage,     setInboxPage]     = useState(1);
+  const [sentMessages,  setSentMessages]  = useState(null); // what the parent has written to the school
+  const [sentLoading,   setSentLoading]   = useState(false);
+  const [sentTotal,     setSentTotal]     = useState(0);
+  const [sentPage,      setSentPage]      = useState(1);
+  const [msgTab,        setMsgTab]        = useState('inbox');
+  const [msgUnreadOnly, setMsgUnreadOnly] = useState(false);
+  const [openMessageId, setOpenMessageId] = useState(null); // the one message expanded in place
   // Reported directly: "the parent cannot message the school... select
   // whom they want to message... but not fellow parents." Compose state
   // for the new send flow — recipients are a server-resolved category
   // list (never a raw address the parent types), scoped to activeChildId.
   const [composeOpen,     setComposeOpen]     = useState(false);
+  const [composeMode,     setComposeMode]     = useState('new'); // 'new' | 'reply'
   const [recipientOptions, setRecipientOptions] = useState(null); // null = loading
   const [composeForm,     setComposeForm]     = useState({ category: '', subject: '', body: '' });
   const [composeSending,  setComposeSending]  = useState(false);
@@ -319,12 +340,29 @@ export default function ParentDashboard() {
      collection, different question entirely. Loaded once per parent
      (not per child, a parent has one inbox regardless of which child
      is selected) the first time the Messages page is opened. */
-  function loadInbox() {
+  function loadInbox(page = 1, append = false) {
     setInboxLoading(true);
-    messagesApi.list({ tab: 'inbox', limit: 50 })
-      .then(r => setInboxMessages(r?.data ?? []))
-      .catch(() => setInboxMessages([]))
+    messagesApi.list({ tab: 'inbox', limit: 20, page })
+      .then(r => {
+        const rows = r?.data ?? [];
+        setInboxMessages(prev => (append && Array.isArray(prev) ? [...prev, ...rows] : rows));
+        setInboxTotal(r?.pagination?.total ?? 0);
+        setInboxPage(page);
+      })
+      .catch(() => { if (!append) setInboxMessages([]); })
       .finally(() => setInboxLoading(false));
+  }
+  function loadSent(page = 1, append = false) {
+    setSentLoading(true);
+    messagesApi.list({ tab: 'sent', limit: 20, page })
+      .then(r => {
+        const rows = r?.data ?? [];
+        setSentMessages(prev => (append && Array.isArray(prev) ? [...prev, ...rows] : rows));
+        setSentTotal(r?.pagination?.total ?? 0);
+        setSentPage(page);
+      })
+      .catch(() => { if (!append) setSentMessages([]); })
+      .finally(() => setSentLoading(false));
   }
   function markMessageRead(m) {
     if (m.isRead?.[session?.user?.id]) return;
@@ -337,11 +375,28 @@ export default function ParentDashboard() {
       .then(() => window.dispatchEvent(new Event('messages:read')))
       .catch(() => {});
   }
+  /* Expanding a message IS reading it — the old list had no way to open
+     a message at all, so opening one now marks it read and expands it in
+     place (a route change per message is friction on a phone). */
+  function toggleMessage(m) {
+    const willOpen = openMessageId !== m.id;
+    setOpenMessageId(willOpen ? m.id : null);
+    if (willOpen) markMessageRead(m);
+  }
+  function replyToMessage(m) {
+    openCompose({ subject: m.subject ? `Re: ${m.subject}` : 'Re: ' });
+  }
 
-  function openCompose() {
-    setComposeForm({ category: '', subject: '', body: '' });
+  /* `prefill` carries a subject when the parent is replying to a message
+     it just read. The recipient is still chosen by the parent from the
+     server-resolved category list — a parent can only ever reach staff,
+     never another parent. */
+  function openCompose(prefill = {}) {
+    const p = (prefill && typeof prefill === 'object' && 'subject' in prefill) ? prefill : {};
+    setComposeForm({ category: '', subject: p.subject ?? '', body: '' });
     setComposeError('');
     setComposeSent(false);
+    setComposeMode(p.subject ? 'reply' : 'new');
     setComposeOpen(true);
     setRecipientOptions(null);
     parentMessaging.recipients(activeChildId)
@@ -360,7 +415,12 @@ export default function ParentDashboard() {
       subject:  composeForm.subject.trim(),
       body:     composeForm.body.trim(),
     })
-      .then(() => { setComposeSent(true); setComposeForm({ category: '', subject: '', body: '' }); })
+      .then(() => {
+        setComposeSent(true);
+        setComposeForm({ category: '', subject: '', body: '' });
+        // If the parent is looking at what they've sent, show it there.
+        if (msgTab === 'sent') loadSent(1);
+      })
       .catch(err => setComposeError(err.message || 'Could not send — please try again.'))
       .finally(() => setComposeSending(false));
   }
@@ -375,7 +435,7 @@ export default function ParentDashboard() {
     setActivePage(pageId);
     setMobileNavOpen(false);
     if (mainRef.current) mainRef.current.scrollTo({ top: 0 });
-    if (pageId === 'messages' && inboxMessages === null) loadInbox();
+    if (pageId === 'messages') loadInbox();
   }
 
   /* ── Loading state ── */
@@ -393,8 +453,12 @@ export default function ParentDashboard() {
     <div id="parent-portal-error" className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
       <div className="bg-white rounded-2xl border border-red-100 p-8 max-w-md text-center">
         <AlertCircle size={32} className="text-red-400 mx-auto mb-3" />
-        <p className="text-slate-700 font-medium mb-1">Could not load dashboard</p>
-        <p className="text-sm text-slate-400 mb-4">{initError}</p>
+        <p className="text-slate-700 font-medium mb-1">
+          {initError.startsWith('Unable to access') ? 'Unable to access account' : 'Could not load dashboard'}
+        </p>
+        <p className="text-sm text-slate-400 mb-4">
+          {initError.startsWith('Unable to access') ? 'Please contact your school administrator.' : initError}
+        </p>
         <button onClick={handleLogout} className="text-sm text-amber-600 hover:underline">Sign out</button>
       </div>
     </div>
@@ -923,57 +987,42 @@ export default function ParentDashboard() {
     // what the bell/notification badge actually counts. Reported
     // directly: "see the notification but can't open" — clicking the
     // bell's notification landed here, which showed something else.
-    const myUserId = session?.user?.id;
-    const inboxUnread = inboxMessages?.filter(m => !m.isRead?.[myUserId]).length ?? 0;
+    const myUserId  = session?.user?.id;
+    const isSent    = msgTab === 'sent';
+    const source    = isSent ? sentMessages : inboxMessages;
+    const loading   = isSent ? sentLoading : inboxLoading;
+    const total     = isSent ? sentTotal : inboxTotal;
+    const allRows   = Array.isArray(source) ? source : [];
+    const unreadCount = allRows.filter(m => !m.isRead?.[myUserId]).length;
+    // "Unread only" filters the loaded page; the count badge always
+    // reflects everything in the inbox, not the filtered view.
+    const rows      = (!isSent && msgUnreadOnly) ? allRows.filter(m => !m.isRead?.[myUserId]) : allRows;
+    const hasMore   = allRows.length < total;
+
     return (
       <>
-      <Card id="section-messages">
-        <CardHeader
-          icon={MessageSquare} iconClass="text-sky-500" title="Messages"
-          right={
-            <div className="flex items-center gap-2">
-              {inboxUnread > 0 && <span id="messages-unread-badge" className="text-[11px] font-semibold text-amber-600 bg-amber-50 px-2.5 py-[5px] rounded-full">{inboxUnread} unread</span>}
-              <button
-                id="compose-message-button"
-                onClick={openCompose}
-                className="flex items-center gap-1.5 text-[11px] font-semibold text-white px-3 py-[7px] rounded-lg transition hover:opacity-90"
-                style={{ background: primary }}
-              >
-                <Send size={12} /> New Message
-              </button>
-            </div>
-          }
-        />
-        {inboxLoading || inboxMessages === null ? (
-          <div className="p-5 space-y-2">{[...Array(3)].map((_, i) => <div key={i} className="h-12 rounded-lg bg-slate-100 animate-pulse" />)}</div>
-        ) : inboxMessages.length === 0 ? (
-          <p id="messages-empty" className="text-[12px] text-slate-400 text-center py-8">No messages yet</p>
-        ) : (
-          <div id="messages-list" className="divide-y divide-slate-50">
-            {inboxMessages.map(m => {
-              const unread = !m.isRead?.[myUserId];
-              return (
-                <button
-                  key={m.id}
-                  id={`inbox-message-${m.id}`}
-                  onClick={() => markMessageRead(m)}
-                  className="w-full text-left flex items-start gap-3 px-[18px] py-3.5 hover:bg-slate-50 transition"
-                >
-                  <div className="w-2 h-2 rounded-full mt-[5px] flex-shrink-0" style={{ background: unread ? primary : 'transparent' }} />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className={`text-[12px] leading-snug ${unread ? 'font-semibold text-slate-800' : 'font-medium text-slate-600'}`}>{m.senderName || 'School'}</p>
-                      <span className="text-[10px] text-slate-400 shrink-0">{m.createdAt ? new Date(m.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '—'}</span>
-                    </div>
-                    <p className="text-[12px] text-slate-700 font-medium mt-0.5">{m.subject}</p>
-                    {m.body && <p className="text-[11px] text-slate-500 mt-0.5">{m.body}</p>}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </Card>
+      <MessagesPanel
+        tab={msgTab}
+        onTabChange={(t) => {
+          setMsgTab(t);
+          setOpenMessageId(null);
+          if (t === 'sent' && sentMessages === null) loadSent();
+        }}
+        messages={rows}
+        loading={loading}
+        hasMore={hasMore}
+        onLoadMore={() => (isSent ? loadSent(sentPage + 1, true) : loadInbox(inboxPage + 1, true))}
+        total={total}
+        myUserId={myUserId}
+        primary={primary}
+        openId={openMessageId}
+        onToggle={toggleMessage}
+        onCompose={() => openCompose()}
+        onReply={replyToMessage}
+        unreadOnly={msgUnreadOnly}
+        onUnreadOnlyChange={setMsgUnreadOnly}
+        unreadCount={unreadCount}
+      />
       <ComposeMessageModal />
       </>
     );
@@ -994,7 +1043,7 @@ export default function ParentDashboard() {
           className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-              <h3 className="text-sm font-semibold text-slate-900">New Message</h3>
+              <h3 className="text-sm font-semibold text-slate-900">{composeMode === 'reply' ? 'Reply' : 'New Message'}</h3>
               <button onClick={() => setComposeOpen(false)} className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100">
                 <X size={16} />
               </button>
@@ -1012,6 +1061,9 @@ export default function ParentDashboard() {
               <div className="px-5 py-4 space-y-3">
                 <div>
                   <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">To</label>
+                  {composeMode === 'reply' && (
+                    <p className="text-[11px] text-slate-400 mt-0.5">Choose who should receive your reply — the school decides who is reachable for your child.</p>
+                  )}
                   {recipientOptions === null ? (
                     <div className="h-9 rounded-lg bg-slate-100 animate-pulse mt-1" />
                   ) : recipientOptions.length === 0 ? (
@@ -1306,6 +1358,9 @@ export default function ParentDashboard() {
                 {children.length === 1 && activeChild ? `Parent · ${activeChild.name?.split(' ')[0]}` : `${children.length} children`}
               </div>
             </div>
+            <button id="sidebar-support-btn" onClick={() => navigate('/support')} title="Support" className={`flex-shrink-0 transition-colors hover:text-amber-300 ${collapsed ? 'lg:hidden' : ''}`} style={{ color: '#a8a29e' }}>
+              <LifeBuoy size={14} />
+            </button>
             <button id="sidebar-logout-btn" onClick={handleLogout} title="Sign out" className={`flex-shrink-0 transition-colors hover:text-red-400 ${collapsed ? 'lg:hidden' : ''}`} style={{ color: '#a8a29e' }}>
               <LogOut size={14} />
             </button>
@@ -1338,7 +1393,7 @@ export default function ParentDashboard() {
             )}
             <button
               id="btn-message-school"
-              onClick={() => goToPage('messages')}
+              onClick={() => { goToPage('messages'); openCompose(); }}
               className="flex-1 sm:flex-initial px-3 sm:px-3.5 py-[7px] rounded-[7px] text-white text-[11px] sm:text-[12px] font-semibold transition hover:opacity-90 whitespace-nowrap"
               style={{ background: accent }}
             >
@@ -1355,31 +1410,46 @@ export default function ParentDashboard() {
             <h2 id="active-page-title" className="text-base font-bold text-slate-800">{activePageLabel}</h2>
           )}
 
-          {/* Child banner — shown on every page, same identity strip */}
+          {/* Child banner — shown on every page, same identity strip.
+              Wraps on a phone: the child's identity takes the full width
+              on one line and the three stats drop underneath, instead of
+              squeezing the name into a 90px column next to them. */}
           {activeChild && (
-            <div id="child-banner" className="rounded-xl p-[18px] flex items-center gap-[18px] border" style={{ background: 'linear-gradient(135deg, #1c1917, #292524)', borderColor: '#44403c' }}>
-              <div id="child-banner-avatar" className="w-[52px] h-[52px] rounded-full flex items-center justify-center text-white text-xl font-bold flex-shrink-0" style={{ background: avatarGradient }}>
-                {childInitials}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div id="child-banner-name" className="text-white font-bold text-base leading-tight">{activeChild.name}</div>
-                <div id="child-banner-meta" className="text-[12px] mt-1" style={{ color: '#a8a29e' }}>
-                  {activeChild.className}
-                  {activeChild.admissionNumber ? ` · Adm. No. ${activeChild.admissionNumber}` : ''}
-                  {d?.school?.name ? ` · ${d.school.name}` : ''}
+            <div id="child-banner" className="rounded-xl p-[18px] flex flex-wrap items-center gap-x-[18px] gap-y-3 border" style={{ background: 'linear-gradient(135deg, #1c1917, #292524)', borderColor: '#44403c' }}>
+              <div className="flex items-center gap-[14px] min-w-0 flex-1 basis-full sm:basis-auto">
+                <div id="child-banner-avatar" className="w-[52px] h-[52px] rounded-full flex items-center justify-center text-white text-xl font-bold flex-shrink-0" style={{ background: avatarGradient }}>
+                  {childInitials}
+                </div>
+                <div className="min-w-0">
+                  <div id="child-banner-name" className="text-white font-bold text-base leading-tight truncate">{activeChild.name}</div>
+                  <div id="child-banner-meta" className="text-[12px] mt-1 leading-snug" style={{ color: '#a8a29e' }}>
+                    {activeChild.className}
+                    {activeChild.admissionNumber ? ` · Adm. No. ${activeChild.admissionNumber}` : ''}
+                    {d?.school?.name ? ` · ${d.school.name}` : ''}
+                  </div>
                 </div>
               </div>
-              <div className="flex gap-5 flex-shrink-0">
-                <div id="child-banner-attendance" className="text-center">
-                  <div className="text-[20px] font-extrabold" style={{ color: primary }}>{d ? `${d.attendance?.percentage ?? 0}%` : '—'}</div>
+              <div className="flex gap-5 flex-shrink-0 w-full sm:w-auto justify-between sm:justify-end">
+                <div id="child-banner-attendance" className="text-center flex-1 sm:flex-none">
+                  {/* A child with no attendance records yet is not "0%",
+                      it is "nothing to show" — the old code painted the
+                      absence of data in the same brand colour as a real
+                      zero, which read as a failing child. */}
+                  <div className="text-[20px] font-extrabold" style={{ color: d?.attendance?.total ? primary : '#a8a29e' }}>
+                    {d?.attendance?.total ? `${d.attendance.percentage}%` : '—'}
+                  </div>
                   <div className="text-[10px]" style={{ color: '#a8a29e' }}>Attendance</div>
                 </div>
-                <div id="child-banner-average" className="text-center">
-                  <div className="text-[20px] font-extrabold text-green-400">{myAvg != null ? `${myAvg}%` : '—'}</div>
+                <div id="child-banner-average" className="text-center flex-1 sm:flex-none">
+                  <div className={`text-[20px] font-extrabold ${myAvg != null ? 'text-green-400' : 'text-stone-500'}`}>{myAvg != null ? `${myAvg}%` : '—'}</div>
                   <div className="text-[10px]" style={{ color: '#a8a29e' }}>Average</div>
                 </div>
-                <div id="child-banner-balance" className="text-center">
-                  <div className="text-[20px] font-extrabold" style={{ color: feePaid ? '#fb923c' : '#f87171' }}>{d ? feeDisplay : '—'}</div>
+                <div id="child-banner-balance" className="text-center flex-1 sm:flex-none">
+                  {/* Cleared = calm, outstanding = needs attention. The
+                      old colours were inverted (a cleared balance showed
+                      in alarm orange), and the Overview card showed the
+                      same number in the opposite colours. */}
+                  <div className="text-[20px] font-extrabold" style={{ color: !d ? '#a8a29e' : feePaid ? '#34d399' : '#f87171' }}>{d ? feeDisplay : '—'}</div>
                   <div className="text-[10px]" style={{ color: '#a8a29e' }}>Balance</div>
                 </div>
               </div>

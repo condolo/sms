@@ -10,6 +10,12 @@
 
 const express            = require('express');
 const { authMiddleware } = require('../middleware/auth');
+const { planGate }       = require('../middleware/plan');
+
+/* Portal access is the tier boundary: student portals need 'student', parent
+   portals need 'family'. Before this, the tiers existed only as prices — a
+   Base school's parents and students could still log in. */
+const PLAN = planGate('student_portal');
 const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { isTimetablePublished, publishedReader } = require('../utils/timetable-publish');
@@ -40,7 +46,7 @@ function _requireStudent(req, res) {
    GET /api/student-portal/dashboard
    Returns everything the student dashboard needs in one request.
    ══════════════════════════════════════════════════════════════ */
-router.get('/dashboard', authMiddleware, async (req, res) => {
+router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
   if (!_requireStudent(req, res)) return;
   try {
     const { schoolId, studentId } = req.jwtUser;
@@ -373,7 +379,7 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
 /* ══════════════════════════════════════════════════════════════
    GET /api/student-portal/me  — own profile only
    ══════════════════════════════════════════════════════════════ */
-router.get('/me', authMiddleware, async (req, res) => {
+router.get('/me', authMiddleware, PLAN, async (req, res) => {
   if (!_requireStudent(req, res)) return;
   try {
     const { schoolId, studentId } = req.jwtUser;
@@ -396,7 +402,7 @@ router.get('/me', authMiddleware, async (req, res) => {
    other than "is this my own studentId," which the shared helper
    already does via req.jwtUser.studentId.
    ══════════════════════════════════════════════════════════════ */
-router.get('/weekly-snapshot/weeks', authMiddleware, async (req, res) => {
+router.get('/weekly-snapshot/weeks', authMiddleware, PLAN, async (req, res) => {
   if (!_requireStudent(req, res)) return;
   try {
     const result = await weeklySnapshotHelpers.getWeeksForStudent(req, req.jwtUser.studentId);
@@ -409,7 +415,7 @@ router.get('/weekly-snapshot/weeks', authMiddleware, async (req, res) => {
   }
 });
 
-router.get('/weekly-snapshot/:weekStart', authMiddleware, async (req, res) => {
+router.get('/weekly-snapshot/:weekStart', authMiddleware, PLAN, async (req, res) => {
   if (!_requireStudent(req, res)) return;
   try {
     const result = await weeklySnapshotHelpers.getSnapshotDetail(req, req.jwtUser.studentId, req.params.weekStart);
@@ -422,7 +428,7 @@ router.get('/weekly-snapshot/:weekStart', authMiddleware, async (req, res) => {
   }
 });
 
-router.get('/weekly-snapshot/:weekStart/pdf', authMiddleware, async (req, res) => {
+router.get('/weekly-snapshot/:weekStart/pdf', authMiddleware, PLAN, async (req, res) => {
   if (!_requireStudent(req, res)) return;
   try {
     await weeklySnapshotHelpers.streamSnapshotPdf(req, res, req.jwtUser.studentId, req.params.weekStart);
