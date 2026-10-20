@@ -1287,9 +1287,29 @@ router.get('/users/search', requireOwnerTier, async (req, res) => {
     const User    = _model('users');
     const School  = _model('schools');
     const escaped = email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex   = new RegExp(escaped, 'i');
+    // Anchored on purpose: an email search means "starts with", and an
+    // anchored pattern is the one a case-insensitive index can serve.
+    // The unanchored version matched an email ANYWHERE, which is both
+    // the wrong semantic and unindexable.
+    const regex = new RegExp(`^${escaped}`, 'i');
 
-    const users = await User.find({ email: regex }).limit(10).lean();
+    // Same collation as the users_email_ci index (server/utils/indexes.js),
+    // so this lookup is index-backed instead of a full collection scan
+    // across every account on the platform.
+    // Hint the case-insensitive email index so this stays index-backed on
+    // a large account table (the planner will happily scan a small one).
+    // If the index is somehow missing - an older instance mid-rollout -
+    // fall back to the unhinted query rather than failing the console.
+    const search = () => User.find({ email: regex })
+      .collation({ locale: 'en', strength: 2 })
+      .limit(10).lean();
+    let users;
+    try {
+      users = await search().hint({ email: 1 });
+    } catch (hintErr) {
+      console.warn('[platform/users/search] email index hint failed, falling back:', hintErr.message);
+      users = await search();
+    }
     const schoolIds = [...new Set(users.map(u => u.schoolId).filter(Boolean))];
     const schools = schoolIds.length
       ? await School.find({ id: { $in: schoolIds } }).select('id name organizationId').lean()
