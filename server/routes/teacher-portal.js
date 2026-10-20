@@ -119,7 +119,12 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     const academicYear = school?.academicYear || '';
 
     // ── Teaching assignments (classIds + subjectIds) ─────────
-    const assignments = await TeachingAssignments.find({ teacherId, schoolId })
+    // Assignments are keyed by the teacher's LOGIN id (see teaching-
+    // assignments.js's canonicalTeacherId comment: every scope check matches
+    // req.jwtUser.userId), but older rows can still be keyed by the staff
+    // record id. Read both so neither form is silently invisible here.
+    const assignmentOwnerIds = [teacher.userId, teacher.id].filter(Boolean);
+    const assignments = await TeachingAssignments.find({ teacherId: { $in: assignmentOwnerIds }, schoolId })
       .select('classId subjectId streamId streamName').lean();
 
     const classIds   = [...new Set(assignments.map(a => a.classId).filter(Boolean))];

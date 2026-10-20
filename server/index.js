@@ -270,7 +270,8 @@ app.use('/api/platform', platformLimiter);
 console.log('[Security] rate limiting active — general: 10000/15min per user (IP for anonymous), auth: 20/15min per IP (login+force-change+change-password+revoke-all), platform: 300/15min per IP');
 
 /* ── API Routes ─────────────────────────────────────────────── */
-app.use('/api/public',      require('./routes/public'));   // no auth — school branding
+app.use('/api/public',      require('./routes/public'));   // no auth - school branding
+app.use('/api/demo',        require('./routes/demo'));     // no auth - self-serve demo requests
 app.use('/api/auth',        require('./routes/auth'));
 app.use('/api/onboard',     require('./routes/onboard'));
 app.use('/api/sync',        require('./routes/sync'));
@@ -370,6 +371,7 @@ app.use('/api/weekly-snapshots',       require('./routes/weekly-snapshots'));
 
 app.use('/api/ops',                    require('./routes/ops'));
 app.use('/api/audit',                  require('./routes/audit'));
+app.use('/api/support',                require('./routes/support'));   // user-facing support tickets
 
 /* ── School-facing announcement routes (JWT auth, not platform key) ── */
 const { authMiddleware } = require('./middleware/auth');
@@ -802,6 +804,22 @@ async function start() {
       startBillingCron();
     } catch (err) {
       console.error('[billing-cron] Failed to start:', err.message);
+    }
+
+    // Demo lifecycle cron — notices, expiry, purge (hourly)
+    try {
+      const { startDemoCron } = require('./utils/demo-cron');
+      startDemoCron();
+    } catch (err) {
+      console.error('[demo-cron] Failed to start:', err.message);
+    }
+
+    // Subscription expiry reminders (daily; 30/14/7/1/0 days)
+    try {
+      const { startPlanCron } = require('./utils/plan-cron');
+      startPlanCron();
+    } catch (err) {
+      console.error('[plan-cron] Failed to start:', err.message);
     }
 
     // Nightly backup cron — full school data export to disk (daily 02:00 Kenya)

@@ -10,6 +10,9 @@ import { detectSchool } from '@/utils/schoolDetect.js';
 import Login   from '@/pages/Login.jsx';
 import Landing from '@/pages/Landing.jsx';
 import Contact       from '@/pages/Contact.jsx';
+import DemoRequest   from '@/pages/DemoRequest.jsx';
+import DemoExpired   from '@/pages/DemoExpired.jsx';
+import SupportPage    from '@/pages/support/SupportPage.jsx';
 import Plans         from '@/pages/Plans.jsx';
 import PrivacyPolicy from '@/pages/legal/PrivacyPolicy.jsx';
 import TermsOfService from '@/pages/legal/TermsOfService.jsx';
@@ -54,6 +57,7 @@ const AssessmentAnalyticsPage = lazy(() => import('@/pages/reports/AssessmentAna
 const HRPage            = lazy(() => import('@/pages/hr/HRPage.jsx'));
 const ChangelogPage     = lazy(() => import('@/pages/changelog/ChangelogPage.jsx'));
 const HelpPage          = lazy(() => import('@/pages/help/HelpPage.jsx'));
+const PortalHelpPage    = lazy(() => import('@/pages/help/PortalHelpPage.jsx'));
 const ProfilePage       = lazy(() => import('@/pages/profile/ProfilePage.jsx'));
 const GrowthProfilePage = lazy(() => import('@/pages/growth-profile/GrowthProfilePage.jsx'));
 const GrowthProfileHome = lazy(() => import('@/pages/growth-profile/GrowthProfileHome.jsx'));
@@ -146,6 +150,15 @@ export const router = createBrowserRouter([
 
   // Contact — public, no auth required
   { path: '/contact', element: <Contact /> },
+
+  // Self-serve demo request + expiry landing (public)
+  { path: '/demo', element: <DemoRequest /> },
+  { path: '/demo-expired', element: <DemoExpired /> },
+
+  // Support tickets — any authenticated school user (guard inside the page)
+  { path: '/support', element: <SupportPage /> },
+  // Portal FAQs — parents and students
+  { path: '/portal-help', element: <SuspenseWrapper><PortalHelpPage /></SuspenseWrapper> },
 
   // Plans — public pricing comparison (legacy route, keep for backlinks)
   { path: '/plans', element: <Plans /> },

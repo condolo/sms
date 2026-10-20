@@ -87,32 +87,81 @@ const FEATURE_PLAN = {
 
 /* ── School plan cache ──────────────────────────────────────── */
 const _planCache = new Map();
-const PLAN_CACHE_TTL = 5 * 60 * 1000;
+/* 60s, not 5min: a lapsed subscription must take effect promptly without a
+   plan change. The cached value is the whole expiry-aware state. */
+const PLAN_CACHE_TTL = 60 * 1000;
+
+/* Subscription expiry policy — opt-in so an existing deployment can turn it
+   on deliberately:
+     ENFORCE_PLAN_EXPIRY=true   after the grace period the school is treated
+                                as the base tier (ERP stays, student/parent
+                                portals close); the billed plan is untouched
+     PLAN_GRACE_DAYS=7          days after expiry before that happens */
+const ENFORCE_PLAN_EXPIRY = process.env.ENFORCE_PLAN_EXPIRY === 'true';
+const PLAN_GRACE_DAYS = Math.max(0, parseInt(process.env.PLAN_GRACE_DAYS || '7', 10));
 
 function _getCachedPlan(schoolId) {
   const entry = _planCache.get(schoolId);
   if (!entry) return null;
   if (Date.now() > entry.expiresAt) { _planCache.delete(schoolId); return null; }
-  return entry.plan;
+  return entry.state;
 }
 
-function _setCachedPlan(schoolId, plan) {
-  _planCache.set(schoolId, { plan, expiresAt: Date.now() + PLAN_CACHE_TTL });
+function _setCachedPlan(schoolId, state) {
+  _planCache.set(schoolId, { state, expiresAt: Date.now() + PLAN_CACHE_TTL });
 }
 
 function invalidatePlanCache(schoolId) {
   _planCache.delete(schoolId);
 }
 
-async function _getSchoolPlan(schoolId) {
+/**
+ * Resolve a school's subscription state.
+ * Effective expiry = planExpiresAt (paid) || trialEnds (onboarding trial).
+ * Past expiry + grace (and only when enforcement is on), `restricted` is
+ * true and `effectivePlan` drops to the base level. The billed plan itself
+ * is never mutated — downgrade is an access decision, not a billing one.
+ */
+async function getPlanState(schoolId) {
   const cached = _getCachedPlan(schoolId);
   if (cached) return cached;
 
   const Schools = _model('schools');
-  const school  = await Schools.findOne({ id: schoolId }).lean();
-  const plan    = school?.plan || 'core';
-  _setCachedPlan(schoolId, plan);
-  return plan;
+  const school  = await Schools.findOne(
+    { id: schoolId },
+    { plan: 1, planExpiresAt: 1, trialEnds: 1 }
+  ).lean();
+
+  const plan        = school?.plan || 'core';
+  /* An explicit planExpiresAt=null means "no expiry" (enterprise /
+     bootstrap) and must NOT fall back to an old onboarding trialEnds —
+     otherwise clearing the date would silently re-expire the school. Only
+     when the field was never set does the trial date govern. */
+  const hasPlanExpiry = !!school && Object.prototype.hasOwnProperty.call(school, 'planExpiresAt');
+  const expiryRaw   = hasPlanExpiry ? school.planExpiresAt : (school?.trialEnds || null);
+  const expiryDate  = expiryRaw ? new Date(expiryRaw) : null;
+  const validExpiry = expiryDate && !Number.isNaN(expiryDate.getTime()) ? expiryDate : null;
+  const graceEndsAt = validExpiry ? new Date(validExpiry.getTime() + PLAN_GRACE_DAYS * 86400000) : null;
+
+  const pastExpiry = !!(validExpiry && Date.now() > validExpiry.getTime());
+  const restricted = !!(ENFORCE_PLAN_EXPIRY && graceEndsAt && Date.now() > graceEndsAt.getTime());
+
+  const state = {
+    plan,
+    effectivePlan: restricted ? 'core' : plan,
+    expiresAt:     validExpiry ? validExpiry.toISOString() : null,
+    graceEndsAt:   graceEndsAt ? graceEndsAt.toISOString() : null,
+    pastExpiry,
+    restricted,
+    graceDays:     PLAN_GRACE_DAYS,
+    enforced:      ENFORCE_PLAN_EXPIRY,
+  };
+  _setCachedPlan(schoolId, state);
+  return state;
+}
+
+async function _getSchoolPlan(schoolId) {
+  return (await getPlanState(schoolId)).effectivePlan;
 }
 
 /* ── Middleware factory ──────────────────────────────────────── */
@@ -139,7 +188,8 @@ function planGate(feature) {
         return res.status(403).json({ success: false, error: { code: 'PLAN_UPGRADE_REQUIRED', message: `Feature '${feature}' is not available on any plan. Contact support.` } });
       }
 
-      const schoolPlan     = await _getSchoolPlan(schoolId);
+      const state          = await getPlanState(schoolId);
+      const schoolPlan     = state.effectivePlan;
       const schoolLevel    = PLAN_LEVELS[schoolPlan]    || 1;
       const requiredLevel  = PLAN_LEVELS[requiredPlan]  || 1;
 
@@ -162,6 +212,34 @@ function planGate(feature) {
         return next();
       }
 
+      /* Subscription expiry is a different denial from "paid for a lower
+         tier" — but guardians and students must never be told their school
+         is behind on billing. They get a neutral account-access message;
+         staff get the date so they can act on it. */
+      if (state.restricted) {
+        const isPortalUser = ['parent', 'guardian', 'student'].includes(req.jwtUser?.role);
+        if (isPortalUser) {
+          return res.status(403).json({
+            success: false,
+            error: {
+              code: 'ACCOUNT_UNAVAILABLE',
+              message: 'Unable to access this account. Please contact your school administrator.',
+            }
+          });
+        }
+        return res.status(403).json({
+          success: false,
+          error: {
+            code: 'PLAN_EXPIRED',
+            message: `Your subscription expired on ${new Date(state.expiresAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}. This feature is paused until the subscription is renewed.`,
+            currentPlan: state.plan,
+            requiredPlan,
+            expiresAt: state.expiresAt,
+            graceDays: state.graceDays,
+          }
+        });
+      }
+
       return res.status(403).json({
         success: false,
         error: {
@@ -178,4 +256,12 @@ function planGate(feature) {
   };
 }
 
-module.exports = { planGate, invalidatePlanCache, FEATURE_PLAN, PLAN_LEVELS };
+module.exports = {
+  planGate,
+  invalidatePlanCache,
+  getPlanState,
+  FEATURE_PLAN,
+  PLAN_LEVELS,
+  PLAN_GRACE_DAYS,
+  ENFORCE_PLAN_EXPIRY,
+};

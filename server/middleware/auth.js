@@ -6,6 +6,7 @@ const { _model }           = require('../utils/model');
 const SessionService       = require('../services/sessionService');
 const AuditService         = require('../services/audit');
 const { csrfOk, PLATFORM_CSRF_COOKIE_NAME } = require('../utils/csrf');
+const demo = require('../utils/demo');
 
 /* Standard error envelope — matches { success, error: { code, message } } used everywhere */
 function _unauth(res, code, message) {
@@ -106,6 +107,24 @@ async function authMiddleware(req, res, next) {
     }
 
     req.jwtUser = payload;   // { userId, schoolId, role, roles, email, tv, identityId?, itv?, guardianOf? … }
+
+    /* Demo tenants expire server-side, not in the UI. Cached for 30s, so a
+       normal school costs nothing beyond the first request in each window. */
+    /* Demo tenants expire server-side, not in the UI. Only demo tokens carry
+       the `demo` claim, so ordinary school traffic costs no extra query. The
+       lookup is cached for 30s in utils/demo. */
+    if (payload.demo) {
+      const demoState = await demo.getDemoState(payload.schoolId);
+      if (demo.isDemoStateExpired(demoState)) {
+        return res.status(403).json({
+          success: false,
+          error: {
+            code: 'DEMO_EXPIRED',
+            message: 'This demo has ended. Your data is kept for 30 days — contact us to reopen it or move to a paid school.',
+          },
+        });
+      }
+    }
 
     // Record activity for session idle tracking — rate-limited to one DB write per 5 min.
     if (payload.sessionId) _touchActivity(payload.sessionId, payload.userId);

@@ -1857,7 +1857,7 @@ router.get('/bulk-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), s
     // Resolved AFTER the zero-match 404 check above — no point paying
     // for these queries on a request that's about to 404 anyway.
     const [bulkSchool, bulkCaConfig, bulkAssignments, bulkSubjectDocs] = await Promise.all([
-      _model('schools').findOne({ id: schoolId }, { logoUrl: 1, tagline: 1, address: 1, phone: 1, email: 1, website: 1, country: 1, principalSignatureUrl: 1, schoolStampUrl: 1, principalName: 1, timezone: 1 }).lean().catch(() => null),
+      _model('schools').findOne({ id: schoolId }, { name: 1, logoUrl: 1, tagline: 1, address: 1, phone: 1, email: 1, website: 1, country: 1, principalSignatureUrl: 1, schoolStampUrl: 1, principalName: 1, timezone: 1 }).lean().catch(() => null),
       _getAssessmentConfig(schoolId, req.query.academicYearId || null),
       tenantModel('teaching_assignments', tenantContext(req))
         .find({ schoolId, classId: req.query.classId }).select('subjectId teacherName').lean().catch(() => []),
@@ -1892,7 +1892,6 @@ router.get('/bulk-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), s
       .batchSize(CHUNK_SIZE)
       .cursor();
 
-    let isFirst  = true;
     let chunkBuf = [];
 
     const processChunk = async (chunk) => {
@@ -1926,9 +1925,15 @@ router.get('/bulk-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), s
           behaviour:   behaviourResults[i],
           deviations:  computeTermDeviation(snap.subjects, deviationResults[i]?.subjects),
         };
-        _buildPDFPage(pdfDoc, snap, config, attResults[i], false,
+        // Every layout's renderPdf() calls `if (!isFirstPage) doc.addPage()`
+        // itself. This loop already adds the page above, so passing false
+        // here added a SECOND page — every student's report was preceded
+        // by a blank page, and the batch visibly diverged from the
+        // single-student download (which passes true on a fresh document).
+        // The flag means "the page is already open", which is exactly true
+        // after addPage(), for every student including the first.
+        _buildPDFPage(pdfDoc, snap, config, attResults[i], true,
           { ...bulkImages, studentPhoto: photoBuffers[i] }, studentExtra);
-        isFirst = false;
       });
     };
 
@@ -2293,7 +2298,7 @@ async function _loadRenderExtras(req, schoolId, snap) {
     // predates this field being frozen at publish time (every snapshot
     // going forward carries its own, see POST /publish's "Load school
     // signature/stamp URLs for snapshotting" step).
-    _model('schools').findOne({ id: schoolId }, { logoUrl: 1, tagline: 1, address: 1, phone: 1, email: 1, website: 1, country: 1, principalSignatureUrl: 1, schoolStampUrl: 1, principalName: 1, timezone: 1 }).lean().catch(() => null),
+    _model('schools').findOne({ id: schoolId }, { name: 1, logoUrl: 1, tagline: 1, address: 1, phone: 1, email: 1, website: 1, country: 1, principalSignatureUrl: 1, schoolStampUrl: 1, principalName: 1, timezone: 1 }).lean().catch(() => null),
     behaviourSummary(schoolId, snap.studentId).catch(() => null),
     snap.termNumber > 1
       ? tenantModel('report_card_snapshots', tenantContext(req)).findOne({
@@ -2370,6 +2375,16 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
   } = extra;
   const isDraft = snap.status !== 'published' || snap.superseded;
 
+  // Reported directly, side-by-side against the printed card: downloaded
+  // report cards headed every page with the literal "School Management
+  // System" instead of the school's own name. snap.schoolName is only
+  // ever populated when the publishing client explicitly sends one (it
+  // doesn't), so this always fell through. The live school doc is already
+  // resolved for branding (logo/tagline/contact) and is non-frozen by
+  // design, so fall back to its real name before the generic placeholder.
+  const displaySchoolName =
+    (snap.schoolName && String(snap.schoolName).trim()) || school?.name || 'School Management System';
+
   // Reported directly: "system should be aware who is the school
   // principal" — previously only the manually-typed per-report field
   // (Comments tab) ever populated this, requiring it to be retyped for
@@ -2435,7 +2450,7 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
     isDraft,
     watermarkText: isDraft ? (snap.superseded ? 'SUPERSEDED' : 'DRAFT') : null,
     header: {
-      schoolName: snap.schoolName || 'School Management System',
+      schoolName: displaySchoolName,
       subtitle:   'ACADEMIC REPORT CARD' + (isDraft ? '   [DRAFT — NOT OFFICIAL]' : ''),
     },
     studentInfo: {
@@ -2579,7 +2594,7 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
       // above is unchanged and still what legacy_tabular's HTML cover
       // renders from.
       title:            'REPORT CARD',
-      schoolName:       snap.schoolName    || '',
+      schoolName:       snap.schoolName || school?.name || '',
       studentName:      snap.studentName   || '—',
       admissionNo:      snap.admissionNo   || '—',
       className:        snap.className    || '—',
@@ -3168,9 +3183,16 @@ router.post('/preview-html', authMiddleware, PLAN, MODGATE, rbac('grades', 'read
       subjectNames, subjectTeacherNames,
     });
     // RCE2 — an unpublished draft has no frozen layoutKey of its own, so
-    // preview uses the school's LIVE current default (school-wide, no
-    // section context available here) rather than a snapshotted one.
-    const { layoutKey } = await resolveTemplate(tenantContext(req), schoolId, null);
+    // preview must resolve the LIVE template. It has to resolve it the same
+    // way POST /publish does, though: publish calls
+    // sectionIdForClass() and passes that section to resolveTemplate()
+    // (section default → school default → legacy). This route used to pass
+    // null unconditionally, so any school with a section-specific default
+    // saw the SCHOOL default while previewing and a different section
+    // template once the same report was published — the individual preview
+    // and the bulk/parent copies of one report disagreed on structure.
+    const previewSectionId = classId ? await sectionIdForClass(schoolId, classId) : null;
+    const { layoutKey } = await resolveTemplate(tenantContext(req), schoolId, previewSectionId);
     const html = getLayout(layoutKey).renderHtml(sections);
     return ok(res, { html });
   } catch (err) { console.error('[report-cards/preview-html]', err); return E.serverError(res); }

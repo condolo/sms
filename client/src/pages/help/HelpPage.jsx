@@ -2,6 +2,7 @@
    Help Centre — searchable FAQ covering every Msingi module
    ============================================================ */
 import { useState, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Search, ChevronDown, ChevronRight,
   BookOpen, Users, Wallet, CalendarDays, FileText, Scale,
@@ -9,7 +10,7 @@ import {
   Clock, ClipboardList, MonitorPlay, BookCheck,
   ClipboardCheck, Layers, UserCog, Database,
   BookMarked, Bus, BedDouble, TrendingUp, Library,
-  Sprout, CalendarCheck, HeartPulse, Boxes, Link2, LineChart,
+  Sprout, CalendarCheck, HeartPulse, Boxes, Link2, LineChart, LifeBuoy,
 } from 'lucide-react';
 import { useSchoolTheme, withOpacity } from '@/hooks/useSchoolTheme.js';
 import useAuthStore from '@/store/auth.js';
@@ -1287,7 +1288,21 @@ export default function HelpPage() {
         </div>
         <h1 className="text-2xl font-bold text-slate-900">Help Centre</h1>
         <p className="text-slate-500 mt-1 text-sm">Find answers to common questions about Msingi.</p>
-        <p className="text-slate-400 mt-1 text-xs">Showing what applies to you — your role's access and the modules your school has enabled.</p>
+        <p className="text-slate-400 mt-1 text-xs">Showing what applies to you - your role's access and the modules your school has enabled.</p>
+      </div>
+
+      {/* ── Human support ───────────────────────────────────── */}
+      <div className="mb-8 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:flex-row sm:items-center">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-indigo-50">
+          <LifeBuoy size={18} className="text-indigo-600" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-slate-800">Can't find the answer?</p>
+          <p className="text-xs text-slate-500">Raise a support ticket — replies arrive here and by email.</p>
+        </div>
+        <Link to="/support" className="shrink-0 rounded-lg bg-indigo-600 px-4 py-2 text-center text-sm font-semibold text-white hover:bg-indigo-700">
+          Contact support
+        </Link>
       </div>
 
       {/* ── Search ──────────────────────────────────────────── */}

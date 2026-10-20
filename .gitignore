@@ -29,3 +29,9 @@ release-cert.json
 
 # Local demo-school data export (contains personal records; never commit)
 backups/
+
+# Local development MongoDB data (scripts/dev-mongo.js)
+.local-mongo/
+
+# Locally captured email (scripts/dev-mail.js)
+.mail/

@@ -4,18 +4,19 @@
    timezone fields, houses config, no old components, no alert()
    ============================================================ */
 import { useState, useRef, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useEffect } from 'react';
 import {
   Building2, Users, User, Plus, X, Save, Loader2,
   CheckCircle2, AlertTriangle, Trash2, Mail, Phone,
-  Globe, Shield, UserPlus, Home, Palette,
+  Globe, Shield, Home, Palette,
   Eye, EyeOff, Lock, ShieldCheck, Database, Download,
   RefreshCcw, Info, Server, Check, ChevronDown, ChevronUp,
   CreditCard, Smartphone, Zap, ArrowRight, Layers, Pencil,
   Bell, MessageSquare, BookOpen, Calendar, CalendarDays, Clock,
-  Upload, ImageIcon, KeyRound, Copy,
+  Upload, ImageIcon, KeyRound,
   PlusCircle, ChevronRight, AlertCircle, Archive,
   MonitorPlay, WifiOff, ClipboardList,
 } from 'lucide-react';
@@ -26,10 +27,19 @@ import { billing as billingApi, mpesa as mpesaApi } from '@/api/client.js';
 import { students as studentsApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 import { deriveNavModules, buildModuleConfigMap } from '@/config/moduleNav.js';
-import { SYSTEM_ROLE_LABELS, roleLabel, STAFF_ROLE_KEYS } from '@/utils/roleLabels.js';
+import { SYSTEM_ROLE_LABELS, roleLabel } from '@/utils/roleLabels.js';
 import { useCurrentAcademicPeriod } from '@/hooks/useCurrentAcademicPeriod.js';
 import { BUILTIN_STAFF_RESPONSIBILITIES } from '@/config/staffResponsibilities.js';
 import { resizeImageToDataUrl } from '@/utils/imageResize.js';
+
+/* ── Extracted tab components + shared primitives ────────────────
+   The Users and Audit Log tabs were split into ./components/ (2026-10)
+   so each file stays focused; the shared bits (toast, form field,
+   role pill, role lists) live in SettingsPrimitives.jsx so nothing
+   keeps a private copy that drifts. */
+import { FField, Toast, iCls, RolePill, SYSTEM_ROLE_COLORS, SYSTEM_ROLES, PROTECTED_ROLES } from './components/SettingsPrimitives.jsx';
+import UsersTab from './components/UsersTab.jsx';
+import AuditLogTab from './components/AuditLogTab.jsx';
 
 /* ── Tab config ─────────────────────────────────────────────── */
 const TABS = [
@@ -43,101 +53,6 @@ const TABS = [
   { id: 'audit_log',      label: 'Audit Log',           Icon: ClipboardList,  adminOnly: true  },
   { id: 'account',        label: 'Account',             Icon: User,           adminOnly: false },
 ];
-
-/* ── Role display constants (must be before RolePill + USER_ROLE_GROUPS) ──
-   SYSTEM_ROLE_LABELS/roleLabel now live in utils/roleLabels.js (2026-09)
-   so HR and a user's own Profile page read the exact same defaults and
-   the exact same school-level rename override, instead of each keeping
-   an independent copy. ── */
-const SYSTEM_ROLE_COLORS = {
-  superadmin:           { sel:'bg-red-600 text-white ring-red-600',          idle:'ring-slate-200 bg-white text-red-700'        },
-  admin:                { sel:'bg-violet-600 text-white ring-violet-600',     idle:'ring-slate-200 bg-white text-violet-700'     },
-  principal:            { sel:'bg-indigo-700 text-white ring-indigo-700',     idle:'ring-slate-200 bg-white text-indigo-800'     },
-  deputy_principal:     { sel:'bg-indigo-600 text-white ring-indigo-600',     idle:'ring-slate-200 bg-white text-indigo-700'     },
-  section_head:         { sel:'bg-purple-600 text-white ring-purple-600',     idle:'ring-slate-200 bg-white text-purple-700'     },
-  teacher:              { sel:'bg-blue-600 text-white ring-blue-600',         idle:'ring-slate-200 bg-white text-blue-700'       },
-  exams_officer:        { sel:'bg-cyan-600 text-white ring-cyan-600',         idle:'ring-slate-200 bg-white text-cyan-700'       },
-  timetabler:           { sel:'bg-teal-600 text-white ring-teal-600',         idle:'ring-slate-200 bg-white text-teal-700'       },
-  admissions_officer:   { sel:'bg-sky-600 text-white ring-sky-600',           idle:'ring-slate-200 bg-white text-sky-700'        },
-  finance:              { sel:'bg-green-600 text-white ring-green-600',       idle:'ring-slate-200 bg-white text-green-700'      },
-  hr:                   { sel:'bg-lime-600 text-white ring-lime-600',         idle:'ring-slate-200 bg-white text-lime-700'       },
-  discipline_committee: { sel:'bg-orange-600 text-white ring-orange-600',     idle:'ring-slate-200 bg-white text-orange-700'     },
-  parent:               { sel:'bg-emerald-600 text-white ring-emerald-600',   idle:'ring-slate-200 bg-white text-emerald-700'    },
-  student:              { sel:'bg-amber-500 text-white ring-amber-500',       idle:'ring-slate-200 bg-white text-amber-700'      },
-};
-
-/* ── Role pills ─────────────────────────────────────────────── */
-const ROLE_PILL = {
-  superadmin:           'bg-red-50 text-red-700 border-red-200',
-  admin:                'bg-violet-50 text-violet-700 border-violet-200',
-  deputy_principal:     'bg-indigo-50 text-indigo-700 border-indigo-200',
-  deputy:               'bg-indigo-50 text-indigo-700 border-indigo-200',  // legacy alias
-  section_head:         'bg-purple-50 text-purple-700 border-purple-200',
-  teacher:              'bg-blue-50 text-blue-700 border-blue-200',
-  exams_officer:        'bg-cyan-50 text-cyan-700 border-cyan-200',
-  timetabler:           'bg-teal-50 text-teal-700 border-teal-200',
-  admissions_officer:   'bg-sky-50 text-sky-700 border-sky-200',
-  finance:              'bg-green-50 text-green-700 border-green-200',
-  hr:                   'bg-lime-50 text-lime-700 border-lime-200',
-  discipline_committee: 'bg-orange-50 text-orange-700 border-orange-200',
-  parent:               'bg-emerald-50 text-emerald-700 border-emerald-200',
-  student:              'bg-amber-50 text-amber-700 border-amber-200',
-};
-function RolePill({ role, customRoles = [], roleLabels = {} }) {
-  // Check if this is a custom role first
-  const cr = customRoles.find(r => r.key === role);
-  if (cr) {
-    return (
-      <span
-        className="inline-flex px-2 py-0.5 text-[11px] font-medium rounded border"
-        style={{ backgroundColor: cr.color + '18', color: cr.color, borderColor: cr.color + '55' }}
-      >
-        {cr.label}
-      </span>
-    );
-  }
-  const label = roleLabel(role, roleLabels);
-  const cls   = ROLE_PILL[role] ?? 'bg-slate-100 text-slate-600 border-slate-200';
-  return (
-    <span className={`inline-flex px-2 py-0.5 text-[11px] font-medium rounded border capitalize ${cls}`}>
-      {label}
-    </span>
-  );
-}
-
-/* ── Shared primitives ───────────────────────────────────────── */
-function iCls(err = false) {
-  return `w-full text-sm px-3 py-2 rounded-lg border ${err ? 'border-red-300 focus:ring-red-500/20' : 'border-slate-200 focus:border-slate-400 focus:ring-slate-900/10'} bg-white focus:outline-none focus:ring-2 text-slate-800 placeholder-slate-400 transition`;
-}
-
-function Toast({ msg, type = 'success', onDismiss }) {
-  const isErr  = type === 'error';
-  const isWarn = type === 'warning';
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}
-      className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border shadow-sm ${
-        isErr  ? 'bg-red-50    text-red-700    border-red-200'    :
-        isWarn ? 'bg-amber-50  text-amber-700  border-amber-200'  :
-                 'bg-emerald-50 text-emerald-700 border-emerald-200'
-      }`}
-    >
-      {isErr || isWarn ? <AlertTriangle size={13} /> : <CheckCircle2 size={13} />}
-      {msg}
-      <button onClick={onDismiss} className="ml-1 opacity-60 hover:opacity-100"><X size={11} /></button>
-    </motion.div>
-  );
-}
-
-function FField({ label, error, children }) {
-  return (
-    <div className="space-y-1.5">
-      <label className="block text-xs font-medium text-slate-600">{label}</label>
-      {children}
-      {error && <p className="text-[11px] text-red-500">{error}</p>}
-    </div>
-  );
-}
 
 /* ── Currency + Timezone options ────────────────────────────── */
 const CURRENCIES = [
@@ -1880,501 +1795,6 @@ function SmtpCard({ school = {}, onSaved }) {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   USERS TAB
-   ══════════════════════════════════════════════════════════════ */
-/* ── Canonical system role list ─────────────────────────────────
-   Single source of truth — filter, invite form, and R&P all derive
-   from this. Built on roleLabels.js's STAFF_ROLE_KEYS (the same list
-   HR and Payroll use) plus the account types that aren't staff but
-   still need a row here: 'superadmin' (platform-granted, still shown
-   so it can be filtered/invited... see exclusions below) and the
-   portal-only 'parent'/'student' roles. `deputy` kept as a legacy
-   alias (backward compat) but does NOT appear in the UI — it is
-   merged with deputy_principal.
-   ─────────────────────────────────────────────────────────────── */
-const SYSTEM_ROLES = ['superadmin', ...STAFF_ROLE_KEYS, 'parent', 'student'];
-
-// Roles that can never be deleted from the school (safety guard)
-const PROTECTED_ROLES = new Set(['superadmin', 'admin']);
-
-// User filter groups — derived so they always stay in sync with SYSTEM_ROLES
-// 'All roles' sentinel first; the rest come from SYSTEM_ROLES
-const USER_ROLE_GROUPS = [
-  { value: '', label: 'All roles' },
-  ...SYSTEM_ROLES.map(r => ({ value: r, label: SYSTEM_ROLE_LABELS[r] })),
-];
-
-function UsersTab() {
-  const qc = useQueryClient();
-  const can        = useAuthStore(s => s.can.bind(s));
-  const sessionRole = useAuthStore(s => s.session?.user?.role ?? '');
-  const canManage  = can('settings') || sessionRole === 'admin' || sessionRole === 'superadmin';
-  const [showInvite, setShowInvite] = useState(false);
-  const [toast, setToast] = useState(null);
-  const [roleFilter, setRoleFilter] = useState('');
-  const [search, setSearch]         = useState('');
-  const [resetPwdUser, setResetPwdUser] = useState(null);
-  const [editingUserId, setEditingUserId] = useState(null);
-  const [editNameVal,   setEditNameVal]   = useState('');
-  const [editingRoleId, setEditingRoleId] = useState(null);
-  const [showRemoved, setShowRemoved] = useState(false);
-
-  const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ['settings', 'users'],
-    queryFn:  () => settingsApi.users.list(),
-    staleTime: 60_000,
-  });
-  const allUsers = data?.data ?? [];
-
-  // Removed (soft-deleted) accounts — fetched only when the panel is
-  // opened, since most admins will never need it. A removed account's
-  // email still blocks a fresh invite forever (see POST /invite's
-  // INACTIVE_ACCOUNT_EXISTS error) with no other way to find or undo it.
-  const { data: removedData, isLoading: removedLoading } = useQuery({
-    queryKey: ['settings', 'users', 'removed'],
-    queryFn:  () => settingsApi.users.listRemoved(),
-    enabled:  showRemoved,
-    staleTime: 30_000,
-  });
-  const removedUsers = removedData?.data ?? [];
-
-  const { mutate: reactivateUser, isPending: reactivating } = useMutation({
-    mutationFn: id => settingsApi.users.reactivate(id),
-    onSuccess: (res) => {
-      qc.invalidateQueries({ queryKey: ['settings', 'users'] });
-      const d = res?.data;
-      setToast({
-        msg: d?.emailSent
-          ? `${d.name} reactivated — a new temporary password was emailed to them.`
-          : `${d?.name ?? 'User'} reactivated. New temporary password: ${d?.password} (email failed to send — share this manually).`,
-        type: 'success',
-      });
-    },
-    onError: err => setToast({ msg: err?.message ?? 'Reactivate failed.', type: 'error' }),
-  });
-
-  /* Fetch school doc — needed for hiddenSystemRoles */
-  const { data: schoolData } = useQuery({
-    queryKey: ['settings', 'school'],
-    queryFn:  () => settingsApi.school.get(),
-    staleTime: 60_000,
-  });
-  const hiddenSystemRoles = schoolData?.data?.hiddenSystemRoles ?? [];
-  const roleLabels        = schoolData?.data?.roleLabels ?? {};
-
-  /* Fetch custom roles so filter + pills stay in sync */
-  const { data: crData } = useQuery({
-    queryKey: ['settings', 'custom-roles'],
-    queryFn:  () => settingsApi.customRoles.list(),
-    staleTime: 60_000,
-  });
-  const customRoles = crData?.data ?? [];
-
-  /* Merge built-in role groups (school's own renames applied) + custom
-     roles for the filter dropdown */
-  const roleGroups = [
-    ...USER_ROLE_GROUPS.map(g => g.value ? { ...g, label: roleLabel(g.value, roleLabels) } : g),
-    ...customRoles.map(cr => ({ value: cr.key, label: cr.label })),
-  ];
-
-  const users = allUsers.filter(u => {
-    const matchRole   = !roleFilter || u.role === roleFilter;
-    const matchSearch = !search || (u.name ?? '').toLowerCase().includes(search.toLowerCase()) || (u.email ?? '').toLowerCase().includes(search.toLowerCase());
-    return matchRole && matchSearch;
-  });
-
-  const { mutate: removeUser } = useMutation({
-    mutationFn: id => settingsApi.users.remove(id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['settings', 'users'] });
-      setToast({ msg: 'User removed.', type: 'success' });
-    },
-    onError: err => setToast({ msg: err?.message ?? 'Remove failed.', type: 'error' }),
-  });
-
-  const { mutate: saveName, isPending: savingName } = useMutation({
-    mutationFn: ({ id, name }) => settingsApi.users.update(id, { name }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['settings', 'users'] });
-      setEditingUserId(null);
-      setToast({ msg: 'Name updated.', type: 'success' });
-    },
-    onError: err => setToast({ msg: err?.message ?? 'Failed to update name.', type: 'error' }),
-  });
-
-  const { mutate: saveRole, isPending: savingRole } = useMutation({
-    mutationFn: ({ id, role }) => settingsApi.users.update(id, { role }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['settings', 'users'] });
-      setEditingRoleId(null);
-      setToast({ msg: 'Role updated. User session revoked — they must log in again.', type: 'success' });
-    },
-    onError: err => {
-      setEditingRoleId(null);
-      setToast({ msg: err?.message ?? 'Failed to update role.', type: 'error' });
-    },
-  });
-
-  // Roles available to assign — excludes superadmin (only platform-level)
-  const assignableRoles = [
-    ...SYSTEM_ROLES.filter(r => r !== 'superadmin').map(r => ({ value: r, label: roleLabel(r, roleLabels) })),
-    ...customRoles.map(cr => ({ value: cr.key, label: cr.label })),
-  ];
-
-  function confirmRemove(u) {
-    if (!window.confirm(`Remove ${u.name ?? u.email} from this school? They will lose access immediately.`)) return;
-    removeUser(u.id ?? u._id);
-  }
-
-  function startEditName(u) {
-    setEditingUserId(u.id ?? u._id);
-    setEditNameVal(u.name ?? '');
-  }
-
-  function commitNameEdit(u) {
-    const trimmed = editNameVal.trim();
-    if (!trimmed || trimmed === u.name) { setEditingUserId(null); return; }
-    saveName({ id: u.id ?? u._id, name: trimmed });
-  }
-
-  return (
-    <div className="max-w-2xl space-y-4">
-      {/* Toast */}
-      <div className="h-8 flex items-center">
-        <AnimatePresence>
-          {toast && <Toast msg={toast.msg} type={toast.type} onDismiss={() => setToast(null)} />}
-        </AnimatePresence>
-      </div>
-
-      {/* Header + filters */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-slate-500">
-            {isLoading ? 'Loading…' : `${users.length} of ${allUsers.length} user${allUsers.length !== 1 ? 's' : ''}`}
-          </p>
-          {canManage && (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setShowRemoved(v => !v)}
-                className={`flex items-center gap-1.5 border text-sm font-medium px-3 py-2 rounded-lg transition ${
-                  showRemoved ? 'border-slate-300 bg-slate-100 text-slate-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-                }`}
-              >
-                <Archive size={13} /> Removed
-              </button>
-              <button
-                onClick={() => setShowInvite(true)}
-                className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium px-3 py-2 rounded-lg transition"
-              >
-                <UserPlus size={13} /> Invite user
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Removed accounts — collapsed by default */}
-        {showRemoved && (
-          <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3 space-y-2">
-            <p className="text-xs font-medium text-slate-500">
-              Removed accounts still hold their email — reactivate one instead of inviting the same address again.
-            </p>
-            {removedLoading ? (
-              <div className="h-10 bg-slate-100 rounded-lg animate-pulse" />
-            ) : removedUsers.length === 0 ? (
-              <p className="text-xs text-slate-400 py-1">No removed accounts.</p>
-            ) : (
-              <div className="space-y-1.5">
-                {removedUsers.map(u => (
-                  <div key={u.id ?? u._id} className="flex items-center justify-between bg-white border border-slate-200 rounded-lg px-3 py-2">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-800 truncate">{u.name ?? u.email}</p>
-                      <p className="text-xs text-slate-400 truncate">{u.email} · removed {u.updatedAt ? new Date(u.updatedAt).toLocaleDateString() : ''}</p>
-                    </div>
-                    <button
-                      onClick={() => reactivateUser(u.id ?? u._id)}
-                      disabled={reactivating}
-                      className="shrink-0 flex items-center gap-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 disabled:opacity-50 px-2.5 py-1.5 rounded-lg transition"
-                    >
-                      <RefreshCcw size={12} /> Reactivate
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-        <div className="flex flex-wrap gap-2">
-          {/* Search */}
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search name or email…"
-            className="flex-1 min-w-[180px] rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400/40 focus:border-violet-400"
-          />
-          {/* Role filter */}
-          <select
-            value={roleFilter}
-            onChange={e => setRoleFilter(e.target.value)}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400/40 focus:border-violet-400"
-          >
-            {roleGroups.map(g => (
-              <option key={g.value} value={g.value}>{g.label}</option>
-            ))}
-          </select>
-          {(roleFilter || search) && (
-            <button
-              onClick={() => { setRoleFilter(''); setSearch(''); }}
-              className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-50 transition"
-            >
-              Clear
-            </button>
-          )}
-        </div>
-      </div>
-
-      {isLoading ? (
-        <div className="space-y-2">{[...Array(4)].map((_, i) => <div key={i} className="h-14 bg-slate-100 rounded-xl animate-pulse" />)}</div>
-      ) : isError ? (
-        <div className="bg-white border border-red-200 rounded-xl p-8 flex flex-col items-center gap-2">
-          <AlertTriangle size={20} className="text-red-400" />
-          <p className="text-sm text-slate-600">{error?.message}</p>
-          <button onClick={refetch} className="text-xs font-medium text-slate-700 underline">Retry</button>
-        </div>
-      ) : users.length === 0 ? (
-        <div className="bg-white border border-slate-200 rounded-xl p-10 flex flex-col items-center gap-2">
-          <Users size={24} className="text-slate-300" />
-          <p className="text-sm text-slate-500">No users yet. Invite your team to get started.</p>
-        </div>
-      ) : (
-        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-100 bg-slate-50/50">
-                <th className="text-left text-xs font-medium text-slate-500 px-4 py-3">Name</th>
-                <th className="text-left text-xs font-medium text-slate-500 px-4 py-3 hidden sm:table-cell">Email</th>
-                <th className="text-left text-xs font-medium text-slate-500 px-4 py-3">Role</th>
-                {canManage && <th className="px-4 py-3 w-8" />}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {users.map(u => {
-                const uid       = u.id ?? u._id;
-                const isEditing = editingUserId === uid;
-                return (
-                  <tr key={u._id ?? u.id} className="hover:bg-slate-50 transition group">
-                    <td className="px-4 py-3 font-medium text-slate-800">
-                      {isEditing ? (
-                        <div className="flex items-center gap-1.5">
-                          <input
-                            autoFocus
-                            value={editNameVal}
-                            onChange={e => setEditNameVal(e.target.value)}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter') commitNameEdit(u);
-                              if (e.key === 'Escape') setEditingUserId(null);
-                            }}
-                            className="flex-1 rounded border border-slate-300 bg-white px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400/40"
-                          />
-                          <button
-                            onClick={() => commitNameEdit(u)}
-                            disabled={savingName}
-                            className="p-1 text-emerald-500 hover:bg-emerald-50 rounded transition"
-                            title="Save name"
-                          >
-                            <Check size={13} />
-                          </button>
-                          <button
-                            onClick={() => setEditingUserId(null)}
-                            className="p-1 text-slate-400 hover:bg-slate-100 rounded transition"
-                            title="Cancel"
-                          >
-                            <X size={13} />
-                          </button>
-                        </div>
-                      ) : (
-                        <span className="cursor-default">{u.name ?? '—'}</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-slate-500 text-xs hidden sm:table-cell">{u.email}</td>
-                    <td className="px-4 py-3">
-                      {canManage && editingRoleId === uid ? (
-                        <select
-                          autoFocus
-                          defaultValue={u.role}
-                          disabled={savingRole}
-                          onChange={e => {
-                            const newRole = e.target.value;
-                            if (newRole !== u.role) saveRole({ id: uid, role: newRole });
-                            else setEditingRoleId(null);
-                          }}
-                          onBlur={() => setEditingRoleId(null)}
-                          className="rounded border border-violet-300 bg-white px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-violet-400/40"
-                        >
-                          {assignableRoles.map(r => (
-                            <option key={r.value} value={r.value}>{r.label}</option>
-                          ))}
-                        </select>
-                      ) : (
-                        <button
-                          onClick={() => canManage && !PROTECTED_ROLES.has(u.role) && setEditingRoleId(uid)}
-                          className={canManage && !PROTECTED_ROLES.has(u.role) ? 'cursor-pointer hover:opacity-80 transition' : 'cursor-default'}
-                          title={canManage && !PROTECTED_ROLES.has(u.role) ? 'Click to change role' : undefined}
-                        >
-                          <RolePill role={u.role} customRoles={customRoles} roleLabels={roleLabels} />
-                        </button>
-                      )}
-                    </td>
-                    {canManage && (
-                      <td className="px-4 py-3 text-right">
-                        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition">
-                          <button
-                            onClick={() => startEditName(u)}
-                            className="p-1.5 text-slate-300 hover:text-violet-500 hover:bg-violet-50 rounded-lg transition"
-                            title="Edit name"
-                          >
-                            <Pencil size={13} />
-                          </button>
-                          <button
-                            onClick={() => setResetPwdUser(u)}
-                            className="p-1.5 text-slate-300 hover:text-amber-500 hover:bg-amber-50 rounded-lg transition"
-                            title="Set password"
-                          >
-                            <KeyRound size={13} />
-                          </button>
-                          <button
-                            onClick={() => confirmRemove(u)}
-                            className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
-                            title="Remove user"
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
-                      </td>
-                    )}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* Invite slide-over */}
-      <AnimatePresence>
-        {showInvite && (
-          <InviteSlideOver
-            customRoles={customRoles}
-            hiddenSystemRoles={hiddenSystemRoles}
-            roleLabels={roleLabels}
-            onClose={() => setShowInvite(false)}
-            onInvited={() => {
-              setShowInvite(false);
-              qc.invalidateQueries({ queryKey: ['settings', 'users'] });
-              setToast({ msg: 'Invitation sent.', type: 'success' });
-            }}
-          />
-        )}
-      </AnimatePresence>
-
-      {/* Reset password modal */}
-      <AnimatePresence>
-        {resetPwdUser && (
-          <ResetPasswordModal user={resetPwdUser} onClose={() => setResetPwdUser(null)} />
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
-
-function InviteSlideOver({ customRoles = [], hiddenSystemRoles = [], roleLabels = {}, onClose, onInvited }) {
-  const [email, setEmail] = useState('');
-  const [role,  setRole]  = useState('teacher');
-  const [name,  setName]  = useState('');
-  const [errors, setErrors] = useState({});
-
-  const { mutate, isPending } = useMutation({
-    mutationFn: () => settingsApi.users.invite({ email, role, name }),
-    onSuccess:  () => onInvited(),
-    onError:    err => setErrors({ _server: err?.message ?? 'Invite failed.' }),
-  });
-
-  function submit(e) {
-    e.preventDefault();
-    const errs = {};
-    if (!email.trim()) errs.email = 'Email is required.';
-    if (Object.keys(errs).length) { setErrors(errs); return; }
-    setErrors({});
-    mutate();
-  }
-
-  return (
-    <>
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-        className="fixed inset-0 bg-slate-900/30 backdrop-blur-sm z-40" onClick={onClose} />
-      <motion.div
-        initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
-        transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-        className="fixed right-0 top-0 h-full w-full max-w-sm bg-white shadow-2xl z-50 flex flex-col"
-      >
-        <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100">
-          <div>
-            <h2 className="text-base font-semibold text-slate-900">Invite User</h2>
-            <p className="text-xs text-slate-400 mt-0.5">Send an invite to your team</p>
-          </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition">
-            <X size={18} />
-          </button>
-        </div>
-
-        <form onSubmit={submit} className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
-          {errors._server && (
-            <div className="flex items-center gap-2 bg-red-50 text-red-700 text-sm px-3 py-2.5 rounded-lg border border-red-200">
-              <AlertTriangle size={14} />{errors._server}
-            </div>
-          )}
-          <FField label="Full name (optional)" error={errors.name}>
-            <input value={name} onChange={e => setName(e.target.value)} placeholder="Their display name" className={iCls(!!errors.name)} />
-          </FField>
-          <FField label="Email address *" error={errors.email}>
-            <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="teacher@school.com" className={iCls(!!errors.email)} autoFocus />
-          </FField>
-          <FField label="Role">
-            <select value={role} onChange={e => setRole(e.target.value)} className={iCls()}>
-              {/* System roles: exclude superadmin (can't be invited) and school-hidden roles */}
-              {SYSTEM_ROLES
-                .filter(r => r !== 'superadmin' && !hiddenSystemRoles.includes(r))
-                .map(r => (
-                  <option key={r} value={r}>{roleLabel(r, roleLabels)}</option>
-                ))
-              }
-              {customRoles.length > 0 && (
-                <optgroup label="── Custom Roles ──">
-                  {customRoles.map(cr => (
-                    <option key={cr.key} value={cr.key}>{cr.label}</option>
-                  ))}
-                </optgroup>
-              )}
-            </select>
-          </FField>
-        </form>
-
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50/50">
-          <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-800 transition">Cancel</button>
-          <button
-            onClick={submit}
-            disabled={isPending}
-            className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-sm font-medium px-5 py-2 rounded-lg transition"
-          >
-            {isPending ? <Loader2 size={13} className="animate-spin" /> : <Mail size={13} />}
-            {isPending ? 'Sending…' : 'Send invite'}
-          </button>
-        </div>
-      </motion.div>
-    </>
-  );
-}
-
-/* ══════════════════════════════════════════════════════════════
    ACADEMIC YEARS SECTION
    Full academic year lifecycle manager embedded in the School tab.
    Lists all years with status badges, allows creating draft years,
@@ -2874,167 +2294,6 @@ function AcademicYearsSection({ schoolId }) {
         )}
       </AnimatePresence>
     </div>
-  );
-}
-
-/* ══════════════════════════════════════════════════════════════
-   SET PASSWORD MODAL
-   Admin sets a usable password for the user.  They can use it
-   immediately — no forced change on login.  The platform's
-   90-day rotation policy handles scheduled expiry.
-   ══════════════════════════════════════════════════════════════ */
-function ResetPasswordModal({ user, onClose }) {
-  const [result,     setResult]     = useState(null);
-  const [copied,     setCopied]     = useState(false);
-  const [errMsg,     setErrMsg]     = useState('');
-  const [customPwd,  setCustomPwd]  = useState('');
-  const [showPwd,    setShowPwd]    = useState(false);
-
-  const { mutate, isPending } = useMutation({
-    mutationFn: () => settingsApi.users.resetPassword(
-      user.id ?? user._id,
-      customPwd.trim() ? { password: customPwd.trim() } : {}
-    ),
-    onSuccess: res  => setResult(res?.data),
-    onError:   err  => setErrMsg(err?.message ?? 'Failed to set password.'),
-  });
-
-  function copyPwd() {
-    navigator.clipboard.writeText(result.password).catch(() => {});
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }
-
-  return (
-    <>
-      <motion.div
-        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-        className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50"
-        onClick={!result ? onClose : undefined}
-      />
-      <motion.div
-        initial={{ scale: 0.95, opacity: 0 }}
-        animate={{ scale: 1,    opacity: 1 }}
-        exit={{ scale: 0.95,    opacity: 0 }}
-        transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-        className="fixed z-50 left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden"
-      >
-        {!result ? (
-          /* ── Form ── */
-          <div className="p-6 space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
-                <KeyRound size={18} className="text-amber-600" />
-              </div>
-              <div>
-                <h2 className="text-base font-semibold text-slate-900">Set Password</h2>
-                <p className="text-xs text-slate-500">{user.name ?? user.email}</p>
-              </div>
-            </div>
-
-            <p className="text-sm text-slate-600">
-              Set a new password for <strong>{user.name ?? user.email}</strong>. They can use it immediately — no forced change on login.
-            </p>
-
-            {/* Optional custom password */}
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">
-                Password <span className="text-slate-400 font-normal">(leave blank to auto-generate)</span>
-              </label>
-              <div className="relative">
-                <input
-                  type={showPwd ? 'text' : 'password'}
-                  value={customPwd}
-                  onChange={e => { setCustomPwd(e.target.value); setErrMsg(''); }}
-                  placeholder="Type a password, or leave blank"
-                  minLength={8}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 pr-10"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPwd(v => !v)}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                  tabIndex={-1}
-                >
-                  {showPwd ? <EyeOff size={14} /> : <Eye size={14} />}
-                </button>
-              </div>
-              {customPwd && customPwd.length < 8 && (
-                <p className="text-xs text-amber-600 mt-1">Must be at least 8 characters</p>
-              )}
-            </div>
-
-            <p className="text-xs text-slate-500">
-              An email with the new password will be sent to{' '}
-              <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded">{user.email}</span>
-              {' '}— keep this dialog open in case the email doesn&apos;t arrive.
-            </p>
-
-            {errMsg && (
-              <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{errMsg}</p>
-            )}
-
-            <div className="flex justify-end gap-3 pt-1">
-              <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition">
-                Cancel
-              </button>
-              <button
-                onClick={() => mutate()}
-                disabled={isPending || (customPwd.length > 0 && customPwd.length < 8)}
-                className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white rounded-lg transition"
-              >
-                {isPending && <Loader2 size={13} className="animate-spin" />}
-                {isPending ? 'Saving…' : 'Set Password'}
-              </button>
-            </div>
-          </div>
-        ) : (
-          /* ── Result ── */
-          <div className="p-6 space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-full bg-green-100 flex items-center justify-center shrink-0">
-                <CheckCircle2 size={18} className="text-green-600" />
-              </div>
-              <div>
-                <h2 className="text-base font-semibold text-slate-900">Password Set</h2>
-                <p className="text-xs text-slate-500">{result.name} · {result.email}</p>
-              </div>
-            </div>
-
-            <p className="text-sm text-slate-600">Share this password securely with the user. They can log in with it immediately.</p>
-
-            <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
-              <code className="flex-1 text-lg font-bold tracking-widest text-violet-700 font-mono break-all">
-                {result.password}
-              </code>
-              <button
-                onClick={copyPwd}
-                className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-800 border border-slate-200 rounded-lg px-2.5 py-1.5 hover:bg-white transition shrink-0"
-              >
-                {copied ? <Check size={12} className="text-green-600" /> : <Copy size={12} />}
-                {copied ? 'Copied!' : 'Copy'}
-              </button>
-            </div>
-
-            <div className={`rounded-lg px-3 py-2.5 text-xs flex items-start gap-2 ${result.emailSent ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'}`}>
-              {result.emailSent ? (
-                <><CheckCircle2 size={13} className="shrink-0 mt-0.5" /> Email with the new password sent to {result.email}.</>
-              ) : (
-                <><AlertTriangle size={13} className="shrink-0 mt-0.5" /> Email could not be sent — share this password directly with {result.name}.</>
-              )}
-            </div>
-
-            <p className="text-[11px] text-slate-400">This password will not be shown again after you close this dialog.</p>
-
-            <div className="flex justify-end pt-1">
-              <button onClick={onClose} className="px-5 py-2 text-sm font-medium bg-slate-900 hover:bg-slate-800 text-white rounded-lg transition">
-                Done
-              </button>
-            </div>
-          </div>
-        )}
-      </motion.div>
-    </>
   );
 }
 
@@ -4643,6 +3902,9 @@ function SubscriptionTab() {
   const expiry          = school?.planExpiresAt
     ? new Date(school.planExpiresAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
     : null;
+  const planExpired     = school?.planExpiresAt
+    ? new Date(school.planExpiresAt) < new Date()
+    : !!school?.planExpired;
 
   // Fetch current pending invoice
   const { data: invoiceData, refetch: refetchInvoice } = useQuery({
@@ -4704,6 +3966,18 @@ function SubscriptionTab() {
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
+      {planExpired && (
+        <div className="flex items-start gap-2.5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-[13px] text-rose-800">
+          <AlertTriangle size={15} className="mt-0.5 shrink-0 text-rose-500" />
+          <div>
+            <p className="font-semibold">Subscription expired{expiry ? ` on ${expiry}` : ''}</p>
+            <p className="mt-0.5 text-rose-700">
+              Staff features remain available. Student and parent portal logins pause after the grace period
+              until the subscription is renewed. Pay below, or contact your platform administrator to change tier.
+            </p>
+          </div>
+        </div>
+      )}
       {/* Current plan status */}
       <div className="bg-white border border-slate-200 rounded-xl p-5">
         <div className="flex items-center gap-3 mb-4">
@@ -5599,126 +4873,20 @@ function ModulesTab() {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   AUDIT LOG TAB
-   ══════════════════════════════════════════════════════════════ */
-const SEVERITY_BADGE = {
-  info:     'bg-sky-100 text-sky-700',
-  warn:     'bg-amber-100 text-amber-700',
-  critical: 'bg-red-100 text-red-700',
-};
-
-function AuditLogTab() {
-  const [page, setPage]         = useState(1);
-  const [action, setAction]     = useState('');
-  const [severity, setSeverity] = useState('');
-  const [from, setFrom]         = useState('');
-  const [to, setTo]             = useState('');
-
-  const params = new URLSearchParams({ page, limit: 50, ...(action && { action }), ...(severity && { severity }), ...(from && { from }), ...(to && { to }) }).toString();
-
-  const { data: actionsData } = useQuery({
-    queryKey: ['audit-actions'],
-    queryFn: () => fetch('/api/audit/actions', { credentials: 'include' }).then(r => r.json()),
-    staleTime: Infinity,
-  });
-
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ['audit-logs', page, action, severity, from, to],
-    queryFn: () => fetch(`/api/audit?${params}`, { credentials: 'include' }).then(r => r.json()),
-    staleTime: 30_000,
-    keepPreviousData: true,
-  });
-
-  const logs       = data?.data ?? [];
-  const pagination = data?.pagination;
-
-  return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-lg font-semibold text-slate-800">Audit Log</h2>
-        <p className="text-sm text-slate-500 mt-1">High-impact actions performed by users in your school, in reverse chronological order.</p>
-      </div>
-
-      {/* Filters */}
-      <div className="flex flex-wrap gap-3">
-        <select value={action} onChange={e => { setAction(e.target.value); setPage(1); }} className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
-          <option value="">All actions</option>
-          {(actionsData?.data ?? []).map(a => (
-            <option key={a.action} value={a.action}>{a.action}</option>
-          ))}
-        </select>
-        <select value={severity} onChange={e => { setSeverity(e.target.value); setPage(1); }} className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
-          <option value="">All severities</option>
-          <option value="info">Info</option>
-          <option value="warn">Warn</option>
-          <option value="critical">Critical</option>
-        </select>
-        <input type="date" value={from} onChange={e => { setFrom(e.target.value); setPage(1); }} className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500" title="From date" />
-        <input type="date" value={to} onChange={e => { setTo(e.target.value); setPage(1); }} className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500" title="To date" />
-        {(action || severity || from || to) && (
-          <button onClick={() => { setAction(''); setSeverity(''); setFrom(''); setTo(''); setPage(1); }} className="text-sm text-slate-500 hover:text-slate-700 px-3 py-2 rounded-lg border border-slate-200 bg-white">Clear filters</button>
-        )}
-      </div>
-
-      {/* Table */}
-      {isLoading ? (
-        <div className="flex items-center gap-2 text-slate-400 py-8"><Loader2 className="w-4 h-4 animate-spin" />Loading…</div>
-      ) : isError ? (
-        <div className="text-red-500 text-sm py-4">Failed to load audit logs. Please try again.</div>
-      ) : logs.length === 0 ? (
-        <div className="text-slate-400 text-sm py-8 text-center">No audit events found.</div>
-      ) : (
-        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-100 text-xs font-medium text-slate-500 uppercase tracking-wide">
-                <th className="text-left px-4 py-3">Time</th>
-                <th className="text-left px-4 py-3">Action</th>
-                <th className="text-left px-4 py-3">Severity</th>
-                <th className="text-left px-4 py-3">Actor</th>
-                <th className="text-left px-4 py-3">Target</th>
-              </tr>
-            </thead>
-            <tbody>
-              {logs.map((log, i) => (
-                <tr key={log._id ?? i} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
-                  <td className="px-4 py-3 text-slate-500 whitespace-nowrap">{new Date(log.createdAt).toLocaleString()}</td>
-                  <td className="px-4 py-3 font-mono text-slate-700">{log.action}</td>
-                  <td className="px-4 py-3">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${SEVERITY_BADGE[log.severity] ?? 'bg-slate-100 text-slate-600'}`}>
-                      {log.severity}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-slate-600">{log.actor?.email ?? log.actor?.userId ?? '—'}</td>
-                  <td className="px-4 py-3 text-slate-500">{log.target?.label ?? log.target?.id ?? '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* Pagination */}
-      {pagination && pagination.pages > 1 && (
-        <div className="flex items-center justify-between text-sm text-slate-500">
-          <span>Page {pagination.page} of {pagination.pages} ({pagination.total} events)</span>
-          <div className="flex gap-2">
-            <button disabled={page <= 1} onClick={() => setPage(p => p - 1)} className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white disabled:opacity-40">Previous</button>
-            <button disabled={page >= pagination.pages} onClick={() => setPage(p => p + 1)} className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white disabled:opacity-40">Next</button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ══════════════════════════════════════════════════════════════
    MAIN PAGE
    ══════════════════════════════════════════════════════════════ */
 export default function SettingsPage() {
   const role = useAuthStore(s => s.session?.user?.role ?? '');
   const isAdmin = ['admin', 'superadmin'].includes(role);
-  const [tab, setTab] = useState(() => isAdmin ? 'school' : 'account');
+  const [searchParams] = useSearchParams();
+  // Deep-linkable tabs (/settings?tab=subscription) — the expiry banner's
+  // "Renew" link depends on this landing directly on Subscription.
+  const [tab, setTab] = useState(() => {
+    const requested = searchParams.get('tab');
+    const def = TABS.find(t => t.id === requested);
+    if (def && (isAdmin || !def.adminOnly)) return requested;
+    return isAdmin ? 'school' : 'account';
+  });
 
   const visibleTabs = TABS.filter(t => !t.adminOnly || isAdmin);
 
@@ -5726,17 +4894,21 @@ export default function SettingsPage() {
     <div className="min-h-screen bg-slate-50">
       {/* Header */}
       <div className="bg-white border-b border-slate-200">
-        <div className="max-w-5xl mx-auto px-6 py-5">
+        <div className="max-w-6xl mx-auto px-6 py-5">
           <div className="mb-5">
             <h1 className="text-xl font-semibold text-slate-900 tracking-tight">Settings</h1>
             <p className="text-sm text-slate-500 mt-0.5">School profile, team management, permissions and system information</p>
           </div>
-          <nav className="flex gap-1 -mb-px overflow-x-auto">
+          {/* The tab strip WRAPS rather than scrolling sideways: with the app
+              shell's sidebar open there isn't room for nine tabs on one line,
+              and a horizontal scroll hid the last tab behind a clipped edge
+              (no visible affordance that there was more to the right). */}
+          <nav className="flex flex-wrap gap-x-1 -mb-px">
             {visibleTabs.map(({ id, label, Icon }) => (
               <button
                 key={id}
                 onClick={() => setTab(id)}
-                className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition ${
+                className={`flex items-center gap-1.5 px-3.5 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition ${
                   tab === id
                     ? 'border-slate-900 text-slate-900'
                     : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
@@ -5750,7 +4922,7 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      <div className="max-w-5xl mx-auto px-6 py-6">
+      <div className="max-w-6xl mx-auto px-6 py-6">
         <AnimatePresence mode="wait">
           <motion.div
             key={tab}

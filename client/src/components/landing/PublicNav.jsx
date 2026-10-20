@@ -162,7 +162,7 @@ export default function PublicNav() {
             className="hidden lg:block px-4 py-2 text-base font-medium text-slate-600 hover:text-slate-900 transition-colors">
             Login
           </Link>
-          <Link to="/contact"
+          <Link to="/demo"
             className="rounded-xl bg-slate-900 px-4 py-2 text-base font-semibold text-white hover:bg-indigo-600 transition-all shadow-sm">
             Book a Demo
           </Link>
@@ -201,7 +201,7 @@ export default function PublicNav() {
               ))}
               <div className="h-px bg-indigo-100 my-2" />
               <Link to="/login" className="block px-3 py-2.5 rounded-xl text-base font-medium text-slate-600 hover:bg-white/60">Login</Link>
-              <Link to="/contact" className="block rounded-xl bg-slate-900 px-4 py-3 text-base font-semibold text-white text-center hover:bg-indigo-600 transition-all">
+              <Link to="/demo" className="block rounded-xl bg-slate-900 px-4 py-3 text-base font-semibold text-white text-center hover:bg-indigo-600 transition-all">
                 Book a Demo
               </Link>
             </div>

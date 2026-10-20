@@ -98,7 +98,7 @@ const MFA_ROLES = new Set(['superadmin', 'admin', 'deputy', 'principal', 'financ
  * @param {string} schoolId
  * @returns {Object}      — payload passed to sign()
  */
-async function _buildTokenPayload(user, schoolId) {
+async function _buildTokenPayload(user, schoolId, schoolDoc = null) {
   const role  = user.primaryRole || user.role;
   const payload = {
     userId:   user.id || user._id.toString(),
@@ -108,6 +108,13 @@ async function _buildTokenPayload(user, schoolId) {
     roles:    user.roles || [role],
     tv:       user.tokenVersion ?? 0,  // token version — enables revocation
   };
+
+  /* Demo tenants: mark the token so the auth middleware only pays for the
+     expiry lookup on demo sessions, never on ordinary school traffic. */
+  if (schoolDoc?.isDemo) {
+    payload.demo = true;
+    payload.demoExpiresAt = schoolDoc.expiresAt || null;
+  }
 
   // Include guardian link only for roles that use it — keeps tokens lean for everyone else
   if (role === 'parent' || role === 'guardian') {
@@ -468,7 +475,7 @@ router.post('/login', loginIpLimiter, tenantMiddleware, async (req, res) => {
     // Can be disabled per-user with mfaEnabled: false
     // Skipped for the demo school — demo accounts have no real email inboxes
     const userRole   = user.primaryRole || user.role;
-    const isDemo     = req.school?.slug === 'demo';
+    const isDemo     = !!req.school?.isDemo || req.school?.slug === 'demo';   // every demo tenant + the legacy shared demo slug
     // C8/MR-001 Phase 3 — mfaEnabled becomes identity-level once cutover
     // is live and this user has one (ADR-0003 Decision 4, Open Question
     // 3 — a deliberate, tested decision, not a silent behavior change).
@@ -510,7 +517,7 @@ router.post('/login', loginIpLimiter, tenantMiddleware, async (req, res) => {
       req.headers['user-agent'] || '',
     );
 
-    const tokenPayload = await _buildTokenPayload(user, req.school.id);
+    const tokenPayload = await _buildTokenPayload(user, req.school.id, req.school);
     const token = sign({ ...tokenPayload, sessionId, absoluteExpiry });
 
     // Check trial expiry and send reminder if needed
@@ -1064,7 +1071,7 @@ router.get('/google/callback', async (req, res) => {
       return res.redirect(`${publicUrl}/login?error=account_inactive`);
     }
 
-    const token = sign(await _buildTokenPayload(user, school.id));
+    const token = sign(await _buildTokenPayload(user, school.id, school));
     // Issue a short-lived exchange code — JWT never appears in the URL or logs
     const code = _issueExchangeCode(token);
     res.redirect(`${publicUrl}/login?code=${code}&school=${encodeURIComponent(school.slug)}&provider=google`);
@@ -1177,7 +1184,7 @@ router.get('/microsoft/callback', async (req, res) => {
 
     if (!user.isActive) return res.redirect(`${publicUrl}/login?error=account_inactive`);
 
-    const token = sign(await _buildTokenPayload(user, school.id));
+    const token = sign(await _buildTokenPayload(user, school.id, school));
     const code  = _issueExchangeCode(token);
     res.redirect(`${publicUrl}/login?code=${code}&school=${encodeURIComponent(school.slug)}&provider=microsoft`);
   } catch (err) {
@@ -1731,7 +1738,7 @@ router.post('/complete-org-login', orgLoginLimiter, async (req, res) => {
    /verify-otp's own pattern (no exchange code — see section header). */
 async function _completeOrgLoginSession(req, res, user, school, identity) {
   const userRole = user.primaryRole || user.role;
-  const isDemo   = school?.slug === 'demo';
+  const isDemo   = !!school?.isDemo || school?.slug === 'demo';   // every demo tenant + the legacy shared demo slug
   const mfaEnabled = identity ? identity.mfaEnabled : user.mfaEnabled;
 
   if (!isDemo && MFA_ROLES.has(userRole) && mfaEnabled !== false) {
@@ -1767,7 +1774,7 @@ async function _completeOrgLoginSession(req, res, user, school, identity) {
     req.headers['user-agent'] || '',
   );
 
-  const tokenPayload = await _buildTokenPayload(user, school.id);
+  const tokenPayload = await _buildTokenPayload(user, school.id, school);
   const token = sign({ ...tokenPayload, sessionId, absoluteExpiry });
 
   const safeUser = { ...user, password: undefined };

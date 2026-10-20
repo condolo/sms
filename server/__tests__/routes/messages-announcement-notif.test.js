@@ -49,7 +49,14 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockIsEnabled.mockResolvedValue(true);
   mockCurrentUser = { userId: 'u_admin', schoolId: SCHOOL, role: 'admin', roles: [], name: 'Admin' };
-  mockStores = { messages: makeStore([]), users: makeStore([]), schools: makeStore([{ id: 'school_test_001', slug: 'trinitas', organizationId: null }]) };
+  mockStores = {
+    messages: makeStore([]),
+    users: makeStore([
+      { id: 'u_admin', schoolId: SCHOOL, name: 'Admin', email: 'admin@school.test', role: 'admin', isActive: true },
+      { id: 'u_someone', schoolId: SCHOOL, name: 'Someone', email: 'someone@school.test', role: 'teacher', isActive: true },
+    ]),
+    schools: makeStore([{ id: 'school_test_001', slug: 'trinitas', organizationId: null }]),
+  };
 });
 
 test('a direct message checks the new_message event', async () => {

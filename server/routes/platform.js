@@ -227,7 +227,7 @@ router.get('/schools', async (req, res) => {
     // Projection: only load fields needed for the dashboard list + stats
     // Avoids pulling large fields (logoUrl, branding, email templates) into RAM for every school
     const schools = await School.find({})
-      .select('id _id slug name shortName plan isActive status adminName adminEmail currency currencySymbol trialEnds createdAt primaryColor sections curriculum')
+      .select('id _id slug name shortName plan planExpiresAt isActive status adminName adminEmail currency currencySymbol trialEnds createdAt primaryColor sections curriculum')
       .lean();
 
     const withStats = await Promise.all(schools.map(async s => {
@@ -1499,7 +1499,25 @@ router.patch('/schools/:id', async (req, res) => {
     if (req.body.plan)     update.plan     = req.body.plan;
     if (req.body.addOns)   update.addOns   = req.body.addOns;
     if (typeof req.body.isActive === 'boolean') update.isActive = req.body.isActive;
-    if (req.body.planExpiry) update.planExpiry = req.body.planExpiry;
+
+    /* Subscription expiry. The console/API used to write `planExpiry`, a
+       field nothing reads — every reader (tenant.js's session shape,
+       Settings → Subscription, M-Pesa's activation) uses `planExpiresAt`,
+       so an operator-set expiry silently did nothing. Accept both spellings
+       for backward compatibility, normalise to `planExpiresAt`, and allow
+       null/'' to clear it. */
+    const expiryInput = req.body.planExpiresAt !== undefined ? req.body.planExpiresAt : req.body.planExpiry;
+    if (expiryInput !== undefined) {
+      if (expiryInput === null || expiryInput === '') {
+        update.planExpiresAt = null;
+      } else {
+        const when = new Date(expiryInput);
+        if (Number.isNaN(when.getTime())) {
+          return res.status(400).json({ error: 'planExpiresAt must be a valid date (ISO string) or null' });
+        }
+        update.planExpiresAt = when.toISOString();
+      }
+    }
 
     if (Object.keys(update).length === 0) {
       return res.status(400).json({ error: 'No valid fields to update' });
@@ -1513,8 +1531,12 @@ router.patch('/schools/:id', async (req, res) => {
 
     const doc = await School.findOneAndUpdate(query, { $set: update }, { new: true }).lean();
     if (!doc) return res.status(404).json({ error: 'School not found' });
-    // Bust plan cache immediately so active sessions see the new plan right away
-    if (update.plan && doc.id) invalidatePlanCache(doc.id);
+    // Bust plan cache immediately so active sessions see the new plan right
+    // away — the cache stores the plan only, but an expiry/entitlement
+    // change must not keep serving a stale derived view either.
+    if (doc.id && (update.plan !== undefined || update.addOns !== undefined || update.planExpiresAt !== undefined)) {
+      invalidatePlanCache(doc.id);
+    }
     res.json(doc);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -2692,6 +2714,278 @@ router.put('/landing-content', async (req, res) => {
   } catch (err) {
     console.error('[platform/landing-content PUT]', err);
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   DEMO REQUESTS + SUPPORT TICKETS  (platform operator tooling)
+
+   Demo requests are created by the public /api/demo flow. Auto-approved
+   requests are already provisioned by the time they appear here; the
+   list exists so operators can see the pipeline, approve manual-review
+   requests, extend or reject tenants, and work the linked ticket.
+
+   Tickets are platform-only (no school-facing UI): demo requests create
+   one automatically, and operators can open ad-hoc support tickets.
+   Support-tier operators can read; mutations stay owner-tier via the
+   router-level gate above.
+   ══════════════════════════════════════════════════════════════ */
+
+const demoService = require('../services/demoService');
+
+function _ticketActor(req) {
+  return _platformActor(req);
+}
+
+/* ── Demo requests ───────────────────────────────────────────── */
+router.get('/demo-requests', async (req, res) => {
+  try {
+    const { status, limit = 100 } = req.query;
+    const q = {};
+    if (status) q.status = status;
+    const requests = await _model('demo_requests')
+      .find(q)
+      .sort({ createdAt: -1 })
+      .limit(Math.min(parseInt(limit, 10) || 100, 500))
+      .lean();
+    return res.json({ success: true, requests });
+  } catch (err) {
+    console.error('[platform GET /demo-requests]', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.get('/demo-requests/:id', async (req, res) => {
+  try {
+    const doc = await _model('demo_requests').findOne({ id: req.params.id }).lean();
+    if (!doc) return res.status(404).json({ success: false, error: 'Request not found' });
+    const tenant = doc.tenantId ? await _model('schools').findOne({ id: doc.tenantId }).lean() : null;
+    return res.json({ success: true, request: doc, tenant });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.post('/demo-requests/:id/approve', async (req, res) => {
+  try {
+    const result = await demoService.approveRequest(req.params.id, _ticketActor(req));
+    if (!result.ok) return res.status(400).json({ success: false, error: result.message });
+    return res.json({ success: true, data: result.data });
+  } catch (err) {
+    console.error('[platform demo approve]', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.post('/demo-requests/:id/reject', async (req, res) => {
+  try {
+    const result = await demoService.rejectRequest(req.params.id, req.body?.reason, _ticketActor(req));
+    if (!result.ok) return res.status(400).json({ success: false, error: result.message });
+    return res.json({ success: true, data: result.data });
+  } catch (err) {
+    console.error('[platform demo reject]', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.get('/demo-sweep', async (req, res) => {
+  try {
+    const stats = await demoService.sweep();
+    return res.json({ success: true, data: stats });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.post('/schools/:id/extend-demo', async (req, res) => {
+  try {
+    const days = parseInt(req.body?.days, 10) || undefined;
+    const result = await demoService.extendDemo(req.params.id, days, _ticketActor(req));
+    if (!result.ok) return res.status(400).json({ success: false, error: result.message });
+    return res.json({ success: true, data: result.data });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* ── Tickets ─────────────────────────────────────────────────── */
+const TICKET_STATUSES   = ['open', 'in_progress', 'waiting', 'resolved', 'closed'];
+const TICKET_PRIORITIES = ['low', 'normal', 'high', 'urgent'];
+const TICKET_CATEGORIES = ['demo', 'support', 'bug', 'billing', 'feature'];
+
+/* User-supplied search text goes into a regex — escape it so a stray `(`
+   cannot throw and a pathological pattern cannot burn CPU. */
+function _escapeRegex(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+router.get('/tickets', async (req, res) => {
+  try {
+    const { status, category, q, limit = 100 } = req.query;
+    const filter = {};
+    if (status) filter.status = { $in: String(status).split(',') };
+    if (category) filter.category = category;
+    if (q) {
+      const needle = _escapeRegex(q);
+      filter.$or = [
+        { subject: { $regex: needle, $options: 'i' } },
+        { requesterEmail: { $regex: needle, $options: 'i' } },
+        { schoolName: { $regex: needle, $options: 'i' } },
+        { ref: { $regex: needle, $options: 'i' } },
+      ];
+    }
+    const tickets = await _model('tickets')
+      .find(filter)
+      .sort({ updatedAt: -1 })
+      .limit(Math.min(parseInt(limit, 10) || 100, 500))
+      .lean();
+    return res.json({ success: true, tickets });
+  } catch (err) {
+    console.error('[platform GET /tickets]', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.get('/tickets/:id', async (req, res) => {
+  try {
+    const ticket = await _model('tickets').findOne({ id: req.params.id }).lean();
+    if (!ticket) return res.status(404).json({ success: false, error: 'Ticket not found' });
+    return res.json({ success: true, ticket });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.post('/tickets', async (req, res) => {
+  try {
+    const { subject, description, category, priority, requesterName, requesterEmail, schoolName, assignee } = req.body || {};
+    if (!subject) return res.status(400).json({ success: false, error: 'Subject is required' });
+    const Tickets = _model('tickets');
+    const seq = await Tickets.countDocuments({});
+    const now = new Date().toISOString();
+    const ticket = {
+      id: `tck_${crypto.randomUUID()}`,
+      ref: `TCK-${String(seq + 1).padStart(4, '0')}`,
+      subject: String(subject).slice(0, 200),
+      description: String(description || '').slice(0, 5000),
+      category: TICKET_CATEGORIES.includes(category) ? category : 'support',
+      priority: TICKET_PRIORITIES.includes(priority) ? priority : 'normal',
+      status: 'open',
+      source: 'manual',
+      requesterName: String(requesterName || '').slice(0, 120),
+      requesterEmail: String(requesterEmail || '').slice(0, 200),
+      schoolName: String(schoolName || '').slice(0, 160),
+      tenantId: null,
+      demoRequestId: null,
+      assignee: assignee ? String(assignee).slice(0, 200) : null,
+      tags: [],
+      messages: [],
+      slaDueAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      createdAt: now,
+      updatedAt: now,
+    };
+    await Tickets.create(ticket);
+    AuditService.log({
+      action: 'platform.ticket.created',
+      actor: _ticketActor(req),
+      schoolId: null,
+      target: { type: 'ticket', id: ticket.id, label: ticket.ref },
+      details: { category: ticket.category },
+      req,
+    });
+    return res.status(201).json({ success: true, ticket });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.patch('/tickets/:id', async (req, res) => {
+  try {
+    const allowed = ['status', 'priority', 'category', 'assignee', 'subject'];
+    const set = { updatedAt: new Date().toISOString() };
+    for (const k of allowed) {
+      if (req.body?.[k] !== undefined) set[k] = req.body[k];
+    }
+    if (set.status === 'resolved') set.resolvedAt = set.updatedAt;
+    if (set.status === 'closed') set.closedAt = set.updatedAt;
+    if (set.status && !TICKET_STATUSES.includes(set.status)) {
+      return res.status(400).json({ success: false, error: 'Unknown status' });
+    }
+    if (set.priority && !TICKET_PRIORITIES.includes(set.priority)) {
+      return res.status(400).json({ success: false, error: 'Unknown priority' });
+    }
+    const updated = await _model('tickets').findOneAndUpdate({ id: req.params.id }, { $set: set }, { new: true }).lean();
+    if (!updated) return res.status(404).json({ success: false, error: 'Ticket not found' });
+    AuditService.log({
+      action: 'platform.ticket.updated',
+      actor: _ticketActor(req),
+      schoolId: null,
+      target: { type: 'ticket', id: updated.id, label: updated.ref },
+      details: { changes: Object.keys(set).filter((k) => k !== 'updatedAt') },
+      req,
+    });
+    return res.json({ success: true, ticket: updated });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.post('/tickets/:id/messages', async (req, res) => {
+  try {
+    const body = String(req.body?.body || '').trim().slice(0, 5000);
+    if (!body) return res.status(400).json({ success: false, error: 'Message body is required' });
+    const Tickets = _model('tickets');
+    const existing = await Tickets.findOne({ id: req.params.id }).lean();
+    if (!existing) return res.status(404).json({ success: false, error: 'Ticket not found' });
+
+    const operator = req.platformOperator;
+    const internal = !!req.body?.internal;
+    const message = {
+      id: `msg_${crypto.randomUUID()}`,
+      author: operator?.name || operator?.email || 'Platform',
+      authorEmail: operator?.email || null,
+      authorType: 'operator',
+      internal,
+      body,
+      createdAt: new Date().toISOString(),
+    };
+    const set = { updatedAt: new Date().toISOString() };
+    if (req.body?.status && TICKET_STATUSES.includes(req.body.status)) {
+      set.status = req.body.status;
+    } else if (!internal && existing.status === 'open') {
+      /* A public reply answers the requester — wait on them from here. */
+      set.status = 'waiting';
+    }
+
+    const updated = await Tickets.findOneAndUpdate(
+      { id: req.params.id },
+      { $push: { messages: message }, $set: set },
+      { new: true }
+    ).lean();
+
+    /* Tell the requester — but never for internal notes, and never for a
+       demo tenant (its addresses are fictional; outbound is suppressed). */
+    if (!internal && updated.requesterEmail) {
+      try {
+        const { isDemoSchool } = require('../utils/demo');
+        const isDemo = updated.schoolId ? await isDemoSchool(updated.schoolId) : false;
+        if (!isDemo) {
+          const email = require('../utils/email');
+          await email.sendSupportReply({
+            to: updated.requesterEmail,
+            name: updated.requesterName,
+            ref: updated.ref,
+            subject: updated.subject,
+            body,
+            schoolName: updated.schoolName,
+          }).catch(() => {});
+        }
+      } catch { /* notification is non-fatal */ }
+    }
+
+    return res.json({ success: true, ticket: updated });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 

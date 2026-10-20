@@ -14,6 +14,11 @@
    ============================================================ */
 'use strict';
 
+/* Portal access is now tier-gated (parent → family, student → student).
+   These suites test route behaviour, not billing, so the gate is a pass-through. */
+jest.mock('../../middleware/plan', () => ({ planGate: () => (req, _res, next) => next() }));
+
+
 const SCHOOL = 'school_A';
 const CHILD_1 = 'stu_1';
 const OTHER_CHILD = 'stu_999'; // not linked to this parent

@@ -52,6 +52,10 @@ function _slimSchool(school) {
     shortName:    school.shortName,
     slug:         school.slug,
     plan:         school.plan,
+    // Subscription state must survive a refresh, otherwise the expiry banner
+    // disappears on reload and a lapsed school looks active again.
+    planExpiresAt: school.planExpiresAt ?? null,
+    planExpired:   school.planExpired   ?? undefined,
     logoUrl:      school.logoUrl     ?? undefined,
     faviconUrl:   school.faviconUrl  ?? undefined,
     primaryColor: school.primaryColor ?? undefined,

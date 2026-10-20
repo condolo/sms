@@ -36,6 +36,8 @@ const { seedDemoData } = require('./seed-demo-data');
 // Using the one shared factory everywhere removes the drift entirely
 // instead of just matching its options by hand a second time.
 const { _model } = require('../utils/model');
+const { MODULE_KEYS } = require('../config/moduleRegistry');
+const { ROLE_DEFAULTS } = require('../utils/repairPermissions');
 
 /* ── Users to provision ── */
 const DEMO_USERS = [
@@ -158,17 +160,51 @@ async function seedDemo() {
   const RCU  = ['read', 'create', 'update'];
   const R    = ['read'];
 
-  const ALL_MODS = ['students','teachers','classes','attendance','finance',
-                    'behaviour','exams','grades','admissions','timetable',
-                    'messages','settings','assessment','report_cards','lessons'];
+  /* The admin row is derived from the canonical module registry rather than
+     a hand-maintained list: a hardcoded list silently drifts behind new
+     modules (analytics, library, transport, hostel, medical, inventory,
+     growth_profile, elearning…), leaving the demo admin 403ing on whole
+     sections of its own dashboard. `hr` additionally carries
+     'manage_workflow', matching repairPermissions.js's admin default —
+     without it Settings → HR approval-workflow config disappears. */
+  const adminPerms = Object.fromEntries(MODULE_KEYS.map(m => [m, FULL]));
+  adminPerms.hr = [...FULL, 'manage_workflow'];
+
+  /* Demo users must be able to explore the whole product, so each role's
+     grant set is the canonical server default (repairPermissions.js
+     ROLE_DEFAULTS — the same source onboard.js is tested against) with the
+     demo-specific extras below layered on top. Those extras never remove a
+     canonical module, they only add demo conveniences, so a new module can
+     never leave a demo portal 403ing again. */
+  const canonical = (role, demoOverrides) => ({ ...(ROLE_DEFAULTS[role] || {}), ...demoOverrides });
 
   const PERMS = {
-    admin:            Object.fromEntries(ALL_MODS.map(m => [m, FULL])),
-    deputy_principal: { students: R, teachers: R, classes: RCU, attendance: RCU, finance: R, behaviour: RCU, exams: RCU, grades: RCU, admissions: R, timetable: RCU, messages: RCU, settings: R, assessment: RCU, report_cards: RCU, lessons: FULL },
-    teacher:          { students: R, teachers: R, classes: R, attendance: RCU, finance: [], behaviour: RCU, exams: RCU, grades: RCU, admissions: [], timetable: R, messages: RCU, settings: [], assessment: RCU, report_cards: R, lessons: FULL },
-    finance:          { students: R, teachers: [], classes: [], attendance: [], finance: FULL, behaviour: [], exams: [], grades: [], admissions: R, timetable: [], messages: R, settings: [], assessment: [], report_cards: [] },
-    parent:           { students: R, teachers: [], classes: [], attendance: R, finance: R, behaviour: R, exams: [], grades: R, admissions: [], timetable: R, messages: RCU, settings: [], assessment: R, report_cards: R, lessons: R },
-    student:          { students: R, teachers: [], classes: R, attendance: R, finance: R, behaviour: R, exams: R, grades: R, admissions: [], timetable: R, messages: RCU, settings: [], assessment: R, report_cards: R, lessons: R },
+    admin: adminPerms,
+    deputy_principal: canonical('deputy_principal', {
+      students: R, teachers: R, classes: RCU, attendance: RCU, finance: R, behaviour: RCU,
+      exams: RCU, grades: RCU, admissions: R, timetable: RCU, messages: RCU, settings: R,
+      assessment: RCU, report_cards: RCU, lessons: FULL, analytics: R, events: R,
+    }),
+    teacher: canonical('teacher', {
+      students: R, teachers: R, classes: R, attendance: RCU, finance: [], behaviour: RCU,
+      exams: RCU, grades: RCU, admissions: [], timetable: R, messages: RCU, settings: [],
+      assessment: RCU, report_cards: R, lessons: FULL, events: R,
+    }),
+    finance: canonical('finance', {
+      students: R, teachers: [], classes: [], attendance: [], finance: FULL, behaviour: [],
+      exams: [], grades: [], admissions: R, timetable: [], messages: R, settings: [],
+      assessment: [], report_cards: [], events: R,
+    }),
+    parent: canonical('parent', {
+      students: R, teachers: [], classes: [], attendance: R, finance: R, behaviour: R,
+      exams: [], grades: R, admissions: [], timetable: R, messages: RCU, settings: [],
+      assessment: R, report_cards: R, lessons: R, events: R,
+    }),
+    student: canonical('student', {
+      students: R, teachers: [], classes: R, attendance: R, finance: R, behaviour: R,
+      exams: R, grades: R, admissions: [], timetable: R, messages: RCU, settings: [],
+      assessment: R, report_cards: R, lessons: R, events: R,
+    }),
   };
 
   await Promise.all(Object.entries(PERMS).map(([roleKey, permissions]) =>

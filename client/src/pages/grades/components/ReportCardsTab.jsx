@@ -4,7 +4,7 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useBlocker } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ClipboardList, FileText, Send, CheckCircle, Loader2, Download } from 'lucide-react';
+import { AlertTriangle, ClipboardList, FileText, Send, CheckCircle, Loader2, Lock, Printer } from 'lucide-react';
 import {
   assessment as assessmentApi,
   classes as classesApi,
@@ -103,8 +103,6 @@ export default function ReportCardsTab() {
   // locks the Markbook automatically instead of requiring every subject
   // to already be submitted+approved+manually-locked beforehand.
   const [confirmingPublish, setConfirmingPublish] = useState(false);
-  const [downloadError, setDownloadError] = useState('');
-  const [downloadingKey, setDownloadingKey] = useState(''); // 'class' | 'stream' | ''
 
   const school      = useAuthStore(s => s.session?.school);
   const academicYear = school?.academicYear ?? '';
@@ -148,6 +146,27 @@ export default function ReportCardsTab() {
     staleTime: 10 * 60_000,
   });
   const yearsList = yearsData?.data ?? yearsData ?? [];
+
+  /* Term dates for the selected class/term/year. Attendance records carry
+     only a date (no termId), so the live preview must send the term's own
+     date range — without it GET /attendance/summary happily aggregates
+     every term ever recorded for the class and a Term 3 card showed
+     "Total Days 60" instead of that term's 20. The published PDF already
+     scopes by the snapshot's term dates; this brings the preview in line. */
+  const termYearDoc = useMemo(() => {
+    const list = Array.isArray(yearsList) ? yearsList : [];
+    if (yearId) return list.find(y => (y.id ?? y._id) === yearId) || null;
+    return list.find(y => y.isCurrent) || list[0] || null;
+  }, [yearsList, yearId]);
+
+  const selectedTermDates = useMemo(() => {
+    const terms = Array.isArray(termYearDoc?.terms) ? termYearDoc.terms : [];
+    const selected = terms.find(t => Number(t.termNumber ?? 0) === Number(termNum))
+      || terms[Number(termNum) - 1];
+    return selected?.startDate && selected?.endDate
+      ? { dateFrom: selected.startDate, dateTo: selected.endDate }
+      : {};
+  }, [termYearDoc, termNum]);
 
   // Reported directly: a student showed as a raw UUID instead of their
   // name, and vanished entirely once a stream filter was applied — both
@@ -232,12 +251,20 @@ export default function ReportCardsTab() {
     staleTime: 60_000,
     select: (res) => {
       const idx = {};
+      // Publishing locks every mark row for that class + term
+      // (assessment_marks.isLocked). The UI needs to SHOW that state -
+      // until now the only sign a class had been published was a small
+      // report-ID chip on each card, so nobody could see that the
+      // Markbook was closed until a teacher tried to edit a mark and
+      // was refused.
+      let locked = false;
       for (const m of (res?.data ?? [])) {
+        if (m.isLocked) locked = true;
         if (!idx[m.studentId]) idx[m.studentId] = {};
         if (!idx[m.studentId][m.subjectId]) idx[m.studentId][m.subjectId] = {};
         idx[m.studentId][m.subjectId][`${m.assessmentType}_${m.instance}`] = m.rawScore;
       }
-      return idx;
+      return { index: idx, locked };
     },
   });
 
@@ -259,20 +286,23 @@ export default function ReportCardsTab() {
   // Behaviour summary indexed by studentId for this class
   const { data: behaviourMap, isError: isBehaviourError, refetch: refetchBehaviour } = useQuery({
     queryKey: ['behaviour', 'summary', { classId }],
-    queryFn:  () => behaviourApi.summary({ classId }),
+    queryFn:  () => behaviourApi.incidents.summary({ classId }),
     enabled:  !!classId,
     staleTime: 5 * 60_000,
     select: (res) => Object.fromEntries((res?.data ?? []).map(b => [b._id, b])),
   });
 
-  // Attendance summary indexed by studentId for this class — reported
-  // directly: "attendance summary is on but I'm not seeing it", traced to
-  // this screen never fetching attendance at all (only the published PDF
-  // did). Mirrors behaviourMap above exactly.
+  /* Attendance summary indexed by studentId for this class — reported
+     directly: "attendance summary is on but I'm not seeing it", traced to
+     this screen never fetching attendance at all (only the published PDF
+     did). Mirrors behaviourMap above exactly, but scoped to the selected
+     term's date range: attendance records have no termId, so a bare
+     { classId } query aggregates every term and a Term 3 card misleadingly
+     showed 60 total days (3 × 20) instead of 20. */
   const { data: attendanceMap, isError: isAttendanceError, refetch: refetchAttendance } = useQuery({
-    queryKey: ['attendance', 'summary', { classId }],
-    queryFn:  () => attendanceApi.summary({ classId }),
-    enabled:  !!classId,
+    queryKey: ['attendance', 'summary', { classId, ...selectedTermDates }],
+    queryFn:  () => attendanceApi.summary({ classId, ...selectedTermDates }),
+    enabled:  !!classId && !!termNum && !!selectedTermDates.dateFrom,
     staleTime: 5 * 60_000,
     select: (res) => Object.fromEntries((res?.data ?? []).map(a => [a._id, a])),
   });
@@ -350,35 +380,117 @@ export default function ReportCardsTab() {
     onError: (err) => setPublishError(err?.message ?? 'Publish failed'),
   });
 
-  /* ── Bulk download — "can the system allow download per stream or
-     class?" GET /bulk-pdf already existed server-side (cursor-streamed,
-     RBAC/scope-checked, correctly draws sign-off images via the native
-     PDFKit renderer) but had no client wrapper and no button anywhere
-     called it; it also had no streamId filter, so even a wired-up caller
-     could only ever get the whole class merged into one PDF. Both are
-     fixed server-side — this just calls through. */
-  async function downloadBulk(scope) {
-    setDownloadError('');
-    setDownloadingKey(scope);
-    try {
-      const nameParts = [className || 'class'];
-      if (scope === 'stream' && streamId) {
-        nameParts.push(streamsList.find(st => (st.id ?? st._id) === streamId)?.name ?? 'stream');
-      }
-      nameParts.push(`Term${termNum}`);
-      if (displayAcademicYear) nameParts.push(displayAcademicYear);
-      const filename = `Report Cards - ${nameParts.join(' - ')}.pdf`.replace(/[\\/:*?"<>|]/g, '');
+  /* ── Bulk print (the accepted school standard) ──────────────
+     Reported directly: "the downloaded class report cards look
+     different from the printed ones - the print version was accurate."
+     True root cause: the class download went through a completely
+     different renderer (the server's cursor-streamed PDFKit bulk
+     export), while a single card's Print button renders the shared
+     IR through the HTML adapter in the browser. Two renderers, two
+     designs - they could never match.
 
-      await reportCardsApi.bulkPdf({
-        classId,
-        streamId: scope === 'stream' ? (streamId || undefined) : undefined,
-        termNumber: Number(termNum),
-        academicYearId: yearId || undefined,
-      }, filename);
+     This replaces it with the only construction that is 1:1 by
+     definition: every student's card is rendered through the EXACT
+     route their own Print button uses - a published snapshot through
+     GET /report-cards/:id/html, an unpublished one through
+     POST /report-cards/preview-html - and the results are combined
+     into one printable document, one student per page. Printing that
+     document (or choosing "Save as PDF" in the print dialog) is
+     byte-for-byte what printing that student's card produces.
+
+     The server-side bulk PDF route (GET /report-cards/bulk-pdf) is
+     left untouched and still available for API consumers. */
+  const [printingClass, setPrintingClass] = useState(false);
+  const [printClassError, setPrintClassError] = useState('');
+
+  function _bodyOf(doc) {
+    const m = String(doc || '').match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+    return m ? m[1] : String(doc || '');
+  }
+  function _stylesOf(doc) {
+    return [...String(doc || '').matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)].map(m => m[1]).join('\n');
+  }
+
+  async function printClass(scope) {
+    setPrintClassError('');
+    const list = scope === 'stream' ? visibleStudents : students;
+    if (!list.length) {
+      setPrintClassError('There are no report cards to print for this selection.');
+      return;
+    }
+    setPrintingClass(true);
+    try {
+      const docs = [];
+      for (const student of list) {
+        const snap = snapshotsMap?.[student.studentId];
+        const html = snap?.id
+          ? (await reportCardsApi.html(snap.id))?.data?.html
+          : (await reportCardsApi.previewHtml({
+              student,
+              studentInfo: studentInfoMap[student.studentId],
+              classId,
+              className,
+              termNum: Number(termNum),
+              academicYear: displayAcademicYear,
+              school,
+              draftComment: commentsMap?.[student.studentId],
+              studentDeviations: deviationMap[student.studentId] ?? null,
+              behaviourSummary: behaviourMap?.[student.studentId] ?? null,
+              config: { gradeScale, customTypes, reportLabel: savedCycleLabel || null },
+            }))?.data?.html;
+        if (html) docs.push(html);
+      }
+      if (!docs.length) {
+        setPrintClassError('Could not render the report cards for this class.');
+        return;
+      }
+
+      const streamName = streamsList.find(s => (s.id ?? s._id) === streamId)?.name;
+      const title = [
+        'Report Cards',
+        className || 'Class',
+        scope === 'stream' && streamName ? streamName : null,
+        `Term ${termNum}`,
+        displayAcademicYear || null,
+      ].filter(Boolean).join(' - ');
+
+      const printDocument = `<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<title>${title}</title>
+<style>${_stylesOf(docs[0])}</style>
+<style>
+  @page { margin: 1.5cm; size: A4; }
+  .rc-batch > * { page-break-after: always; break-after: page; }
+  .rc-batch > *:last-child { page-break-after: auto; break-after: auto; }
+  html, body { margin: 0; padding: 0; }
+</style>
+</head><body>
+<div class="rc-batch">
+${docs.map(h => `<div>${_bodyOf(h)}</div>`).join('\n')}
+</div>
+</body></html>`;
+
+      const w = window.open('', '_blank', 'width=1200,height=900');
+      if (!w) {
+        setPrintClassError('Please allow pop-ups to print the class report cards.');
+        return;
+      }
+      w.document.open();
+      w.document.write(printDocument);
+      w.document.close();
+      w.focus();
+      // Photos/signatures are remote images - wait for them before the
+      // print dialog opens, or they land on the page after it.
+      const imgs = Array.from(w.document.images || []);
+      await Promise.all(imgs.map(img => (img.complete
+        ? Promise.resolve()
+        : new Promise(res => { img.onload = res; img.onerror = res; }))));
+      setTimeout(() => w.print(), 400);
     } catch (err) {
-      setDownloadError(err?.message ?? 'Download failed — no published report cards found for this selection?');
+      console.error('[ReportCardsTab] print class failed', err);
+      setPrintClassError(err?.message ?? 'Failed to render the class report cards.');
     } finally {
-      setDownloadingKey('');
+      setPrintingClass(false);
     }
   }
 
@@ -458,11 +570,23 @@ export default function ReportCardsTab() {
     ? kgStudents.filter(s => studentInfoMap[s.studentId]?.streamId === streamId)
     : kgStudents;
 
-  // Download only makes sense once something has actually been
-  // published — /bulk-pdf reads report_card_snapshots directly, not the
-  // live /generate preview above, so this checks snapshotsMap (published,
-  // non-superseded), not students.length.
-  const hasPublishedSnapshots = Object.keys(snapshotsMap ?? {}).length > 0;
+  // How many of these students already have a PUBLISHED snapshot
+  // (a published card prints its frozen render; an unpublished one prints
+  // the live draft). Only used for the "Print Class" hint below.
+  const publishedCount = Object.keys(snapshotsMap ?? {}).length;
+
+  // Published / locked state of the selected class + term, for the
+  // status strip under the selectors. Reported directly: "will the UI
+  // show the class was published and locked?" - it had to, in one place.
+  const totalStudents     = isKgClass ? kgStudents.length : students.length;
+  const publishedSnaps    = Object.values(snapshotsMap ?? {});
+  const latestVersion     = publishedSnaps.reduce((m, s) => Math.max(m, s.version || 1), 0);
+  const latestPublishedAt = publishedSnaps
+    .map(s => s.publishedAt)
+    .filter(Boolean)
+    .sort()
+    .pop() || null;
+  const marksLocked        = !!instanceMarksAll?.locked;
 
   // Term-over-term deviation: current score − previous term score, per student per subject
   // deviationMap[studentId] = { subjects: { [subjectId]: number|null }, mean: number|null }
@@ -551,53 +675,35 @@ export default function ReportCardsTab() {
             placeholder={currentPeriod.academicYear ? `Current (${currentPeriod.academicYear})` : 'Current year'}
           />
           {canQuery && isManagementRole && (
-            <div className="flex flex-col gap-1.5 min-w-[180px]">
-              <label className="text-xs font-medium text-slate-600">Report Label (optional)</label>
-              <div className="flex gap-1.5">
-                <input
-                  type="text"
-                  value={labelDraft}
-                  onChange={e => setLabelDraft(e.target.value)}
-                  placeholder={`e.g. Mid-Term ${termNum || ''}`}
-                  maxLength={60}
-                  className="w-full text-sm px-3 py-2 rounded-lg border border-slate-200 focus:border-slate-400 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 text-slate-800 transition"
-                />
-                <button
-                  onClick={() => saveCycleLabel()}
-                  disabled={savingLabel || labelDraft === savedCycleLabel}
-                  title="Shown in place of &quot;Term X&quot; on the report card; survives a republish until changed again."
-                  className="shrink-0 px-3 py-2 rounded-lg border border-slate-200 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  {savingLabel ? '...' : labelSaved ? 'Saved' : 'Save'}
-                </button>
-              </div>
-            </div>
-          )}
-          {canQuery && isManagementRole && hasPublishedSnapshots && (
             <div className="flex flex-col gap-1">
               <div className="flex gap-2">
                 <button
-                  onClick={() => downloadBulk('class')}
-                  disabled={!!downloadingKey}
-                  title={`Download every published report card for ${className || 'this class'}`}
+                  onClick={() => printClass('class')}
+                  disabled={printingClass}
+                  title={`Print every report card in ${className || 'this class'} as ONE document — every page is rendered through the exact same route as that student's own Print button. Choose "Save as PDF" in the print dialog to download it.`}
                   className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 text-slate-700 text-sm font-medium hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
-                  {downloadingKey === 'class' ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-                  Download Class
+                  {printingClass ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
+                  Print Class
                 </button>
                 {streamId && (
                   <button
-                    onClick={() => downloadBulk('stream')}
-                    disabled={!!downloadingKey}
-                    title="Download only this stream's published report cards"
+                    onClick={() => printClass('stream')}
+                    disabled={printingClass}
+                    title="Print only this stream's report cards"
                     className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 text-slate-700 text-sm font-medium hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
-                    {downloadingKey === 'stream' ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-                    Download Stream
+                    {printingClass ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
+                    Print Stream
                   </button>
                 )}
               </div>
-              {downloadError && <p className="text-xs text-red-500">{downloadError}</p>}
+              {publishedCount < students.length && (
+                <p className="text-xs text-slate-500">
+                  {publishedCount} of {students.length} published — the rest print as drafts.
+                </p>
+              )}
+              {printClassError && <p className="text-xs text-red-500">{printClassError}</p>}
             </div>
           )}
           {canQuery && ['admin', 'superadmin'].includes(role) && (
@@ -620,6 +726,52 @@ export default function ReportCardsTab() {
             </div>
           )}
         </div>
+        {/* Published / locked state of the selected class + term. Reported
+            directly: "will the UI show the class was published and locked?"
+            Until now the only signal was a small report-ID chip on each
+            student card - neither the class as a whole nor the fact that
+            its Markbook rows are closed was visible anywhere, so an admin
+            or teacher had to try editing a mark to find out. */}
+        {canQuery && totalStudents > 0 && (
+          <div className={`mx-6 mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border px-3 py-2 text-xs ${
+            publishedCount > 0
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+              : 'border-slate-200 bg-slate-50 text-slate-600'
+          }`}>
+            {publishedCount > 0 ? (
+              <>
+                <span className="inline-flex items-center gap-1 font-semibold">
+                  <CheckCircle size={13} /> Published
+                </span>
+                {latestVersion > 0 && <span className="font-mono">v{latestVersion}</span>}
+                {latestPublishedAt && (
+                  <span>· {new Date(latestPublishedAt).toLocaleDateString()}</span>
+                )}
+                <span>
+                  · {publishedCount} of {totalStudents} student{totalStudents === 1 ? '' : 's'}
+                </span>
+                {marksLocked && (
+                  <span className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-100 px-1.5 py-0.5 font-medium text-amber-800">
+                    <Lock size={11} /> Marks locked
+                  </span>
+                )}
+                <span className="text-emerald-700/80">
+                  Visible to students and parents. Publishing again creates a new version.
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="inline-flex items-center gap-1 font-semibold">
+                  <AlertTriangle size={13} /> Not published
+                </span>
+                <span>
+                  Marks and comments are still editable. Publishing locks the Markbook for this
+                  class and term and releases the cards to students and parents.
+                </span>
+              </>
+            )}
+          </div>
+        )}
         {/* Reported directly: publishing should warn before it locks the
            Markbook and makes report cards visible to students/parents —
            2026-10-13 workflow redesign (marks now lock AUTOMATICALLY at
@@ -725,7 +877,7 @@ export default function ReportCardsTab() {
               subjectMap={subjectMap}
               customTypes={customTypes}
               gradeScale={gradeScale}
-              instanceMarks={instanceMarksAll?.[student.studentId]}
+              instanceMarks={instanceMarksAll?.index?.[student.studentId]}
               draftComment={commentsMap?.[student.studentId]}
               onSaveComment={(data) => saveComment({ studentId: student.studentId, data })}
               onSaveSubjectComment={(subjectId, comment) => saveSubjectComment({ studentId: student.studentId, subjectId, comment })}

@@ -15,6 +15,9 @@
                                 membershipId filters, C5/MR-002 — see
                                 AuditService.query())
    GET /api/audit/actions    — list of known action types (for filter UI)
+   GET /api/audit/stats      — aggregate counters for the KPI row
+                                (totals by severity, distinct actors,
+                                busiest action, last-24h count)
    ============================================================ */
 'use strict';
 
@@ -52,6 +55,7 @@ router.get('/', authMiddleware, _adminGuard, async (req, res) => { // rbac: _adm
       membershipId:  req.query.membershipId  || undefined,
       from:          req.query.from          || undefined,
       to:            req.query.to            || undefined,
+      q:             req.query.q             || undefined,
       page,
       limit,
     });
@@ -73,6 +77,34 @@ router.get('/actions', authMiddleware, _adminGuard, (req, res) => { // rbac: _ad
     severity: meta.severity,
   }));
   return ok(res, actions);
+});
+
+/* ════════════════════════════════════════════════════════════════
+   GET /api/audit/stats
+   Aggregate counters for the KPI row above the audit table: total
+   events, how many were critical / warn / info, how many distinct
+   people acted, what the busiest action was, and how much happened in
+   the last 24 hours.
+
+   Same school lock as GET /api/audit — a school admin never sees
+   another school's numbers. The optional date window narrows every
+   figure so the cards agree with the filter bar above them.
+   ════════════════════════════════════════════════════════════════ */
+router.get('/stats', authMiddleware, _adminGuard, async (req, res) => { // rbac: _adminGuard above — real admin/superadmin check
+  try {
+    const { schoolId: actorSchoolId } = req.jwtUser;
+
+    const stats = await AuditService.stats({
+      schoolId: actorSchoolId,
+      from:     req.query.from || undefined,
+      to:       req.query.to   || undefined,
+    });
+
+    return ok(res, stats);
+  } catch (err) {
+    console.error('[audit GET /stats]', err);
+    return E.serverError(res);
+  }
 });
 
 module.exports = router;

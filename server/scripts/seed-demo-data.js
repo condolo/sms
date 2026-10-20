@@ -47,10 +47,19 @@ const { _model } = require('../utils/model');
 
 function upsert(Model, id, data) {
   // Insert-only: creates if not exists, skips if already there.
+  //
+  // timestamps:false + explicit createdAt/updatedAt is deliberate. With
+  // Mongoose's schema-level timestamps on, an upsert that carries
+  // updatedAt inside $setOnInsert ALSO gets an automatic $set.updatedAt
+  // from Mongoose, and MongoDB rejects the conflicting path
+  // ("Updating the path 'updatedAt' would create a conflict"). That
+  // aborted the whole demo seed at the library step, so every later
+  // section (hostel, portal accounts, report-card data) never ran.
+  const now = new Date().toISOString();
   return Model.updateOne(
     { id },
-    { $setOnInsert: { id, schoolId: SCHOOL_ID, ...data } },
-    { upsert: true }
+    { $setOnInsert: { id, schoolId: SCHOOL_ID, createdAt: now, updatedAt: now, ...data } },
+    { upsert: true, timestamps: false }
   );
 }
 
@@ -141,7 +150,7 @@ const TEACHER_PROFILES = [
   { id:'tch_demo_10', userId:'u_demo_t10',     firstName:'Joseph',  lastName:'Kipchoge', title:'Mr.',  email:'jkipchoge@demo.msingi.io',gender:'male',   staffId:'TCH-010', staffType:'teacher', departmentId:'dept_demo_pe',   subjects:['subj_demo_pe','subj_demo_ss'],                           contractType:'full_time', status:'active',   joinDate:'2021-09-01', extraRoles:['hod'] },
 ];
 
-/* ── Students (20) ── */
+/* ── Students (26) ── */
 const STUDENTS = [
   /* Form 1A */
   { id:'std_demo_1',  firstName:'Amara',     lastName:'Osei',       gender:'female', classId:'cls_demo_f1a', sectionId:SEC_SEC, dob:'2012-03-14', parent:'Mrs. Abena Osei',    pEmail:'abena.osei@gmail.com',   pPhone:'+254 712 001 001', adm:'ADM-2026-00001', status:'active',   fees:35000, paid:35000 },
@@ -170,6 +179,15 @@ const STUDENTS = [
   { id:'std_demo_18', firstName:'Joseph',    lastName:'Omondi',     gender:'male',   classId:'cls_demo_6a',  sectionId:SEC_PRI, dob:'2013-01-14', parent:'Mrs. Mary Omondi',  pEmail:'mary.omondi@gmail.com',   pPhone:'+254 722 007 001', adm:'ADM-2024-00022', status:'active',   fees:24000, paid:24000 },
   { id:'std_demo_19', firstName:'Christine', lastName:'Chebet',     gender:'female', classId:'cls_demo_6a',  sectionId:SEC_PRI, dob:'2013-05-30', parent:'Mr. Ruto Chebet',   pEmail:'ruto.chebet@gmail.com',   pPhone:'+254 711 007 002', adm:'ADM-2024-00025', status:'active',   fees:24000, paid:24000 },
   { id:'std_demo_20', firstName:'Emmanuel',  lastName:'Wekesa',     gender:'male',   classId:'cls_demo_6a',  sectionId:SEC_PRI, dob:'2013-09-17', parent:'Mr. Daniel Wekesa', pEmail:'daniel.wekesa@gmail.com', pPhone:'+254 700 007 003', adm:'ADM-2024-00028', status:'active',   fees:24000, paid:12000 },
+  /* Form 5A — A-Level (referenced by the A-Level class curriculum, but the
+     class had no students, so Report Cards generated nothing for it) */
+  { id:'std_demo_21', firstName:'Tariq',     lastName:'Njoroge',    gender:'male',   classId:'cls_demo_f5a', sectionId:SEC_AL,  dob:'2008-02-11', parent:'Mr. Yusuf Njoroge',  pEmail:'yusuf.njoroge@gmail.com',  pPhone:'+254 722 008 001', adm:'ADM-2025-00041', status:'active',   fees:45000, paid:45000 },
+  { id:'std_demo_22', firstName:'Wanjiku',   lastName:'Mwangi',     gender:'female', classId:'cls_demo_f5a', sectionId:SEC_AL,  dob:'2008-06-24', parent:'Mrs. Grace Mwangi',  pEmail:'grace.mwangi@gmail.com',   pPhone:'+254 711 008 002', adm:'ADM-2025-00042', status:'active',   fees:45000, paid:22500 },
+  { id:'std_demo_23', firstName:'Ethan',     lastName:'Ochieng',    gender:'male',   classId:'cls_demo_f5a', sectionId:SEC_AL,  dob:'2008-10-30', parent:'Mr. Paul Ochieng',   pEmail:'paul.ochieng@yahoo.com',   pPhone:'+254 733 008 003', adm:'ADM-2025-00043', status:'active',   fees:45000, paid:0     },
+  /* Form 6A — A-Level */
+  { id:'std_demo_24', firstName:'Zawadi',    lastName:'Achieng',    gender:'female', classId:'cls_demo_f6a', sectionId:SEC_AL,  dob:'2007-01-19', parent:'Mrs. Millicent Achieng', pEmail:'millicent.achieng@gmail.com', pPhone:'+254 700 009 001', adm:'ADM-2024-00045', status:'active', fees:47000, paid:47000 },
+  { id:'std_demo_25', firstName:'Liam',      lastName:'Kariuki',    gender:'male',   classId:'cls_demo_f6a', sectionId:SEC_AL,  dob:'2007-05-07', parent:'Mr. Isaac Kariuki',  pEmail:'isaac.kariuki@gmail.com',  pPhone:'+254 722 009 002', adm:'ADM-2024-00046', status:'active',   fees:47000, paid:23500 },
+  { id:'std_demo_26', firstName:'Nasra',     lastName:'Ali',        gender:'female', classId:'cls_demo_f6a', sectionId:SEC_AL,  dob:'2007-09-12', parent:'Mr. Hussein Ali',    pEmail:'hussein.ali@yahoo.com',    pPhone:'+254 711 009 003', adm:'ADM-2024-00047', status:'active',   fees:47000, paid:47000 },
 ];
 
 /* ── Behaviour incidents ── */
@@ -527,6 +545,20 @@ const ENROLLMENTS = [
   /* Primary Std 6A — same */
   { students:['std_demo_18','std_demo_19','std_demo_20'], classId:'cls_demo_6a',
     subjects:['subj_demo_math','subj_demo_eng','subj_demo_kisw','subj_demo_sci','subj_demo_ss','subj_demo_cre','subj_demo_pe','subj_demo_ict'] },
+  /* A-Level Form 5A — 3-subject A-Level combinations (rule: min 3, max 4) */
+  { students:['std_demo_21'], classId:'cls_demo_f5a',
+    subjects:['subj_demo_pmath','subj_demo_mech','subj_demo_stat'] },
+  { students:['std_demo_22'], classId:'cls_demo_f5a',
+    subjects:['subj_demo_pmath','subj_demo_phy','subj_demo_chem'] },
+  { students:['std_demo_23'], classId:'cls_demo_f5a',
+    subjects:['subj_demo_eco','subj_demo_bs','subj_demo_eng'] },
+  /* A-Level Form 6A */
+  { students:['std_demo_24'], classId:'cls_demo_f6a',
+    subjects:['subj_demo_pmath','subj_demo_chem','subj_demo_bio'] },
+  { students:['std_demo_25'], classId:'cls_demo_f6a',
+    subjects:['subj_demo_pmath','subj_demo_mech','subj_demo_stat'] },
+  { students:['std_demo_26'], classId:'cls_demo_f6a',
+    subjects:['subj_demo_eco','subj_demo_hist','subj_demo_geo'] },
 ];
 
 /* ── Library books (12) ──────────────────────────────────────── */
@@ -611,6 +643,421 @@ const HOSTEL_ASSIGNMENTS = [
   { id:'ha_demo_5', hostelId:'h_demo_girls', hostelName:"Girls' Hostel", roomId:'hr_demo_g201', roomNumber:'G201', studentId:'std_demo_7',  studentName:'Naledi Dlamini',  studentClass:'Form 3A',      bedNumber:'G1', status:'active' },
   { id:'ha_demo_6', hostelId:'h_demo_girls', hostelName:"Girls' Hostel", roomId:'hr_demo_g201', roomNumber:'G201', studentId:'std_demo_11', studentName:'Miriam Gitau',    studentClass:'Form 4A',      bedNumber:'G2', status:'active' },
 ];
+
+/* ════════════════════════════════════════════════════════════════
+   REPORT-CARD REVIEW SEED
+   ════════════════════════════════════════════════════════════════
+   Why this exists (reported directly, 2026-10-20): opening Grades →
+   Report Cards for any demo class returned
+   `POST /api/report-cards/generate 400` — "No grade scale is set for
+   this class's section" — and even after adding a scale, most classes
+   had no Markbook marks, no attendance, and Form 5A/6A had no students
+   at all, so there was nothing to review.
+
+   This block makes every one of the 9 demo classes reviewable end to
+   end, insert-only and idempotent (every write is keyed by its natural
+   key and `$setOnInsert`), so re-running the demo seed never overwrites
+   marks, attendance or comments a user has since edited:
+     • grade scales for Primary, Secondary, A-Level + a school default
+     • A-Level section record (classes referenced it, but only
+       Primary/Secondary were ever seeded)
+     • 6 A-Level students (3 per class) + subject enrollments
+     • Term 1–3 Markbook marks (CA×2, HW×2, MT, ET) for every enrolled
+       student/subject — enough for weighted final scores, grades,
+       rankings, class averages and term-over-term deviation
+     • 20 school days of attendance per term per student
+     • complete draft report comments (subject comments + class teacher
+       and principal remarks) so the Comments tab and PDF are populated
+   ════════════════════════════════════════════════════════════════ */
+
+/* Assessment types/weights mirror assessment_config's own defaults:
+   CA 20% (2 instances), HW 10% (2), MT 30% (1), ET 40% (1). */
+const REPORT_ASSESSMENT_TYPES = [
+  { key: 'CA', instances: 2, bias: 2 },
+  { key: 'HW', instances: 2, bias: -1 },
+  { key: 'MT', instances: 1, bias: 0 },
+  { key: 'ET', instances: 1, bias: 4 },
+];
+
+const REPORT_ATTENDANCE_DAYS = 20;
+
+const REPORT_TERM_WINDOWS = {
+  1: { closingDate: '2026-04-03', nextTermBegin: '2026-04-28' },
+  2: { closingDate: '2026-08-07', nextTermBegin: '2026-09-01' },
+  3: { closingDate: '2026-11-27', nextTermBegin: '2027-01-05' },
+};
+
+const CLASS_TEACHER_NAMES = {
+  cls_demo_4a:  'Mr. Demo Teacher',
+  cls_demo_5a:  'Ms. Lilian Wairimu',
+  cls_demo_6a:  'Mr. Francis Ochieng',
+  cls_demo_f1a: 'Ms. Agnes Otieno',
+  cls_demo_f2a: 'Mr. Peter Kamau',
+  cls_demo_f3a: 'Mr. Collins Waweru',
+  cls_demo_f4a: 'Ms. Judith Njoroge',
+  cls_demo_f5a: 'Mr. Samuel Maina',
+  cls_demo_f6a: 'Ms. Dorothy Chebet',
+};
+
+const GRADE_SCALES = [
+  {
+    id: 'gs_demo_primary', name: 'CBC Primary Performance Levels',
+    description: 'Competency-based primary levels (EE / ME / AE / BE).',
+    sectionId: SEC_PRI, isDefault: true,
+    bands: [
+      { min: 80, grade: 'EE', points: 4, label: 'Exceeding Expectation' },
+      { min: 65, grade: 'ME', points: 3, label: 'Meeting Expectation' },
+      { min: 50, grade: 'AE', points: 2, label: 'Approaching Expectation' },
+      { min: 0,  grade: 'BE', points: 1, label: 'Below Expectation' },
+    ],
+  },
+  {
+    id: 'gs_demo_secondary', name: 'KCSE Grading Scale',
+    description: 'KCSE grade bands A–E used by the secondary classes.',
+    sectionId: SEC_SEC, isDefault: true,
+    bands: [
+      { min: 80, grade: 'A',  points: 12, label: 'Excellent' },
+      { min: 75, grade: 'A-', points: 11, label: 'Very Good' },
+      { min: 70, grade: 'B+', points: 10, label: 'Good' },
+      { min: 65, grade: 'B',  points: 9,  label: 'Good' },
+      { min: 60, grade: 'B-', points: 8,  label: 'Satisfactory' },
+      { min: 55, grade: 'C+', points: 7,  label: 'Satisfactory' },
+      { min: 50, grade: 'C',  points: 6,  label: 'Average' },
+      { min: 45, grade: 'C-', points: 5,  label: 'Average' },
+      { min: 40, grade: 'D+', points: 4,  label: 'Below Average' },
+      { min: 35, grade: 'D',  points: 3,  label: 'Below Average' },
+      { min: 30, grade: 'D-', points: 2,  label: 'Weak' },
+      { min: 0,  grade: 'E',  points: 1,  label: 'Fail' },
+    ],
+  },
+  {
+    id: 'gs_demo_alevel', name: 'A-Level Grading Scale',
+    description: 'A-Level grade bands A–F used by Form 5A and Form 6A.',
+    sectionId: SEC_AL, isDefault: true,
+    bands: [
+      { min: 80, grade: 'A', points: 5, label: 'Excellent' },
+      { min: 70, grade: 'B', points: 4, label: 'Very Good' },
+      { min: 60, grade: 'C', points: 3, label: 'Good' },
+      { min: 50, grade: 'D', points: 2, label: 'Satisfactory' },
+      { min: 40, grade: 'E', points: 1, label: 'Weak Pass' },
+      { min: 0,  grade: 'F', points: 0, label: 'Fail' },
+    ],
+  },
+  {
+    id: 'gs_demo_default', name: 'School Default Grading Scale',
+    description: 'Fallback for any class whose section has no scale of its own.',
+    sectionId: null, isDefault: true,
+    bands: [
+      { min: 80, grade: 'A',  points: 12, label: 'Excellent' },
+      { min: 75, grade: 'A-', points: 11, label: 'Very Good' },
+      { min: 70, grade: 'B+', points: 10, label: 'Good' },
+      { min: 65, grade: 'B',  points: 9,  label: 'Good' },
+      { min: 60, grade: 'B-', points: 8,  label: 'Satisfactory' },
+      { min: 55, grade: 'C+', points: 7,  label: 'Satisfactory' },
+      { min: 50, grade: 'C',  points: 6,  label: 'Average' },
+      { min: 45, grade: 'C-', points: 5,  label: 'Average' },
+      { min: 40, grade: 'D+', points: 4,  label: 'Below Average' },
+      { min: 35, grade: 'D',  points: 3,  label: 'Below Average' },
+      { min: 30, grade: 'D-', points: 2,  label: 'Weak' },
+      { min: 0,  grade: 'E',  points: 1,  label: 'Fail' },
+    ],
+  },
+];
+
+/* Deterministic 0–1 hash — same input always produces the same score, so
+   re-running the seed is stable and two term/type combinations never
+   collapse onto one flat number. */
+function _hash01(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return ((h >>> 0) % 100000) / 100000;
+}
+
+/** First `count` weekdays (ISO date strings) from a term's start date. */
+function _weekdays(startDate, count, endDate) {
+  const out = [];
+  const cursor = new Date(`${startDate}T00:00:00.000Z`);
+  const end = endDate ? new Date(`${endDate}T23:59:59.999Z`) : null;
+  while (out.length < count && (!end || cursor <= end)) {
+    const dow = cursor.getUTCDay();
+    if (dow !== 0 && dow !== 6) out.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return out;
+}
+
+function _markScore(studentId, subjectId, termNumber, typeKey, instance, studentIndex) {
+  const base         = 50 + ((studentIndex * 13) % 28);                     // 50–77
+  const subjectBias  = Math.round((_hash01(`${studentId}|${subjectId}`) - 0.5) * 18);
+  const termBias     = (termNumber - 2) * 2;
+  const typeBias     = REPORT_ASSESSMENT_TYPES.find(t => t.key === typeKey)?.bias ?? 0;
+  const instanceBias = instance > 1 ? -1 : 1;
+  const noise        = Math.round((_hash01(`${studentId}|${subjectId}|${termNumber}|${typeKey}|${instance}`) - 0.5) * 6);
+  return Math.max(30, Math.min(99, base + subjectBias + termBias + typeBias + instanceBias + noise));
+}
+
+function _classTeacherRemark(seed) {
+  const r = _hash01(seed);
+  if (r < 0.33) return 'A dependable term overall — keep up the consistent effort.';
+  if (r < 0.66) return 'Good progress this term; a little more revision will lift the results further.';
+  return 'An excellent term — hard work and focus are clearly showing in the results.';
+}
+
+function _subjectRemark(seed) {
+  const r = _hash01(seed);
+  if (r < 0.25) return 'Needs regular practice to strengthen this subject.';
+  if (r < 0.60) return 'Steady effort and a fair understanding of the topics covered.';
+  if (r < 0.85) return 'Good work — shows a solid grasp of the concepts taught.';
+  return 'Excellent performance — consistently strong in class and in assessments.';
+}
+
+async function seedReportCardReviewData() {
+  if (!mongoose.connection || mongoose.connection.readyState !== 1) return;
+
+  const Section    = _model('sections');
+  const Scales     = _model('grade_boundaries');
+  const Marks      = _model('assessment_marks');
+  const Attendance = _model('attendance');
+  const Drafts     = _model('report_card_draft_comments');
+  const nowISO     = new Date().toISOString();
+
+  /* A-Level section — classes have referenced `sec_alevel_sch_demo` since
+     the A-Level classes were added, but only Primary/Secondary were ever
+     created, so sectionIdForClass() resolved A-Level classes to no
+     section and no section-scoped template/scale could ever match. */
+  await Section.updateOne(
+    { id: SEC_AL },
+    {
+      $set: { id: SEC_AL, schoolId: SCHOOL_ID, key: 'alevel', name: 'A-Level', code: 'ALE', color: '#f59e0b', order: 3, sectionHeadId: null, updatedAt: nowISO },
+      $setOnInsert: { createdAt: nowISO },
+    },
+    { upsert: true, timestamps: false }
+  );
+
+  /* Grade scales — one per section plus a school-wide fallback. */
+  for (const def of GRADE_SCALES) {
+    const scope = def.sectionId
+      ? { schoolId: SCHOOL_ID, sectionId: def.sectionId }
+      : { schoolId: SCHOOL_ID, $or: [{ sectionId: null }, { sectionId: { $exists: false } }] };
+    const existing = await Scales.findOne(scope).sort({ isDefault: -1 }).lean();
+    if (existing) {
+      if (!existing.isDefault) {
+        await Scales.updateOne(
+          { _id: existing._id },
+          { $set: { isDefault: true, updatedBy: ADMIN_ID, updatedAt: nowISO } },
+          { timestamps: false }
+        );
+      }
+      continue;
+    }
+    await Scales.updateOne(
+      { id: def.id },
+      {
+        $setOnInsert: {
+          id: def.id,
+          schoolId: SCHOOL_ID,
+          ...def,
+          createdBy: ADMIN_ID,
+          updatedBy: ADMIN_ID,
+          createdAt: nowISO,
+          updatedAt: nowISO,
+        },
+      },
+      { upsert: true, timestamps: false }
+    );
+  }
+
+  /* Default report-card template — without a real document here,
+     resolveTemplate() falls back to the frozen legacy_tabular renderer,
+     whose PDF and HTML adapters look nothing like each other (the
+     "Download Class" PDF and the on-screen/print card were two different
+     designs). subject_paired is the engine's own recommended default and
+     has both a PDF and an HTML renderer from the same design system, so
+     every new publish prints and downloads consistently. Insert-only:
+     never overrides a template the school created itself. */
+  const Templates = _model('report_card_templates');
+  const anyTemplate = await Templates.findOne({ schoolId: SCHOOL_ID }).lean();
+  if (!anyTemplate) {
+    await Templates.updateOne(
+      { id: 'rct_demo_subject_paired' },
+      {
+        $setOnInsert: {
+          id: 'rct_demo_subject_paired',
+          schoolId: SCHOOL_ID,
+          name: 'Demo Report Card — Subject + Comment',
+          curriculumTag: 'cbc',
+          sectionId: null,
+          isDefault: true,
+          layoutKey: 'subject_paired',
+          revision: 1,
+          createdBy: ADMIN_ID,
+          updatedBy: ADMIN_ID,
+          createdAt: nowISO,
+          updatedAt: nowISO,
+        },
+      },
+      { upsert: true, timestamps: false }
+    );
+  }
+
+  /* Student → enrolled subjects map from the same ENROLLMENTS constant the
+     demo itself uses, so Markbook data can never drift from the curriculum
+     the rest of the demo shows. */
+  const enrollmentByStudent = {};
+  for (const group of ENROLLMENTS) {
+    for (const studentId of group.students) {
+      enrollmentByStudent[studentId] ??= { classId: group.classId, subjects: new Set() };
+      for (const subjectId of group.subjects) enrollmentByStudent[studentId].subjects.add(subjectId);
+    }
+  }
+
+  /* Markbook marks: every term, every assessment type/instance, for every
+     student/subject they are actually enrolled in. */
+  const markOps = [];
+  STUDENTS.forEach((student, sIdx) => {
+    const subjects = [...(enrollmentByStudent[student.id]?.subjects ?? [])];
+    for (const subjectId of subjects) {
+      for (const termNumber of [1, 2, 3]) {
+        for (const type of REPORT_ASSESSMENT_TYPES) {
+          for (let instance = 1; instance <= type.instances; instance++) {
+            markOps.push({
+              updateOne: {
+                filter: { schoolId: SCHOOL_ID, studentId: student.id, subjectId, termNumber, assessmentType: type.key, instance },
+                update: {
+                  $setOnInsert: {
+                    id: `am_demo_${student.id.replace('std_demo_', '')}_${subjectId.replace('subj_demo_', '')}_t${termNumber}_${type.key.toLowerCase()}${instance}`,
+                    schoolId: SCHOOL_ID,
+                    studentId: student.id,
+                    classId: student.classId,
+                    subjectId,
+                    termNumber,
+                    assessmentType: type.key,
+                    instance,
+                    rawScore: _markScore(student.id, subjectId, termNumber, type.key, instance, sIdx),
+                    markState: 'present',
+                    label: instance > 1 ? `${type.key} ${instance}` : type.key,
+                    isPublished: true,
+                    isLocked: false,
+                    streamId: null,
+                    academicYearId: AY_ID,
+                    enteredBy: ADMIN_ID,
+                    updatedBy: ADMIN_ID,
+                    createdAt: nowISO,
+                    updatedAt: nowISO,
+                  },
+                },
+                upsert: true,
+              },
+            });
+          }
+        }
+      }
+    }
+  });
+  if (markOps.length) await Marks.bulkWrite(markOps, { ordered: false, timestamps: false });
+
+  /* Term dates come from the demo academic year; fixed fallback keeps this
+     helper usable even before the school seed has run. */
+  const yearDoc = await _model('academic_years').findOne({ schoolId: SCHOOL_ID, id: AY_ID }).lean();
+  const termDocs = Array.isArray(yearDoc?.terms) && yearDoc.terms.length
+    ? yearDoc.terms
+    : [
+        { id: 't1_demo', name: 'Term 1', startDate: '2026-01-08', endDate: '2026-04-05' },
+        { id: 't2_demo', name: 'Term 2', startDate: '2026-04-28', endDate: '2026-08-09' },
+        { id: 't3_demo', name: 'Term 3', startDate: '2026-09-01', endDate: '2026-11-30' },
+      ];
+
+  /* Attendance — 20 school days per term per student, class register
+     records only (subjectId: null), so attendanceSummary() on the report
+     card shows real present/absent/authorised/late figures. */
+  const attendanceOps = [];
+  for (const student of STUDENTS) {
+    termDocs.forEach((term, ti) => {
+      for (const date of _weekdays(term.startDate, REPORT_ATTENDANCE_DAYS, term.endDate)) {
+        const roll = _hash01(`${student.id}|${date}`);
+        const status = roll < 0.05 ? 'absent'
+          : roll < 0.09 ? 'late'
+          : roll < 0.13 ? 'authorised_absence'
+          : 'present';
+        attendanceOps.push({
+          updateOne: {
+            filter: { schoolId: SCHOOL_ID, studentId: student.id, date, period: 'AM' },
+            update: {
+              $setOnInsert: {
+                id: `att_demo_${student.id.replace('std_demo_', '')}_t${ti + 1}_${date}`,
+                schoolId: SCHOOL_ID,
+                studentId: student.id,
+                classId: student.classId,
+                date,
+                period: 'AM',
+                status,
+                subjectId: null,
+                streamId: null,
+                note: status === 'present' ? ''
+                  : status === 'late' ? 'Arrived after roll call.'
+                  : status === 'authorised_absence' ? 'Absence authorised by guardian.'
+                  : 'Did not report to school.',
+                markedBy: ADMIN_ID,
+                updatedBy: ADMIN_ID,
+                createdBy: ADMIN_ID,
+                createdAt: nowISO,
+                updatedAt: nowISO,
+              },
+            },
+            upsert: true,
+          },
+        });
+      }
+    });
+  }
+  if (attendanceOps.length) await Attendance.bulkWrite(attendanceOps, { ordered: false, timestamps: false });
+
+  /* Draft report comments — subject comments plus class teacher/principal
+     remarks for every term, so the Comments tab and published PDF are
+     populated rather than blank on a fresh demo. */
+  const draftOps = [];
+  for (const student of STUDENTS) {
+    const subjects = [...(enrollmentByStudent[student.id]?.subjects ?? [])];
+    termDocs.forEach((term, ti) => {
+      const termNumber = ti + 1;
+      const window = REPORT_TERM_WINDOWS[termNumber] ?? REPORT_TERM_WINDOWS[1];
+      const subjectComments = Object.fromEntries(
+        subjects.map(subjectId => [subjectId, _subjectRemark(`${student.id}|${subjectId}|${termNumber}`)])
+      );
+      draftOps.push({
+        updateOne: {
+          filter: { schoolId: SCHOOL_ID, studentId: student.id, termNumber },
+          update: {
+            $setOnInsert: {
+              id: `rcdc_demo_${student.id.replace('std_demo_', '')}_t${termNumber}`,
+              schoolId: SCHOOL_ID,
+              studentId: student.id,
+              classId: student.classId,
+              termNumber,
+              classTeacherName: CLASS_TEACHER_NAMES[student.classId] || 'Demo Teacher',
+              classTeacherRemark: _classTeacherRemark(`${student.id}|class|${termNumber}`),
+              sportsAndTalent: 'Participates actively in sports, clubs and school activities.',
+              principalName: 'Demo Principal',
+              principalRemark: _classTeacherRemark(`${student.id}|principal|${termNumber}`),
+              closingDate: window.closingDate,
+              nextTermBegin: window.nextTermBegin,
+              subjectComments,
+              updatedBy: ADMIN_ID,
+              createdBy: ADMIN_ID,
+              createdAt: nowISO,
+              updatedAt: nowISO,
+            },
+          },
+          upsert: true,
+        },
+      });
+    });
+  }
+  if (draftOps.length) await Drafts.bulkWrite(draftOps, { ordered: false, timestamps: false });
+}
 
 /* ════════════════════════════════════════════════════════════════
    MAIN EXPORT
@@ -1017,7 +1464,7 @@ async function seedDemoData() {
           password: hash, role: 'student', primaryRole: 'student', roles: ['student'],
           studentId: u.studentId,
           isActive: true, mustChangePassword: false,
-          passwordChangedAt: nowISO, createdAt: nowISO, updatedAt: nowISO,
+          passwordChangedAt: nowISO, createdAt: nowISO,
         },
       }, { upsert: true })
     ));
@@ -1030,7 +1477,7 @@ async function seedDemoData() {
           password: hash, role: 'parent', primaryRole: 'parent', roles: ['parent'],
           studentIds: [u.studentId], guardianOf: [u.studentId],
           isActive: true, mustChangePassword: false,
-          passwordChangedAt: nowISO, createdAt: nowISO, updatedAt: nowISO,
+          passwordChangedAt: nowISO, createdAt: nowISO,
         },
       }, { upsert: true })
     ));
@@ -1042,11 +1489,32 @@ async function seedDemoData() {
       { $set: { hasPortalAccount: true, hasParentAccount: true } }
     );
 
-    console.log('[seed-demo-data] ✓ 9 classes · 6 departments · 18 subjects · 10 teacher profiles · 9 teacher users · 20 students · 25 behaviour · 20 invoices · 14 payments · 205 timetable slots (7 classes) · 8 admissions · 10 events · 20 payroll (Apr+May) · 4 leave · 96 class-subjects · ' + enrollmentDocs.length + ' enrollments · 4 subject-rules · 12 library books · 8 loans · 3 transport routes · 8 transport assignments · 2 hostels · 6 rooms · 6 hostel residents · 4 student portal + 4 parent portal accounts');
+    /* 22. Report-card review data — grade scales, A-Level section,
+       Markbook marks, attendance and draft comments, so every one of
+       the 9 classes can generate and be reviewed end to end. */
+    await seedReportCardReviewData();
+
+    console.log('[seed-demo-data] ✓ 9 classes · 6 departments · 18 subjects · 10 teacher profiles · 9 teacher users · 26 students · 25 behaviour · 20 invoices · 14 payments · 205 timetable slots (7 classes) · 8 admissions · 10 events · 20 payroll (Apr+May) · 4 leave · 96 class-subjects · ' + enrollmentDocs.length + ' enrollments · 4 subject-rules · 12 library books · 8 loans · 3 transport routes · 8 transport assignments · 2 hostels · 6 rooms · 6 hostel residents · 4 student portal + 4 parent portal accounts · report-card scales + marks + attendance for 9 classes');
 
   } catch (err) {
-    console.warn('[seed-demo-data] Warning:', err.message);
+    console.warn('[seed-demo-data] Warning:', err.stack || err.message);
   }
 }
 
 module.exports = { seedDemoData };
+
+/* Allow `npm run seed:data` (or `node server/scripts/seed-demo-data.js`) to
+   actually seed a connected local database. Before this guard the file only
+   exported the function, so the documented npm script silently did nothing. */
+if (require.main === module) {
+  require('dotenv').config();
+  (async () => {
+    await mongoose.connect(process.env.MONGODB_URI, { dbName: process.env.MONGODB_DB_NAME || 'innolearn' });
+    await seedDemoData();
+    await mongoose.disconnect();
+    console.log('[seed-demo-data] Done.');
+  })().catch(err => {
+    console.error('[seed-demo-data] Fatal:', err);
+    process.exit(1);
+  });
+}

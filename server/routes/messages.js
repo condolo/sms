@@ -24,12 +24,103 @@ router.use(authMiddleware, tenantMiddleware, moduleGate('messages'));
 /* ── Role → recipient group mapping ─────────────────────── */
 const ROLE_GROUPS = {
   teachers: ['teacher', 'section_head', 'deputy_principal'],
-  parents:  ['parent'],
+  parents:  ['parent', 'guardian'],
   students: ['student'],
-  staff:    ['teacher', 'section_head', 'deputy_principal', 'hr',
+  staff:    ['teacher', 'section_head', 'deputy_principal', 'principal', 'hr',
              'admissions_officer', 'finance', 'exams_officer', 'timetabler',
              'discipline_committee'],
 };
+
+/* Portal roles: they may only message staff directly (never another
+   parent/student they were not explicitly linked to), and they cannot
+   create saved groups or broadcast announcements. Staff roles are every
+   role outside this set, including custom roles built on a staff base. */
+const PORTAL_ROLES = new Set(['parent', 'guardian', 'student']);
+
+const BROADCAST_ROLES = new Set([
+  'superadmin', 'admin', 'principal', 'deputy_principal', 'deputy',
+  'section_head', 'teacher', 'hr',
+]);
+
+/* Roles that may manage a saved group they did not create. */
+const GROUP_MANAGER_ROLES = new Set([
+  'superadmin', 'admin', 'principal', 'deputy_principal', 'deputy',
+]);
+
+function _cleanIdList(value) {
+  const list = Array.isArray(value) ? value : [value];
+  return [...new Set(
+    list
+      .filter(v => typeof v === 'string' && v.trim())
+      .map(v => v.trim()),
+  )];
+}
+
+function _roleLabel(role) {
+  if (!role) return '';
+  return role.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+/* Resolve a group's memberIds into display-ready members. Groups are
+   intentionally small (a class, a department, a committee), so one
+   lookup per listing is cheaper and clearer than a populate that would
+   bypass tenantModel's scoping. */
+async function _hydrateGroups(req, groups) {
+  const ids = [...new Set(groups.flatMap(g => g.memberIds ?? []))];
+  const User = tenantModel('users', tenantContext(req));
+  const users = ids.length
+    ? await User.find({ id: { $in: ids } }).select('id name role isActive').lean()
+    : [];
+  const byId = Object.fromEntries(users.map(u => [u.id, u]));
+  return groups.map(g => ({
+    ...g,
+    members: (g.memberIds ?? []).map(id => ({
+      id,
+      name: byId[id]?.name ?? 'Removed user',
+      role: byId[id]?.role ?? '',
+      roleLabel: _roleLabel(byId[id]?.role),
+      isActive: byId[id]?.isActive !== false,
+    })),
+    memberCount: (g.memberIds ?? []).length,
+  }));
+}
+
+function _canManageGroup(group, { userId, role }) {
+  return group.createdBy === userId || GROUP_MANAGER_ROLES.has(role);
+}
+
+/* Validate explicit direct recipients against the tenant's active users
+   and the sender's role. Returns { users } on success or { status, error }
+   so callers can return a precise 4xx instead of creating a message that
+   is invisible to everyone (an arbitrary/stale user id). */
+async function _resolveDirectRecipients(req, rawRecipients) {
+  const { userId, role } = req.jwtUser;
+  const ids = _cleanIdList(rawRecipients).filter(id => id !== userId);
+  if (!ids.length) {
+    return { status: 400, error: 'Choose at least one recipient other than yourself.' };
+  }
+
+  const User = tenantModel('users', tenantContext(req));
+  const users = await User.find({
+    id: { $in: ids },
+    isActive: { $ne: false },
+  }).select('id name role email').lean();
+
+  const byId = Object.fromEntries(users.map(u => [u.id, u]));
+  const missing = ids.filter(id => !byId[id]);
+  if (missing.length) {
+    return { status: 400, error: 'One or more recipients are invalid or inactive.' };
+  }
+
+  if (PORTAL_ROLES.has(role)) {
+    const disallowed = users.find(u => PORTAL_ROLES.has(u.role));
+    if (disallowed) {
+      return { status: 403, error: 'Parents and students can only message staff members.' };
+    }
+  }
+
+  return { users: ids.map(id => byId[id]), ids };
+}
 
 /* Inbox membership — a message addressed to 'all', this user's role
    group, or directly to them. Shared by GET / and GET /unread-count so
@@ -65,6 +156,177 @@ router.get('/unread-count', rbac('messages', 'read'), async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+/* ── GET /api/messages/recipients — compose-time people directory ──
+   Deliberately separate from Settings → Users (which requires settings
+   read): a teacher or parent composing a message needs name/role only,
+   never emails, account flags or credentials. Portal roles are always
+   restricted to staff, regardless of what scope they ask for. */
+router.get('/recipients', rbac('messages', 'read'), async (req, res) => {
+  try {
+    const { userId, role } = req.jwtUser;
+    const User = tenantModel('users', tenantContext(req));
+    const q = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 80) : '';
+    const scope = PORTAL_ROLES.has(role) ? 'staff' : (req.query.scope || 'all');
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 30));
+
+    const filter = {
+      isActive: { $ne: false },
+      id: { $ne: userId },
+    };
+
+    if (scope === 'staff') {
+      filter.role = { $nin: [...PORTAL_ROLES] };
+    } else if (scope === 'parents') {
+      filter.role = { $in: ['parent', 'guardian'] };
+    } else if (scope === 'students') {
+      filter.role = 'student';
+    }
+
+    if (q) {
+      const { escapeRegex } = require('../utils/escape-regex');
+      filter.name = new RegExp(escapeRegex(q), 'i');
+    }
+
+    const users = await User.find(filter)
+      .select('id name role')
+      .sort({ name: 1 })
+      .limit(limit)
+      .lean();
+
+    res.json({
+      data: users.map(u => ({
+        id: u.id,
+        name: u.name || 'Unnamed user',
+        role: u.role,
+        roleLabel: _roleLabel(u.role),
+      })),
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* ── Saved groups ─────────────────────────────────────────────
+   A group is a reusable recipient list, not a chat room: sending to it
+   stamps each message with groupId/groupName so the inbox can show the
+   group badge, while recipients still get an ordinary direct message
+   addressed to their userId (which keeps email + unread semantics
+   identical to every other direct message in the app). */
+
+/* GET /api/messages/groups — groups I belong to or created */
+router.get('/groups', rbac('messages', 'read'), async (req, res) => {
+  try {
+    const { userId } = req.jwtUser;
+    const Groups = tenantModel('message_groups', tenantContext(req));
+    const groups = await Groups.find({
+      $or: [{ createdBy: userId }, { memberIds: userId }],
+    }).sort({ updatedAt: -1, createdAt: -1 }).lean();
+    res.json({ data: await _hydrateGroups(req, groups) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* POST /api/messages/groups — create a reusable group */
+router.post('/groups', rbac('messages', 'create'), async (req, res) => {
+  try {
+    const { userId, role } = req.jwtUser;
+    if (PORTAL_ROLES.has(role)) {
+      return res.status(403).json({ error: 'Only staff can create saved groups. You can still message several people directly.' });
+    }
+
+    const name = typeof req.body.name === 'string' ? req.body.name.trim() : '';
+    if (!name) return res.status(400).json({ error: 'Group name is required.' });
+    if (name.length > 80) return res.status(400).json({ error: 'Group name must be 80 characters or fewer.' });
+
+    const memberIds = _cleanIdList(req.body.memberIds).filter(id => id !== userId);
+    if (!memberIds.length) {
+      return res.status(400).json({ error: 'Add at least one member to the group.' });
+    }
+
+    const User = tenantModel('users', tenantContext(req));
+    const members = await User.find({
+      id: { $in: memberIds },
+      isActive: { $ne: false },
+    }).select('id').lean();
+    if (members.length !== memberIds.length) {
+      return res.status(400).json({ error: 'One or more group members are invalid or inactive.' });
+    }
+
+    const sender = await User.findOne({ id: userId }).select('name').lean();
+    const Groups = tenantModel('message_groups', tenantContext(req));
+    const now = new Date().toISOString();
+    const group = await Groups.create({
+      id: uuidv4(),
+      createdBy: userId,
+      createdByName: sender?.name ?? 'Staff member',
+      name,
+      memberIds,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const [hydrated] = await _hydrateGroups(req, [group.toObject()]);
+    res.status(201).json({ data: hydrated });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* PATCH /api/messages/groups/:id — rename or change membership */
+router.patch('/groups/:id', rbac('messages', 'update'), async (req, res) => {
+  try {
+    const { userId, role } = req.jwtUser;
+    const Groups = tenantModel('message_groups', tenantContext(req));
+    const group = await Groups.findOne({ id: req.params.id }).lean();
+    if (!group) return res.status(404).json({ error: 'Group not found.' });
+    if (!_canManageGroup(group, { userId, role })) {
+      return res.status(403).json({ error: 'Only the group creator or an administrator can edit this group.' });
+    }
+
+    const patch = { updatedAt: new Date().toISOString() };
+    if (req.body.name !== undefined) {
+      const name = typeof req.body.name === 'string' ? req.body.name.trim() : '';
+      if (!name) return res.status(400).json({ error: 'Group name is required.' });
+      if (name.length > 80) return res.status(400).json({ error: 'Group name must be 80 characters or fewer.' });
+      patch.name = name;
+    }
+
+    if (req.body.memberIds !== undefined) {
+      const memberIds = _cleanIdList(req.body.memberIds).filter(id => id !== userId);
+      if (!memberIds.length) {
+        return res.status(400).json({ error: 'A group needs at least one member.' });
+      }
+      const User = tenantModel('users', tenantContext(req));
+      const members = await User.find({
+        id: { $in: memberIds },
+        isActive: { $ne: false },
+      }).select('id').lean();
+      if (members.length !== memberIds.length) {
+        return res.status(400).json({ error: 'One or more group members are invalid or inactive.' });
+      }
+      patch.memberIds = memberIds;
+    }
+
+    const updated = await Groups.findOneAndUpdate(
+      { id: req.params.id },
+      { $set: patch },
+      { new: true },
+    ).lean();
+    const [hydrated] = await _hydrateGroups(req, [updated]);
+    res.json({ data: hydrated });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* DELETE /api/messages/groups/:id */
+router.delete('/groups/:id', rbac('messages', 'delete'), async (req, res) => {
+  try {
+    const { userId, role } = req.jwtUser;
+    const Groups = tenantModel('message_groups', tenantContext(req));
+    const group = await Groups.findOne({ id: req.params.id }).lean();
+    if (!group) return res.status(404).json({ error: 'Group not found.' });
+    if (!_canManageGroup(group, { userId, role })) {
+      return res.status(403).json({ error: 'Only the group creator or an administrator can delete this group.' });
+    }
+    await Groups.deleteOne({ id: req.params.id });
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 /* ── GET /api/messages — list messages visible to this user ─ */
 router.get('/', rbac('messages', 'read'), async (req, res) => {
   try {
@@ -93,6 +355,40 @@ router.get('/', rbac('messages', 'read'), async (req, res) => {
       msgs.forEach(m => { if (!m.senderName && m.senderId) m.senderName = nameMap[m.senderId] ?? null; });
     }
 
+    /* Direct and group messages store userIds in `recipients`; the old
+       client could only render role labels ("Direct"), so a multi-person
+       message looked identical to a one-person one. Resolve those ids to
+       name/role once for the whole page, and expose a stable
+       recipientUsers array the compose/detail UI can render as chips. */
+    const directIds = [...new Set(msgs.flatMap(m =>
+      (m.recipients ?? []).filter(r => r !== 'all' && !ROLE_GROUPS[r]),
+    ))];
+    if (directIds.length) {
+      const User = tenantModel('users', tenantContext(req));
+      const users = await User.find({ id: { $in: directIds } }).select('id name role isActive').lean();
+      const byId = Object.fromEntries(users.map(u => [u.id, u]));
+      msgs.forEach(m => {
+        m.recipientUsers = (m.recipients ?? [])
+          .filter(r => r !== 'all' && !ROLE_GROUPS[r])
+          .map(id => ({
+            id,
+            name: byId[id]?.name ?? 'Removed user',
+            role: byId[id]?.role ?? '',
+            roleLabel: _roleLabel(byId[id]?.role),
+            isActive: byId[id]?.isActive !== false,
+          }));
+        m.recipientCount = (m.recipients ?? [])
+          .filter(r => r !== 'all' && !ROLE_GROUPS[r]).length;
+        m.isGroup = !!m.groupId;
+      });
+    } else {
+      msgs.forEach(m => {
+        m.recipientUsers = [];
+        m.recipientCount = 0;
+        m.isGroup = !!m.groupId;
+      });
+    }
+
     res.json({
       data: msgs,
       pagination: { total, page: parseInt(page), limit: parseInt(limit), pages: Math.ceil(total / parseInt(limit)) }
@@ -106,25 +402,67 @@ router.post('/', rbac('messages', 'create'), async (req, res) => {
     const { schoolId, userId, role: senderRole } = req.jwtUser;
     const senderUser = await tenantModel('users', tenantContext(req)).findOne({ id: userId, schoolId }).select('name email').lean();
     const senderName = req.jwtUser.name || senderUser?.name || senderUser?.email || 'School staff';
-    const { subject, body, recipients, type = 'direct' } = req.body;
+    const subject = typeof req.body.subject === 'string' ? req.body.subject.trim() : '';
+    const body = typeof req.body.body === 'string' ? req.body.body.trim() : '';
+    const type = req.body.type === 'announcement' ? 'announcement' : 'direct';
+    const groupId = typeof req.body.groupId === 'string' ? req.body.groupId.trim() : '';
 
-    if (!subject || !body || !recipients) {
-      return res.status(400).json({ error: 'subject, body, and recipients are required' });
+    if (!subject || !body) {
+      return res.status(400).json({ error: 'A subject and message body are required.' });
     }
-
-    const recipientList = Array.isArray(recipients) ? recipients : [recipients];
-
-    // Only staff roles may broadcast to the entire school
-    const BROADCAST_ROLES = new Set([
-      'superadmin', 'admin', 'deputy_principal', 'deputy',
-      'section_head', 'teacher', 'hr',
-    ]);
-    if (recipientList.includes('all') && !BROADCAST_ROLES.has(senderRole)) {
-      return res.status(403).json({ error: 'Only staff members may send school-wide announcements.' });
+    if (subject.length > 200) {
+      return res.status(400).json({ error: 'Subject must be 200 characters or fewer.' });
+    }
+    if (body.length > 10_000) {
+      return res.status(400).json({ error: 'Message must be 10,000 characters or fewer.' });
     }
 
     const Msg  = tenantModel('messages', tenantContext(req));
     const User = tenantModel('users', tenantContext(req));
+
+    let recipientList = [];
+    let group = null;
+    let directRecipientUsers = [];
+
+    if (groupId) {
+      /* A group send is a direct message to each current member — never a
+         broadcast. Membership is re-read at send time so a renamed or
+         re-scoped group cannot keep sending to stale recipients. */
+      const Groups = tenantModel('message_groups', tenantContext(req));
+      group = await Groups.findOne({ id: groupId }).lean();
+      if (!group) return res.status(404).json({ error: 'Group not found.' });
+      if (!_canManageGroup(group, { userId, role: senderRole }) && !(group.memberIds ?? []).includes(userId)) {
+        return res.status(403).json({ error: 'You are not a member of this group.' });
+      }
+      const resolved = await _resolveDirectRecipients(req, group.memberIds ?? []);
+      if (resolved.error) return res.status(resolved.status).json({ error: resolved.error });
+      directRecipientUsers = resolved.users;
+      recipientList = resolved.ids;
+    } else if (type === 'announcement') {
+      if (!BROADCAST_ROLES.has(senderRole)) {
+        return res.status(403).json({ error: 'Only staff members may send announcements.' });
+      }
+      recipientList = _cleanIdList(req.body.recipients);
+      if (!recipientList.length) {
+        return res.status(400).json({ error: 'Choose an audience for the announcement.' });
+      }
+      const invalid = recipientList.find(r => r !== 'all' && !ROLE_GROUPS[r]);
+      if (invalid) {
+        return res.status(400).json({ error: `Unknown audience "${invalid}". Choose Everyone, Teachers, Parents, Students, or Staff.` });
+      }
+      if (recipientList.includes('all') && PORTAL_ROLES.has(senderRole)) {
+        return res.status(403).json({ error: 'Only staff members may send school-wide announcements.' });
+      }
+    } else {
+      const resolved = await _resolveDirectRecipients(req, req.body.recipients);
+      if (resolved.error) return res.status(resolved.status).json({ error: resolved.error });
+      directRecipientUsers = resolved.users;
+      recipientList = resolved.ids;
+    }
+
+    if (!recipientList.length) {
+      return res.status(400).json({ error: 'Choose at least one recipient.' });
+    }
 
     const msg = await Msg.create({
       id:         uuidv4(),
@@ -136,6 +474,7 @@ router.post('/', rbac('messages', 'create'), async (req, res) => {
       subject,
       body,
       type, // 'direct' | 'announcement'
+      ...(group ? { groupId: group.id, groupName: group.name } : {}),
       isRead: {},
       createdAt: new Date().toISOString(),
     });
@@ -205,8 +544,8 @@ router.post('/', rbac('messages', 'create'), async (req, res) => {
           }
         }
       } else {
-        // Direct — single user by ID
-        const target = await User.findOne({ id: recipient, schoolId }).lean();
+        // Direct / group — already validated and loaded above
+        const target = directRecipientUsers.find(u => u.id === recipient);
         if (target?.email && emailEnabled) {
           notifyJobs.push(() => email.sendMessageNotification({
             recipientName:  target.name,

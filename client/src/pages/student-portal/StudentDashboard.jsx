@@ -15,18 +15,26 @@ import {
   LayoutDashboard, Calendar, BookCheck, CheckCircle, Clock,
   Download, FileText, GraduationCap, LogOut, AlertCircle,
   BookOpen, Lock, Bell, MessageSquare, Activity, Star,
-  MapPin, Play, MonitorPlay, CalendarCheck, Menu, X,
+  MapPin, Play, MonitorPlay, CalendarCheck, Menu, X, LifeBuoy,
 } from 'lucide-react';
 import NotificationBell from '@/components/layout/NotificationBell.jsx';
+import FloatingHelp from '@/components/help/FloatingHelp.jsx';
 
 /* ── API ────────────────────────────────────────────────────────── */
 const API_BASE = import.meta.env.VITE_API_BASE || '';
 async function _fetch(path) {
   const res  = await fetch(`${API_BASE}${path}`, { credentials: 'include' });
   const json = await res.json();
-  if (res.status === 401 || res.status === 403) {
+  if (res.status === 401) {
     const err = new Error(json.error?.message || 'Session expired — please sign in again');
     err.code = 'auth_expired';
+    throw err;
+  }
+  /* A 403 is a real access answer, not an expired session — show its
+     (deliberately neutral) message instead of forcing a logout. */
+  if (res.status === 403) {
+    const err = new Error(json.error?.message || 'Unable to access this account. Please contact your school administrator.');
+    err.code = json.error?.code || 'forbidden';
     throw err;
   }
   if (!json.success) throw new Error(json.error?.message || 'Failed to load');
@@ -208,8 +216,12 @@ export default function StudentDashboard() {
     <div id="student-portal-error" className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
       <div className="bg-white rounded-2xl border border-red-100 p-8 max-w-md text-center">
         <AlertCircle size={32} className="text-red-400 mx-auto mb-3" />
-        <p className="text-slate-700 font-medium mb-1">Could not load dashboard</p>
-        <p className="text-sm text-slate-400 mb-4">{error}</p>
+        <p className="text-slate-700 font-medium mb-1">
+          {error.startsWith('Unable to access') ? 'Unable to access account' : 'Could not load dashboard'}
+        </p>
+        <p className="text-sm text-slate-400 mb-4">
+          {error.startsWith('Unable to access') ? 'Please contact your school administrator.' : error}
+        </p>
         <button onClick={() => { logout(); navigate('/login', { replace: true }); }}
           className="text-sm text-emerald-600 hover:underline">Sign out</button>
       </div>
@@ -388,6 +400,14 @@ export default function StudentDashboard() {
                 {student.className ? `${student.className} · Student` : 'Student'}
               </div>
             </div>
+            <button
+              id="sidebar-support-btn"
+              onClick={() => navigate('/support')}
+              title="Support"
+              className="text-emerald-500 hover:text-emerald-300 transition flex-shrink-0"
+            >
+              <LifeBuoy size={14} />
+            </button>
             <button
               id="sidebar-logout-btn"
               onClick={handleLogout}

@@ -6,6 +6,42 @@ import { Tag, Zap, Bug, Shield, Sparkles } from 'lucide-react';
 
 const RELEASES = [
   {
+    version: '4.62.0',
+    date: '2026-10-20',
+    label: 'Parent Portal → Messages — rebuilt',
+    changes: [
+      { type: 'new', text: 'Parent Portal → Messages — the list now shows who wrote to you (with their role), what the message was about, a short preview and the time it arrived, grouped by day.' },
+      { type: 'new', text: 'Parent Portal → Messages — tap any message to open it in place and read the full text. Opening a message also marks it read.' },
+      { type: 'new', text: 'Parent Portal → Messages — reply to a message in one tap; the subject is filled in for you and you still choose who the school should answer.' },
+      { type: 'new', text: 'Parent Portal → Messages — a Sent tab, so a parent can see what they have already asked the school.' },
+      { type: 'new', text: 'Parent Portal → Messages — an Unread filter, and unread messages are now obvious (a coloured edge, a bold subject and a dot) instead of a barely visible speck.' },
+      { type: 'improvement', text: 'Parent Portal — the “Message School” button now opens the message composer straight away instead of only taking you to the page.' },
+      { type: 'improvement', text: 'Parent Portal — the child banner fits a phone: the name and class take the full width and the three figures sit underneath, instead of squeezing the name into a sliver.' },
+      { type: 'fix', text: 'Parent Portal — a child with no attendance records yet showed “0%”, as if they had missed every lesson. It now shows a dash, and the same goes for a grade average that does not exist yet.' },
+      { type: 'fix', text: 'Parent Portal — a cleared fee balance was shown in alarm orange on the child banner, while the same number was green on the Overview. The colours now agree.' },
+    ],
+  },
+  {
+    version: '4.61.0',
+    date: '2026-10-20',
+    label: 'Settings → Users & Audit Log — redesigned',
+    changes: [
+      { type: 'new', text: 'Settings → Users — search, role filter and pagination now run on the server, so a school with hundreds of accounts filters and pages instantly instead of loading every account into the browser.' },
+      { type: 'new', text: 'Settings → Users — a summary row describing the school’s account population at a glance: active accounts, staff, students, parents and custom roles.' },
+      { type: 'new', text: 'Settings → Users — a denser table with account avatars, the date each person joined, and a removed-accounts panel that paginates too.' },
+      { type: 'new', text: 'Settings → Audit Log — a summary row (total events, critical, warnings, informational, people involved) computed server-side over the same school scope and date window as the table.' },
+      { type: 'new', text: 'Settings → Audit Log — free-text search across the action, the actor and the target; date presets (today / 7 days / 30 days / all time); and a severity filter that is also a single click on a summary card.' },
+      { type: 'new', text: 'Settings → Audit Log — readable action names with category icons (the raw action name stays visible for anyone grepping it), actor avatars, target type badges, and relative timestamps.' },
+      { type: 'new', text: 'Settings → Audit Log — export the current filtered log to CSV.' },
+      { type: 'improvement', text: 'Settings — the tab strip no longer scrolls sideways out of view; it wraps, so every tab is always reachable.' },
+      { type: 'fix', text: 'The audit log’s "to" date filter used to drop every event that happened ON the selected day. A date range now covers the whole day, as the filter bar implies.' },
+      { type: 'fix', text: 'The audit log’s summary counters were comparing date strings against stored dates and silently reported zero. They now always agree with the table above them.' },
+      { type: 'fix', text: 'Students — the Class column showed a dash for every student whose record had a class reference but no copied class name (imports, seed data and older enrolments). The list and the duplicate-check panel now resolve the real class name in one lookup per page rather than one per student, matching what the profile page already did.' },
+      { type: 'fix', text: 'Signing out and back in as someone else in the same tab could show the previous account’s cached totals for up to five minutes. The query cache is now cleared whenever the signed-in identity changes.' },
+      { type: 'fix', text: 'Changing a role or removing an account whose id was supplied in its Mongo form skipped session revocation entirely, leaving the old session alive with its old role. Revocation now always uses the account’s canonical id.' },
+    ],
+  },
+  {
     version: '4.60.0',
     date: '2026-08-12',
     label: 'Weekly Student Snapshot — Auto-Generated Weekly Digest',
