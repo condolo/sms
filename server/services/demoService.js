@@ -147,6 +147,7 @@ async function verifyOtp({ id, email: emailAddr, code }) {
   const req = await Requests.findOne({ id, email: email_ }).lean();
   if (!req) return { ok: false, code: 'NOT_FOUND', message: 'Request not found.' };
   if (req.status === 'provisioned') return { ok: true, data: { status: 'provisioned', loginUrl: demo.loginUrlFor(req.tenantSlug) } };
+  if (req.status === 'provisioning') return { ok: false, code: 'IN_PROGRESS', message: 'Your workspace is being created — this takes a few seconds. Check your email for the logins shortly.' };
   if (req.status === 'pending_review') return { ok: true, data: { status: 'pending_review' } };
   if (req.status === 'rejected') return { ok: false, code: 'REJECTED', message: 'This request was not approved.' };
 
@@ -188,10 +189,24 @@ async function verifyOtp({ id, email: emailAddr, code }) {
 }
 
 /* ── Provision ───────────────────────────────────────────────── */
-/* In-process guard: a double-click on "verify" (or a retry) must not build
-   two tenants for one request. The hourly/per-request flow is single-process,
-   same assumption the job queue makes. */
+/* Two guards, because they cover different failures:
+
+   1. This in-process set stops a double-click on "verify" from starting a
+      second build in the SAME process without paying for a DB round trip.
+   2. The atomic claim in provisionDemo() below is the real one: it stops a
+      second WORKER (or a restart mid-build, which loses this set entirely)
+      from building a second tenant for the same request.
+
+   What matters is not the lock itself but that only one builder ever gets
+   past it: every insert below happens after the claim and before the
+   request is marked provisioned, so a duplicate build would leave a
+   school nobody asked for, with its own cloned data. */
 const _provisioning = new Set();
+
+/* A claim older than this is treated as abandoned (the process that took it
+   died mid-build) and may be re-claimed. Long enough that a slow clone of a
+   large template is never mistaken for a crash. */
+const PROVISION_STALE_MS = 10 * 60 * 1000;
 
 async function provisionDemo(requestId) {
   if (_provisioning.has(requestId)) {
@@ -199,7 +214,54 @@ async function provisionDemo(requestId) {
   }
   _provisioning.add(requestId);
   try {
-    return await _provisionDemo(requestId);
+    const Requests = _model('demo_requests');
+
+    /* Atomic claim: findOneAndUpdate on one document, so concurrent builders
+       cannot both match. Only a verified request (or an expired claim) can be
+       taken; everything else is either in flight, already done, or not a
+       state this function may act on. */
+    const claimed = await Requests.findOneAndUpdate(
+      {
+        id: requestId,
+        $or: [
+          { status: 'verified' },
+          { status: 'provisioning', provisioningStartedAt: { $lt: new Date(Date.now() - PROVISION_STALE_MS) } },
+        ],
+      },
+      { $set: { status: 'provisioning', provisioningStartedAt: new Date(), updatedAt: new Date() } },
+      { new: true }
+    );
+
+    if (!claimed) {
+      /* Report the real state rather than a generic failure: "already yours"
+         and "someone is building it" both retry successfully and must not
+         look like errors the user should give up on. */
+      const current = await Requests.findOne({ id: requestId }).lean();
+      if (!current) return { ok: false, code: 'NOT_FOUND', message: 'Request not found.' };
+      if (current.status === 'provisioned') {
+        return { ok: true, data: { status: 'provisioned', loginUrl: demo.loginUrlFor(current.tenantSlug) } };
+      }
+      if (current.status === 'provisioning') {
+        return { ok: false, code: 'IN_PROGRESS', message: 'Your workspace is being created — try again in a few seconds.' };
+      }
+      return { ok: false, code: 'NOT_PROVISIONABLE', message: 'This demo request can no longer be set up automatically. Our team has been notified.' };
+    }
+
+    try {
+      return await _provisionDemo(requestId);
+    } catch (err) {
+      /* A thrown build must not leave the claim standing: without this the
+         request sits in 'provisioning' until the staleness window expires,
+         and an operator retry would look like a no-op. verifyOtp's own
+         catch still turns this into the user-facing "could not set up"
+         message — this only makes the record retryable. */
+      await Requests.updateOne({ id: requestId }, { $set: {
+        status: 'failed',
+        failureReason: String(err?.message || 'provision_failed').slice(0, 300),
+        updatedAt: new Date(),
+      } }).catch(() => {});
+      throw err;
+    }
   } finally {
     _provisioning.delete(requestId);
   }
@@ -398,7 +460,12 @@ async function approveRequest(requestId, actor) {
   const req = await Requests.findOne({ id: requestId }).lean();
   if (!req) return { ok: false, code: 'NOT_FOUND', message: 'Request not found.' };
   if (req.status === 'provisioned') return { ok: true, data: { status: 'provisioned' } };
-  await Requests.updateOne({ id: requestId }, { $set: { approvedAt: new Date(), approvedBy: actor?.email || 'platform', status: 'verified', updatedAt: new Date() } });
+  /* Record who approved it, but never reset an in-flight or finished build:
+     handing a live claim back to 'verified' would release it for a second
+     builder. A request that is mid-build answers IN_PROGRESS below, which is
+     the truth — it IS being set up. */
+  await Requests.updateOne({ id: requestId }, { $set: { approvedAt: new Date(), approvedBy: actor?.email || 'platform', updatedAt: new Date() } });
+  await Requests.updateOne({ id: requestId, status: { $nin: ['provisioning', 'provisioned'] } }, { $set: { status: 'verified' } });
   AuditService.log({
     action: 'demo.request.approved',
     actor: actor || { userId: 'platform', role: 'platform', email: null },

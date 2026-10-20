@@ -1287,9 +1287,47 @@ router.get('/users/search', requireOwnerTier, async (req, res) => {
     const User    = _model('users');
     const School  = _model('schools');
     const escaped = email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex   = new RegExp(escaped, 'i');
 
-    const users = await User.find({ email: regex }).limit(10).lean();
+    // Two searches, in order of preference:
+    //
+    //  1. PREFIX match (anchored, case-insensitive, collation-matched and
+    //     hinted at users_email_ci). This is the one the index serves, so
+    //     it stays index-backed on a platform with a large account table
+    //     instead of scanning every account.
+    //  2. CONTAINS match (the old behaviour) only when the prefix search
+    //     found nothing - so searching for a domain ("greenvalley") still
+    //     finds the account. It cannot use the index, which is exactly
+    //     why it is the fallback and not the first attempt.
+    const buildQuery = (re, { withCollation, withHint }) => {
+      let q = User.find({ email: re });
+      // collation/hint are index hints, not correctness requirements: a
+      // query builder without them must not turn the console into a 500.
+      if (withCollation && typeof q.collation === 'function') {
+        q = q.collation({ locale: 'en', strength: 2 });
+      }
+      if (withHint && typeof q.hint === 'function') {
+        q = q.hint({ email: 1 });
+      }
+      return q;
+    };
+    const runQuery = async (re, opts) => {
+      let q = buildQuery(re, opts);
+      if (typeof q.limit === 'function') q = q.limit(10);
+      return typeof q.lean === 'function' ? q.lean() : q;
+    };
+
+    let users = [];
+    try {
+      users = await runQuery(new RegExp(`^${escaped}`, 'i'), { withCollation: true, withHint: true });
+    } catch (hintErr) {
+      // The index is missing (an older instance mid-rollout) - fall back
+      // rather than failing the console outright.
+      console.warn('[platform/users/search] email index hint failed, retrying without it:', hintErr.message);
+      users = await runQuery(new RegExp(`^${escaped}`, 'i'), { withCollation: true, withHint: false });
+    }
+    if (!users.length) {
+      users = await runQuery(new RegExp(escaped, 'i'), { withCollation: true, withHint: false });
+    }
     const schoolIds = [...new Set(users.map(u => u.schoolId).filter(Boolean))];
     const schools = schoolIds.length
       ? await School.find({ id: { $in: schoolIds } }).select('id name organizationId').lean()

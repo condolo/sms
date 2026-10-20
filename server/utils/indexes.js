@@ -214,8 +214,14 @@ const INDEXES = [
       { key: { schoolId: 1, email: 1 },    name: 'users_school_email_str',    unique: true, partialFilterExpression: { email: { $type: 'string' } } },
       { key: { schoolId: 1, username: 1 }, name: 'users_school_username_str', unique: true, partialFilterExpression: { username: { $type: 'string' } } },
       { key: { studentId: 1 },             name: 'users_student_id',      sparse: true },
-      { key: { id: 1 },                    name: 'users_id',              unique: true, sparse: true },
-      { key: { identityId: 1, schoolId: 1 }, name: 'users_identity_school', sparse: true },
+      { key: { id: 1 },                    name: 'users_id',              unique: true, sparse: true },      { key: { identityId: 1, schoolId: 1 }, name: 'users_identity_school', sparse: true },
+      // Platform-wide, case-insensitive email lookup. The unique
+      // {schoolId, email} index above cannot serve it: the console's
+      // user search filters on email ALONE (no schoolId), so without this
+      // index it was a full collection scan over every account in the
+      // platform. Collation strength 2 folds case, matching the
+      // case-insensitive search the console performs.
+      { key: { email: 1 }, name: 'users_email_ci', partialFilterExpression: { email: { $type: 'string' } }, collation: { locale: 'en', strength: 2 } },
     ],
   },
 
@@ -256,6 +262,9 @@ const INDEXES = [
       { key: { schoolId: 1, updatedAt: -1 },                     name: 'tickets_school_date' },
       { key: { status: 1, updatedAt: -1 },                        name: 'tickets_status_date' },
       { key: { id: 1 },                                           name: 'tickets_id', unique: true, sparse: true },
+      /* The demo bridge re-reads its ticket by the request that created it,
+         on every provisioning and every approve — and once per sweep tick. */
+      { key: { demoRequestId: 1 },                                name: 'tickets_demo_request', sparse: true },
     ],
   },
 
@@ -268,6 +277,15 @@ const INDEXES = [
     indexes: [
       { key: { status: 1, createdAt: -1 }, name: 'demoreq_status_date' },
       { key: { id: 1 },                     name: 'demoreq_id', unique: true, sparse: true },
+      /* The self-serve abuse caps: "has this email already requested in the
+         last 24h?" and "how many requests from this IP today?". Without
+         these two, every public POST /api/demo/request scanned the whole
+         collection twice before doing any work. */
+      { key: { email: 1, createdAt: -1 },   name: 'demoreq_email_date' },
+      { key: { ip: 1, createdAt: -1 },      name: 'demoreq_ip_date' },
+      /* The hourly sweep (and extend/expire/purge) look a demo tenant's
+         request up by the tenant it produced, once per demo school. */
+      { key: { tenantId: 1 },               name: 'demoreq_tenant', sparse: true },
     ],
   },
 
@@ -1044,13 +1062,17 @@ async function ensureIndexes() {
 
   for (const { col, indexes } of INDEXES) {
     try {
-      const model = _model(col);
-      for (const { key, name, unique = false, sparse = false, partialFilterExpression } of indexes) {
+      const model = _model(col);      for (const { key, name, unique = false, sparse = false, partialFilterExpression, collation } of indexes) {
         try {
           const opts = { name, unique, background: true };
           // sparse and partialFilterExpression are mutually exclusive in MongoDB
           if (partialFilterExpression) opts.partialFilterExpression = partialFilterExpression;
           else if (sparse)             opts.sparse = true;
+          // A collation on the index makes the stored keys case-folded, so a
+          // query that passes the SAME collation can use it for a
+          // case-insensitive lookup. A query without it cannot - which is
+          // why the platform console's email search now passes it too.
+          if (collation) opts.collation = collation;
 
           await model.collection.createIndex(key, opts);
           results.created++;

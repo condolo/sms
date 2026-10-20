@@ -29,6 +29,9 @@ jest.mock('../../utils/jwt', () => ({ sign: jest.fn() }));
 jest.mock('../../utils/email', () => ({}));
 
 let mockUserDocs = [];
+/* Every users.find() the platform search made, with the index hints it
+   applied - the evidence that the search is index-backed, not a scan. */
+let mockUsersSearchCalls = [];
 let mockSchoolDocs = [];
 let mockMembershipDocs = [];
 let mockMembershipCreateCalls = [];
@@ -52,17 +55,27 @@ jest.mock('mongoose', () => {
     model: jest.fn((_name, _schema, col) => {
       if (col === 'users') {
         return {
-          find: (filter) => ({
-            limit: () => ({
-              lean: () => Promise.resolve(mockUserDocs.filter(u => !filter.email || filter.email.test(u.email))),
-            }),
-            // provisionIdentityForUser's sibling-lookup: same org's schools, excluding self
-            select: () => ({
-              lean: () => Promise.resolve(
-                mockUserDocs.filter(u => (filter.schoolId?.$in || []).includes(u.schoolId) && u._id !== filter._id?.$ne)
-              ),
-            }),
-          }),
+          find: (filter) => {
+            // Chainable query stub. collation()/hint() are the index hints
+            // the platform's email search uses (users_email_ci); they are
+            // recorded so the test can assert the search stays index-backed.
+            const q = {
+              limit: (n) => { q._limit = n; return q; },
+              collation: (c) => { q._collation = c; return q; },
+              hint: (h) => { q._hint = h; return q; },
+              // provisionIdentityForUser's sibling-lookup: same org's schools, excluding self
+              select: () => ({
+                lean: () => Promise.resolve(
+                  mockUserDocs.filter(u => (filter.schoolId?.$in || []).includes(u.schoolId) && u._id !== filter._id?.$ne)
+                ),
+              }),
+              lean: () => {
+                mockUsersSearchCalls.push({ filter, collation: q._collation, hint: q._hint, limit: q._limit });
+                return Promise.resolve(mockUserDocs.filter(u => !filter.email || filter.email.test(u.email)));
+              },
+            };
+            return q;
+          },
           findOne: (filter) => ({ lean: () => Promise.resolve(mockUserDocs.find(u => u.id === filter.id) || null) }),
           updateOne:  mockUsersUpdateOne,
           updateMany: mockUsersUpdateMany,
@@ -152,6 +165,7 @@ function app() {
 beforeEach(() => {
   jest.clearAllMocks();
   mockUserDocs = [];
+  mockUsersSearchCalls = [];
   mockSchoolDocs = [];
   mockMembershipDocs = [];
   mockMembershipCreateCalls = [];
@@ -171,6 +185,13 @@ describe('GET /api/platform/users/search', () => {
     const res = await supertest(app()).get('/api/platform/users/search?email=jane');
 
     expect(res.status).toBe(200);
+    // The search must be index-backed: the case-insensitive collation and
+    // the index hint are what let MongoDB use users_email_ci instead of
+    // scanning every account on the platform.
+    const search = mockUsersSearchCalls[0];
+    expect(search.collation).toEqual({ locale: 'en', strength: 2 });
+    expect(search.hint).toEqual({ email: 1 });
+    expect(search.limit).toBe(10);
     expect(res.body.users).toHaveLength(1);
     const u = res.body.users[0];
     expect(u).toMatchObject({ id: 'usr_1', email: 'jane@greenvalley.ac.ke', schoolName: 'Campus A', organizationId: 'org_x' });
@@ -180,6 +201,30 @@ describe('GET /api/platform/users/search', () => {
     expect(u.tokenVersion).toBeUndefined();
   });
 
+  test('falls back to a contains match when the prefix search finds nothing', async () => {
+    mockSchoolDocs = [{ id: 'sch_a', name: 'Campus A', organizationId: 'org_x' }];
+    mockUserDocs = [
+      {
+        _id: 'oid_1', id: 'usr_1', email: 'jane@greenvalley.ac.ke', role: 'teacher', schoolId: 'sch_a',
+        password: 'HASH', mfaOtp: '123456', mfaExpiry: '2026-01-01', tokenVersion: 3,
+      },
+    ];
+
+    // 'greenvalley' is a DOMAIN, not the start of the address - the
+    // index-backed prefix search cannot match it, so the route falls back
+    // to the contains match and still finds the account.
+    const res = await supertest(app()).get('/api/platform/users/search?email=greenvalley');
+
+    expect(res.status).toBe(200);
+    expect(res.body.users).toHaveLength(1);
+    expect(res.body.users[0].email).toBe('jane@greenvalley.ac.ke');
+
+    // The first attempt was the index-backed prefix search; the last was
+    // the unindexed fallback, which is why the hint is absent on it.
+    expect(mockUsersSearchCalls.length).toBeGreaterThanOrEqual(2);
+    expect(mockUsersSearchCalls[0].hint).toEqual({ email: 1 });
+    expect(mockUsersSearchCalls[mockUsersSearchCalls.length - 1].hint).toBeUndefined();
+  });
   test('rejects a query shorter than 3 characters', async () => {
     const res = await supertest(app()).get('/api/platform/users/search?email=ja');
     expect(res.status).toBe(400);
