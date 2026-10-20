@@ -20,15 +20,46 @@ services:
       - key: JWT_EXPIRES_IN
         value: 7d
       - key: PLATFORM_ADMIN_KEY
-        generateValue: true  # Your private platform admin API key
+        generateValue: true  # Legacy single-key platform lock (fallback)
+      # Named platform operator (preferred). Create the operator with:
+      #   node scripts/create-platform-operator.js --email <you> --tier owner
+      - key: PLATFORM_ADMIN_USER
+        sync: false          # Platform console username (e.g. platform@msingi.io)
+      - key: PLATFORM_ADMIN_PASS_HASH
+        sync: false          # bcrypt hash - NOT the plaintext password
+      - key: PLATFORM_JWT_SECRET
+        generateValue: true  # Separate secret for platform-admin session cookies
       - key: APP_URL
         value: https://msingi.io
+      - key: SMTP_HOST
+        sync: false          # Set in Render dashboard: smtp.yourprovider.com
+      - key: SMTP_PORT
+        value: 587
       - key: SMTP_USER
-        sync: false          # Set in Render dashboard: your Gmail address
+        sync: false          # Set in Render dashboard: the sending address
       - key: SMTP_PASS
-        sync: false          # Set in Render dashboard: Gmail App Password (16 chars)
+        sync: false          # Set in Render dashboard: the provider password
       - key: PLATFORM_EMAIL
         sync: false          # Set in Render dashboard: email address for admin alerts
+      # Demo tenant lifecycle (self-serve /demo). The template school must
+      # already exist in the target database.
+      - key: DEMO_TEMPLATE_SCHOOL_ID
+        sync: false          # e.g. sch_demo
+      - key: DEMO_TRIAL_DAYS
+        value: 7
+      - key: DEMO_EXTENSION_DAYS
+        value: 7
+      - key: DEMO_MAX_EXTENSIONS
+        value: 2
+      - key: DEMO_PURGE_AFTER_DAYS
+        value: 30
+      # Subscription expiry enforcement is OPT-IN: when off, an expired school
+      # keeps everything; when on, it keeps staff/ERP features and loses only
+      # student/parent portal access. The billed plan is never rewritten.
+      - key: ENFORCE_PLAN_EXPIRY
+        value: 'false'
+      - key: PLAN_GRACE_DAYS
+        value: 7
       - key: SENTRY_DSN
         sync: false          # Optional — set in Render dashboard to activate Sentry error
                               # tracking (server/utils/monitoring.js). Server behaves exactly
