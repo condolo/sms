@@ -1287,28 +1287,46 @@ router.get('/users/search', requireOwnerTier, async (req, res) => {
     const User    = _model('users');
     const School  = _model('schools');
     const escaped = email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    // Anchored on purpose: an email search means "starts with", and an
-    // anchored pattern is the one a case-insensitive index can serve.
-    // The unanchored version matched an email ANYWHERE, which is both
-    // the wrong semantic and unindexable.
-    const regex = new RegExp(`^${escaped}`, 'i');
 
-    // Same collation as the users_email_ci index (server/utils/indexes.js),
-    // so this lookup is index-backed instead of a full collection scan
-    // across every account on the platform.
-    // Hint the case-insensitive email index so this stays index-backed on
-    // a large account table (the planner will happily scan a small one).
-    // If the index is somehow missing - an older instance mid-rollout -
-    // fall back to the unhinted query rather than failing the console.
-    const search = () => User.find({ email: regex })
-      .collation({ locale: 'en', strength: 2 })
-      .limit(10).lean();
-    let users;
+    // Two searches, in order of preference:
+    //
+    //  1. PREFIX match (anchored, case-insensitive, collation-matched and
+    //     hinted at users_email_ci). This is the one the index serves, so
+    //     it stays index-backed on a platform with a large account table
+    //     instead of scanning every account.
+    //  2. CONTAINS match (the old behaviour) only when the prefix search
+    //     found nothing - so searching for a domain ("greenvalley") still
+    //     finds the account. It cannot use the index, which is exactly
+    //     why it is the fallback and not the first attempt.
+    const buildQuery = (re, { withCollation, withHint }) => {
+      let q = User.find({ email: re });
+      // collation/hint are index hints, not correctness requirements: a
+      // query builder without them must not turn the console into a 500.
+      if (withCollation && typeof q.collation === 'function') {
+        q = q.collation({ locale: 'en', strength: 2 });
+      }
+      if (withHint && typeof q.hint === 'function') {
+        q = q.hint({ email: 1 });
+      }
+      return q;
+    };
+    const runQuery = async (re, opts) => {
+      let q = buildQuery(re, opts);
+      if (typeof q.limit === 'function') q = q.limit(10);
+      return typeof q.lean === 'function' ? q.lean() : q;
+    };
+
+    let users = [];
     try {
-      users = await search().hint({ email: 1 });
+      users = await runQuery(new RegExp(`^${escaped}`, 'i'), { withCollation: true, withHint: true });
     } catch (hintErr) {
-      console.warn('[platform/users/search] email index hint failed, falling back:', hintErr.message);
-      users = await search();
+      // The index is missing (an older instance mid-rollout) - fall back
+      // rather than failing the console outright.
+      console.warn('[platform/users/search] email index hint failed, retrying without it:', hintErr.message);
+      users = await runQuery(new RegExp(`^${escaped}`, 'i'), { withCollation: true, withHint: false });
+    }
+    if (!users.length) {
+      users = await runQuery(new RegExp(escaped, 'i'), { withCollation: true, withHint: false });
     }
     const schoolIds = [...new Set(users.map(u => u.schoolId).filter(Boolean))];
     const schools = schoolIds.length
