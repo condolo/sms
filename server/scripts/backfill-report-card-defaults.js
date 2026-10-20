@@ -115,19 +115,18 @@ function planSchool(schoolId, gradeScales, templates) {
   };
 }
 
-async function run() {
-  const apply = process.argv.includes('--apply');
-  const schoolArg = process.argv.find(a => a.startsWith('--schoolId='));
-  const onlySchool = schoolArg ? schoolArg.split('=')[1] : null;
-
+async function runBackfill({ apply = false, onlySchool = null, log = console.log } = {}) {
   if (!process.env.MONGODB_URI) {
-    console.error('[backfill] MONGODB_URI is not set.');
-    process.exit(2);
+    throw new Error('MONGODB_URI is not set');
   }
 
-  await mongoose.connect(process.env.MONGODB_URI, {
-    dbName: process.env.MONGODB_DB_NAME || 'innolearn',
-  });
+  // Already connected when the server's startup migration chain calls
+  // this - mongoose.connect() is then a no-op.
+  if (mongoose.connection.readyState !== 1) {
+    await mongoose.connect(process.env.MONGODB_URI, {
+      dbName: process.env.MONGODB_DB_NAME || 'innolearn',
+    });
+  }
 
   const Schools    = _model('schools');
   const Boundaries = _model('grade_boundaries');
@@ -205,17 +204,29 @@ async function run() {
     }
 
     report.schools.push(entry);
-  }
+  }  if (log) log(JSON.stringify(report, null, 2));
+  return report;
+}
 
-  console.log(JSON.stringify(report, null, 2));
-  console.error(`\n[backfill] ${apply ? 'APPLIED' : 'DRY RUN'} - ${schools.length} school(s) scanned, ` +
-    `${report.created} created, ${report.updated} updated, ${report.review} need a human decision.`);
-  if (!apply) {
-    console.error('[backfill] Nothing was written. Re-run with --apply to perform the backfill.');
-  }
+async function run() {
+  const apply = process.argv.includes('--apply');
+  const schoolArg = process.argv.find(a => a.startsWith('--schoolId='));
+  const onlySchool = schoolArg ? schoolArg.split('=')[1] : null;
 
-  await mongoose.disconnect();
-  process.exit(report.review > 0 ? 1 : 0);
+  try {
+    const report = await runBackfill({ apply, onlySchool });
+    console.log(JSON.stringify(report, null, 2));
+    console.error(`\n[backfill] ${apply ? 'APPLIED' : 'DRY RUN'} - ${report.schools.length} school(s) scanned, ` +
+      `${report.created} created, ${report.updated} updated, ${report.review} need a human decision.`);
+    if (!apply) {
+      console.error('[backfill] Nothing was written. Re-run with --apply to perform the backfill.');
+    }
+    await mongoose.disconnect();
+    process.exit(report.review > 0 ? 1 : 0);
+  } catch (err) {
+    console.error('[backfill] Fatal:', err.message);
+    process.exit(2);
+  }
 }
 
 if (require.main === module) {
@@ -225,4 +236,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { planSchool, DEFAULT_GRADE_BANDS, TEMPLATE_LAYOUT_KEY };
+module.exports = { planSchool, runBackfill, DEFAULT_GRADE_BANDS, TEMPLATE_LAYOUT_KEY };

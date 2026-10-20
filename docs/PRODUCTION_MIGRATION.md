@@ -77,7 +77,19 @@ renderer, whose **HTML** (what a card prints) and **PDF** (what a class batch
 downloads) are two different documents — the printed card and the downloaded
 card would never match.
 
-The backfill fills exactly those two gaps, per school, and touches nothing else:
+It also **runs automatically on every server start** — `_migrateReportCardDefaults()`
+in `server/index.js` calls the same `runBackfill()` logic (idempotent, and
+non-blocking, so it never delays the HTTP listener). The script is therefore
+both the migration and the dry-run tool:
+
+- **Automatic (default):** the deploy's server restart performs the backfill.
+  You do not have to run anything by hand.
+- **Manual / audit:** run the script yourself for a dry run, for one school, or
+  if you would rather review before it happens.
+- **Off:** set `SKIP_REPORT_CARD_DEFAULTS_BACKFILL=true` to disable the
+  automatic run and do it by hand instead.
+
+It fills exactly those two gaps, per school, and touches nothing else:
 
 ```bash
 # 1. dry run first — reports only, writes nothing
@@ -151,7 +163,8 @@ Full list: `.env.example`.
 1. **Back up the production database** (the app has a backup route; a mongodump
    is fine).
 2. Run the **dry-run backfill** and read the report. Resolve any school it
-   flags as needing a decision.
+   flags as needing a decision. (Optional — the same backfill also runs
+   automatically on the deploy's server restart.)
 3. Create the **four new collections' indexes** (section 1) if the production
    database is large enough that you would rather not build them during a
    deploy.
@@ -163,7 +176,9 @@ Full list: `.env.example`.
 5. **Deploy the server** first. It is backwards compatible: every new route is
    additive, and no existing route changes shape. Old clients keep working.
 6. **Deploy the client** second (it calls the new group/support/demo endpoints).
-7. Run the **backfill with `--apply`** if you did not already.
+7. Run the **backfill with `--apply`** if you did not already — otherwise
+   the deploy's server restart does it for you (look for
+   `[Migration] report-card defaults: N created, M updated` in the startup log).
 8. Optionally seed the demo school so it is reviewable end to end:
    ```bash
    npm run seed:data        # demo school only (sch_demo), insert-only
