@@ -20,7 +20,7 @@ const { sign } = require('../utils/jwt');
 const { issueCsrfCookie, clearCsrfCookie, PLATFORM_CSRF_COOKIE_NAME } = require('../utils/csrf');
 const email    = require('../utils/email');
 const { dispatchNotification } = require('../utils/notify-dispatch');
-const { tenantModel } = require('../utils/tenant-model');
+const { tenantModel, platformModel } = require('../utils/tenant-model');
 const { provisionOrganizationForSchool } = require('../utils/provision-organizations');
 const { provisionMembershipForUser } = require('../utils/provision-memberships');
 const { provisionIdentityForUser } = require('../utils/provision-identities');
@@ -2743,7 +2743,7 @@ router.get('/demo-requests', async (req, res) => {
     const { status, limit = 100 } = req.query;
     const q = {};
     if (status) q.status = status;
-    const requests = await _model('demo_requests')
+    const requests = await platformModel('demo_requests')
       .find(q)
       .sort({ createdAt: -1 })
       .limit(Math.min(parseInt(limit, 10) || 100, 500))
@@ -2757,7 +2757,7 @@ router.get('/demo-requests', async (req, res) => {
 
 router.get('/demo-requests/:id', async (req, res) => {
   try {
-    const doc = await _model('demo_requests').findOne({ id: req.params.id }).lean();
+    const doc = await platformModel('demo_requests').findOne({ id: req.params.id }).lean();
     if (!doc) return res.status(404).json({ success: false, error: 'Request not found' });
     const tenant = doc.tenantId ? await _model('schools').findOne({ id: doc.tenantId }).lean() : null;
     return res.json({ success: true, request: doc, tenant });
@@ -2834,7 +2834,7 @@ router.get('/tickets', async (req, res) => {
         { ref: { $regex: needle, $options: 'i' } },
       ];
     }
-    const tickets = await _model('tickets')
+    const tickets = await platformModel('tickets')
       .find(filter)
       .sort({ updatedAt: -1 })
       .limit(Math.min(parseInt(limit, 10) || 100, 500))
@@ -2848,7 +2848,7 @@ router.get('/tickets', async (req, res) => {
 
 router.get('/tickets/:id', async (req, res) => {
   try {
-    const ticket = await _model('tickets').findOne({ id: req.params.id }).lean();
+    const ticket = await platformModel('tickets').findOne({ id: req.params.id }).lean();
     if (!ticket) return res.status(404).json({ success: false, error: 'Ticket not found' });
     return res.json({ success: true, ticket });
   } catch (err) {
@@ -2860,7 +2860,7 @@ router.post('/tickets', async (req, res) => {
   try {
     const { subject, description, category, priority, requesterName, requesterEmail, schoolName, assignee } = req.body || {};
     if (!subject) return res.status(400).json({ success: false, error: 'Subject is required' });
-    const Tickets = _model('tickets');
+    const Tickets = platformModel('tickets');
     const seq = await Tickets.countDocuments({});
     const now = new Date().toISOString();
     const ticket = {
@@ -2914,7 +2914,7 @@ router.patch('/tickets/:id', async (req, res) => {
     if (set.priority && !TICKET_PRIORITIES.includes(set.priority)) {
       return res.status(400).json({ success: false, error: 'Unknown priority' });
     }
-    const updated = await _model('tickets').findOneAndUpdate({ id: req.params.id }, { $set: set }, { new: true }).lean();
+    const updated = await platformModel('tickets').findOneAndUpdate({ id: req.params.id }, { $set: set }, { new: true }).lean();
     if (!updated) return res.status(404).json({ success: false, error: 'Ticket not found' });
     AuditService.log({
       action: 'platform.ticket.updated',
@@ -2934,7 +2934,7 @@ router.post('/tickets/:id/messages', async (req, res) => {
   try {
     const body = String(req.body?.body || '').trim().slice(0, 5000);
     if (!body) return res.status(400).json({ success: false, error: 'Message body is required' });
-    const Tickets = _model('tickets');
+    const Tickets = platformModel('tickets');
     const existing = await Tickets.findOne({ id: req.params.id }).lean();
     if (!existing) return res.status(404).json({ success: false, error: 'Ticket not found' });
 

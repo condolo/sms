@@ -220,7 +220,7 @@ describe('_mapSchoolDoc — no undefined required fields', () => {
     'id', 'slug', 'name', 'shortName', 'logoUrl', 'systemEmail', 'adminEmail',
     'plan', 'addOns', 'isActive', 'planExpiresAt', 'planExpired',
     // Demo lifecycle — read by login (MFA bypass / expiry) and by every
-    // authenticated request in middleware/auth.js.
+    // signed-in request in middleware/auth.js.
     'status', 'isDemo', 'expiresAt', 'demoExpired',
     'primaryColor', 'accentColor', 'themePreset', 'faviconUrl',
     'moduleConfig',

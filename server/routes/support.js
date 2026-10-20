@@ -20,6 +20,7 @@ const { z } = require('zod');
 
 const { authMiddleware } = require('../middleware/auth');
 const { _model } = require('../utils/model');
+const { tenantModel, tenantContext, platformModel } = require('../utils/tenant-model');
 const AuditService = require('../services/audit');
 const { ok, E } = require('../utils/response');
 
@@ -92,12 +93,18 @@ function _summary(ticket) {
 }
 
 async function _nextRef() {
-  const seq = await _model('tickets').countDocuments({});
+  // Platform-wide ticket sequence (the console counts the same way), so
+  // this is a deliberate CROSS-TENANT read - platformModel(), the
+  // documented ADR-0001 section 4 exception - not a tenant-scoped one.
+  const seq = await platformModel('tickets').countDocuments({});
   return `TCK-${String(seq + 1).padStart(4, '0')}`;
 }
 
-/* POST /api/support/tickets — open a ticket */
-router.post('/tickets', createLimiter, async (req, res) => {
+/* POST /api/support/tickets - open a ticket.
+   Deliberately open to every signed-in school user (staff, parents and
+   students) - the ticket is owner-scoped afterwards, and this is the
+   user-facing support surface, not a staff tool. */
+router.post('/tickets', createLimiter, async (req, res) => { // rbac: any signed-in school user (owner-scoped)
   if (!_requireSchoolUser(req, res)) return;
   const parsed = CreateSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -107,7 +114,7 @@ router.post('/tickets', createLimiter, async (req, res) => {
   try {
     const { userId, schoolId, role, email } = req.jwtUser;
     const school = await _model('schools').findOne({ id: schoolId }, { name: 1, adminEmail: 1 }).lean().catch(() => null);
-    const user = await _model('users').findOne({ id: userId, schoolId }, { name: 1, email: 1, username: 1 }).lean().catch(() => null);
+    const user = await tenantModel('users', tenantContext(req)).findOne({ id: userId }, { name: 1, email: 1, username: 1 }).lean().catch(() => null);
     const requesterName = user?.name || req.jwtUser.name || user?.username || 'School user';
     const requesterEmail = user?.email || email || null;
     const now = new Date().toISOString();
@@ -136,7 +143,7 @@ router.post('/tickets', createLimiter, async (req, res) => {
       createdAt: now,
       updatedAt: now,
     };
-    await _model('tickets').create(ticket);
+    await tenantModel('tickets', tenantContext(req)).create(ticket);
 
     AuditService.log({
       action: 'support.ticket.created',
@@ -154,13 +161,15 @@ router.post('/tickets', createLimiter, async (req, res) => {
   }
 });
 
-/* GET /api/support/tickets — my tickets */
-router.get('/tickets', async (req, res) => {
+/* GET /api/support/tickets - my tickets. Rows are filtered to the
+   caller's own tickets (tenant-scoped + requesterUserId), never anyone
+   else's. */
+router.get('/tickets', async (req, res) => { // rbac: any signed-in school user (own tickets only)
   if (!_requireSchoolUser(req, res)) return;
   try {
     const { userId, schoolId } = req.jwtUser;
-    const tickets = await _model('tickets')
-      .find({ schoolId, requesterUserId: userId })
+    const tickets = await tenantModel('tickets', tenantContext(req))
+      .find({ requesterUserId: userId })
       .sort({ updatedAt: -1 })
       .limit(50)
       .lean();
@@ -171,12 +180,14 @@ router.get('/tickets', async (req, res) => {
   }
 });
 
-/* GET /api/support/tickets/:id — my ticket + public thread */
-router.get('/tickets/:id', async (req, res) => {
+/* GET /api/support/tickets/:id - my ticket + public thread. The
+   tenant-scoped + requesterUserId filter is what decides whether this
+   ticket is the caller's. */
+router.get('/tickets/:id', async (req, res) => { // rbac: any signed-in school user (own ticket only)
   if (!_requireSchoolUser(req, res)) return;
   try {
     const { userId, schoolId } = req.jwtUser;
-    const ticket = await _model('tickets').findOne({ id: req.params.id, schoolId, requesterUserId: userId }).lean();
+    const ticket = await tenantModel('tickets', tenantContext(req)).findOne({ id: req.params.id, requesterUserId: userId }).lean();
     if (!ticket) return E.notFound(res, 'Ticket not found');
     return ok(res, {
       ..._summary(ticket),
@@ -188,22 +199,23 @@ router.get('/tickets/:id', async (req, res) => {
   }
 });
 
-/* POST /api/support/tickets/:id/messages — requester reply */
-router.post('/tickets/:id/messages', replyLimiter, async (req, res) => {
+/* POST /api/support/tickets/:id/messages - requester reply. Same
+   owner-scoped lookup as the read above. */
+router.post('/tickets/:id/messages', replyLimiter, async (req, res) => { // rbac: any signed-in school user (own ticket only)
   if (!_requireSchoolUser(req, res)) return;
   const parsed = ReplySchema.safeParse(req.body);
   if (!parsed.success) return E.validation(res, [{ field: 'body', message: 'Message is required.' }]);
 
   try {
     const { userId, schoolId, role, email } = req.jwtUser;
-    const Tickets = _model('tickets');
-    const ticket = await Tickets.findOne({ id: req.params.id, schoolId, requesterUserId: userId }).lean();
+    const Tickets = tenantModel('tickets', tenantContext(req));
+    const ticket = await Tickets.findOne({ id: req.params.id, requesterUserId: userId }).lean();
     if (!ticket) return E.notFound(res, 'Ticket not found');
     if (ticket.status === 'closed') {
       return E.badRequest(res, 'This ticket is closed. Raise a new ticket if you need more help.');
     }
 
-    const user = await _model('users').findOne({ id: userId, schoolId }, { name: 1, email: 1, username: 1 }).lean().catch(() => null);
+    const user = await tenantModel('users', tenantContext(req)).findOne({ id: userId }, { name: 1, email: 1, username: 1 }).lean().catch(() => null);
     const message = {
       id: `msg_${crypto.randomUUID()}`,
       author: user?.name || req.jwtUser.name || user?.username || 'Requester',

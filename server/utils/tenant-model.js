@@ -176,8 +176,35 @@ function tenantModel(collection, ctx) {
   return _wrap(_model(collection), schoolId, collection);
 }
 
+/**
+ * platformModel(collection) — the sanctioned CROSS-TENANT accessor.
+ *
+ * ADR-0001 §4 lists "a platform-admin route managing an arbitrary target
+ * school, or a caller listing every school in an org" as a reviewed
+ * exception: the platform console legitimately reads across every tenant
+ * (all demo requests, the support queue, orphan accounts), and there is
+ * no single schoolId to scope to.
+ *
+ * Before this existed, those sites called `_model('...')` inline in
+ * server/routes/*.js — which is exactly what the tenant-enforcement
+ * ratchet (scripts/verify-tenant-coverage.js) counts and blocks from
+ * growing, so every new console view had to either re-use a
+ * grandfathered line or break the gate. Centralising the exception
+ * here keeps the ratchet meaningful (route files stop sprinkling raw
+ * model handles) while making each cross-tenant use greppable and
+ * reviewable in ONE place.
+ *
+ * NOT for tenant-scoped request handling. A route serving a school user
+ * must use tenantModel(collection, tenantContext(req)) so the tenant
+ * boundary is structural, not a filter the caller can forget.
+ */
+function platformModel(collection) {
+  return _model(collection);
+}
+
 module.exports = {
   tenantModel,
+  platformModel,
   tenantContext,
   tenantContextMiddleware,
   PLATFORM_COLLECTIONS,
