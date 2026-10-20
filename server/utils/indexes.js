@@ -233,6 +233,54 @@ const INDEXES = [
 
   /* ── messages / notifications ───────────────────────────────
      Primary: inbox query by schoolId + recipientId */
+  /* ── message_groups ───────────────────────────────────────────────
+     Saved recipient lists (reusable groups). Primary lookup: a school's
+     own groups, newest first; the group detail screen fetches one by id. */
+  {
+    col: 'message_groups',
+    indexes: [
+      { key: { schoolId: 1, createdAt: -1 }, name: 'msggroups_school_date' },
+      { key: { id: 1 },                    name: 'msggroups_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── tickets (user-facing support) ─────────────────────────────────
+     Tenant-owned: a ticket always carries the school that raised it.
+     Primary lookup: one school's tickets, newest first. The platform
+     console reads across schools (platformModel) - hence no school-scoped
+     default index here. */
+  {
+    col: 'tickets',
+    indexes: [
+      { key: { schoolId: 1, requesterUserId: 1, updatedAt: -1 }, name: 'tickets_requester' },
+      { key: { schoolId: 1, updatedAt: -1 },                     name: 'tickets_school_date' },
+      { key: { status: 1, updatedAt: -1 },                        name: 'tickets_status_date' },
+      { key: { id: 1 },                                           name: 'tickets_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── demo_requests (platform console) ─────────────────────────────
+     Platform-level request registry (a request to create a demo school);
+     read across every school, so it is indexed by its own lifecycle
+     fields rather than by schoolId. */
+  {
+    col: 'demo_requests',
+    indexes: [
+      { key: { status: 1, createdAt: -1 }, name: 'demoreq_status_date' },
+      { key: { id: 1 },                     name: 'demoreq_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── platform_operators ───────────────────────────────────────────
+     Named SaaS operator accounts (platform console login). */
+  {
+    col: 'platform_operators',
+    indexes: [
+      { key: { email: 1 }, name: 'platform_ops_email', unique: true, sparse: true },
+      { key: { id: 1 },    name: 'platform_ops_id', unique: true, sparse: true },
+    ],
+  },
+
   {
     col: 'messages',
     indexes: [
