@@ -6,6 +6,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.203.1] - 2026-10-21 - fix(release-gate): the security-pattern check could never pass
+
+`npm run platform:release-gate` always ended in **"RELEASE BLOCKED — 1 critical check(s) failed"**, on a completely clean tree, because `checkSecurityPatterns()` judged the scan by matching words in its output:
+
+```js
+pass = !out.includes('fail') && !out.includes('found')
+```
+
+`scripts/security-scan.js`'s own success line is *"Security scan passed - no dangerous patterns found."* — it contains **found**, so the check failed every time. Prose-matching was fragile in the other direction too: a genuine violation was only detected if its wording happened to contain one of those two substrings.
+
+The script documents its real contract at the top (*"Exit 0 = clean. Exit 1 = violations found"*), so the gate now judges it by **exit status**. The decision lives in a new `scripts/lib/exec-status.js` (`runForStatus` / `judgeByExitStatus` / `runAndJudge`), which keeps three states distinct: exit 0 → pass, non-zero → fail, and **could not be started → fail closed** (a gate that could not run its check must not report success).
+
+**The bug was untested, so it is now pinned.** `server/__tests__/scripts/release-gate-security-check.test.js` (12 tests) asserts the historical success line now *passes*, that a violation whose wording contains neither "fail" nor "found" still *fails*, that an unrunnable scan fails closed, and that the repository's real scan exits 0 and is judged a pass. Verified by mutation: reintroducing the old prose heuristic fails 6 of the 12 tests, so the regression test genuinely bites.
+
+Found while fixing the ADR-0008 platform-team work after a deliberate "did you actually run the repo's own gates?" check; the security-scan and release-gate scripts were otherwise untouched by that change.
+
+---
+
 ## [v5.204.0] - 2026-10-21 - feat(platform): scoped platform team members, invites and work queues (ADR-0008)
 
 Direct request: "super admin team member or users to do some tasks like managing tickets onboarding etc." Until now the only unit of platform permission was a binary `tier` — every GET open to any tier, every mutating verb requiring `owner`. That made a real team member impossible: the choice was full owner (delete schools, impersonate, grant entitlements) or read-only-everything — and accounts could only be created by SSH-ing in and running `scripts/create-platform-operator.js`.
