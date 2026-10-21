@@ -507,7 +507,7 @@ function _demoRequestCard(r) {
         <i class="fas fa-user-check"></i> Owner
         <select onchange="demoAssign('${r.id}', this.value)" style="border:1px solid #d1d5db;border-radius:6px;padding:4px 8px;font-size:12px">
           <option value="">— Unassigned —</option>
-          ${_teamMembers.map(op => `<option value="${_esc(op.id)}" ${r.assigneeId === op.id ? 'selected' : ''}>${_esc(op.name)}</option>`).join('')}
+          ${_assignableMembers.map(op => `<option value="${_esc(op.id)}" ${r.assigneeId === op.id ? 'selected' : ''}>${_esc(op.name)}</option>`).join('')}
         </select>
       </span>`);
     actions.push(`<button class="pa-btn success" onclick="demoApprove('${r.id}')"><i class="fas fa-check"></i> Approve</button>`);
@@ -662,7 +662,7 @@ async function openTicket(id) {
           <select id="ticket-assignee-${t.id}" onchange="ticketAssign('${t.id}', this.value)"
                   style="border:1px solid #d1d5db;border-radius:6px;padding:4px 8px;font-size:12px">
             <option value="">— Unassigned —</option>
-            ${_teamMembers.map(op => `<option value="${_esc(op.id)}" ${t.assigneeId === op.id ? 'selected' : ''}>${_esc(op.name)}</option>`).join('')}
+            ${_assignableMembers.map(op => `<option value="${_esc(op.id)}" ${t.assigneeId === op.id ? 'selected' : ''}>${_esc(op.name)}</option>`).join('')}
           </select>
           ${t.slaDueAt ? `<span style="font-size:12px;color:${new Date(t.slaDueAt) < new Date() ? '#b91c1c' : '#6b7280'}">SLA ${new Date(t.slaDueAt) < new Date() ? 'breached' : 'due'} ${_fmtWhen(t.slaDueAt)}</span>` : ''}
         </div>
@@ -890,7 +890,7 @@ function _pendingCard(s) {
           <select onchange="schoolAssign('${s._id}', this.value)"
                   style="border:1px solid #d1d5db;border-radius:6px;padding:4px 8px;font-size:12px">
             <option value="">— Unassigned —</option>
-            ${_teamMembers.map(op => `<option value="${_esc(op.id)}" ${s.assigneeId === op.id ? 'selected' : ''}>${_esc(op.name)}</option>`).join('')}
+            ${_assignableMembers.map(op => `<option value="${_esc(op.id)}" ${s.assigneeId === op.id ? 'selected' : ''}>${_esc(op.name)}</option>`).join('')}
           </select>
         </span>
         <button class="pa-btn success" onclick="approveSchool('${s._id}','${_esc(s.name)}')">
@@ -3642,15 +3642,25 @@ async function demoAssign(id, operatorId) {
 /* Pending-school cards carry a Mongo _id; encode it safely for a URL. */
 function _assignKey(id) { return encodeURIComponent(String(id)); }
 
-/* Operators for the assignee picker. Loaded lazily from the minimal
-   directory route — a support agent cannot read the full team list. */
+/* Operators for the assignee picker. Loaded from the minimal directory
+   route — a support agent cannot read the full team list.
+
+   Kept SEPARATE from _teamMembers on purpose: the Team table lists
+   removed and suspended members too (their record is the audit trail),
+   and using that list to populate an assignee picker offered removed
+   members as assignees — work that nobody would ever see. The directory
+   route only returns active members, which is what a picker should offer.
+
+   Re-fetched on demand rather than cached: it is one small request, and
+   a cached copy went stale the moment someone was suspended or removed. */
+let _assignableMembers = [];
+
 async function _ensureTeamMembers() {
-  if (_teamMembers.length) return _teamMembers;
   try {
     const data = await api('GET', '/operators/directory');
-    _teamMembers = data.operators || [];
+    _assignableMembers = data.operators || [];
   } catch (e) { /* picker simply stays empty */ }
-  return _teamMembers;
+  return _assignableMembers;
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -3734,3 +3744,4 @@ window.addEventListener('DOMContentLoaded', async () => {
 </script>
 </body>
 </html>
+

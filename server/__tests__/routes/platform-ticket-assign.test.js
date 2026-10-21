@@ -148,9 +148,14 @@ beforeEach(() => {
     { _id: 'sch_active',             id: 'sch_active',             name: 'Live School',       slug: 'live',      status: 'active',  assigneeId: null,         createdAt: '2026-10-01T10:00:00.000Z' },
   ];
   mockDemoRequests = [
-    { id: 'dr_mine',      schoolName: 'My Demo',        status: 'pending', assigneeId: 'op_agent', email: 'a@x.io', createdAt: '2026-10-19T11:00:00.000Z' },
-    { id: 'dr_unclaimed', schoolName: 'Free Demo',      status: 'pending', assigneeId: null,       email: 'b@x.io', createdAt: '2026-10-17T11:00:00.000Z' },
-    { id: 'dr_other',     schoolName: "Ola's Demo",     status: 'pending', assigneeId: 'op_other', email: 'c@x.io', createdAt: '2026-10-18T11:00:00.000Z' },
+    // 'pending_review' is the real status a demo request sits in while it
+    // waits for the platform to approve it ('pending_otp' and 'verified'
+    // are still the applicant's own to finish). A queue that filtered on
+    // the non-existent 'pending' would silently always be empty.
+    { id: 'dr_mine',      schoolName: 'My Demo',        status: 'pending_review', assigneeId: 'op_agent', email: 'a@x.io', createdAt: '2026-10-19T11:00:00.000Z' },
+    { id: 'dr_unclaimed', schoolName: 'Free Demo',      status: 'pending_review', assigneeId: null,       email: 'b@x.io', createdAt: '2026-10-17T11:00:00.000Z' },
+    { id: 'dr_other',     schoolName: "Ola's Demo",     status: 'pending_review', assigneeId: 'op_other', email: 'c@x.io', createdAt: '2026-10-18T11:00:00.000Z' },
+    { id: 'dr_not_ready', schoolName: 'Still Verifying', status: 'verified',     assigneeId: null,       email: 'd@x.io', createdAt: '2026-10-16T11:00:00.000Z' },
   ];
 });
 afterAll(() => { process.env = ORIGINAL_ENV; });
@@ -313,6 +318,13 @@ describe('GET /my-work — onboarding queue', () => {
     expect(res.body.counts.myOnboarding).toBe(2);        // 1 school + 1 demo request
     expect(res.body.counts.unassignedOnboarding).toBe(2); // 1 school + 1 demo request
     expect(res.body.counts.pendingSchools).toBe(2);       // sch_pending_* (not the active one)
+  });
+
+  test('a demo request still in the applicant\u2019s own steps is NOT in the queue', async () => {
+    // 'verified' is not 'pending_review' — the queue only holds what is
+    // actually waiting on the platform.
+    const res = await supertest(buildApp()).get('/api/platform/my-work').set(cookie(tokenFor('op_agent')));
+    expect(res.body.onboarding.demoRequests.map(r => r.id)).not.toContain('dr_not_ready');
   });
 });
 

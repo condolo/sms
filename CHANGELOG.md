@@ -24,6 +24,20 @@ Found while fixing the ADR-0008 platform-team work after a deliberate "did you a
 
 ---
 
+## [v5.204.2] - 2026-10-21 - fix(platform): picker offered removed members; the demo-request queue filtered on a status that does not exist
+
+Two more defects, found by clicking the remaining Team/Onboarding actions in a browser and by auditing the route table against the capability policy.
+
+1. **The assignee pickers offered removed and suspended members.** The console kept one list (`_teamMembers`) for two different jobs: the Team table — which deliberately shows removed members, because their record is the audit trail — and the assignee pickers. A member I had just removed was still offered as an assignee, so work could be assigned to someone who can never see it. The pickers now use a separate list fed by `GET /api/platform/operators/directory` (active members only), and that list is re-fetched on demand rather than cached, so a suspension is reflected immediately.
+2. **The onboarding queue filtered demo requests on a status that does not exist.** The real vocabulary is `pending_otp → verified → provisioning → pending_review → provisioned`; there is no `pending`. `GET /my-work` queried `status: 'pending'`, so the demo-request half of the onboarding queue and its counters were **permanently empty** — the feature looked broken rather than wrong. Now `pending_review`, matching the console's own Demo Requests badge.
+
+Also added, in the same round:
+
+- **`server/__tests__/routes/platform-permission-matrix.test.js`** — the permission matrix, for every role template against every gated route. The expected result is derived from the template definition itself, so changing a role moves the expectation with it; the test then has to agree with reality. A hand-written expectation table would just be a second copy of the same decision, free to drift.
+- **`server/__tests__/routes/platform-policy-coverage.test.js`** — every mutating platform route must have a capability, or be declared public; and no policy rule may be dead. The audit behind it found the table complete: 76 routes, 71 policied, the remaining 5 being the public auth/settings routes registered before the session gate.
+
+---
+
 ## [v5.204.1] - 2026-10-21 - fix(platform): four console/email defects found by driving the team UI in a browser
 
 Found by clicking through the platform console with Playwright against the local server, and by auditing the captured invite email. All four are in the ADR-0008 work.

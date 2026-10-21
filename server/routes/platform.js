@@ -3226,12 +3226,15 @@ router.get('/my-work', async (req, res) => {
       Tickets.find({ status: { $in: openish }, slaDueAt: { $lt: new Date().toISOString() } })
         .sort({ slaDueAt: 1 }).limit(25).lean(),
       _model('schools').countDocuments({ status: 'pending' }),
-      platformModel('demo_requests').countDocuments({ status: 'pending' }),
-      /* Onboarding queue, split by ownership the same way tickets are. */
+      platformModel('demo_requests').countDocuments({ status: 'pending_review' }),
+      /* Onboarding queue, split by ownership the same way tickets are.
+         Demo requests reach the review queue as 'pending_review' (the
+         statuses before it are 'pending_otp' and 'verified', which are
+         still the applicant's own to finish). */
       _model('schools').find({ status: 'pending', assigneeId: me.id }).sort({ createdAt: 1 }).limit(25).lean(),
-      platformModel('demo_requests').find({ status: 'pending', assigneeId: me.id }).sort({ createdAt: 1 }).limit(25).lean(),
+      platformModel('demo_requests').find({ status: 'pending_review', assigneeId: me.id }).sort({ createdAt: 1 }).limit(25).lean(),
       _model('schools').countDocuments({ status: 'pending', assigneeId: null }),
-      platformModel('demo_requests').countDocuments({ status: 'pending', assigneeId: null }),
+      platformModel('demo_requests').countDocuments({ status: 'pending_review', assigneeId: null }),
     ]);
 
     return res.json({
