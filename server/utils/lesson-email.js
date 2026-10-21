@@ -10,7 +10,7 @@ const nodemailer = require('nodemailer');
 const SMTP_USER      = process.env.SMTP_USER;
 const SMTP_PASS      = (process.env.SMTP_PASS || '').replace(/\s+/g, '');
 const SMTP_READY     = !!(SMTP_USER && SMTP_PASS);
-const APP_URL        = process.env.APP_URL || 'https://msingi.io';
+const APP_URL        = require('./app-url').APP_URL;
 
 if (!SMTP_READY) {
   // Warning already emitted by email.js — no need to repeat

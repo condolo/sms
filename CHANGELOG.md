@@ -24,6 +24,19 @@ Found while fixing the ADR-0008 platform-team work after a deliberate "did you a
 
 ---
 
+## [v5.204.1] - 2026-10-21 - fix(platform): four console/email defects found by driving the team UI in a browser
+
+Found by clicking through the platform console with Playwright against the local server, and by auditing the captured invite email. All four are in the ADR-0008 work.
+
+1. **The console was bricked after the invite flow.** `_showInvitePanel()` rewrites the lock card in place (hides the username/password fields and the sign-in button, shows the invite form) and never undid it. Anyone who used an invite link and then signed out was left staring at the invite form with **no way to sign in again** — the console was unusable in that tab until a manual refresh. `_showLogin()` now calls a new `_resetLockScreen()` that restores the sign-in form, and every path back to the lock screen goes through it.
+2. **The invite result message was wiped instantly.** `teamInvite()` wrote its confirmation and *then* called `renderTeam()`, which replaces the whole view — so the message vanished before it could be read, and (far worse) so did **the invite link returned when the email could not be sent**, leaving the inviter with no way to deliver it. The refresh now happens first and the message is written after it.
+3. **The role chip showed the raw template key** ("Support_agent") instead of the human label ("Support agent"). `GET /me` now returns `templateLabel` and the console renders that.
+4. **The base URL had three definitions with two different fallbacks.** `APP_URL` was defined in `email.js` and `school-url.js` (falling back to `https://msingi.io`) and again in `routes/platform.js` (falling back to **`http://localhost:3005`**) and in `utils/demo.js` (**`http://localhost:3005`**). If `APP_URL` were ever unset in a deployment, the platform-team invite email and the demo-tenant emails would have linked to `localhost` — resolvable only on the server itself, so an invitee could never activate their account and the invite would silently expire. New `server/utils/app-url.js` is now the single definition; `email.js`, `school-url.js`, `demo.js`, `lesson-email.js` and `platform.js` all use it, and `server/__tests__/utils/app-url.test.js` (5 tests) fails if any module reads `process.env.APP_URL` directly again.
+
+Verified in a browser: invite link → validation (short password, mismatched password) → activation → console with the correct capability-gated nav → claim a ticket from *My Work* → sign out → sign back in. Also verified the failure path with SMTP stopped: the inviter is shown the link instead of losing it.
+
+---
+
 ## [v5.204.0] - 2026-10-21 - feat(platform): scoped platform team members, invites and work queues (ADR-0008)
 
 Direct request: "super admin team member or users to do some tasks like managing tickets onboarding etc." Until now the only unit of platform permission was a binary `tier` — every GET open to any tier, every mutating verb requiring `owner`. That made a real team member impossible: the choice was full owner (delete schools, impersonate, grant entitlements) or read-only-everything — and accounts could only be created by SSH-ing in and running `scripts/create-platform-operator.js`.

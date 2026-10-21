@@ -21,6 +21,7 @@ const { issueCsrfCookie, clearCsrfCookie, PLATFORM_CSRF_COOKIE_NAME } = require(
 const email    = require('../utils/email');
 const { dispatchNotification } = require('../utils/notify-dispatch');
 const { tenantModel, platformModel } = require('../utils/tenant-model');
+const { appUrl, RAW_APP_URL } = require('../utils/app-url');
 const { provisionOrganizationForSchool } = require('../utils/provision-organizations');
 const { provisionMembershipForUser } = require('../utils/provision-memberships');
 const { provisionIdentityForUser } = require('../utils/provision-identities');
@@ -328,8 +329,18 @@ router.get('/me', (req, res) => {
   return res.json({
     success: true,
     operator: req.platformOperator
-      ? { id: req.platformOperator.id, name: req.platformOperator.name, email: req.platformOperator.email, tier: req.platformOperator.tier, template: req.platformOperator.template || null }
-      : { id: 'platform', name: 'Platform Admin', email: null, tier: 'owner', template: 'owner' },
+      ? {
+          id: req.platformOperator.id,
+          name: req.platformOperator.name,
+          email: req.platformOperator.email,
+          tier: req.platformOperator.tier,
+          template: req.platformOperator.template || null,
+          // Human-readable role name for the console ("Support agent", not
+          // the raw template key "support_agent").
+          templateLabel: TEMPLATES[req.platformOperator.template]?.label
+            || (req.platformOperator.tier === 'owner' ? 'Owner' : null),
+        }
+      : { id: 'platform', name: 'Platform Admin', email: null, tier: 'owner', template: 'owner', templateLabel: 'Owner' },
     caps,
   });
 });
@@ -2677,13 +2688,17 @@ router.get('/test-email', requireOwnerTier, async (req, res) => {
   const smtpUser    = process.env.SMTP_USER;
   const smtpPass    = process.env.SMTP_PASS;
   const platformAddr = process.env.PLATFORM_EMAIL || smtpUser;
-  const appUrl      = process.env.APP_URL || '(not set)';
+  /* RAW_APP_URL, not APP_URL: this panel deliberately reports the value the
+     operator actually has configured — including "not set" — so a
+     misconfigured deployment is visible. The shared helper's APP_URL would
+     silently mask it behind the fallback. */
+  const configuredAppUrl = RAW_APP_URL || '(not set)';
 
   const config = {
     SMTP_USER:      smtpUser     ? `${smtpUser.slice(0, 4)}***` : '❌ NOT SET',
     SMTP_PASS:      smtpPass     ? '*** (set)'                   : '❌ NOT SET',
     PLATFORM_EMAIL: platformAddr ? platformAddr                   : '❌ NOT SET',
-    APP_URL:        appUrl,
+    APP_URL:        configuredAppUrl,
     smtpReady:      !!(smtpUser && smtpPass),
   };
 
@@ -3345,7 +3360,7 @@ async function _otherActiveOwnerExists(Operators, exceptId) {
   return (owners || []).some(o => o.id !== exceptId && isOwner(o));
 }
 function _platformUrl() {
-  return (process.env.APP_URL || 'http://localhost:3005').replace(/\/$/, '');
+  return appUrl();
 }
 
 /* GET /api/platform/operators/directory — minimal, active-operators-only

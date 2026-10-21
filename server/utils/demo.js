@@ -10,6 +10,7 @@
 
 const crypto = require('crypto');
 const { _model } = require('./model');
+const { appUrl } = require('./app-url');
 
 const TRIAL_DAYS         = Math.max(1, parseInt(process.env.DEMO_TRIAL_DAYS || '7', 10));
 const EXTENSION_DAYS     = Math.max(1, parseInt(process.env.DEMO_EXTENSION_DAYS || '7', 10));
@@ -105,8 +106,11 @@ function invalidateDemoCache(schoolId) {
 }
 
 function loginUrlFor(slug) {
-  const base = (process.env.APP_URL || 'http://localhost:3005').replace(/\/$/, '');
-  return `${base}/login?school=${encodeURIComponent(slug)}`;
+  /* The shared base URL, not a local copy. This used to fall back to
+     'http://localhost:3005' while every other module fell back to the
+     real site — so a deployment missing APP_URL would have emailed demo
+     tenants a link that only resolves on the server itself. */
+  return `${appUrl()}/login?school=${encodeURIComponent(slug)}`;
 }
 
 /* Role logins created for every demo tenant. One shared password per

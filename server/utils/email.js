@@ -27,7 +27,7 @@ const SMTP_PASS      = (process.env.SMTP_PASS || '').replace(/\s+/g, '');
 const SMTP_READY     = !!(SMTP_USER && SMTP_PASS);
 const PLATFORM_EMAIL = process.env.PLATFORM_EMAIL || SMTP_USER || '';
 const SUPPORT_EMAIL  = process.env.SUPPORT_EMAIL  || 'support@msingi.io';
-const APP_URL        = process.env.APP_URL || 'https://msingi.io';
+const APP_URL        = require('./app-url').APP_URL;
 
 if (!SMTP_READY) {
   console.warn('[EMAIL] ⚠️  SMTP_USER / SMTP_PASS not set — platform emails will be skipped.');

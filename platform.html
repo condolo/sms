@@ -239,6 +239,7 @@ async function _showApp() {
 }
 
 function _showLogin(message) {
+  _resetLockScreen();
   document.getElementById('lock-screen').style.display = 'flex';
   document.getElementById('app-shell').style.display   = 'none';
   document.getElementById('login-username').value      = '';
@@ -248,6 +249,32 @@ function _showLogin(message) {
     err.textContent   = message;
     err.style.display = 'block';
   }
+}
+
+/* Restore the sign-in form.
+   _showInvitePanel() rewrites the lock card in place (hides the username /
+   password fields and the sign-in button, shows the invite form). Without
+   this reset, anyone who used an invite link and then signed out was left
+   staring at the invite form with no way to sign in again — the console
+   was effectively bricked in that tab until a manual refresh. Every path
+   that returns to the lock screen goes through here. */
+function _resetLockScreen() {
+  const lock = document.getElementById('lock-screen');
+  if (!lock) return;
+  const heading = lock.querySelector('h2');
+  const sub     = lock.querySelector('p');
+  if (heading) heading.textContent = 'Platform Admin';
+  if (sub) sub.textContent = 'This area is restricted to Msingi system administrators. Sign in with your platform credentials.';
+  ['login-username', 'login-password'].forEach(id => {
+    const field = document.getElementById(id)?.closest('.pa-lock-field');
+    if (field) field.style.display = '';
+  });
+  const btn = document.getElementById('login-btn');
+  if (btn) btn.style.display = '';
+  const panel = document.getElementById('invite-panel');
+  if (panel) panel.style.display = 'none';
+  const err = document.getElementById('login-error');
+  if (err) { err.textContent = ''; err.style.display = 'none'; }
 }
 
 function _updateClock() {
@@ -298,7 +325,9 @@ function _applyCapabilityUI() {
   const who = document.getElementById('pa-whoami');
   if (who) {
     const op = (_me && _me.operator) || {};
-    const roleLabel = op.tier === 'owner' ? 'Owner' : (op.template || 'custom');
+    /* Prefer the server's human-readable role name ("Support agent") over
+       the raw template key ("support_agent"). */
+    const roleLabel = op.templateLabel || (op.tier === 'owner' ? 'Owner' : (op.template || 'custom'));
     who.innerHTML = `<strong>${_esc(op.name || 'Platform Admin')}</strong>`
       + `<span class="pa-role-chip">${_esc(roleLabel)}</span>`;
   }
@@ -3486,15 +3515,25 @@ async function teamInvite() {
   out.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Sending…';
   try {
     const res = await api('POST', '/operators/invite', { name, email, title, template, capabilities });
-    out.innerHTML = res.inviteUrl
-      ? `<div style="background:#fef3c7;border-radius:8px;padding:12px;font-size:13px">
-           Invite created, but the email could not be sent. Send them this link directly:
-           <div style="margin-top:6px"><input readonly value="${_esc(res.inviteUrl)}" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:8px" onclick="this.select()"></div>
-         </div>`
-      : '<span style="color:#166534">Invite sent.</span>';
-    renderTeam();
+    /* Refresh the member table FIRST, then write the result. The order
+       matters: renderTeam() replaces the whole view, so a message written
+       before it would be wiped instantly — which silently swallowed the
+       success confirmation, and (far worse) the invite link returned when
+       the email could not be sent, leaving the inviter with no way to
+       deliver it. */
+    await renderTeam();
+    const box = document.getElementById('team-invite-result');
+    if (box) {
+      box.innerHTML = res.inviteUrl
+        ? `<div style="background:#fef3c7;border-radius:8px;padding:12px;font-size:13px">
+             The invite was created, but the email could not be sent. Send this link to them directly:
+             <div style="margin-top:6px"><input readonly value="${_esc(res.inviteUrl)}" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:8px" onclick="this.select()"></div>
+           </div>`
+        : `<span style="color:#166534">Invite sent — ${_esc(email)} should receive it shortly.</span>`;
+    }
   } catch (err) {
-    out.innerHTML = `<span style="color:#b91c1c">${_esc(err.message || 'Could not send the invite.')}</span>`;
+    const box = document.getElementById('team-invite-result');
+    if (box) box.innerHTML = `<span style="color:#b91c1c">${_esc(err.message || 'Could not send the invite.')}</span>`;
   }
 }
 
