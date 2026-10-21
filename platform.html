@@ -3477,10 +3477,10 @@ function _teamHtml() {
       <h3 style="margin-top:0">Invite a team member</h3>
       <p style="color:#6b7280;font-size:13px;margin-top:0">They receive an email with a link to set their own password. The invite expires in 72 hours.</p>
       <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">
-        <input id="team-name"  placeholder="Full name"  style="flex:1;min-width:180px;border:1px solid #d1d5db;border-radius:8px;padding:9px 12px">
-        <input id="team-email" placeholder="Work email" style="flex:1;min-width:180px;border:1px solid #d1d5db;border-radius:8px;padding:9px 12px">
-        <input id="team-title" placeholder="Job title (optional)" style="flex:1;min-width:160px;border:1px solid #d1d5db;border-radius:8px;padding:9px 12px">
-        <select id="team-template" style="border:1px solid #d1d5db;border-radius:8px;padding:9px 12px">
+        <input id="team-name"  placeholder="Full name"  aria-label="Full name"  style="flex:1;min-width:180px;border:1px solid #d1d5db;border-radius:8px;padding:9px 12px">
+        <input id="team-email" placeholder="Work email" aria-label="Work email" style="flex:1;min-width:180px;border:1px solid #d1d5db;border-radius:8px;padding:9px 12px">
+        <input id="team-title" placeholder="Job title (optional)" aria-label="Job title (optional)" style="flex:1;min-width:160px;border:1px solid #d1d5db;border-radius:8px;padding:9px 12px">
+        <select id="team-template" aria-label="Role template" style="border:1px solid #d1d5db;border-radius:8px;padding:9px 12px">
           <option value="">Choose a role…</option>${roleOptions}
         </select>
       </div>
