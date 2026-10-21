@@ -678,3 +678,29 @@ body {
   color: var(--gray-300);
 }
 
+
+/* ── Platform Team ────────────────────────────────────────────
+   Identity block in the sidebar footer (who is signed in + role),
+   plus a compact button size used by the team table row actions. */
+.pa-whoami {
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border-radius: 8px;
+  background: rgba(255,255,255,.05);
+  font-size: 13px;
+  color: #cbd5e1;
+  line-height: 1.5;
+}
+.pa-whoami strong { display: block; color: #f1f5f9; font-weight: 600; }
+.pa-role-chip {
+  display: inline-block;
+  margin-top: 4px;
+  background: rgba(79,70,229,.25);
+  color: #c7d2fe;
+  border-radius: 20px;
+  padding: 2px 9px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+.pa-btn-sm { padding: 4px 9px; font-size: 12px; }

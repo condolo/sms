@@ -233,8 +233,26 @@ function _wrap(body, schoolName) {
    PLATFORM EMAILS — sent from Msingi Platform identity
    (school registration flow, system notices, platform alerts)
    ══════════════════════════════════════════════════════════════ */
+/* Platform team invite — a named operator account was created for
+   this person; they must set their own password to activate it. The
+   token is single-use and expires; only its hash is stored server-side. */
+async function sendPlatformOperatorInvite({ name, email: toEmail, inviterName, templateLabel, inviteUrl, expiresAt }) {
+  const expires = expiresAt ? new Date(expiresAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }) : null;
+  const html = _wrap(`
+    <h2>You've been invited to the Msingi platform team</h2>
+    <p>Hi ${_escapeHtml(name || 'there')},${inviterName ? ` <strong>${_escapeHtml(inviterName)}</strong> has` : ' you have been'} invited you to a Msingi platform operator account${templateLabel ? ` with the role <strong>${_escapeHtml(templateLabel)}</strong>` : ''}.</p>
+    <p>Choose a password to activate your account:</p>
+    <p style="text-align:center"><a href="${inviteUrl}" class="btn">Set your password &rarr;</a></p>
+    <div class="info">
+      <p><strong>Sign-in:</strong> ${_escapeHtml(toEmail)}</p>
+      ${expires ? `<p><strong>Invite expires:</strong> ${expires}</p>` : ''}
+    </div>
+    <p style="font-size:13px;color:#6b7280">If you weren't expecting this, you can safely ignore this email — the invite expires on its own and nothing is activated until a password is set.</p>
+  `);
+  return _send(toEmail, '[Msingi] Your platform team invitation', html);
+}
 
-/* 1. School registered — pending review */
+/* 2. School registered — pending review */
 async function sendRegistrationPending({ adminName, adminEmail, schoolName, plan }) {
   const html = _wrap(`
     <h2>Your application is under review 👋</h2>
@@ -1176,4 +1194,5 @@ module.exports = {
   sendAttendanceSummaryAlert,
   sendAbsenteeStaffAlert,
   sendPayrollStatusEmail,
+  sendPlatformOperatorInvite,
 };
