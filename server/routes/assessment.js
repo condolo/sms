@@ -1033,7 +1033,14 @@ async function _computeMarkList(req) {
     .sort((a, b) => a.code.localeCompare(b.code));
 
   const Students = tenantModel('students', tenantContext(req));
-  const studentFilter = { schoolId, classId, status: { $nin: ['withdrawn', 'graduated'] } };
+  // Same default every other roster (classes.js/streams.js GET /:id/students)
+  // already enforces: a deactivated student must not appear here either.
+  // This only ever excluded withdrawn/graduated, so a suspended, inactive,
+  // or transferred student still showed up in this missing-marks overview
+  // even though they're correctly hidden from Attendance, the Markbook
+  // itself, and the Report Cards picker — the exact gap those routes'
+  // own fix comments already describe, just never carried over here.
+  const studentFilter = { schoolId, classId, status: 'active' };
   if (streamId) studentFilter.streamId = streamId;
   const students = await Students.find(studentFilter)
     .select('id firstName lastName admissionNumber streamId')
