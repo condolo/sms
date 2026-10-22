@@ -27,6 +27,10 @@ function mockChainObj(obj) {
 }
 function mockMatches(doc, filter) {
   return Object.entries(filter || {}).every(([k, v]) => {
+    // Real Mongoose compares _id against an ObjectId instance (the route
+    // wraps it with `new mongoose.Types.ObjectId(pId)`); the mock's docs
+    // store it as a plain string, so compare both sides as strings.
+    if (k === '_id' && v != null) return String(doc._id) === String(v);
     if (v && typeof v === 'object' && !Array.isArray(v)) {
       if ('$in' in v) return v.$in.includes(doc[k]);
       return true;
@@ -138,5 +142,62 @@ describe('GET /api/classes/:id/students?electiveSubjectId=', () => {
       .query({ electiveSubjectId: KISWAHILI, streamId: STREAM_RUBY, status: 'all' });
     expect(res.status).toBe(200);
     expect(res.body.data.map(s => s.id)).toEqual(['stu_3']);
+  });
+});
+
+describe('GET /api/classes/:id/students?electiveSubjectId= — a class that predates the UUID-`id` migration', () => {
+  // Live-confirmed against a real school: 14 of 15 such legacy classes
+  // (no `id` field, only Mongo _id) have at least one elective subject.
+  // The route resolved `cls` correctly via its _id fallback, but then
+  // called isElective(req, cls.id, subjectId) — cls.id is undefined for
+  // these classes — so isElective's own class_subjects lookup (classId:
+  // undefined) never matched the real link (classId: the _id string),
+  // silently returning false ("not elective") and falling through to
+  // the whole-class branch: every active student, not just the enrolled
+  // 3 of 7. Confirmed live via the real route with the real class before
+  // this fix; this is the regression test for it.
+  const LEGACY_CLASS_ID = '6a3815ed6eb039df2bea8831'; // no `id` field
+  const CHEMISTRY = 'subj_chemistry';
+
+  const LEGACY_STUDENTS = [
+    { id: 'stu_a', schoolId: SCHOOL_A, classId: LEGACY_CLASS_ID, status: 'active', firstName: 'Alvin', lastName: 'Ankunda', admissionNumber: 'L1' },
+    { id: 'stu_b', schoolId: SCHOOL_A, classId: LEGACY_CLASS_ID, status: 'active', firstName: 'Joseph', lastName: 'Muinde', admissionNumber: 'L2' },
+    { id: 'stu_c', schoolId: SCHOOL_A, classId: LEGACY_CLASS_ID, status: 'active', firstName: 'Tumelo', lastName: 'Kimunya', admissionNumber: 'L3' },
+    { id: 'stu_d', schoolId: SCHOOL_A, classId: LEGACY_CLASS_ID, status: 'active', firstName: 'Salma', lastName: 'Abdi', admissionNumber: 'L4' },
+  ];
+
+  beforeEach(() => {
+    mockJwtUser = { userId: 'usr_admin', schoolId: SCHOOL_A, role: 'admin', roles: ['admin'] };
+    // No `id` field at all — only `_id`, same shape a pre-migration class
+    // doc actually has.
+    mockClasses  = mockFakeCollection([{ _id: LEGACY_CLASS_ID, schoolId: SCHOOL_A, name: 'Legacy Form 3' }]);
+    mockStreams  = mockFakeCollection([]);
+    mockStudents = mockFakeCollection(LEGACY_STUDENTS);
+    mockTeachingAssignments = mockFakeCollection([]);
+    mockClassSubjects = mockFakeCollection([
+      { schoolId: SCHOOL_A, classId: LEGACY_CLASS_ID, subjectId: CHEMISTRY, isCompulsoryForClass: false },
+    ]);
+    // Only 3 of the 4 active students are actually enrolled.
+    mockStudentSubjects = mockFakeCollection([
+      { schoolId: SCHOOL_A, classId: LEGACY_CLASS_ID, subjectId: CHEMISTRY, studentId: 'stu_a' },
+      { schoolId: SCHOOL_A, classId: LEGACY_CLASS_ID, subjectId: CHEMISTRY, studentId: 'stu_b' },
+      { schoolId: SCHOOL_A, classId: LEGACY_CLASS_ID, subjectId: CHEMISTRY, studentId: 'stu_c' },
+    ]);
+    invalidateScopeCache('usr_admin', SCHOOL_A);
+  });
+
+  test('narrows to only the enrolled students, not the whole class', async () => {
+    const res = await supertest(buildApp())
+      .get(`/api/classes/${LEGACY_CLASS_ID}/students`)
+      .query({ electiveSubjectId: CHEMISTRY });
+    expect(res.status).toBe(200);
+    expect(res.body.data.map(s => s.id).sort()).toEqual(['stu_a', 'stu_b', 'stu_c']); // not stu_d
+  });
+
+  test('a genuinely compulsory subject for the same legacy class still returns everyone (no over-narrowing)', async () => {
+    const res = await supertest(buildApp())
+      .get(`/api/classes/${LEGACY_CLASS_ID}/students`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.map(s => s.id).sort()).toEqual(['stu_a', 'stu_b', 'stu_c', 'stu_d']);
   });
 });

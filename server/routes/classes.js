@@ -287,11 +287,25 @@ router.get('/:id/students', authMiddleware, PLAN, MODGATE, rbac('students', 'rea
     // directly: "the list is general, can you separate it per class" — that teacher's
     // roster was always the full merged list with no way to narrow it. Only the Markbook
     // asks for electiveSubjectId at all (see elective-scope.js).
+    // Canonical class identity for the class_subjects/teaching_assignments
+    // lookups below — a class that predates the UUID-`id` migration has no
+    // `id` field at all (live-confirmed: several real classes), so `cls.id`
+    // alone is undefined for them. Live-confirmed bug: isElective(req,
+    // cls.id, subjectId) with cls.id === undefined never matches the real
+    // class_subjects row (which stores the class's actual _id string as
+    // classId), so a genuinely elective subject for a legacy class was
+    // silently treated as "not elective" — the Markbook (and this route's
+    // own caller) got back the WHOLE class roster instead of just the
+    // enrolled students, for every legacy class's electives. classIdForms
+    // below (used for the students query itself) already canonicalizes
+    // this correctly — compute it early enough to use here too.
+    const canonicalClassId = cls.id || String(cls._id);
+
     let electiveIds = null;
     if (req.query.electiveSubjectId) {
       const subjectId = String(req.query.electiveSubjectId);
-      if (await isElective(req, cls.id, subjectId)) {
-        if (!(await canTeachElective(req, cls.id, subjectId))) {
+      if (await isElective(req, canonicalClassId, subjectId)) {
+        if (!(await canTeachElective(req, canonicalClassId, subjectId))) {
           return E.forbidden(res, 'You are not assigned to teach this elective in this class.');
         }
         electiveIds = [...(await enrolledStudentIds(req, subjectId))];
@@ -304,7 +318,13 @@ router.get('/:id/students', authMiddleware, PLAN, MODGATE, rbac('students', 'rea
     } else if (req.query.assessmentScope === 'true') {
       req.scope = await ScopeEngine.resolveAssessmentScope(req);
     }
-    const inWholeClassScope = ScopeEngine.isClassInScope(req, 'students', cls.id);
+    // Same canonicalization as above — isClassInScope(req, 'students',
+    // undefined) short-circuits to `true` (its own "nothing to check"
+    // default), which for a legacy class made inWholeClassScope always
+    // true regardless of the caller's real scope: a teacher assigned to
+    // only ONE stream of a legacy class got every OTHER stream's
+    // students too, since the narrowing below never ran.
+    const inWholeClassScope = ScopeEngine.isClassInScope(req, 'students', canonicalClassId);
     let myStreamIds = req.scope?.streamIds ?? [];
     // Raised directly, and dangerous-sounding until traced: a real form/
     // homeroom teacher (streams.js's own formTeacherId, set independently of

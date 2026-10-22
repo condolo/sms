@@ -34,6 +34,11 @@ function mockChainObj(obj) {
 }
 function mockMatchesFilter(doc, filter) {
   return Object.entries(filter || {}).every(([k, v]) => {
+    // Real Mongoose compares _id against an ObjectId instance (the route
+    // wraps it with `new mongoose.Types.ObjectId(pId)` for its _id
+    // fallback lookup); the mock's docs store it as a plain string, so
+    // compare both sides as strings.
+    if (k === '_id' && v != null) return String(doc._id) === String(v);
     if (v && typeof v === 'object' && !Array.isArray(v)) {
       if ('$in' in v) return v.$in.includes(doc[k]);
       return true;
@@ -111,19 +116,38 @@ const STUDENT_4A = {
   parentName: 'Mr Onyango', parentEmail: 'onyango.parent@example.com', parentPhone: '+254700000002',
 };
 
+// A class that predates the UUID-`id` migration — no `id` field at all,
+// only Mongo _id (live-confirmed: several real classes are exactly this
+// shape). class_subjects/students/teaching_assignments reference it by
+// that raw _id string, same as every other collection would.
+const LEGACY_CLASS_ID = '6a3815ed6eb039df2bea8831';
+const STUDENT_LEGACY_RED = {
+  id: 'stu_legacy_1', schoolId: SCHOOL_A, classId: LEGACY_CLASS_ID, streamId: 'strm_legacy_red', status: 'active',
+  firstName: 'Alvin', lastName: 'Ankunda', admissionNumber: 'ADM-LEG-01',
+  parentName: 'Mrs Ankunda', parentEmail: 'ankunda.parent@example.com', parentPhone: '+254700000003',
+};
+const STUDENT_LEGACY_BLUE = {
+  id: 'stu_legacy_2', schoolId: SCHOOL_A, classId: LEGACY_CLASS_ID, streamId: 'strm_legacy_blue', status: 'active',
+  firstName: 'Nabila', lastName: 'Njeri', admissionNumber: 'ADM-LEG-02',
+  parentName: 'Mrs Njeri', parentEmail: 'njeri.parent@example.com', parentPhone: '+254700000004',
+};
+
 beforeEach(() => {
   jest.clearAllMocks();
   mockJwtUser = { userId: 'usr_admin', schoolId: SCHOOL_A, role: 'admin', roles: ['admin'] };
   mockClasses = mockMakeFakeCollection([
     { id: 'cls_9c', schoolId: SCHOOL_A, name: 'Class 9C' },
     { id: 'cls_4a', schoolId: SCHOOL_A, name: 'Class 4A' },
+    { _id: LEGACY_CLASS_ID, schoolId: SCHOOL_A, name: 'Legacy Form 3' }, // no `id` field
   ]);
   mockStreams = mockMakeFakeCollection([
     { id: 'strm_9c_red',  schoolId: SCHOOL_A, classId: 'cls_9c', name: 'Red' },
     { id: 'strm_9c_blue', schoolId: SCHOOL_A, classId: 'cls_9c', name: 'Blue' },
     { id: 'strm_4a_blue', schoolId: SCHOOL_A, classId: 'cls_4a', name: 'Blue' },
+    { id: 'strm_legacy_red',  schoolId: SCHOOL_A, classId: LEGACY_CLASS_ID, name: 'Red' },
+    { id: 'strm_legacy_blue', schoolId: SCHOOL_A, classId: LEGACY_CLASS_ID, name: 'Blue' },
   ]);
-  mockStudents = mockMakeFakeCollection([STUDENT_9C, STUDENT_9C_BLUE, STUDENT_4A]);
+  mockStudents = mockMakeFakeCollection([STUDENT_9C, STUDENT_9C_BLUE, STUDENT_4A, STUDENT_LEGACY_RED, STUDENT_LEGACY_BLUE]);
   mockTeachingAssignments = mockMakeFakeCollection([]);
   mockHomeroomTeacherRecord = null; // no linked teacher record by default — most tests here aren't about homeroom
   invalidateScopeCache('usr_admin', SCHOOL_A);
@@ -225,6 +249,42 @@ describe('GET /api/classes/:id/students — AUTHZ-27', () => {
     asStreamTeacherOf('cls_4a', 'strm_4a_blue');
     const res = await supertest(buildApp()).get('/api/classes/cls_9c/students');
     expect(res.status).toBe(403);
+  });
+});
+
+describe('GET /api/classes/:id/students — AUTHZ-27, a class that predates the UUID-`id` migration', () => {
+  // Live-confirmed real bug, same root cause as the elective-roster fix
+  // in classes-elective-stream-scope.test.js: this route resolves `cls`
+  // correctly via its _id fallback, but then called
+  // ScopeEngine.isClassInScope(req, 'students', cls.id) — cls.id is
+  // undefined for a legacy class — and isClassInScope's own "nothing to
+  // check" default (`if (!classId) return true`) made inWholeClassScope
+  // unconditionally TRUE for every legacy class, for every caller,
+  // regardless of their real scope. A teacher assigned to only ONE
+  // stream of a legacy class got every OTHER stream's students too —
+  // the exact AUTHZ-27 data exposure this file's own header describes,
+  // just reopened specifically for classes with no `id` field.
+  test('a teacher stream-scoped to ONLY Red sees Red\'s roster, not Blue\'s, even for a legacy class', async () => {
+    asStreamTeacherOf(LEGACY_CLASS_ID, 'strm_legacy_red');
+    const res = await supertest(buildApp()).get(`/api/classes/${LEGACY_CLASS_ID}/students`);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].firstName).toBe('Alvin');
+    expect(JSON.stringify(res.body)).not.toContain('Nabila');
+    expect(JSON.stringify(res.body)).not.toContain('njeri.parent@example.com');
+  });
+
+  test('a teacher with ZERO assignments is still denied this legacy class\'s roster', async () => {
+    asTeacherOf(); // no assignments at all
+    const res = await supertest(buildApp()).get(`/api/classes/${LEGACY_CLASS_ID}/students`);
+    expect(res.status).toBe(403);
+    expect(JSON.stringify(res.body)).not.toContain('Alvin');
+  });
+
+  test('admin (school-level scope) still sees the whole legacy class roster', async () => {
+    const res = await supertest(buildApp()).get(`/api/classes/${LEGACY_CLASS_ID}/students`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.map(s => s.firstName).sort()).toEqual(['Alvin', 'Nabila']);
   });
 });
 
