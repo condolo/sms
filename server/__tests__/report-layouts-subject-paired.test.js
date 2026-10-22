@@ -30,6 +30,10 @@ function makeSpyDoc() {
     // RCE8 — registerFont (premium embedded type system) and lineWidth
     // (hairline rules in the new cover/sign-off/observation components).
     'registerFont', 'lineWidth',
+    // Logo watermark — doc.opacity() scopes to image draws too, unlike
+    // fillOpacity (text-only); the DRAFT text watermark uses the latter,
+    // the new logo watermark needs the former.
+    'opacity',
   ];
   for (const m of methods) {
     spy[m] = (...args) => { calls.push({ method: m, args }); return spy; };
@@ -85,19 +89,24 @@ describe('subject_paired.renderPdf — structure', () => {
   // RCE8 — the cover no longer forces its own page (reviewer: "Do not
   // reserve a full page for learner identity unless the content
   // actually requires it"); with only 2 subjects, everything in this
-  // fixture fits on page 1, so isFirstPage=true now adds zero pages.
+  // fixture used to fit on page 1. The assessment-type key (new: "what
+  // does CA/HW/MT/ET mean", drawn just after marks) adds one more short
+  // line here — a real, if small, amount of extra vertical space — which
+  // is just enough to push this specific tight 2-subject fixture onto a
+  // second page. One extra addPage is the correct, physical consequence
+  // of genuinely new content, not a layout regression.
   test('does not force a separate cover page when the content fits on page 1', () => {
     const { spy, calls } = makeSpyDoc();
     const sections = computeSections();
     LAYOUTS.subject_paired.renderPdf(spy, sections, {}, true);
-    expect(calls.filter(c => c.method === 'addPage').length).toBe(0);
+    expect(calls.filter(c => c.method === 'addPage').length).toBe(1);
   });
 
   test('isFirstPage=false still adds exactly the one leading page (outer per-student break)', () => {
     const { spy, calls } = makeSpyDoc();
     const sections = computeSections();
     LAYOUTS.subject_paired.renderPdf(spy, sections, {}, false);
-    expect(calls.filter(c => c.method === 'addPage').length).toBe(1);
+    expect(calls.filter(c => c.method === 'addPage').length).toBe(2);
   });
 
   test('does not throw when nothing optional is configured (no photo, no behaviour, no attendance)', () => {
@@ -316,9 +325,13 @@ describe('subject_paired — a missing mark or deviation is left blank, not show
       subjects: { math: { finalScore: 85, grade: 'A', breakdown: { cat: 80 } } }, // exam never entered
     });
     const html = LAYOUTS.subject_paired.renderHtml(sections);
-    // The CAT cell has its real value; the Exam cell is an empty <td>, not an em-dash.
-    expect(html).toContain('<td style="border:1px solid #e2e8f0;padding:5px 8px;text-align:center">80.0</td>');
-    expect(html).toMatch(/<td style="border:1px solid #e2e8f0;padding:5px 8px;text-align:center"><\/td>/);
+    // The CAT cell has its real value; the Exam cell is an empty <td>, not an
+    // em-dash. width:23% on both — the fixed-width alignment fix (every type
+    // column gets the same explicit width in every one of this layout's
+    // independent per-subject <table>s, so they can never visually drift
+    // from the shared header table above them).
+    expect(html).toContain('<td style="border:1px solid #e2e8f0;padding:5px 8px;text-align:center;width:23%">80.0</td>');
+    expect(html).toMatch(/<td style="border:1px solid #e2e8f0;padding:5px 8px;text-align:center;width:23%"><\/td>/);
   });
 
   test('no prior-term deviation leaves the Dev cell empty, not an em-dash', () => {
@@ -383,5 +396,67 @@ describe('subject_paired — grade shows as a colored badge, not plain text', ()
     const html = LAYOUTS.subject_paired.renderHtml(computeSections());
     expect(html).toMatch(/background:#f7ede1;color:#8a5a2b;font-weight:700">A<\/span>/);
     expect(html).toMatch(/background:#f7ede1;color:#8a5a2b;font-weight:700">C<\/span>/);
+  });
+});
+
+describe('subject_paired — assessment-type key ("what does CA/HW/MT/ET mean")', () => {
+  // Direct request: define these abbreviations on the report itself,
+  // "flexible enough to define only what the school has configured" —
+  // never a hardcoded universal glossary. typeEntries (hence the key)
+  // is already derived from the snapshot's own assessmentWeights, so a
+  // school running a completely different set of types gets a key that
+  // matches exactly what's on their own report.
+  test('lists the KEY and full label for every configured type, placed after marks, before the Grading Key', () => {
+    const html = LAYOUTS.subject_paired.renderHtml(computeSections());
+    const keyIdx     = html.indexOf('cat</b> = CAT');
+    const examIdx    = html.indexOf('exam</b> = Exam');
+    const totalIdx   = html.indexOf('Total Score');
+    const gradingIdx = html.indexOf('Grading Key');
+    expect(keyIdx).toBeGreaterThan(-1);
+    expect(examIdx).toBeGreaterThan(-1);
+    // After the marks/summary table, before the next section down.
+    expect(keyIdx).toBeGreaterThan(totalIdx);
+    expect(keyIdx).toBeLessThan(gradingIdx);
+  });
+
+  test('a school with no assessment types configured at all omits the key entirely', () => {
+    const sections = computeSections({ assessmentWeights: [] });
+    const html = LAYOUTS.subject_paired.renderHtml(sections);
+    expect(html).not.toContain('</b> = ');
+  });
+
+  test('PDF renderer draws the same key text without throwing', () => {
+    const { spy, calls } = makeSpyDoc();
+    const sections = computeSections();
+    LAYOUTS.subject_paired.renderPdf(spy, sections, {}, true);
+    const textCalls = calls.filter(c => c.method === 'text').map(c => c.args[0]);
+    expect(textCalls.some(t => String(t).includes('cat = CAT') && String(t).includes('exam = Exam'))).toBe(true);
+  });
+});
+
+describe('subject_paired — faint school-logo watermark ("for every school")', () => {
+  test('renders a low-opacity, centered <img> when the school has a logo on file', () => {
+    const sections = computeSections({}, {}, { school: { logoUrl: 'https://cdn.example/logo.png' } });
+    const html = LAYOUTS.subject_paired.renderHtml(sections);
+    expect(html).toMatch(/<img src="https:\/\/cdn\.example\/logo\.png" alt="" style="position:fixed;[^"]*opacity:0\.07[^"]*"/);
+  });
+
+  test('no logo on file is a silent no-op, not a broken-image placeholder', () => {
+    const html = LAYOUTS.subject_paired.renderHtml(computeSections());
+    expect(html).not.toMatch(/opacity:0\.07/);
+  });
+
+  test('PDF renderer draws the logo image at low opacity when images.schoolLogo is a real buffer', () => {
+    const { spy, calls } = makeSpyDoc();
+    const sections = computeSections();
+    LAYOUTS.subject_paired.renderPdf(spy, sections, { schoolLogo: Buffer.from('fake-image') }, true);
+    expect(calls.some(c => c.method === 'image')).toBe(true);
+  });
+
+  test('PDF renderer never calls doc.image for the watermark when there is no logo buffer', () => {
+    const { spy, calls } = makeSpyDoc();
+    const sections = computeSections();
+    LAYOUTS.subject_paired.renderPdf(spy, sections, {}, true);
+    expect(calls.some(c => c.method === 'image')).toBe(false);
   });
 });

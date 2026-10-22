@@ -29,6 +29,9 @@ function makeSpyDoc() {
     // RCE8 — registerFont (premium embedded type system) and lineWidth
     // (hairline rules in the new cover/sign-off/observation components).
     'registerFont', 'lineWidth',
+    // Logo watermark — doc.opacity() scopes to image draws too, unlike
+    // fillOpacity (text-only).
+    'opacity',
   ];
   for (const m of methods) {
     spy[m] = (...args) => { calls.push({ method: m, args }); return spy; };
@@ -336,5 +339,48 @@ describe('marks_then_comments — class teacher and principal sign-off stack ver
     const html = LAYOUTS.marks_then_comments.renderHtml(computeSections());
     expect(html).toContain('display:flex;flex-direction:column;gap:16px');
     expect(html).not.toContain('display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px');
+  });
+});
+
+describe('marks_then_comments — assessment-type key ("what does CA/HW/MT/ET mean")', () => {
+  // Same direct request/reasoning as subject_paired's identical test —
+  // sourced only from this snapshot's own assessmentWeights.
+  test('lists the KEY and full label for every configured type, after marks, before the Grading Key', () => {
+    const html = LAYOUTS.marks_then_comments.renderHtml(computeSections());
+    const keyIdx     = html.indexOf('cat</b> = CAT');
+    const totalIdx   = html.indexOf('Total Score');
+    const gradingIdx = html.indexOf('Grading Key');
+    expect(keyIdx).toBeGreaterThan(-1);
+    expect(html).toContain('exam</b> = Exam');
+    expect(keyIdx).toBeGreaterThan(totalIdx);
+    expect(keyIdx).toBeLessThan(gradingIdx);
+  });
+
+  test('no assessment types configured omits the key entirely', () => {
+    const html = LAYOUTS.marks_then_comments.renderHtml(computeSections({ assessmentWeights: [] }));
+    expect(html).not.toContain('</b> = ');
+  });
+});
+
+describe('marks_then_comments — faint school-logo watermark ("for every school")', () => {
+  test('renders a low-opacity, centered <img> when the school has a logo on file', () => {
+    const html = LAYOUTS.marks_then_comments.renderHtml(computeSections({}, {}, { school: { logoUrl: 'https://cdn.example/logo.png' } }));
+    expect(html).toMatch(/<img src="https:\/\/cdn\.example\/logo\.png" alt="" style="position:fixed;[^"]*opacity:0\.07[^"]*"/);
+  });
+
+  test('no logo on file is a silent no-op', () => {
+    const html = LAYOUTS.marks_then_comments.renderHtml(computeSections());
+    expect(html).not.toMatch(/opacity:0\.07/);
+  });
+
+  test('PDF renderer draws the logo image when images.schoolLogo is a real buffer, skips it otherwise', () => {
+    const sections = computeSections();
+    const withLogo = makeSpyDoc();
+    LAYOUTS.marks_then_comments.renderPdf(withLogo.spy, sections, { schoolLogo: Buffer.from('fake-image') }, true);
+    expect(withLogo.calls.some(c => c.method === 'image')).toBe(true);
+
+    const withoutLogo = makeSpyDoc();
+    LAYOUTS.marks_then_comments.renderPdf(withoutLogo.spy, sections, {}, true);
+    expect(withoutLogo.calls.some(c => c.method === 'image')).toBe(false);
   });
 });

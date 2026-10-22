@@ -34,6 +34,9 @@ function makeSpyDoc() {
     'addPage', 'rect', 'roundedRect', 'circle', 'fill', 'stroke', 'fillColor', 'fontSize',
     'font', 'text', 'image', 'save', 'translate', 'rotate', 'fillOpacity', 'restore', 'moveTo', 'lineTo',
     'registerFont', 'lineWidth',
+    // Logo watermark — doc.opacity() scopes to image draws too, unlike
+    // fillOpacity (text-only).
+    'opacity',
   ];
   for (const m of methods) {
     spy[m] = (...args) => { calls.push({ method: m, args }); return spy; };
@@ -136,5 +139,30 @@ describe('kindergarten.renderHtml — remark text honours its toggle; name/signa
       )
     );
     expect(html).not.toContain("'s General Comment");
+  });
+});
+
+describe('kindergarten — faint school-logo watermark ("for every school")', () => {
+  // No assessment-type key here — Kindergarten uses competency bands,
+  // not CA/HW/MT/ET, so that section doesn't apply to this layout.
+  test('renders a low-opacity, centered <img> when the school has a logo on file', () => {
+    const html = LAYOUTS.kindergarten.renderHtml(computeSections({}, {}, { school: { logoUrl: 'https://cdn.example/logo.png' } }));
+    expect(html).toMatch(/<img src="https:\/\/cdn\.example\/logo\.png" alt="" style="position:fixed;[^"]*opacity:0\.07[^"]*"/);
+  });
+
+  test('no logo on file is a silent no-op', () => {
+    const html = LAYOUTS.kindergarten.renderHtml(computeSections());
+    expect(html).not.toMatch(/opacity:0\.07/);
+  });
+
+  test('PDF renderer draws the logo image when images.schoolLogo is a real buffer, skips it otherwise', () => {
+    const sections = computeSections();
+    const withLogo = makeSpyDoc();
+    LAYOUTS.kindergarten.renderPdf(withLogo.spy, sections, { schoolLogo: Buffer.from('fake-image') }, true);
+    expect(withLogo.calls.some(c => c.method === 'image')).toBe(true);
+
+    const withoutLogo = makeSpyDoc();
+    LAYOUTS.kindergarten.renderPdf(withoutLogo.spy, sections, {}, true);
+    expect(withoutLogo.calls.some(c => c.method === 'image')).toBe(false);
   });
 });

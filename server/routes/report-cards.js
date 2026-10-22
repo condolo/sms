@@ -2401,6 +2401,12 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
   const typeEntries = weights.map(w => ({
     key:   w.assessmentType,
     label: (w.label || w.assessmentType).split(/[\s/]+/)[0],
+    // Untruncated, e.g. "Continuous Assessment" rather than the column-
+    // header's first-word-only "label" above — for the assessment-key
+    // explainer (what does CA/HW/MT/ET mean), which must only ever list
+    // what THIS school actually configured (weights, hence typeEntries,
+    // is already scoped to exactly that), never a hardcoded universal set.
+    fullLabel: w.label || w.assessmentType,
   }));
 
   const passMark = snap.passMark ?? config.passMark ?? 40;
