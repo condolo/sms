@@ -3052,6 +3052,52 @@ function _escapeRegex(s) {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/**
+ * Every active platform operator who can read tickets — i.e. whose
+ * resolved capability set includes 'tickets.view' or the '*' sentinel.
+ * Used by the new-ticket notice fan-out so the right people hear about
+ * new work: owner (always '*'), support_agent, onboarding, viewer, and
+ * any custom template that explicitly granted tickets.view.
+ *
+ * Returns [{ id, name, email }]; suspended and removed operators are
+ * excluded (they cannot act on the ticket anyway).
+ */
+async function _ticketCapableOperators() {
+  const Operators = _model('platform_operators');
+  const all = await Operators.find({ isActive: true, status: { $ne: 'suspended' } }).lean();
+  return (all || [])
+    .map(op => {
+      const caps = resolveCapabilities(op);
+      const canView = caps.includes('*') || caps.includes('tickets.view');
+      return canView ? { id: op.id, name: op.name, email: op.email } : null;
+    })
+    .filter(Boolean);
+}
+
+/**
+ * Fan out the new-ticket notice to every ticket-capable operator.
+ * One `sendTicketNotice` call per recipient so a single bad address (a
+ * typo, a bounced mailbox) never sinks the rest. All errors are
+ * swallowed — the ticket itself is already persisted, so the notice is
+ * best-effort, matching the existing support-reply behaviour.
+ */
+async function _notifyTeamOfNewTicket(ticket) {
+  const operators = await _ticketCapableOperators().catch(() => []);
+  const tasks = operators
+    .filter(o => o.email)
+    .map(o => email.sendTicketNotice({
+      to: o.email,
+      ref: ticket.ref,
+      subject: ticket.subject,
+      priority: ticket.priority,
+      source: ticket.source,
+      schoolName: ticket.schoolName || null,
+      slaDueAt: ticket.slaDueAt,
+      requesterName: ticket.requesterName || null,
+    }).catch(() => {}));
+  await Promise.all(tasks);
+}
+
 router.get('/tickets', async (req, res) => {
   try {
     const { status, category, q, limit = 100, assigned } = req.query;
@@ -3135,6 +3181,11 @@ router.post('/tickets', async (req, res) => {
       details: { category: ticket.category },
       req,
     });
+    /* Tell the whole team that can read tickets — best-effort, never
+       blocks the 201. The email carries the ref, priority, source and
+       SLA due date so the recipient can triage without opening the
+       console. */
+    _notifyTeamOfNewTicket(ticket).catch(() => {});
     return res.status(201).json({ success: true, ticket });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });

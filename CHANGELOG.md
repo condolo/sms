@@ -24,6 +24,28 @@ Found while fixing the ADR-0008 platform-team work after a deliberate "did you a
 
 ---
 
+## [v5.205.0] - 2026-10-22 - feat(platform): new-ticket notice fanned out to the team
+
+**What changed:** when a support ticket is created — either by a school user (`POST /api/support/tickets`) or by a platform operator (`POST /api/platform/tickets`) — every active operator who can read tickets (capability `tickets.view` or `*`) now gets an email. One email per recipient, so a single bad mailbox never sinks the rest. Suspended / removed / capability-less operators are excluded; a failed SMTP never blocks the 201.
+
+**Why:** ADR-0008 listed "notification when work is assigned to you" as a non-goal. In practice, the team wanted to *hear about new tickets* the moment they land — the console alone is not enough when you're on a call. This closes the loop without changing the console's UI.
+
+**How it works:**
+
+- `server/utils/email.js` — new template `sendTicketNotice({ to, ref, subject, priority, source, schoolName, slaDueAt, requesterName })`. Subject carries the ticket ref and subject line; the body links to `/platform/tickets`, shows priority / source / school / SLA due date, and labels the requester when `source === 'user'`.
+- `server/routes/platform.js` — new helper `_ticketCapableOperators()` (active, not-suspended, capability-gated) and `_notifyTeamOfNewTicket(ticket)` (one `sendTicketNotice` per recipient, all errors swallowed). Wired into `POST /tickets` after the ticket is persisted and the audit entry is logged — the fan-out is fire-and-forget, so a slow SMTP never delays the response.
+- `server/routes/support.js` — the school-side route fans out the same notice inline (the selection logic is duplicated there because the route file is self-contained; a future refactor could extract a shared helper). The ticket is persisted first, then the fan-out runs best-effort.
+
+**What it does NOT change:**
+
+- No email on ticket **assignment**, **status change**, or **priority change** — only on creation. Those stay in-scope for a follow-up.
+- The existing `sendSupportReply` path (public operator reply → requester email) is untouched.
+- Demo-school suppression: the support route's fan-out runs for demo schools too (the team *should* know a demo school opened a ticket). The demo guard on `sendSupportReply` is a separate concern (outbound email to a fictional address).
+
+**Tested:** `server/__tests__/routes/platform-ticket-notify.test.js` (10 tests) pins recipient selection by capability + status, the email template's subject / body / link, and the route's fan-out isolation (one failed mailbox doesn't sink the others; no-op when no one is eligible; `source: 'manual'` vs `source: 'user'` labelling). The sibling suites (`platform-ticket-assign`, `platform-operators-api`, `platform-permission-matrix`) all still pass.
+
+---
+
 ## [v5.204.3] - 2026-10-22 - style(platform): refresh the console's visual design
 
 Direct feedback with screenshots: the Team page "looks bad" and the schools table is "too oldschool". Both were fair — the console was flat white cards on a near-white canvas, a hairline border on every box, no elevation, and rows of small bordered buttons with icon + label repeated seven times per row.

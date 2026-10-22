@@ -1144,10 +1144,53 @@ async function sendSupportReply({ to, name, ref, subject, body, schoolName }) {
     <p>Hi ${_escapeHtml(name || 'there')},</p>
     <p><strong>${_escapeHtml(ref)} · ${_escapeHtml(subject)}</strong></p>
     <div class="info"><p style="white-space:pre-wrap">${_escapeHtml(body)}</p></div>
-    <p><a class="btn" href="${url}">Open the ticket →</a></p>
+    <p><a class="btn" href="${url}/support">Open the ticket →</a></p>
     <p style="font-size:13px;color:#6b7280">Reply from the same page to keep the conversation in one place.</p>
   `);
   return _send(to, `[${ref}] Reply to your support ticket`, html);
+}
+
+/**
+ * New-ticket notice, fanned out to every platform team member who can read
+ * tickets (capability `tickets.view` or `*`). Sent by the two ticket-create
+ * routes — the platform operator route (ad-hoc / on-behalf) and the school
+ * user route (a signed-in school user opening their own ticket).
+ *
+ * `to` is a single address per call; the caller fans out one call per
+ * recipient so one bad address never sinks the rest.
+ */
+async function sendTicketNotice({ to, ref, subject, priority, source, schoolName, slaDueAt, requesterName }) {
+  const url = `${String(APP_URL).replace(/\/$/, '')}/platform`;
+  const prio = priority === 'urgent' ? 'urgent' : (priority === 'high' ? 'high' : 'normal');
+  const sla = slaDueAt ? new Date(slaDueAt).toLocaleString() : '24h';
+  const sourceLabel = source === 'user'
+    ? `opened by a school user${requesterName ? ` (${_escapeHtml(requesterName)})` : ''}`
+    : 'opened by a platform operator';
+  const html = _wrap(`
+    <h2>New support ticket</h2>
+    <p><strong>${_escapeHtml(ref)}</strong> · ${_escapeHtml(subject)}</p>
+    <table style="width:100%;border-collapse:collapse;margin:12px 0">
+      <tr>
+        <td style="padding:6px 0;color:#6b7280;font-size:13px">Priority</td>
+        <td style="padding:6px 0;text-align:right"><strong>${prio}</strong></td>
+      </tr>
+      <tr>
+        <td style="padding:6px 0;color:#6b7280;font-size:13px">Source</td>
+        <td style="padding:6px 0;text-align:right;font-size:13px">${sourceLabel}</td>
+      </tr>
+      ${schoolName ? `<tr>
+        <td style="padding:6px 0;color:#6b7280;font-size:13px">School</td>
+        <td style="padding:6px 0;text-align:right;font-size:13px">${_escapeHtml(schoolName)}</td>
+      </tr>` : ''}
+      <tr>
+        <td style="padding:6px 0;color:#6b7280;font-size:13px">SLA due</td>
+        <td style="padding:6px 0;text-align:right;font-size:13px">${sla}</td>
+      </tr>
+    </table>
+    <p><a class="btn" href="${url}/tickets">Open the ticket →</a></p>
+    <p style="font-size:13px;color:#6b7280">Claim it, or leave it in the unassigned queue for a colleague.</p>
+  `);
+  return _send(to, `New support ticket ${ref} — ${subject}`, html);
 }
 
 module.exports = {
@@ -1162,6 +1205,7 @@ module.exports = {
   sendDemoRejected,
   sendPlanExpiryReminder,
   sendSupportReply,
+  sendTicketNotice,
   sendRegistrationPending,
   sendAdminNewSchoolAlert,
   sendApprovalWelcome,
