@@ -19,6 +19,8 @@ const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, E } = require('../utils/response');
+const ScopeEngine         = require('../utils/scopeEngine');
+const { scopeMiddleware } = require('../middleware/scopeMiddleware');
 
 const router = express.Router();
 
@@ -196,6 +198,112 @@ router.get('/enrollment-warnings', authMiddleware, async (req, res) => { // rbac
     return ok(res, { classes: result });
   } catch (err) {
     console.error('[class-subjects GET /enrollment-warnings]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ── GET /api/class-subjects/enrollment-analytics ───────────────
+   Per-class SUBJECT-enrollment coverage — a different axis than
+   enrollment-warnings above (which checks per-STUDENT subject counts
+   against min/max rules). This checks, for every subject on a class's
+   curriculum, how many of that class's active students are actually
+   enrolled in it — and separately flags students with ZERO subject
+   enrollments at all. Direct motivation: this is exactly the shape of
+   gap that hid 6 students missing from a Kiswahili elective roster
+   for weeks with nothing surfacing it (4 had no elective enrollment
+   at all; 2 were enrolled in French instead) — this view is what
+   would have caught that immediately instead of only after a parent
+   complaint.
+   A compulsory subject should cover every active student in the
+   class — any shortfall there is a missed enrollment, not a choice,
+   so it's flagged (`gap`). An elective's shortfall is expected (the
+   roster splits across electives) — no gap is computed for those.
+   Scope: same posture as every other teacher-facing roster view this
+   session touched — unrestricted for management, narrowed to the
+   caller's own assigned classes otherwise (resolveClassPickerScope,
+   same pattern used by assessment.js's analytics `availableClasses`).
+   ?classId=X narrows to one class (still subject to scope above).
+   Exported as _buildEnrollmentAnalytics so assessment.js's PDF export
+   can render the exact same data without a second HTTP round trip. */
+async function _buildEnrollmentAnalytics(req) {
+  const { schoolId } = req.jwtUser;
+  const { classId: qClassId } = req.query;
+
+  // req.scope is null for a school-level role (admin/principal/etc) —
+  // applyToFilter/resolveClassPickerScope both no-op in that case, same
+  // as assessment.js's analytics availableClasses resolution.
+  const originalScope = req.scope;
+  req.scope = await ScopeEngine.resolveClassPickerScope(req);
+  const classesFilter = ScopeEngine.applyToFilter(req, 'classes', { schoolId, status: { $ne: 'inactive' } });
+  req.scope = originalScope;
+  if (qClassId) classesFilter.id = qClassId;
+
+  const classes = await tenantModel('classes', tenantContext(req))
+    .find(classesFilter).sort({ order: 1 }).select('id name').lean();
+  if (!classes.length) return { classes: [] };
+
+  const classIds = classes.map(c => c.id);
+
+  const [links, students, enrollAgg, enrollments] = await Promise.all([
+    tenantModel('class_subjects', tenantContext(req))
+      .find({ schoolId, classId: { $in: classIds }, isActive: { $ne: false } }).lean(),
+    tenantModel('students', tenantContext(req))
+      .find({ schoolId, classId: { $in: classIds }, status: { $ne: 'inactive' } })
+      .select('id classId').lean(),
+    tenantModel('student_subjects', tenantContext(req)).aggregate([
+      { $match: { schoolId, classId: { $in: classIds } } },
+      { $group: { _id: { classId: '$classId', subjectId: '$subjectId' }, count: { $sum: 1 } } },
+    ]),
+    tenantModel('student_subjects', tenantContext(req))
+      .find({ schoolId, classId: { $in: classIds } }).select('studentId classId').lean(),
+  ]);
+
+  const subjectIds = [...new Set(links.map(l => l.subjectId))];
+  const subjectDocs = subjectIds.length
+    ? await tenantModel('subjects', tenantContext(req)).find({ schoolId, id: { $in: subjectIds } }).select('id name').lean()
+    : [];
+  const subjectNameMap = Object.fromEntries(subjectDocs.map(s => [s.id, s.name]));
+
+  const rosterByClass = {};
+  for (const s of students) (rosterByClass[s.classId] ??= []).push(s.id);
+
+  const enrollCountMap = {}; // `${classId}::${subjectId}` -> count
+  for (const e of enrollAgg) enrollCountMap[`${e._id.classId}::${e._id.subjectId}`] = e.count;
+
+  const enrolledStudentKeys = new Set(enrollments.map(e => `${e.classId}::${e.studentId}`));
+
+  const result = classes.map(c => {
+    const roster = rosterByClass[c.id] ?? [];
+    const subjects = links
+      .filter(l => l.classId === c.id)
+      .map(l => {
+        const enrolled = enrollCountMap[`${c.id}::${l.subjectId}`] ?? 0;
+        const isCompulsory = !!l.isCompulsoryForClass;
+        return {
+          subjectId:    l.subjectId,
+          subject:      subjectNameMap[l.subjectId] ?? l.subjectId,
+          isCompulsory,
+          enrolled,
+          rosterSize:   roster.length,
+          enrollmentPct: roster.length ? Math.round((enrolled / roster.length) * 1000) / 10 : null,
+          gap: isCompulsory ? Math.max(0, roster.length - enrolled) : null,
+        };
+      })
+      .sort((a, b) => a.subject.localeCompare(b.subject));
+
+    const unenrolledStudents = roster.filter(sid => !enrolledStudentKeys.has(`${c.id}::${sid}`)).length;
+
+    return { classId: c.id, className: c.name, rosterSize: roster.length, subjects, unenrolledStudents };
+  });
+
+  return { classes: result };
+}
+
+router.get('/enrollment-analytics', authMiddleware, rbac('subjects', 'read'), scopeMiddleware, async (req, res) => {
+  try {
+    return ok(res, await _buildEnrollmentAnalytics(req));
+  } catch (err) {
+    console.error('[class-subjects GET /enrollment-analytics]', err);
     return E.serverError(res);
   }
 });
@@ -451,3 +559,4 @@ router.delete('/:id', authMiddleware, rbac('subjects', 'update'), async (req, re
 });
 
 module.exports = router;
+module.exports._buildEnrollmentAnalytics = _buildEnrollmentAnalytics;

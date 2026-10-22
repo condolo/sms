@@ -35,6 +35,9 @@ const { restrictToTaught, taughtSubjectIds, taughtPairs } = require('../utils/te
 const ScopeEngine         = require('../utils/scopeEngine');
 const { scopeMiddleware } = require('../middleware/scopeMiddleware');
 const { MARK_STATES }     = require('../utils/mark-states');
+const PDFDocument         = require('pdfkit');
+const { sanitisePdfStr }  = require('../utils/sanitisePdf');
+const { _buildEnrollmentAnalytics } = require('./class-subjects');
 
 const router = express.Router();
 const PLAN   = planGate('grades');
@@ -1815,7 +1818,14 @@ const _DISTRIBUTION_LABELS     = ['0–39', '40–49', '50–59', '60–69', '70
 
 async function _aggregateAnalyticsPeriod(Marks, baseFilter, academicYearId, termNumber, passMark) {
   if (!academicYearId || !termNumber) return { bySubject: [], byClass: [], distribution: [], overall: null };
-  const filter = { ...baseFilter, ..._yearFilterPart(academicYearId), termNumber };
+  // rawScore is null for a non-present mark state (ABS/MIS/EXM/INC — see
+  // POST /marks: "non-present mark state carries no score, nulled server-
+  // side"), a real and expected value, not a data error. Live-confirmed
+  // this crashed the WHOLE analytics endpoint with a 500 the moment any
+  // matched mark had one: $bucket's groupBy has no branch for null and no
+  // default was specified, so the entire $facet aggregation threw rather
+  // than just omitting that one mark from the histogram.
+  const filter = { ...baseFilter, ..._yearFilterPart(academicYearId), termNumber, rawScore: { $ne: null } };
   const _byDimension = (field) => ([
     { $group: {
         _id: `$${field}`,
@@ -1882,169 +1892,396 @@ async function _aggregateAnalyticsPeriod(Marks, baseFilter, academicYearId, term
   return { bySubject: result?.bySubject ?? [], byClass: result?.byClass ?? [], distribution, overall };
 }
 
+/* Shared builder — both the JSON (/analytics) and the PDF
+   (/analytics/export.pdf) routes render from this exact same scoped
+   aggregation, so the exported PDF can never show different numbers
+   than the screen it was exported from. Throws an Error with
+   `.status = 400` for the one caller-facing validation case (an
+   academicYearId that doesn't match this school); every other route
+   just lets that propagate to its own catch block. */
+async function _buildAnalyticsReport(req) {
+  const { schoolId } = req.jwtUser;
+  const ctx = tenantContext(req);
+  const { classId: qClassId, subjectId, academicYearId: qYearId, termNumber: qTermNumber } = req.query;
+  const compareTo = ['previousTerm', 'previousYear', 'none'].includes(req.query.compareTo)
+    ? req.query.compareTo : 'previousTerm';
+
+  // Explicit, Settings-configurable override — a role/person who is
+  // otherwise scoped to their own section/assigned classes (section_head,
+  // a teacher, etc.) can be granted whole-school Assessment Analytics
+  // without changing their base grades access anywhere else at all.
+  // hasExplicitSubGrant (no coarse-grant fallback), same posture as
+  // mark-submissions.js's review gate and timetable.js's Scheduling
+  // Engine sub — ticking this ONE row in Settings is the only thing
+  // that grants it. Already-unrestricted callers (admin/principal/etc,
+  // per ScopeEngine's own assessment floor) get nothing new from this —
+  // it only ever widens, never narrows.
+  const naturallyUnrestricted = ScopeEngine.isUnrestricted(req, 'assessment');
+  const grantedWholeSchool = !naturallyUnrestricted
+    && await hasExplicitSubGrant(req, 'reports', 'academic_analytics_school_wide', 'read');
+  const isWholeSchoolView = naturallyUnrestricted || grantedWholeSchool;
+
+  const [years, academicCfg] = await Promise.all([
+    tenantModel('academic_years', ctx).find({ schoolId }).sort({ startDate: 1 }).lean(),
+    tenantModel('academic_config', ctx).findOne({ schoolId }).select('passMark').lean(),
+  ]);
+  const passMark = academicCfg?.passMark ?? 40;
+
+  let currentYear, currentTermNumber;
+  if (qYearId) {
+    currentYear = years.find(y => (y.id ?? String(y._id)) === qYearId);
+    if (!currentYear) {
+      const err = new Error(`academicYearId "${qYearId}" does not match any academic year for this school`);
+      err.status = 400;
+      throw err;
+    }
+    currentTermNumber = qTermNumber ? Number(qTermNumber) : resolveCurrentPeriod(years).termNumber;
+  } else {
+    const current = resolveCurrentPeriod(years);
+    currentYear = current.year;
+    currentTermNumber = qTermNumber ? Number(qTermNumber) : current.termNumber;
+  }
+
+  // A brand-new school with no academic years configured yet — same
+  // "don't error, just return an empty picture" treatment
+  // resolveAcademicPeriod() gives every other caller of this pattern.
+  if (!currentYear || !currentTermNumber) {
+    return {
+      scope: isWholeSchoolView ? 'whole_school' : 'assigned',
+      currentPeriod: null, previousPeriod: null, passMark,
+      overall: null, distribution: [], subjects: [], classes: [], availableClasses: [],
+    };
+  }
+
+  const currentYearId = currentYear.id ?? String(currentYear._id);
+  const previous = _resolvePreviousPeriod(years, currentYear, currentTermNumber, compareTo);
+
+  /* Base filter — classId scoping happens BEFORE ScopeEngine.applyToFilter
+     so an explicitly-requested classId outside the caller's scope is
+     rejected (replaced with an impossible match), not silently widened. */
+  const baseFilter = { schoolId, isPublished: true };
+  if (qClassId) baseFilter.classId = qClassId;
+  if (grantedWholeSchool) {
+    // Explicit override — the class/section scope ScopeEngine would
+    // otherwise apply (and restrictToTaught's further narrowing to only
+    // subjects THIS caller personally teaches) are both skipped: that's
+    // the entire point of this grant.
+  } else {
+    ScopeEngine.applyToFilter(req, 'assessment', baseFilter);
+  }
+  if (subjectId) baseFilter.subjectId = subjectId;
+  // Analytics totals are built only from the subjects this caller teaches
+  // — unless explicitly granted the whole-school view above.
+  if (!grantedWholeSchool) await restrictToTaught(req, baseFilter);
+
+  const Marks = tenantModel('assessment_marks', ctx);
+  const [currentAgg, previousAgg] = await Promise.all([
+    _aggregateAnalyticsPeriod(Marks, baseFilter, currentYearId, currentTermNumber, passMark),
+    previous ? _aggregateAnalyticsPeriod(Marks, baseFilter, previous.year.id ?? String(previous.year._id), previous.termNumber, passMark) : Promise.resolve({ bySubject: [], byClass: [], distribution: [], overall: null }),
+  ]);
+
+  // Resolve subject display names for everything either period touched
+  const allSubjectIds = new Set([...currentAgg.bySubject.map(r => r.subjectId), ...previousAgg.bySubject.map(r => r.subjectId)]);
+  const subjectDocs = allSubjectIds.size
+    ? await tenantModel('subjects', ctx).find({ schoolId, id: { $in: [...allSubjectIds] } }).select('id name').lean()
+    : [];
+  const subjectNameMap = Object.fromEntries(subjectDocs.map(s => [s.id, s.name]));
+  const prevBySubject = Object.fromEntries(previousAgg.bySubject.map(r => [r.subjectId, r]));
+
+  const subjects = currentAgg.bySubject
+    .map(cur => {
+      const prev = prevBySubject[cur.subjectId] ?? null;
+      return {
+        subjectId: cur.subjectId,
+        subject:   subjectNameMap[cur.subjectId] ?? cur.subjectId,
+        current:   { avgPct: cur.avgPct, count: cur.count, passRate: cur.passRate },
+        previous:  prev ? { avgPct: prev.avgPct, count: prev.count, passRate: prev.passRate } : null,
+        delta:     prev ? Math.round((cur.avgPct - prev.avgPct) * 10) / 10 : null,
+      };
+    })
+    .sort((a, b) => a.current.avgPct - b.current.avgPct); // weakest subject first
+
+  // Performance by class — same current-vs-previous shape as subjects.
+  // Resolved independently of the filter-dropdown's classDocs below
+  // (a different, picker-specific scope) so a class can never go
+  // unnamed just because it fell outside that scope's own resolution.
+  const allClassIds  = new Set([...currentAgg.byClass.map(r => r.classId), ...previousAgg.byClass.map(r => r.classId)]);
+  const classNameDocs = allClassIds.size
+    ? await tenantModel('classes', ctx).find({ schoolId, id: { $in: [...allClassIds] } }).select('id name').lean()
+    : [];
+  const classNameMap = Object.fromEntries(classNameDocs.map(c => [c.id, c.name]));
+  const prevByClass  = Object.fromEntries(previousAgg.byClass.map(r => [r.classId, r]));
+
+  const classes = currentAgg.byClass
+    .map(cur => {
+      const prev = prevByClass[cur.classId] ?? null;
+      return {
+        classId:   cur.classId,
+        className: classNameMap[cur.classId] ?? cur.classId,
+        current:   { avgPct: cur.avgPct, count: cur.count, passRate: cur.passRate },
+        previous:  prev ? { avgPct: prev.avgPct, count: prev.count, passRate: prev.passRate } : null,
+        delta:     prev ? Math.round((cur.avgPct - prev.avgPct) * 10) / 10 : null,
+      };
+    })
+    .sort((a, b) => a.current.avgPct - b.current.avgPct); // weakest class first
+
+  // Classes available to filter by — every class in the school for an
+  // unrestricted (leadership) caller, or only the caller's assigned
+  // classes otherwise. Names resolved so the client never needs a
+  // second "my classes" call just to populate this dropdown.
+  // resolveClassPickerScope() folds any stream-only assignment (a
+  // compulsory subject taught per-stream — see teaching-assignments.js)
+  // into its parent class before scoping `classes` itself, which — unlike
+  // `assessment` above — has no streamId field of its own to match a
+  // stream-scoped grant against (see scopeEngine.js's MODULE_SCOPE
+  // comment on `classes`); without this, a teacher whose only assignments
+  // were stream-scoped got an empty availableClasses list here despite
+  // real, valid assignments — the same bug classes.js's own GET / had.
+  // Uses a request-local scope, restored right after, since scopeMiddleware
+  // caches req.scope per userId::schoolId for other routes to read as-is.
+  // grantedWholeSchool skips the picker-scope resolution entirely and
+  // just lists every class — same reasoning as the baseFilter above.
+  let classDocs;
+  if (grantedWholeSchool) {
+    classDocs = await tenantModel('classes', ctx).find({ schoolId }).select('id name').lean();
+  } else {
+    const originalScope = req.scope;
+    req.scope = await ScopeEngine.resolveClassPickerScope(req);
+    const classesFilter = ScopeEngine.applyToFilter(req, 'classes', { schoolId });
+    req.scope = originalScope;
+    classDocs = await tenantModel('classes', ctx).find(classesFilter).select('id name').lean();
+  }
+
+  return {
+    scope:            isWholeSchoolView ? 'whole_school' : 'assigned',
+    currentPeriod:    _periodLabel({ year: currentYear, termNumber: currentTermNumber }),
+    previousPeriod:   _periodLabel(previous),
+    passMark,
+    overall:          currentAgg.overall,
+    distribution:     currentAgg.distribution,
+    subjects,
+    classes,
+    availableClasses: classDocs.map(c => ({ id: c.id ?? String(c._id), name: c.name })),
+  };
+}
+
 router.get('/analytics', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), scopeMiddleware, async (req, res) => {
   try {
-    const { schoolId } = req.jwtUser;
-    const ctx = tenantContext(req);
-    const { classId: qClassId, subjectId, academicYearId: qYearId, termNumber: qTermNumber } = req.query;
-    const compareTo = ['previousTerm', 'previousYear', 'none'].includes(req.query.compareTo)
-      ? req.query.compareTo : 'previousTerm';
-
-    // Explicit, Settings-configurable override — a role/person who is
-    // otherwise scoped to their own section/assigned classes (section_head,
-    // a teacher, etc.) can be granted whole-school Assessment Analytics
-    // without changing their base grades access anywhere else at all.
-    // hasExplicitSubGrant (no coarse-grant fallback), same posture as
-    // mark-submissions.js's review gate and timetable.js's Scheduling
-    // Engine sub — ticking this ONE row in Settings is the only thing
-    // that grants it. Already-unrestricted callers (admin/principal/etc,
-    // per ScopeEngine's own assessment floor) get nothing new from this —
-    // it only ever widens, never narrows.
-    const naturallyUnrestricted = ScopeEngine.isUnrestricted(req, 'assessment');
-    const grantedWholeSchool = !naturallyUnrestricted
-      && await hasExplicitSubGrant(req, 'reports', 'academic_analytics_school_wide', 'read');
-    const isWholeSchoolView = naturallyUnrestricted || grantedWholeSchool;
-
-    const [years, academicCfg] = await Promise.all([
-      tenantModel('academic_years', ctx).find({ schoolId }).sort({ startDate: 1 }).lean(),
-      tenantModel('academic_config', ctx).findOne({ schoolId }).select('passMark').lean(),
-    ]);
-    const passMark = academicCfg?.passMark ?? 40;
-
-    let currentYear, currentTermNumber;
-    if (qYearId) {
-      currentYear = years.find(y => (y.id ?? String(y._id)) === qYearId);
-      if (!currentYear) return E.badRequest(res, `academicYearId "${qYearId}" does not match any academic year for this school`);
-      currentTermNumber = qTermNumber ? Number(qTermNumber) : resolveCurrentPeriod(years).termNumber;
-    } else {
-      const current = resolveCurrentPeriod(years);
-      currentYear = current.year;
-      currentTermNumber = qTermNumber ? Number(qTermNumber) : current.termNumber;
-    }
-
-    // A brand-new school with no academic years configured yet — same
-    // "don't error, just return an empty picture" treatment
-    // resolveAcademicPeriod() gives every other caller of this pattern.
-    if (!currentYear || !currentTermNumber) {
-      return _ok(res, {
-        scope: isWholeSchoolView ? 'whole_school' : 'assigned',
-        currentPeriod: null, previousPeriod: null, passMark,
-        overall: null, distribution: [], subjects: [], classes: [], availableClasses: [],
-      });
-    }
-
-    const currentYearId = currentYear.id ?? String(currentYear._id);
-    const previous = _resolvePreviousPeriod(years, currentYear, currentTermNumber, compareTo);
-
-    /* Base filter — classId scoping happens BEFORE ScopeEngine.applyToFilter
-       so an explicitly-requested classId outside the caller's scope is
-       rejected (replaced with an impossible match), not silently widened. */
-    const baseFilter = { schoolId, isPublished: true };
-    if (qClassId) baseFilter.classId = qClassId;
-    if (grantedWholeSchool) {
-      // Explicit override — the class/section scope ScopeEngine would
-      // otherwise apply (and restrictToTaught's further narrowing to only
-      // subjects THIS caller personally teaches) are both skipped: that's
-      // the entire point of this grant.
-    } else {
-      ScopeEngine.applyToFilter(req, 'assessment', baseFilter);
-    }
-    if (subjectId) baseFilter.subjectId = subjectId;
-    // Analytics totals are built only from the subjects this caller teaches
-    // — unless explicitly granted the whole-school view above.
-    if (!grantedWholeSchool) await restrictToTaught(req, baseFilter);
-
-    const Marks = tenantModel('assessment_marks', ctx);
-    const [currentAgg, previousAgg] = await Promise.all([
-      _aggregateAnalyticsPeriod(Marks, baseFilter, currentYearId, currentTermNumber, passMark),
-      previous ? _aggregateAnalyticsPeriod(Marks, baseFilter, previous.year.id ?? String(previous.year._id), previous.termNumber, passMark) : Promise.resolve({ bySubject: [], byClass: [], distribution: [], overall: null }),
-    ]);
-
-    // Resolve subject display names for everything either period touched
-    const allSubjectIds = new Set([...currentAgg.bySubject.map(r => r.subjectId), ...previousAgg.bySubject.map(r => r.subjectId)]);
-    const subjectDocs = allSubjectIds.size
-      ? await tenantModel('subjects', ctx).find({ schoolId, id: { $in: [...allSubjectIds] } }).select('id name').lean()
-      : [];
-    const subjectNameMap = Object.fromEntries(subjectDocs.map(s => [s.id, s.name]));
-    const prevBySubject = Object.fromEntries(previousAgg.bySubject.map(r => [r.subjectId, r]));
-
-    const subjects = currentAgg.bySubject
-      .map(cur => {
-        const prev = prevBySubject[cur.subjectId] ?? null;
-        return {
-          subjectId: cur.subjectId,
-          subject:   subjectNameMap[cur.subjectId] ?? cur.subjectId,
-          current:   { avgPct: cur.avgPct, count: cur.count, passRate: cur.passRate },
-          previous:  prev ? { avgPct: prev.avgPct, count: prev.count, passRate: prev.passRate } : null,
-          delta:     prev ? Math.round((cur.avgPct - prev.avgPct) * 10) / 10 : null,
-        };
-      })
-      .sort((a, b) => a.current.avgPct - b.current.avgPct); // weakest subject first
-
-    // Performance by class — same current-vs-previous shape as subjects.
-    // Resolved independently of the filter-dropdown's classDocs below
-    // (a different, picker-specific scope) so a class can never go
-    // unnamed just because it fell outside that scope's own resolution.
-    const allClassIds  = new Set([...currentAgg.byClass.map(r => r.classId), ...previousAgg.byClass.map(r => r.classId)]);
-    const classNameDocs = allClassIds.size
-      ? await tenantModel('classes', ctx).find({ schoolId, id: { $in: [...allClassIds] } }).select('id name').lean()
-      : [];
-    const classNameMap = Object.fromEntries(classNameDocs.map(c => [c.id, c.name]));
-    const prevByClass  = Object.fromEntries(previousAgg.byClass.map(r => [r.classId, r]));
-
-    const classes = currentAgg.byClass
-      .map(cur => {
-        const prev = prevByClass[cur.classId] ?? null;
-        return {
-          classId:   cur.classId,
-          className: classNameMap[cur.classId] ?? cur.classId,
-          current:   { avgPct: cur.avgPct, count: cur.count, passRate: cur.passRate },
-          previous:  prev ? { avgPct: prev.avgPct, count: prev.count, passRate: prev.passRate } : null,
-          delta:     prev ? Math.round((cur.avgPct - prev.avgPct) * 10) / 10 : null,
-        };
-      })
-      .sort((a, b) => a.current.avgPct - b.current.avgPct); // weakest class first
-
-    // Classes available to filter by — every class in the school for an
-    // unrestricted (leadership) caller, or only the caller's assigned
-    // classes otherwise. Names resolved so the client never needs a
-    // second "my classes" call just to populate this dropdown.
-    // resolveClassPickerScope() folds any stream-only assignment (a
-    // compulsory subject taught per-stream — see teaching-assignments.js)
-    // into its parent class before scoping `classes` itself, which — unlike
-    // `assessment` above — has no streamId field of its own to match a
-    // stream-scoped grant against (see scopeEngine.js's MODULE_SCOPE
-    // comment on `classes`); without this, a teacher whose only assignments
-    // were stream-scoped got an empty availableClasses list here despite
-    // real, valid assignments — the same bug classes.js's own GET / had.
-    // Uses a request-local scope, restored right after, since scopeMiddleware
-    // caches req.scope per userId::schoolId for other routes to read as-is.
-    // grantedWholeSchool skips the picker-scope resolution entirely and
-    // just lists every class — same reasoning as the baseFilter above.
-    let classDocs;
-    if (grantedWholeSchool) {
-      classDocs = await tenantModel('classes', ctx).find({ schoolId }).select('id name').lean();
-    } else {
-      const originalScope = req.scope;
-      req.scope = await ScopeEngine.resolveClassPickerScope(req);
-      const classesFilter = ScopeEngine.applyToFilter(req, 'classes', { schoolId });
-      req.scope = originalScope;
-      classDocs = await tenantModel('classes', ctx).find(classesFilter).select('id name').lean();
-    }
-
-    return _ok(res, {
-      scope:            isWholeSchoolView ? 'whole_school' : 'assigned',
-      currentPeriod:    _periodLabel({ year: currentYear, termNumber: currentTermNumber }),
-      previousPeriod:   _periodLabel(previous),
-      passMark,
-      overall:          currentAgg.overall,
-      distribution:     currentAgg.distribution,
-      subjects,
-      classes,
-      availableClasses: classDocs.map(c => ({ id: c.id ?? String(c._id), name: c.name })),
-    });
+    return _ok(res, await _buildAnalyticsReport(req));
   } catch (err) {
+    if (err.status === 400) return E.badRequest(res, err.message);
     console.error('[assessment/analytics GET]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   ANALYTICS PDF EXPORT  —  GET /api/assessment/analytics/export.pdf
+   Same data the Assessment Analytics screen shows (via the shared
+   _buildAnalyticsReport above), plus the per-class subject-enrollment
+   coverage from class-subjects.js's /enrollment-analytics, rendered
+   as one printable report — so leadership can hand this to a board
+   meeting or a parent without screenshotting the dashboard.
+   ══════════════════════════════════════════════════════════════ */
+
+/* Draws a simple header+rows table starting at (x, y), wrapping to a
+   new page (with the header re-drawn) whenever a row would overflow
+   the bottom margin. Returns the y position just after the table. */
+function _drawAnalyticsTable(doc, { x, y, width, margin, columns, rows, emptyText }) {
+  const HEAD_H = 18;
+  const ROW_H  = 15;
+
+  function drawHeader(headY) {
+    doc.rect(x, headY, width, HEAD_H).fillColor('#1e293b').fill();
+    doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#ffffff');
+    let cx = x;
+    columns.forEach(c => {
+      doc.text(c.label, cx + 4, headY + 5, { width: c.w - 8, align: c.align || 'left', lineBreak: false });
+      cx += c.w;
+    });
+  }
+
+  if (y + HEAD_H > doc.page.height - margin) { doc.addPage(); y = margin; }
+  drawHeader(y);
+  y += HEAD_H;
+
+  if (!rows.length) {
+    doc.font('Helvetica').fontSize(8).fillColor('#94a3b8')
+      .text(emptyText || 'No data for this period.', x + 4, y + 4, { width: width - 8 });
+    return doc.y + 8;
+  }
+
+  doc.font('Helvetica').fontSize(8);
+  rows.forEach((row, i) => {
+    if (y + ROW_H > doc.page.height - margin) {
+      doc.addPage();
+      y = margin;
+      drawHeader(y);
+      y += HEAD_H;
+      doc.font('Helvetica').fontSize(8);
+    }
+    doc.rect(x, y, width, ROW_H).fillColor(i % 2 === 0 ? '#f8fafc' : '#ffffff').fill();
+    let cx = x;
+    columns.forEach(c => {
+      doc.fillColor(c.color ? c.color(row) : '#1e293b')
+        .text(String(c.value(row) ?? '—'), cx + 4, y + 4, { width: c.w - 8, align: c.align || 'left', lineBreak: false });
+      cx += c.w;
+    });
+    y += ROW_H;
+  });
+  return y + 8;
+}
+
+router.get('/analytics/export.pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), scopeMiddleware, async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const [report, school] = await Promise.all([
+      _buildAnalyticsReport(req),
+      _model('schools').findOne({ id: schoolId }).lean(),
+    ]);
+    // Same per-class subject-enrollment coverage the caller would see from
+    // class-subjects.js's own route — req.scope was already resolved for
+    // THIS caller by the scopeMiddleware above, so this reuses it rather
+    // than re-deriving a second time.
+    const enrollment = await _buildEnrollmentAnalytics(req);
+
+    const schoolName = sanitisePdfStr(school?.name ?? 'School');
+    const generatedAt = new Date().toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+
+    const doc     = new PDFDocument({ margin: 40, size: 'A4' });
+    const buffers = [];
+    doc.on('data', chunk => buffers.push(chunk));
+    doc.on('end', () => {
+      const pdf = Buffer.concat(buffers);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'attachment; filename="assessment-analytics.pdf"');
+      res.setHeader('Content-Length', pdf.length);
+      res.send(pdf);
+    });
+
+    const margin   = 40;
+    const pageW    = doc.page.width;
+    const contentW = pageW - margin * 2;
+    let y = margin;
+
+    // ── Header ──────────────────────────────────────────────────
+    doc.font('Helvetica-Bold').fontSize(15).fillColor('#000').text(schoolName, margin, y, { width: contentW, align: 'center' });
+    y = doc.y + 2;
+    doc.font('Helvetica-Bold').fontSize(12).fillColor('#1e293b').text('Assessment Analytics Report', margin, y, { width: contentW, align: 'center' });
+    y = doc.y + 2;
+    const periodLine = report.currentPeriod
+      ? `${sanitisePdfStr(report.currentPeriod.academicYearName)} · Term ${report.currentPeriod.termNumber}`
+        + (report.previousPeriod ? `  —  vs ${sanitisePdfStr(report.previousPeriod.academicYearName)} · Term ${report.previousPeriod.termNumber}` : '')
+      : 'No academic year configured';
+    doc.font('Helvetica').fontSize(9).fillColor('#475569').text(periodLine, margin, y, { width: contentW, align: 'center' });
+    y = doc.y + 1;
+    doc.font('Helvetica').fontSize(8).fillColor('#94a3b8')
+      .text(`${report.scope === 'whole_school' ? 'Whole school' : 'Assigned classes only'}  ·  Generated ${generatedAt}`, margin, y, { width: contentW, align: 'center' });
+    y = doc.y + 10;
+    doc.moveTo(margin, y).lineTo(pageW - margin, y).strokeColor('#e2e8f0').lineWidth(0.5).stroke();
+    y += 14;
+
+    if (!report.currentPeriod) {
+      doc.font('Helvetica').fontSize(10).fillColor('#64748b')
+        .text('No academic year is configured yet for this school.', margin, y, { width: contentW, align: 'center' });
+      doc.end();
+      return;
+    }
+
+    // ── KPI summary ─────────────────────────────────────────────
+    const o = report.overall ?? {};
+    const kpis = [
+      ['Marks Entered', (o.count ?? 0).toLocaleString()],
+      ['Overall Avg Score', o.avgPct != null ? `${o.avgPct}%` : '—'],
+      ['Avg Pass Rate', o.passRate != null ? `${o.passRate}%` : '—'],
+      ['Median Score', o.median != null ? `${o.median}%` : '—'],
+      ['Lowest Score', o.minScore != null ? `${o.minScore}%` : '—'],
+      ['Highest Score', o.maxScore != null ? `${o.maxScore}%` : '—'],
+      ['Std. Deviation', o.stdDev != null ? String(o.stdDev) : '—'],
+      ['Subjects Tracked', String(report.subjects.length)],
+    ];
+    doc.font('Helvetica-Bold').fontSize(10).fillColor('#1e293b').text('Summary', margin, y);
+    y = doc.y + 4;
+    const kpiColW = contentW / 2;
+    kpis.forEach(([label, value], i) => {
+      const col = i % 2, row = Math.floor(i / 2);
+      const kx = margin + col * kpiColW;
+      const ky = y + row * 14;
+      doc.font('Helvetica').fontSize(8.5).fillColor('#64748b').text(`${label}:`, kx, ky, { continued: false, width: kpiColW * 0.6, lineBreak: false });
+      doc.font('Helvetica-Bold').fontSize(8.5).fillColor('#1e293b').text(value, kx + kpiColW * 0.6, ky, { width: kpiColW * 0.4 - 4, align: 'right', lineBreak: false });
+    });
+    y += Math.ceil(kpis.length / 2) * 14 + 12;
+
+    // ── Subject Performance Breakdown ──────────────────────────
+    const pctColor = (v) => (v == null ? '#94a3b8' : v >= 80 ? '#059669' : v >= 50 ? '#b45309' : '#dc2626');
+    doc.font('Helvetica-Bold').fontSize(10).fillColor('#1e293b').text('Subject Performance Breakdown', margin, y);
+    y = doc.y + 4;
+    y = _drawAnalyticsTable(doc, {
+      x: margin, y, width: contentW, margin,
+      columns: [
+        { label: 'SUBJECT', w: contentW * 0.32, value: r => sanitisePdfStr(r.subject) },
+        { label: 'ENTRIES', w: contentW * 0.15, value: r => r.current.count, align: 'right' },
+        { label: 'AVG %',   w: contentW * 0.17, value: r => `${r.current.avgPct}%`, align: 'right', color: r => pctColor(r.current.avgPct) },
+        { label: 'CHANGE',  w: contentW * 0.17, value: r => r.delta == null ? '—' : `${r.delta > 0 ? '+' : ''}${r.delta}%`, align: 'right' },
+        { label: 'PASS RATE', w: contentW * 0.19, value: r => `${r.current.passRate}%`, align: 'right' },
+      ],
+      rows: report.subjects,
+      emptyText: 'No assessment marks recorded yet for this period.',
+    });
+    y += 10;
+
+    // ── Performance by Class ───────────────────────────────────
+    doc.font('Helvetica-Bold').fontSize(10).fillColor('#1e293b').text('Performance by Class', margin, y);
+    y = doc.y + 4;
+    y = _drawAnalyticsTable(doc, {
+      x: margin, y, width: contentW, margin,
+      columns: [
+        { label: 'CLASS',   w: contentW * 0.32, value: r => sanitisePdfStr(r.className) },
+        { label: 'ENTRIES', w: contentW * 0.15, value: r => r.current.count, align: 'right' },
+        { label: 'AVG %',   w: contentW * 0.17, value: r => `${r.current.avgPct}%`, align: 'right', color: r => pctColor(r.current.avgPct) },
+        { label: 'CHANGE',  w: contentW * 0.17, value: r => r.delta == null ? '—' : `${r.delta > 0 ? '+' : ''}${r.delta}%`, align: 'right' },
+        { label: 'PASS RATE', w: contentW * 0.19, value: r => `${r.current.passRate}%`, align: 'right' },
+      ],
+      rows: report.classes,
+      emptyText: 'No assessment marks recorded yet for this period.',
+    });
+    y += 10;
+
+    // ── Subject Enrollment Coverage by Class ───────────────────
+    const enrollmentRows = (enrollment.classes ?? []).flatMap(c =>
+      c.subjects.map(s => ({ ...s, className: c.className, unenrolledStudents: c.unenrolledStudents }))
+    );
+    doc.font('Helvetica-Bold').fontSize(10).fillColor('#1e293b').text('Subject Enrollment Coverage by Class', margin, y);
+    y = doc.y + 2;
+    doc.font('Helvetica').fontSize(7.5).fillColor('#94a3b8')
+      .text('A compulsory subject short of its class roster is flagged (Gap); an elective\'s partial coverage is expected and never flagged.', margin, y, { width: contentW });
+    y = doc.y + 6;
+    y = _drawAnalyticsTable(doc, {
+      x: margin, y, width: contentW, margin,
+      columns: [
+        { label: 'CLASS',    w: contentW * 0.22, value: r => sanitisePdfStr(r.className) },
+        { label: 'SUBJECT',  w: contentW * 0.28, value: r => sanitisePdfStr(r.subject) },
+        { label: 'TYPE',     w: contentW * 0.14, value: r => r.isCompulsory ? 'Compulsory' : 'Elective' },
+        { label: 'ENROLLED', w: contentW * 0.14, value: r => `${r.enrolled}/${r.rosterSize}`, align: 'right' },
+        { label: 'COVERAGE', w: contentW * 0.12, value: r => r.enrollmentPct != null ? `${r.enrollmentPct}%` : '—', align: 'right' },
+        { label: 'GAP',      w: contentW * 0.10, value: r => r.gap == null ? '—' : String(r.gap), align: 'right', color: r => (r.gap > 0 ? '#dc2626' : '#1e293b') },
+      ],
+      rows: enrollmentRows,
+      emptyText: 'No curriculum/enrollment data available.',
+    });
+
+    const unenrolledTotal = (enrollment.classes ?? []).reduce((s, c) => s + c.unenrolledStudents, 0);
+    if (unenrolledTotal > 0) {
+      y += 6;
+      if (y > doc.page.height - margin - 14) { doc.addPage(); y = margin; }
+      doc.font('Helvetica-Bold').fontSize(8.5).fillColor('#dc2626')
+        .text(`${unenrolledTotal} active student${unenrolledTotal !== 1 ? 's are' : ' is'} enrolled in zero subjects across the classes above.`, margin, y, { width: contentW });
+    }
+
+    doc.end();
+  } catch (err) {
+    if (err.status === 400) return E.badRequest(res, err.message);
+    console.error('[assessment/analytics/export.pdf GET]', err);
     return E.serverError(res);
   }
 });

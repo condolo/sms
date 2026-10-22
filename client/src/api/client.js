@@ -448,6 +448,7 @@ export const assessment = {
   // with a previous-term/previous-year comparison. See ReportsPage.jsx's
   // Academic tab.
   analytics:    (params)     => _get('/assessment/analytics', params),
+  analyticsPdf: (params)     => _downloadPdf('/assessment/analytics/export.pdf', `assessment-analytics-${new Date().toISOString().slice(0, 10)}.pdf`, params),
 
   // Reminders
   reminders:    (params)     => _get('/assessment/reminders', params),
@@ -765,6 +766,8 @@ export const classSubjects = {
   list:     (params)             => _get('/class-subjects', params),
   /** GET /enrollment-warnings?classId=X  (or no param for school-wide) */
   warnings: (params)             => _get('/class-subjects/enrollment-warnings', params),
+  /** GET /enrollment-analytics?classId=X  — per-class subject-enrollment coverage (Assessment Analytics' enrollment section) */
+  enrollmentAnalytics: (params)  => _get('/class-subjects/enrollment-analytics', params),
   assign:   (data)               => _post('/class-subjects', data),
   bulk:     (data)               => _post('/class-subjects/bulk', data),
   update:   (id, data)           => _put(`/class-subjects/${id}`, data),

@@ -67,6 +67,7 @@ function mockMatchesFilter(doc, filter) {
     if (v && typeof v === 'object' && !Array.isArray(v)) {
       if ('$in' in v) return v.$in.includes(doc[k]);
       if ('$exists' in v) return (doc[k] !== undefined) === v.$exists;
+      if ('$ne' in v) return doc[k] !== v.$ne;
     }
     return doc[k] === v;
   });
@@ -370,5 +371,21 @@ describe('GET /api/assessment/analytics — edge cases', () => {
     const res = await supertest(buildApp()).get('/api/assessment/analytics').query({ academicYearId: 'ay_2026', termNumber: 2, compareTo: 'none' });
     expect(res.body.data.passMark).toBe(65);
     expect(res.body.data.overall.passRate).toBeCloseTo(33.3, 1); // 1 of 3 marks passes
+  });
+});
+
+describe('GET /api/assessment/analytics — a non-present mark (ABS/MIS/EXM/INC) carries rawScore: null', () => {
+  // Live-confirmed against the demo school: rawScore is correctly nulled
+  // server-side for a non-present mark state (see POST /marks), but the
+  // score-distribution $bucket stage has no branch for null and no
+  // default was specified — MongoDB threw "PlanExecutor error ... $switch
+  // could not find a matching branch for an input" and the WHOLE
+  // analytics endpoint 500'd the moment any matched mark was absent/
+  // missing, not just that one mark's contribution to the histogram.
+  test('does not 500 — the null-score mark is simply excluded from every stat', async () => {
+    mockMarkDocs.push(mark({ subjectId: 'sub_math', classId: 'cls_a', rawScore: null, markState: 'ABS' }));
+    const res = await supertest(buildApp()).get('/api/assessment/analytics').query({ academicYearId: 'ay_2026', termNumber: 2, compareTo: 'none' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.overall.count).toBe(3); // still just the 3 scored marks, not 4
   });
 });
