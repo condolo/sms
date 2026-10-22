@@ -24,7 +24,27 @@ Found while fixing the ADR-0008 platform-team work after a deliberate "did you a
 
 ---
 
-## [v5.204.2] - 2026-10-21 - fix(platform): picker offered removed members; the demo-request queue filtered on a status that does not exist
+## [v5.204.3] - 2026-10-22 - style(platform): refresh the console's visual design
+
+Direct feedback with screenshots: the Team page "looks bad" and the schools table is "too oldschool". Both were fair — the console was flat white cards on a near-white canvas, a hairline border on every box, no elevation, and rows of small bordered buttons with icon + label repeated seven times per row.
+
+Direction: **"instrument panel, not admin panel."** The console is an operator's cockpit — a few staff running many schools in long desktop sessions. So: ink-navy chrome, depth from *soft shadow on a tinted canvas* instead of a border on every box, tabular figures wherever numbers line up, and one brand accent — the indigo→violet gradient the product already uses in its emails — spent in exactly three places (the brand mark, the active nav rail, the primary button). Nothing else gets it.
+
+- **Token layer rewritten** in `css/platform.css`: surfaces, ink, lines, brand, status and elevation as named variables; `--gray-*` kept as aliases so older rules keep working.
+- **Elevation + type**: cards are 12px-radius surfaces with layered shadow on a `#f5f6fb` canvas; micro-labels are 11px uppercase with wider tracking; counts and table figures use `font-variant-numeric: tabular-nums` so columns line up.
+- **Semantic status palette.** `open` used to render red (`#fee2e2`/`#991b1b`) — which made a normal support queue read as a wall of errors. Red is now reserved for failure; one `.pa-pill` scale covers every status in the console (blue = queued, amber = waiting on someone else, green = done, red = went wrong), replacing two separate inline-style maps.
+- **Wide tables keep their actions.** The last column is pinned to the right edge with a soft shadow, so "Log in" can never be hidden behind a horizontal scroll; the slug column ellipsises with the full value on hover, and names no longer stack onto three lines.
+- **Row actions stop shouting.** Seven labelled bordered buttons per row became one labelled primary action plus quiet icon buttons with real tooltips (and `aria-label`s). Applied to the schools table, the organizations table (whose five buttons were stacking into 170px-tall rows — now 58px) and the Team table.
+- **Team view rebuilt on the system**: proper card header with a meta line, a labelled four-field form grid, capability toggles in a grouped grid instead of a cramped inline block, and an action footer row.
+- **Landing CMS fixed**: the section body had no horizontal padding, so every field ran flush to the card edge; labels and inputs were not on the system, and the conviction-pair grid declared two columns for three children, wrapping the delete button onto its own row. Now inset, labelled, and a three-column row with a quiet icon delete.
+- **Defined the classes the markup already used but no stylesheet ever styled**: `.pa-input`, `.pa-label`, `.pa-error`, `.pa-btn-primary`, `.cms-field`, `.cms-conv-*`.
+- **Accessibility**: visible `:focus-visible` rings, `aria-label` on every icon-only action, `prefers-reduced-motion` respected, and breakpoints at 1080/860px (the sidebar stacks and the identity block hides on narrow screens).
+
+Verified in a browser at 1028px and 1280px across all fourteen views: no view overflows horizontally, the page never scrolls sideways (only the table wrapper does), and every row action was exercised end to end after the markup refactor — invite, role change, suspend, reactivate, revoke sessions, remove — all still hitting the same endpoints.
+
+---
+
+## [v5.204.2] - 2026-10-22 - fix(platform): picker offered removed members; the demo-request queue filtered on a status that does not exist
 
 Two more defects, found by clicking the remaining Team/Onboarding actions in a browser and by auditing the route table against the capability policy.
 

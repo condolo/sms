@@ -451,8 +451,7 @@ const _DEMO_STATUS_STYLE = {
   purged:          'background:#f1f5f9;color:#94a3b8',
 };
 function _demoBadge(status) {
-  const style = _DEMO_STATUS_STYLE[status] || 'background:#f1f5f9;color:#475569';
-  return `<span style="${style};padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700">${_esc(status || 'unknown')}</span>`;
+  return `<span class="pa-pill ${_esc(status || '')}">${_esc((status || 'unknown').replace(/_/g, ' '))}</span>`;
 }
 function _fmtWhen(v) {
   if (!v) return '-';
@@ -575,8 +574,7 @@ const _TICKET_STATUS_STYLE = {
   closed:      'background:#f1f5f9;color:#475569',
 };
 function _ticketBadge(status) {
-  const style = _TICKET_STATUS_STYLE[status] || 'background:#f1f5f9;color:#475569';
-  return `<span style="${style};padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700">${_esc((status || '').replace('_', ' '))}</span>`;
+  return `<span class="pa-pill ${_esc(status || '')}">${_esc((status || '').replace('_', ' '))}</span>`;
 }
 
 let _ticketFilter = 'active';
@@ -1046,10 +1044,10 @@ function _schoolRow(s) {
   return `
     <tr>
       <td>
-        <strong style="display:block;font-size:13px;color:var(--gray-900)">${_esc(s.name)}</strong>
-        <span style="font-size:11px;color:var(--gray-400)">${_esc(s.email)||''}</span>
+        <strong style="display:block;font-size:13px;font-weight:600;color:var(--text)">${_esc(s.name)}</strong>
+        <span class="pa-muted" style="font-size:11.5px">${_esc(s.email)||''}</span>
       </td>
-      <td><code style="font-size:12px;background:var(--gray-100);padding:2px 6px;border-radius:4px">${_esc(s.slug)||'—'}</code></td>
+      <td><code class="slug" title="${_esc(s.slug)}">${_esc(s.slug)||'—'}</code></td>
       <td><span class="plan-pill ${s.plan||'core'}">${_esc(s.plan)||'core'}</span></td>
       <td>${planExpStr}</td>
       <td><span class="status-dot ${status}">${statusLabel}</span></td>
@@ -1058,27 +1056,26 @@ function _schoolRow(s) {
       <td>${trialStr}</td>
       <td>
         <div class="pa-action-wrap">
-          <button class="pa-btn" title="Log in as admin" onclick="confirmImpersonate('${s._id}','${_esc(s.name)}')">
+          <button class="pa-btn" title="Sign in as this school's admin" onclick="confirmImpersonate('${s._id}','${_esc(s.name)}')">
             <i class="fas fa-user-secret"></i> Log in
           </button>
-          <button class="pa-btn" title="Change plan" onclick="changePlan('${s._id}','${_esc(s.plan)}','${_esc(s.name)}','${_esc(s.planExpiresAt || '')}')">
-            <i class="fas fa-layer-group"></i> Plan
+          <button class="pa-btn-icon" title="Change plan" aria-label="Change plan for ${_esc(s.name)}" onclick="changePlan('${s._id}','${_esc(s.plan)}','${_esc(s.name)}','${_esc(s.planExpiresAt || '')}')">
+            <i class="fas fa-layer-group"></i>
           </button>
-          <button class="pa-btn" title="Edit school name (slug is fixed and cannot be changed)" onclick="editSchoolName('${s._id}','${_esc(s.name)}')">
-            <i class="fas fa-pen"></i> Rename
+          <button class="pa-btn-icon" title="Rename school (its slug is fixed)" aria-label="Rename ${_esc(s.name)}" onclick="editSchoolName('${s._id}','${_esc(s.name)}')">
+            <i class="fas fa-pen"></i>
           </button>
-          <button class="pa-btn" title="Grant/revoke capabilities independent of plan tier" onclick="showEntitlements('${s._id}','${_esc(s.name)}')">
-            <i class="fas fa-unlock-alt"></i> Entitlements
+          <button class="pa-btn-icon" title="Grant or revoke capabilities regardless of plan" aria-label="Entitlements for ${_esc(s.name)}" onclick="showEntitlements('${s._id}','${_esc(s.name)}')">
+            <i class="fas fa-unlock"></i>
           </button>
-          <button class="pa-btn" title="View/add superadmin accounts" onclick="showSuperadmins('${s._id}','${_esc(s.name)}')">
-            <i class="fas fa-user-shield"></i> Superadmins
+          <button class="pa-btn-icon" title="View and add superadmin accounts" aria-label="Superadmins for ${_esc(s.name)}" onclick="showSuperadmins('${s._id}','${_esc(s.name)}')">
+            <i class="fas fa-user-shield"></i>
           </button>
           ${s.isActive
-            ? `<button class="pa-btn danger" title="Suspend school" onclick="toggleActive('${s._id}',false,'${_esc(s.name)}')"><i class="fas fa-ban"></i></button>`
-            : `<button class="pa-btn success" title="Reinstate school" onclick="toggleActive('${s._id}',true,'${_esc(s.name)}')"><i class="fas fa-check"></i></button>`
+            ? `<button class="pa-btn-icon danger" title="Suspend school" aria-label="Suspend ${_esc(s.name)}" onclick="toggleActive('${s._id}',false,'${_esc(s.name)}')"><i class="fas fa-ban"></i></button>`
+            : `<button class="pa-btn-icon success" title="Reinstate school" aria-label="Reinstate ${_esc(s.name)}" onclick="toggleActive('${s._id}',true,'${_esc(s.name)}')"><i class="fas fa-check"></i></button>`
           }
-          <button class="pa-btn" title="Delete school permanently"
-            style="color:#dc2626;border-color:#fca5a5"
+          <button class="pa-btn-icon danger" title="Delete school permanently" aria-label="Delete ${_esc(s.name)}"
             onclick="deleteSchool('${s._id}','${_esc(s.name)}')">
             <i class="fas fa-trash-alt"></i>
           </button>
@@ -1173,21 +1170,23 @@ function _orgRow(o) {
       <td><span class="status-dot ${o.status === 'active' ? 'active' : ''}">${o.status || '—'}</span></td>
       <td style="color:var(--gray-400);font-size:12px">${created}</td>
       <td>
-        <button class="pa-btn" title="View member schools" onclick="viewOrgSchools('${o.id}')">
-          <i class="fas fa-eye"></i> View Schools
-        </button>
-        <button class="pa-btn" title="Multi-school & shared-slug-login settings" onclick="showOrgActivation('${o.id}')">
-          <i class="fas fa-sliders-h"></i> Multi-School
-        </button>
-        <button class="pa-btn" title="Edit organization name (slug is fixed and cannot be changed)" onclick="editOrgName('${o.id}','${o.name.replace(/'/g,"\\'")}')">
-          <i class="fas fa-pen"></i> Rename
-        </button>
-        <button class="pa-btn" title="Logo, color, tagline, and login background for this org's shared portal" onclick="showOrgBranding('${o.id}')">
-          <i class="fas fa-palette"></i> Branding
-        </button>
-        <button class="pa-btn" title="Add a read-only Group Director/CEO account — sees a merged analytics view across every school in this org, nothing else" onclick="showAddDirector('${o.id}','${o.name.replace(/'/g,"\\'")}')" ${o._stats.activeCount === 0 ? 'disabled' : ''}>
-          <i class="fas fa-chart-line"></i> Add Director
-        </button>
+        <div class="pa-action-wrap">
+          <button class="pa-btn" title="View member schools" onclick="viewOrgSchools('${o.id}')">
+            <i class="fas fa-eye"></i> View Schools
+          </button>
+          <button class="pa-btn-icon" title="Multi-school and shared-slug-login settings" aria-label="Multi-school settings for ${_esc(o.name)}" onclick="showOrgActivation('${o.id}')">
+            <i class="fas fa-sliders-h"></i>
+          </button>
+          <button class="pa-btn-icon" title="Rename organization (its slug is fixed)" aria-label="Rename ${_esc(o.name)}" onclick="editOrgName('${o.id}','${o.name.replace(/'/g,"\\'")}')">
+            <i class="fas fa-pen"></i>
+          </button>
+          <button class="pa-btn-icon" title="Logo, colour, tagline and login background for this org's shared portal" aria-label="Branding for ${_esc(o.name)}" onclick="showOrgBranding('${o.id}')">
+            <i class="fas fa-palette"></i>
+          </button>
+          <button class="pa-btn-icon" title="Add a read-only Group Director/CEO account for this organization" aria-label="Add director to ${_esc(o.name)}" onclick="showAddDirector('${o.id}','${o.name.replace(/'/g,"\\'")}')" ${o._stats.activeCount === 0 ? 'disabled' : ''}>
+            <i class="fas fa-chart-line"></i>
+          </button>
+        </div>
       </td>
     </tr>`;
 }
@@ -3179,12 +3178,12 @@ function _cmsSection(id, title, inner) {
   return `
     <div class="pa-card" id="cms-sec-${id}">
       <div class="pa-card-header" style="cursor:pointer;user-select:none" onclick="_toggleCmsSection('${id}')">
-        <h3 style="margin:0;display:flex;align-items:center;gap:8px">
-          <i class="fas fa-chevron-down" id="cms-chevron-${id}" style="font-size:11px;color:#94a3b8;transition:transform .2s"></i>
+        <h3 style="margin:0;display:flex;align-items:center;gap:9px">
+          <i class="fas fa-chevron-down" id="cms-chevron-${id}" style="font-size:11px;color:var(--faint);transition:transform .2s"></i>
           ${title}
         </h3>
       </div>
-      <div id="cms-body-${id}" style="padding:16px 0 0">
+      <div id="cms-body-${id}" class="cms-body">
         ${inner}
       </div>
     </div>`;
@@ -3222,7 +3221,7 @@ function _convictionRows() {
     <div class="cms-conv-row" data-index="${i}" style="display:grid;grid-template-columns:1fr 1fr 32px;gap:8px;align-items:center">
       <input class="cms-conv-before" type="text" placeholder="Before (old pain)" value="${(p.before||'').replace(/"/g,'&quot;')}" />
       <input class="cms-conv-after"  type="text" placeholder="After (Msingi solution)" value="${(p.after||'').replace(/"/g,'&quot;')}" />
-      <button onclick="this.closest('.cms-conv-row').remove()" style="background:#fee2e2;border:none;border-radius:6px;color:#dc2626;cursor:pointer;padding:6px">
+      <button class="pa-btn-icon danger" title="Remove this pair" aria-label="Remove this pair" onclick="this.closest('.cms-conv-row').remove()">
         <i class="fas fa-trash"></i>
       </button>
     </div>`).join('');
@@ -3408,7 +3407,7 @@ function _teamStatusChip(status) {
     removed:   ['#f1f5f9', '#475569', 'Removed'],
   };
   const [bg, fg, label] = map[status] || map.removed;
-  return `<span style="background:${bg};color:${fg};padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600">${label}</span>`;
+  return `<span style="background:${bg};color:${fg};padding:3px 10px;border-radius:999px;font-size:11.5px;font-weight:600;white-space:nowrap">${label}</span>`;
 }
 
 async function renderTeam() {
@@ -3438,68 +3437,94 @@ function _teamHtml() {
 
   const capToggles = groups.map(g => {
     const items = caps.filter(c => c.group === g).map(c =>
-      `<label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#374151;margin:4px 0">
-         <input type="checkbox" class="pa-cap" value="${_esc(c.key)}"> ${_esc(c.label)}
-         <code style="font-size:11px;color:#94a3b8">${_esc(c.key)}</code>
+      `<label class="pa-cap-row">
+         <input type="checkbox" class="pa-cap" value="${_esc(c.key)}">
+         <span>${_esc(c.label)}</span>
+         <code>${_esc(c.key)}</code>
        </label>`).join('');
-    return `<div style="margin-right:24px"><div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px">${_esc(g)}</div>${items}</div>`;
+    return `<div><div class="pa-cap-group">${_esc(g)}</div>${items}</div>`;
   }).join('');
 
   const rows = _teamMembers.map(op => {
     const isMe = (_me && _me.operator && _me.operator.id === op.id) || op.email === (_me && _me.operator && _me.operator.email);
-    const roleSelect = `<select onchange="teamChangeRole('${_esc(op.id)}', this.value)" ${isMe ? 'disabled' : ''} style="border:1px solid #d1d5db;border-radius:6px;padding:4px 6px;font-size:12px">
+    const roleSelect = `<select class="pa-input" onchange="teamChangeRole('${_esc(op.id)}', this.value)" ${isMe ? 'disabled' : ''} style="width:auto;min-width:150px;padding:5px 28px 5px 10px;font-size:12.5px">
       ${templates.map(t => `<option value="${_esc(t.key)}" ${op.template === t.key ? 'selected' : ''}>${_esc(t.label)}</option>`).join('')}
     </select>`;
     const actions = isMe
-      ? '<span style="font-size:12px;color:#94a3b8">You</span>'
+      ? '<span class="pa-muted" style="font-size:12px">You</span>'
       : `
-        ${op.status === 'active'
-          ? `<button class="pa-btn pa-btn-sm" onclick="teamSuspend('${_esc(op.id)}')">Suspend</button>`
-          : (op.status === 'invited'
-              ? `<button class="pa-btn pa-btn-sm" onclick="teamResend('${_esc(op.id)}')">Resend invite</button>`
-              : `<button class="pa-btn pa-btn-sm" onclick="teamReactivate('${_esc(op.id)}')">Reactivate</button>`)}
-        <button class="pa-btn pa-btn-sm" onclick="teamRevoke('${_esc(op.id)}')">Revoke sessions</button>
-        <button class="pa-btn pa-btn-sm" style="color:#b91c1c" onclick="teamRemove('${_esc(op.id)}')">Remove</button>`;
+        <div class="pa-action-wrap">
+          ${op.status === 'active'
+            ? `<button class="pa-btn-icon" title="Suspend — they lose access immediately" aria-label="Suspend ${_esc(op.name)}" onclick="teamSuspend('${_esc(op.id)}')"><i class="fas fa-pause"></i></button>`
+            : (op.status === 'invited'
+                ? `<button class="pa-btn-icon" title="Resend the invite email" aria-label="Resend invite to ${_esc(op.name)}" onclick="teamResend('${_esc(op.id)}')"><i class="fas fa-paper-plane"></i></button>`
+                : `<button class="pa-btn-icon success" title="Reactivate — restore access" aria-label="Reactivate ${_esc(op.name)}" onclick="teamReactivate('${_esc(op.id)}')"><i class="fas fa-play"></i></button>`)}
+          <button class="pa-btn-icon" title="Revoke sessions — forces them to sign in again" aria-label="Revoke sessions for ${_esc(op.name)}" onclick="teamRevoke('${_esc(op.id)}')"><i class="fas fa-arrow-right-from-bracket"></i></button>
+          <button class="pa-btn-icon danger" title="Remove — access ends now, the record stays for the audit trail" aria-label="Remove ${_esc(op.name)}" onclick="teamRemove('${_esc(op.id)}')"><i class="fas fa-trash-can"></i></button>
+        </div>`;
     const extra = (op.overrides && op.overrides.length)
-      ? `<div style="font-size:11px;color:#94a3b8;margin-top:2px">+ ${op.overrides.map(_esc).join(', ')}</div>` : '';
+      ? `<div class="pa-muted" style="font-size:11px;margin-top:3px">+ ${op.overrides.map(_esc).join(', ')}</div>` : '';
     return `<tr>
-      <td><strong>${_esc(op.name)}</strong>${op.title ? `<div style="font-size:12px;color:#6b7280">${_esc(op.title)}</div>` : ''}</td>
+      <td><strong style="font-weight:600;color:var(--text)">${_esc(op.name)}</strong>${op.title ? `<div class="pa-muted" style="font-size:12px">${_esc(op.title)}</div>` : ''}</td>
       <td>${_esc(op.email)}</td>
       <td>${roleSelect}${extra}</td>
       <td>${_teamStatusChip(op.status)}</td>
-      <td style="font-size:12px;color:#6b7280">${op.lastLoginAt ? _esc(new Date(op.lastLoginAt).toLocaleDateString('en-GB')) : '—'}</td>
+      <td class="pa-muted" style="font-size:12px">${op.lastLoginAt ? _esc(new Date(op.lastLoginAt).toLocaleDateString('en-GB')) : '—'}</td>
       <td style="white-space:nowrap">${actions}</td>
     </tr>`;
   }).join('');
 
   return `
-    <div class="pa-card" style="margin-bottom:20px">
-      <h3 style="margin-top:0">Invite a team member</h3>
-      <p style="color:#6b7280;font-size:13px;margin-top:0">They receive an email with a link to set their own password. The invite expires in 72 hours.</p>
-      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">
-        <input id="team-name"  placeholder="Full name"  aria-label="Full name"  style="flex:1;min-width:180px;border:1px solid #d1d5db;border-radius:8px;padding:9px 12px">
-        <input id="team-email" placeholder="Work email" aria-label="Work email" style="flex:1;min-width:180px;border:1px solid #d1d5db;border-radius:8px;padding:9px 12px">
-        <input id="team-title" placeholder="Job title (optional)" aria-label="Job title (optional)" style="flex:1;min-width:160px;border:1px solid #d1d5db;border-radius:8px;padding:9px 12px">
-        <select id="team-template" aria-label="Role template" style="border:1px solid #d1d5db;border-radius:8px;padding:9px 12px">
-          <option value="">Choose a role…</option>${roleOptions}
-        </select>
+    <div class="pa-card">
+      <div class="pa-card-header">
+        <h3>Invite a team member</h3>
+        <span class="pa-muted" style="font-size:12px">Invites expire after 72 hours</span>
       </div>
-      <details style="margin-bottom:12px">
-        <summary style="cursor:pointer;font-size:13px;color:#4f46e5">Extra capabilities (optional)</summary>
-        <div style="display:flex;flex-wrap:wrap;margin-top:10px">${capToggles}</div>
-      </details>
-      <button class="pa-btn" onclick="teamInvite()"><i class="fas fa-paper-plane"></i> Send invite</button>
-      <div id="team-invite-result" style="margin-top:12px"></div>
+      <div class="pa-form">
+        <div class="pa-form-row" style="grid-template-columns:1.1fr 1.3fr 1fr 1fr">
+          <div class="pa-field">
+            <label for="team-name">Full name</label>
+            <input id="team-name" placeholder="e.g. Amina Otieno" autocomplete="off">
+          </div>
+          <div class="pa-field">
+            <label for="team-email">Work email</label>
+            <input id="team-email" type="email" placeholder="name@msingi.io" autocomplete="off">
+          </div>
+          <div class="pa-field">
+            <label for="team-title">Job title <span style="font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></label>
+            <input id="team-title" placeholder="e.g. Support lead" autocomplete="off">
+          </div>
+          <div class="pa-field">
+            <label for="team-template">Role</label>
+            <select id="team-template">
+              <option value="">Choose a role…</option>${roleOptions}
+            </select>
+          </div>
+        </div>
+        <details>
+          <summary style="cursor:pointer;font-size:12.5px;font-weight:550;color:var(--primary);padding:2px 0">Extra capabilities beyond the role</summary>
+          <div class="pa-cap-grid">${capToggles}</div>
+        </details>
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-top:1px solid var(--line-soft);padding-top:15px">
+          <button class="pa-btn primary" onclick="teamInvite()"><i class="fas fa-paper-plane"></i> Send invite</button>
+          <span class="pa-muted" style="font-size:12px">They set their own password from the emailed link.</span>
+        </div>
+        <div id="team-invite-result"></div>
+      </div>
     </div>
 
     <div class="pa-card">
-      <h3 style="margin-top:0">Team (${_teamMembers.length})</h3>
+      <div class="pa-card-header">
+        <h3>Team</h3>
+        <span class="pa-muted" style="font-size:12px">${_teamMembers.length} ${_teamMembers.length === 1 ? 'member' : 'members'}</span>
+      </div>
       <div class="pa-table-wrap">
         <table class="pa-table">
-          <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Last sign-in</th><th></th></tr></thead>
-          <tbody>${rows || '<tr><td colspan="6" style="color:#94a3b8">No team members yet.</td></tr>'}</tbody>
+          <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Last sign-in</th><th style="text-align:right">Actions</th></tr></thead>
+          <tbody>${rows || '<tr><td colspan="6" style="text-align:center;color:var(--faint);padding:28px">No team members yet.</td></tr>'}</tbody>
         </table>
-      </div>    </div>`;
+      </div>
+    </div>`;
 }
 
 async function teamInvite() {
