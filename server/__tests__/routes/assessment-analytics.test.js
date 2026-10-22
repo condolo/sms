@@ -389,3 +389,21 @@ describe('GET /api/assessment/analytics — a non-present mark (ABS/MIS/EXM/INC)
     expect(res.body.data.overall.count).toBe(3); // still just the 3 scored marks, not 4
   });
 });
+
+describe('GET /api/assessment/analytics — a class that predates the UUID-`id` migration', () => {
+  // Live-confirmed against a real school: 15 of 40 classes have no `id`
+  // field at all, only the Mongo _id — and old marks reference them by
+  // that raw _id string directly as classId. Matching classNameMap on
+  // `id` alone silently missed those, which is exactly what showed a raw
+  // ObjectId string instead of a class name in Performance by Class.
+  const LEGACY_CLASS_ID = '6a3815ed6eb039df2bea8831';
+
+  test('resolves the class name via its _id, not a raw ObjectId string', async () => {
+    mockClassDocs = [...CLASSES, { _id: LEGACY_CLASS_ID, name: 'Legacy Form 3', schoolId: SCHOOL }]; // no `id` field
+    mockMarkDocs = [mark({ subjectId: 'sub_math', classId: LEGACY_CLASS_ID, rawScore: 72 })];
+    const res = await supertest(buildApp()).get('/api/assessment/analytics').query({ academicYearId: 'ay_2026', termNumber: 2, compareTo: 'none' });
+    expect(res.status).toBe(200);
+    const legacy = res.body.data.classes.find(c => c.classId === LEGACY_CLASS_ID);
+    expect(legacy.className).toBe('Legacy Form 3');
+  });
+});

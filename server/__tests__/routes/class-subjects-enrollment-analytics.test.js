@@ -47,6 +47,8 @@ function mockChain(result) {
 }
 function matches(doc, filter) {
   return Object.entries(filter || {}).every(([k, v]) => {
+    if (k === '$or') return v.some(sub => matches(doc, sub));
+    if (k === '$and') return v.every(sub => matches(doc, sub));
     if (v && typeof v === 'object' && !Array.isArray(v)) {
       if ('$in' in v) return v.$in.includes(doc[k]);
       if ('$ne' in v) return doc[k] !== v.$ne;
@@ -157,5 +159,42 @@ describe('GET /api/class-subjects/enrollment-analytics', () => {
     mockScope = { classIds: ['cls_2'] };
     const res = await supertest(buildApp()).get('/api/class-subjects/enrollment-analytics');
     expect(res.body.data.classes.map(c => c.classId)).toEqual(['cls_2']);
+  });
+});
+
+describe('GET /api/class-subjects/enrollment-analytics — legacy (pre-UUID-migration) class', () => {
+  // Live-confirmed against a real school: 15 of 40 classes have no `id`
+  // field at all, only the Mongo _id — and their class_subjects/students/
+  // student_subjects records reference them by that raw _id string. The
+  // class picker sends `c.id ?? String(c._id)` back as ?classId=, so
+  // filtering those collections (and the `classes` lookup itself) on
+  // `id` alone made a legacy class's filtered view come back completely
+  // empty — "No curriculum/enrollment data available" — even though
+  // "All classes" (no filter) worked, since that path never needed to
+  // match a specific classId against the picker's canonicalized value.
+  const LEGACY_ID = '6a3815ed6eb039df2bea8831';
+
+  beforeEach(() => {
+    mockStores.classes.push({ _id: LEGACY_ID, schoolId: SCHOOL, name: 'Legacy Form 3' }); // no `id` field
+    mockStores.students.push({ id: 'stu_legacy', schoolId: SCHOOL, classId: LEGACY_ID, status: 'active' });
+    mockStores.class_subjects.push({ schoolId: SCHOOL, classId: LEGACY_ID, subjectId: 'sub_math', isCompulsoryForClass: true });
+    mockStores.student_subjects.push({ schoolId: SCHOOL, classId: LEGACY_ID, studentId: 'stu_legacy', subjectId: 'sub_math' });
+  });
+
+  test('resolves correctly when filtered by the picker\'s canonicalized classId (the raw _id string)', async () => {
+    const res = await supertest(buildApp()).get(`/api/class-subjects/enrollment-analytics?classId=${LEGACY_ID}`);
+    expect(res.status).toBe(200);
+    const legacy = res.body.data.classes.find(c => c.classId === LEGACY_ID);
+    expect(legacy).toBeTruthy();
+    expect(legacy.className).toBe('Legacy Form 3');
+    const math = legacy.subjects.find(s => s.subjectId === 'sub_math');
+    expect(math.enrolled).toBe(1);
+    expect(math.rosterSize).toBe(1);
+    expect(math.gap).toBe(0);
+  });
+
+  test('also appears in the unfiltered "all classes" view', async () => {
+    const res = await supertest(buildApp()).get('/api/class-subjects/enrollment-analytics');
+    expect(res.body.data.classes.some(c => c.classId === LEGACY_ID)).toBe(true);
   });
 });

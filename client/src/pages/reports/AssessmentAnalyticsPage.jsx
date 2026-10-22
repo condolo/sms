@@ -14,13 +14,32 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
 import {
   ArrowLeft, Download, BarChart3, TrendingUp, TrendingDown, Scale, BookOpen, FileDown, AlertTriangle,
 } from 'lucide-react';
 import { assessment as assessmentApi, academicConfig as academicConfigApi, classSubjects as classSubjectsApi } from '@/api/client.js';
 import { Stat, Card, ChartTip } from './ReportsPrimitives.jsx';
+
+// A fixed, colorblind-validated 8-hue categorical palette (dataviz skill's
+// reference palette — order chosen so adjacent slots clear CVD/normal-
+// vision separation floors). Subjects are assigned a slot by hashing their
+// id, not by position in whatever list they're currently rendered in —
+// the Subject chart sorts by score, the breakdown table sorts by name, so
+// a position-based assignment would give the same subject two different
+// colors depending on which one you're looking at. A hash keeps it the
+// same subject = same color everywhere, at the cost of the palette's
+// adjacent-pair ordering guarantee past a handful of subjects — accepted
+// since every bar/row already carries a direct text label (the relief
+// this palette's own low-contrast slots require anyway).
+const SUBJECT_PALETTE = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'];
+function subjectColor(key) {
+  if (!key) return SUBJECT_PALETTE[0];
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+  return SUBJECT_PALETTE[hash % SUBJECT_PALETTE.length];
+}
 
 function _downloadCSV(rows, filename) {
   if (!rows.length) return;
@@ -34,7 +53,7 @@ function _downloadCSV(rows, filename) {
 
 /* A sortable breakdown table — identical shape for subjects and classes,
    just a different id/name/label set. */
-function BreakdownTable({ title, rows, idKey, nameKey, nameLabel, compareTo, sort, setSort, emptyHint }) {
+function BreakdownTable({ title, rows, idKey, nameKey, nameLabel, compareTo, sort, setSort, emptyHint, barColor }) {
   function doSort(col) {
     setSort(prev => (prev.col === col ? { col, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'desc' }));
   }
@@ -82,7 +101,10 @@ function BreakdownTable({ title, rows, idKey, nameKey, nameLabel, compareTo, sor
                   <td className="py-2.5 px-3">
                     <div className="flex items-center gap-2">
                       <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden max-w-[60px]">
-                        <div className="h-full rounded-full bg-violet-500" style={{ width: `${row.avgPct}%` }} />
+                        <div
+                          className={`h-full rounded-full ${barColor ? '' : 'bg-violet-500'}`}
+                          style={{ width: `${row.avgPct}%`, backgroundColor: barColor ? barColor(row) : undefined }}
+                        />
                       </div>
                       <span className="text-slate-700 font-medium">{row.avgPct}%</span>
                     </div>
@@ -197,7 +219,7 @@ function EnrollmentCoverageTable({ classes, sort, setSort }) {
                   <td className="py-2.5 px-3">
                     <div className="flex items-center gap-2">
                       <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden max-w-[60px]">
-                        <div className="h-full rounded-full bg-violet-500" style={{ width: `${row.enrollmentPct ?? 0}%` }} />
+                        <div className="h-full rounded-full" style={{ width: `${row.enrollmentPct ?? 0}%`, backgroundColor: subjectColor(row.subjectId) }} />
                       </div>
                       <span className="text-slate-700 font-medium">{row.enrollmentPct != null ? `${row.enrollmentPct}%` : '—'}</span>
                     </div>
@@ -301,9 +323,13 @@ export default function AssessmentAnalyticsPage() {
   const overallPass = data.overall?.passRate ?? 0;
   const { minScore, maxScore, median, stdDev } = data.overall ?? {};
 
-  const chartSubjectData = [...subjectRows].sort((a, b) => a.avgPct - b.avgPct).slice(0, 10)
-    .map(r => ({ name: r.subject, avg: r.avgPct }));
-  const chartClassData = [...classRows].sort((a, b) => a.avgPct - b.avgPct).slice(0, 12)
+  // No cap here — a school can easily run 15-20+ subjects/classes, and
+  // capping to the weakest N silently dropped the rest from the chart
+  // (reported directly: "some subjects not showing in the graphs").
+  // Every subject/class in the breakdown tables below is shown here too.
+  const chartSubjectData = [...subjectRows].sort((a, b) => a.avgPct - b.avgPct)
+    .map(r => ({ name: r.subject, avg: r.avgPct, subjectId: r.subjectId }));
+  const chartClassData = [...classRows].sort((a, b) => a.avgPct - b.avgPct)
     .map(r => ({ name: r.className, avg: r.avgPct }));
   const distribution = data.distribution ?? [];
 
@@ -505,13 +531,20 @@ export default function AssessmentAnalyticsPage() {
             {/* Subject chart + table */}
             {chartSubjectData.length > 0 && (
               <Card title="Average Score % by Subject">
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={chartSubjectData} margin={{ left: -10 }}>
+                <ResponsiveContainer width="100%" height={chartSubjectData.length > 8 ? 280 : 220}>
+                  <BarChart data={chartSubjectData} margin={{ left: -10, bottom: chartSubjectData.length > 8 ? 60 : 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                    <XAxis dataKey="name" tick={{ fontSize: 10 }} />
+                    <XAxis
+                      dataKey="name" tick={{ fontSize: 10 }} interval={0}
+                      angle={chartSubjectData.length > 8 ? -40 : 0}
+                      textAnchor={chartSubjectData.length > 8 ? 'end' : 'middle'}
+                      height={chartSubjectData.length > 8 ? 70 : 30}
+                    />
                     <YAxis tick={{ fontSize: 10 }} domain={[0, 100]} unit="%" />
                     <Tooltip content={<ChartTip />} />
-                    <Bar dataKey="avg" name="Avg %" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="avg" name="Avg %" radius={[4, 4, 0, 0]}>
+                      {chartSubjectData.map(d => <Cell key={d.subjectId} fill={subjectColor(d.subjectId)} />)}
+                    </Bar>
                   </BarChart>
                 </ResponsiveContainer>
               </Card>
@@ -520,10 +553,15 @@ export default function AssessmentAnalyticsPage() {
             {/* Class chart */}
             {chartClassData.length > 0 && (
               <Card title="Average Score % by Class">
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={chartClassData} margin={{ left: -10 }}>
+                <ResponsiveContainer width="100%" height={chartClassData.length > 8 ? 280 : 220}>
+                  <BarChart data={chartClassData} margin={{ left: -10, bottom: chartClassData.length > 8 ? 60 : 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                    <XAxis dataKey="name" tick={{ fontSize: 10 }} />
+                    <XAxis
+                      dataKey="name" tick={{ fontSize: 10 }} interval={0}
+                      angle={chartClassData.length > 8 ? -40 : 0}
+                      textAnchor={chartClassData.length > 8 ? 'end' : 'middle'}
+                      height={chartClassData.length > 8 ? 70 : 30}
+                    />
                     <YAxis tick={{ fontSize: 10 }} domain={[0, 100]} unit="%" />
                     <Tooltip content={<ChartTip />} />
                     <Bar dataKey="avg" name="Avg %" fill="#3b82f6" radius={[4, 4, 0, 0]} />
@@ -538,6 +576,7 @@ export default function AssessmentAnalyticsPage() {
             rows={subjectRows} idKey="subjectId" nameKey="subject" nameLabel="Subject"
             compareTo={compareTo} sort={subjectSort} setSort={setSubjectSort}
             emptyHint="No assessment marks recorded yet for this period. Enter marks via the Markbook."
+            barColor={row => subjectColor(row.subjectId)}
           />
 
           <BreakdownTable

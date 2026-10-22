@@ -2006,10 +2006,26 @@ async function _buildAnalyticsReport(req) {
   // (a different, picker-specific scope) so a class can never go
   // unnamed just because it fell outside that scope's own resolution.
   const allClassIds  = new Set([...currentAgg.byClass.map(r => r.classId), ...previousAgg.byClass.map(r => r.classId)]);
-  const classNameDocs = allClassIds.size
-    ? await tenantModel('classes', ctx).find({ schoolId, id: { $in: [...allClassIds] } }).select('id name').lean()
-    : [];
-  const classNameMap = Object.fromEntries(classNameDocs.map(c => [c.id, c.name]));
+  // A class referenced on a mark may predate the UUID-`id` migration and
+  // exist only as a Mongo _id (live-confirmed: 15 of 40 classes in one
+  // real school have no `id` field at all, and their old marks store that
+  // legacy _id string directly as classId) — matching on `id` alone
+  // silently misses them, which is exactly what showed a raw ObjectId
+  // string instead of a class name in Performance by Class. Match both
+  // forms and index the result by both too.
+  let classNameMap = {};
+  if (allClassIds.size) {
+    const mongoose = require('mongoose');
+    const idList = [...allClassIds];
+    const objectIdForms = idList.filter(v => mongoose.Types.ObjectId.isValid(v) && String(v).length === 24);
+    const or = [{ id: { $in: idList } }];
+    if (objectIdForms.length) or.push({ _id: { $in: objectIdForms } });
+    const classNameDocs = await tenantModel('classes', ctx).find({ schoolId, $or: or }).select('id name').lean();
+    for (const c of classNameDocs) {
+      if (c.id) classNameMap[c.id] = c.name;
+      classNameMap[String(c._id)] = c.name;
+    }
+  }
   const prevByClass  = Object.fromEntries(previousAgg.byClass.map(r => [r.classId, r]));
 
   const classes = currentAgg.byClass
@@ -2132,6 +2148,75 @@ function _drawAnalyticsTable(doc, { x, y, width, margin, columns, rows, emptyTex
   return y + 8;
 }
 
+// Same 8-hue categorical palette and hash as the client's
+// AssessmentAnalyticsPage.jsx subjectColor() — kept in lock-step so a
+// subject's bar is the same color on screen and in the exported PDF,
+// per direct request ("colors consistent per subject everywhere").
+const _SUBJECT_PALETTE = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'];
+function _subjectColor(key) {
+  if (!key) return _SUBJECT_PALETTE[0];
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+  return _SUBJECT_PALETTE[hash % _SUBJECT_PALETTE.length];
+}
+
+function _truncatePdfLabel(s, max) {
+  if (!s) return '';
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+}
+
+/* Draws a bar chart (gridlines + bars + labels) starting at (x, y).
+   Labels rotate -40° once there are enough bars that horizontal labels
+   would collide — same threshold the client's chart uses. Returns the y
+   position just after the chart (including room for rotated labels). */
+function _drawPdfBarChart(doc, { x, y, width, data, maxValue = 100, colorFor, margin }) {
+  if (!data.length) return y;
+  const CHART_H  = 110;
+  const LABEL_H  = data.length > 8 ? 55 : 16;
+  const AXIS_LBL_W = 20;
+  const plotX = x + AXIS_LBL_W;
+  const plotW = width - AXIS_LBL_W;
+  const top = y;
+  const plotBottom = top + CHART_H;
+
+  if (plotBottom + LABEL_H > doc.page.height - margin) { doc.addPage(); y = margin; }
+  const chartTop = y;
+  const bottom = chartTop + CHART_H;
+
+  // Gridlines + y-axis labels at 0/25/50/75/100(%).
+  doc.font('Helvetica').fontSize(6).fillColor('#94a3b8');
+  [0, 25, 50, 75, 100].forEach(pct => {
+    const gy = bottom - (pct / 100) * CHART_H;
+    doc.moveTo(plotX, gy).lineTo(plotX + plotW, gy).strokeColor('#e2e8f0').lineWidth(0.4).stroke();
+    doc.text(String(pct), x, gy - 3, { width: AXIS_LBL_W - 4, align: 'right', lineBreak: false });
+  });
+
+  const GAP = 3;
+  const barW = Math.max(3, (plotW - GAP * (data.length - 1)) / data.length);
+  const rotate = data.length > 8;
+
+  data.forEach((d, i) => {
+    const bx = plotX + i * (barW + GAP);
+    const val = Math.max(0, Math.min(maxValue, d.value ?? 0));
+    const barH = (val / maxValue) * CHART_H;
+    doc.rect(bx, bottom - barH, barW, barH).fillColor(colorFor ? colorFor(d) : '#3b82f6').fill();
+
+    doc.font('Helvetica').fontSize(5.5).fillColor('#64748b');
+    const label = _truncatePdfLabel(d.label, rotate ? 16 : 8);
+    if (rotate) {
+      doc.save();
+      doc.translate(bx + barW / 2, bottom + 3);
+      doc.rotate(-40);
+      doc.text(label, 0, 0, { lineBreak: false });
+      doc.restore();
+    } else {
+      doc.text(label, bx - GAP, bottom + 3, { width: barW + GAP * 2, align: 'center', lineBreak: false });
+    }
+  });
+
+  return bottom + LABEL_H;
+}
+
 router.get('/analytics/export.pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), scopeMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
@@ -2211,6 +2296,47 @@ router.get('/analytics/export.pdf', authMiddleware, PLAN, MODGATE, rbac('grades'
       doc.font('Helvetica-Bold').fontSize(8.5).fillColor('#1e293b').text(value, kx + kpiColW * 0.6, ky, { width: kpiColW * 0.4 - 4, align: 'right', lineBreak: false });
     });
     y += Math.ceil(kpis.length / 2) * 14 + 12;
+
+    // ── Score Distribution ──────────────────────────────────────
+    if (report.distribution.length) {
+      doc.font('Helvetica-Bold').fontSize(10).fillColor('#1e293b').text('Score Distribution', margin, y);
+      y = doc.y + 6;
+      y = _drawPdfBarChart(doc, {
+        x: margin, y, width: contentW, margin,
+        data: report.distribution.map(b => ({ label: b.band, value: b.count })),
+        maxValue: Math.max(1, ...report.distribution.map(b => b.count)),
+        colorFor: () => '#3b82f6',
+      });
+      y += 10;
+    }
+
+    // ── Average Score % by Subject / by Class ──────────────────
+    // Same subjectColor() hash as the on-screen chart and every
+    // subject-keyed bar on this page — identical palette, identical
+    // hash, so a subject's bar is the same color here and on screen.
+    if (report.subjects.length) {
+      doc.font('Helvetica-Bold').fontSize(10).fillColor('#1e293b').text('Average Score % by Subject', margin, y);
+      y = doc.y + 6;
+      const sorted = [...report.subjects].sort((a, b) => a.current.avgPct - b.current.avgPct);
+      y = _drawPdfBarChart(doc, {
+        x: margin, y, width: contentW, margin,
+        data: sorted.map(s => ({ label: s.subject, value: s.current.avgPct, subjectId: s.subjectId })),
+        colorFor: d => _subjectColor(d.subjectId),
+      });
+      y += 10;
+    }
+
+    if (report.classes.length) {
+      doc.font('Helvetica-Bold').fontSize(10).fillColor('#1e293b').text('Average Score % by Class', margin, y);
+      y = doc.y + 6;
+      const sorted = [...report.classes].sort((a, b) => a.current.avgPct - b.current.avgPct);
+      y = _drawPdfBarChart(doc, {
+        x: margin, y, width: contentW, margin,
+        data: sorted.map(c => ({ label: c.className, value: c.current.avgPct })),
+        colorFor: () => '#3b82f6',
+      });
+      y += 10;
+    }
 
     // ── Subject Performance Breakdown ──────────────────────────
     const pctColor = (v) => (v == null ? '#94a3b8' : v >= 80 ? '#059669' : v >= 50 ? '#b45309' : '#dc2626');

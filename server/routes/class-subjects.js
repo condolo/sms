@@ -236,26 +236,60 @@ async function _buildEnrollmentAnalytics(req) {
   req.scope = await ScopeEngine.resolveClassPickerScope(req);
   const classesFilter = ScopeEngine.applyToFilter(req, 'classes', { schoolId, status: { $ne: 'inactive' } });
   req.scope = originalScope;
-  if (qClassId) classesFilter.id = qClassId;
+
+  // A class may predate the UUID-`id` migration and exist only as a
+  // Mongo _id (live-confirmed: 15 of 40 classes in one real school have
+  // no `id` field at all). The ?classId= filter's value is whatever the
+  // class picker sent — c.id ?? String(c._id) — so a legacy class is
+  // filtered by its _id string; matching only `id` on the classes query
+  // then never finds it, which is exactly what made "selected class"
+  // return "no curriculum/enrollment data" for one of these classes.
+  if (qClassId) {
+    const mongoose = require('mongoose');
+    const idOr = [{ id: qClassId }];
+    if (mongoose.Types.ObjectId.isValid(qClassId) && String(qClassId).length === 24) idOr.push({ _id: qClassId });
+    if (classesFilter.id !== undefined) {
+      // Scope already narrowed by id (e.g. {$in:[...allowed]}, or
+      // {$in:[]} for a strict deny) — AND it with the dual-form match
+      // instead of overwriting either condition.
+      classesFilter.$and = [{ id: classesFilter.id }, { $or: idOr }];
+      delete classesFilter.id;
+    } else {
+      classesFilter.$or = idOr;
+    }
+  }
 
   const classes = await tenantModel('classes', tenantContext(req))
     .find(classesFilter).sort({ order: 1 }).select('id name').lean();
   if (!classes.length) return { classes: [] };
 
-  const classIds = classes.map(c => c.id);
+  // Every downstream collection (class_subjects, students,
+  // student_subjects) may reference a class by EITHER form — whichever
+  // was current when that record was written — independent of whether
+  // the class doc itself has since gained an `id`. Resolve the full set
+  // of forms each class is known by once, then canonicalize every
+  // lookup through it rather than trusting a single id field.
+  const classMeta = classes.map(c => ({
+    canonicalId: c.id || String(c._id),
+    name: c.name,
+    forms: [...new Set([c.id, c._id != null ? String(c._id) : null].filter(Boolean))],
+  }));
+  const formToCanonical = {};
+  for (const m of classMeta) for (const f of m.forms) formToCanonical[f] = m.canonicalId;
+  const allClassIdForms = Object.keys(formToCanonical);
 
   const [links, students, enrollAgg, enrollments] = await Promise.all([
     tenantModel('class_subjects', tenantContext(req))
-      .find({ schoolId, classId: { $in: classIds }, isActive: { $ne: false } }).lean(),
+      .find({ schoolId, classId: { $in: allClassIdForms }, isActive: { $ne: false } }).lean(),
     tenantModel('students', tenantContext(req))
-      .find({ schoolId, classId: { $in: classIds }, status: { $ne: 'inactive' } })
+      .find({ schoolId, classId: { $in: allClassIdForms }, status: { $ne: 'inactive' } })
       .select('id classId').lean(),
     tenantModel('student_subjects', tenantContext(req)).aggregate([
-      { $match: { schoolId, classId: { $in: classIds } } },
+      { $match: { schoolId, classId: { $in: allClassIdForms } } },
       { $group: { _id: { classId: '$classId', subjectId: '$subjectId' }, count: { $sum: 1 } } },
     ]),
     tenantModel('student_subjects', tenantContext(req))
-      .find({ schoolId, classId: { $in: classIds } }).select('studentId classId').lean(),
+      .find({ schoolId, classId: { $in: allClassIdForms } }).select('studentId classId').lean(),
   ]);
 
   const subjectIds = [...new Set(links.map(l => l.subjectId))];
@@ -265,19 +299,45 @@ async function _buildEnrollmentAnalytics(req) {
   const subjectNameMap = Object.fromEntries(subjectDocs.map(s => [s.id, s.name]));
 
   const rosterByClass = {};
-  for (const s of students) (rosterByClass[s.classId] ??= []).push(s.id);
+  for (const s of students) {
+    const canonicalId = formToCanonical[s.classId];
+    if (canonicalId) (rosterByClass[canonicalId] ??= []).push(s.id);
+  }
 
-  const enrollCountMap = {}; // `${classId}::${subjectId}` -> count
-  for (const e of enrollAgg) enrollCountMap[`${e._id.classId}::${e._id.subjectId}`] = e.count;
+  // De-duped by (class, subject) — the same class referenced via two
+  // different forms in separate class_subjects docs would otherwise
+  // list that subject twice for it.
+  const linkByKey = new Map(); // `${canonicalId}::${subjectId}` -> link
+  for (const l of links) {
+    const canonicalId = formToCanonical[l.classId];
+    if (!canonicalId) continue;
+    const key = `${canonicalId}::${l.subjectId}`;
+    const existing = linkByKey.get(key);
+    if (!existing || (l.isCompulsoryForClass && !existing.isCompulsoryForClass)) {
+      linkByKey.set(key, { classId: canonicalId, subjectId: l.subjectId, isCompulsoryForClass: l.isCompulsoryForClass });
+    }
+  }
 
-  const enrolledStudentKeys = new Set(enrollments.map(e => `${e.classId}::${e.studentId}`));
+  const enrollCountMap = {}; // `${canonicalClassId}::${subjectId}` -> count
+  for (const e of enrollAgg) {
+    const canonicalId = formToCanonical[e._id.classId];
+    if (!canonicalId) continue;
+    const key = `${canonicalId}::${e._id.subjectId}`;
+    enrollCountMap[key] = (enrollCountMap[key] ?? 0) + e.count;
+  }
 
-  const result = classes.map(c => {
-    const roster = rosterByClass[c.id] ?? [];
-    const subjects = links
-      .filter(l => l.classId === c.id)
+  const enrolledStudentKeys = new Set();
+  for (const e of enrollments) {
+    const canonicalId = formToCanonical[e.classId];
+    if (canonicalId) enrolledStudentKeys.add(`${canonicalId}::${e.studentId}`);
+  }
+
+  const result = classMeta.map(({ canonicalId, name }) => {
+    const roster = rosterByClass[canonicalId] ?? [];
+    const subjects = [...linkByKey.values()]
+      .filter(l => l.classId === canonicalId)
       .map(l => {
-        const enrolled = enrollCountMap[`${c.id}::${l.subjectId}`] ?? 0;
+        const enrolled = enrollCountMap[`${canonicalId}::${l.subjectId}`] ?? 0;
         const isCompulsory = !!l.isCompulsoryForClass;
         return {
           subjectId:    l.subjectId,
@@ -291,9 +351,9 @@ async function _buildEnrollmentAnalytics(req) {
       })
       .sort((a, b) => a.subject.localeCompare(b.subject));
 
-    const unenrolledStudents = roster.filter(sid => !enrolledStudentKeys.has(`${c.id}::${sid}`)).length;
+    const unenrolledStudents = roster.filter(sid => !enrolledStudentKeys.has(`${canonicalId}::${sid}`)).length;
 
-    return { classId: c.id, className: c.name, rosterSize: roster.length, subjects, unenrolledStudents };
+    return { classId: canonicalId, className: name, rosterSize: roster.length, subjects, unenrolledStudents };
   });
 
   return { classes: result };
