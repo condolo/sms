@@ -202,6 +202,56 @@ function _remarkSignOffHtml({ roleLabel, personName, remarkText, signatureUrl, s
     </div>`;
 }
 
+/* Assessment-type key — "what do CA/HW/MT/ET mean" — placed right after
+   the marks table and before Attendance/Behaviour per direct request.
+   Deliberately sourced from s.resultsTable.typeEntries, never a
+   hardcoded CA/HW/MT/ET glossary: that list is already exactly the
+   types THIS school configured (assessment_config.customTypes, or the
+   migrated default), in weight order, so a school running a completely
+   different set of types gets a key that matches what's actually on
+   their own report, not a generic one that happens to share two-letter
+   codes with the common default. Omitted entirely when there are no
+   type columns at all (nothing to define). */
+function _assessmentKeyHtml(s) {
+  if (!s.resultsTable.typeEntries.length) return '';
+  const items = s.resultsTable.typeEntries
+    .map(t => `<span style="margin-right:14px"><b style="color:${BRAND}">${_esc(t.key)}</b> = ${_esc(t.fullLabel)}</span>`)
+    .join('');
+  return `
+  <p style="font-size:9px;color:#64748b;margin:0 0 12px;line-height:1.6">${items}</p>`;
+}
+
+/* Faint school-logo watermark — same positioning convention as the
+   DRAFT text watermark above (centered, rotated, low-opacity, behind
+   content), shown on every report regardless of draft/published status
+   — a school's own mark on its own report, not a status indicator. No
+   logo on file is a silent no-op, never a broken-image placeholder. */
+function _logoWatermarkHtml(logoUrl) {
+  if (!logoUrl) return '';
+  return `<img src="${_esc(logoUrl)}" alt="" style="position:fixed;top:45%;left:50%;width:320px;height:320px;object-fit:contain;transform:translate(-50%,-50%);opacity:0.07;pointer-events:none;z-index:998" />`;
+}
+
+/** Plain-text line version of the assessment key, for PDFKit layouts. */
+function _assessmentKeyText(s) {
+  if (!s.resultsTable.typeEntries.length) return '';
+  return s.resultsTable.typeEntries.map(t => `${t.key} = ${t.fullLabel}`).join('   ·   ');
+}
+
+/* PDFKit counterpart of _logoWatermarkHtml — doc.opacity() scopes to
+   fill AND image draws (unlike fillOpacity, which is text-only), so it
+   has to be explicitly reset after, same save/restore discipline the
+   DRAFT text watermark above already uses for its rotation. */
+function _drawLogoWatermarkPdf(doc, images) {
+  if (!images?.schoolLogo) return;
+  const SIZE = 260;
+  doc.save();
+  doc.opacity(0.07);
+  try {
+    doc.image(images.schoolLogo, doc.page.width / 2 - SIZE / 2, doc.page.height / 2 - SIZE / 2, { fit: [SIZE, SIZE] });
+  } catch { /* corrupt/unsupported buffer — same silent-skip posture as the cover logo's own fetch */ }
+  doc.restore();
+}
+
 /* PDF renderer — walks the IR and makes the pdfkit calls. Every
    coordinate/color/size constant here is unchanged from the original
    monolithic _buildPDFPage; only the source of each value moved from
@@ -761,6 +811,7 @@ function _drawCoverPdf(doc, s, images) {
        .text(s.watermarkText, -200, -45, { width: 400, align: 'center' })
        .restore();
   }
+  _drawLogoWatermarkPdf(doc, images);
 
   // Masthead — logo left, name/tagline/contact stacked right, left-
   // aligned (reviewer: "the header info of cover page are found in
@@ -1163,6 +1214,18 @@ function _renderSubjectPairedPdf(doc, s, images, isFirstPage) {
   ensureSpaceAfterResults(_measureOverallPerformancePdf(doc, s, PAGE_WIDTH));
   rowY = _drawOverallPerformancePdf(doc, s, X, PAGE_WIDTH, rowY);
 
+  /* ASSESSMENT KEY — "what does CA/HW/MT/ET mean", just after marks,
+     before Attendance/Behaviour, sourced only from the types THIS
+     school configured (see _assessmentKeyText's own comment). */
+  const keyText = _assessmentKeyText(s);
+  if (keyText) {
+    doc.font(FONTS.sansRegular).fontSize(7.5);
+    const keyH = doc.heightOfString(keyText, { width: PAGE_WIDTH });
+    ensureSpaceAfterResults(keyH + 6);
+    doc.fillColor(INK_FAINT).text(keyText, X, rowY, { width: PAGE_WIDTH });
+    rowY += keyH + 6;
+  }
+
   /* ATTENDANCE */
   if (s.attendance) {
     ensureSpaceAfterResults(30);
@@ -1259,6 +1322,7 @@ function _renderSubjectPairedHtml(s) {
   const watermarkHtml = s.watermarkText
     ? `<div style="position:fixed;top:45%;left:50%;transform:translate(-50%,-50%) rotate(-30deg);font-size:90px;font-weight:900;color:#cc0000;opacity:0.08;pointer-events:none;white-space:nowrap;z-index:999">${_esc(s.watermarkText)}</div>`
     : '';
+  const logoWatermarkHtml = _logoWatermarkHtml(s.cover.logoUrl);
   const coverHtml = _renderCoverHtml(s);
 
   // Reported directly: the report card "is very dull... colored table
@@ -1272,23 +1336,47 @@ function _renderSubjectPairedHtml(s) {
 
   // RCE3c — short assessment-type KEY (CA/HW/MT/ET), not the split-derived
   // full-word label; see the identical note in the PDF renderer above.
-  const colHeaders = s.resultsTable.typeEntries.map(t => `<th style="${thS}">${_esc(t.key)}</th>`).join('');
-  const devHeader   = s.resultsTable.showDeviation ? `<th style="${thS}">Dev</th>` : '';
+  //
+  // Reported directly, with a side-by-side comparison: columns did not
+  // line up with their own header at all, worse for some subjects than
+  // others. Root cause: the header row lives in its own <table>, and
+  // EVERY subject gets its own SEPARATE <table> too (needed so its
+  // comment row can sit directly under it, inside one page-break-avoid
+  // block) — browsers size each <table>'s columns independently, from
+  // that table's own content alone, with nothing forcing two separate
+  // tables to agree. A subject with a blank CA cell and one with a real
+  // score settle on different column widths in their own tables, and
+  // neither matches the header table above them. Fixing this needs
+  // `table-layout:fixed` plus the SAME explicit width on the matching
+  // column in every one of these independent tables — percentages of
+  // an equal container width always resolve to the same pixel width,
+  // whichever table they're in.
+  const devW = s.resultsTable.showDeviation ? 8 : 0;
+  const typeW = s.resultsTable.typeEntries.length > 0
+    ? (100 - 26 - 10 - 10 - devW) / s.resultsTable.typeEntries.length
+    : 0;
+  const colWidthStyle = [26, ...s.resultsTable.typeEntries.map(() => typeW), 10, 10, ...(s.resultsTable.showDeviation ? [devW] : [])];
+  const tableFixed = 'width:100%;table-layout:fixed;border-collapse:collapse';
+
+  const colHeaders = s.resultsTable.typeEntries.map((t, i) => `<th style="${thS};width:${colWidthStyle[1 + i]}%">${_esc(t.key)}</th>`).join('');
+  const devHeader   = s.resultsTable.showDeviation ? `<th style="${thS};width:${colWidthStyle[colWidthStyle.length - 1]}%">Dev</th>` : '';
   // A single header row shown once above the whole subject list — each
   // subject still gets its own small table below (so its comment row can
   // sit directly under it), but a reader needs the column headings
   // visible somewhere, not repeated N times.
   const headerRowHtml = `
-    <table style="width:100%;border-collapse:collapse;margin-bottom:4px;font-size:11px">
-      <tr><th style="${thS};text-align:left">Subject</th>${colHeaders}<th style="${thS}">AVG</th><th style="${thS}">Grade</th>${devHeader}</tr>
+    <table style="${tableFixed};margin-bottom:4px;font-size:11px">
+      <tr><th style="${thS};width:${colWidthStyle[0]}%;text-align:left">Subject</th>${colHeaders}<th style="${thS};width:${colWidthStyle[colWidthStyle.length - 2 - (s.resultsTable.showDeviation ? 1 : 0)]}%">AVG</th><th style="${thS};width:${colWidthStyle[colWidthStyle.length - 1 - (s.resultsTable.showDeviation ? 1 : 0)]}%">Grade</th>${devHeader}</tr>
     </table>`;
 
   const subjectBlocks = s.resultsTable.rows.map(row => {
-    const markCells = row.typeValues.map(v => `<td style="${tdC}">${_esc(v)}</td>`).join('');
+    const markCells = row.typeValues.map((v, i) => `<td style="${tdC};width:${colWidthStyle[1 + i]}%">${_esc(v)}</td>`).join('');
+    const avgW = colWidthStyle[colWidthStyle.length - 2 - (s.resultsTable.showDeviation ? 1 : 0)];
+    const gradeW = colWidthStyle[colWidthStyle.length - 1 - (s.resultsTable.showDeviation ? 1 : 0)];
     const devCell = s.resultsTable.showDeviation
       ? (() => {
           const devColor = row.deviationText == null ? '#94a3b8' : row.deviationText.startsWith('-') ? '#dc2626' : '#16a34a';
-          return `<td style="${tdC};color:${devColor};font-weight:600">${row.deviationText == null ? '' : _esc(row.deviationText)}</td>`;
+          return `<td style="${tdC};width:${devW}%;color:${devColor};font-weight:600">${row.deviationText == null ? '' : _esc(row.deviationText)}</td>`;
         })()
       : '';
     const commentEnabled = s.comments.subjectTeacherCommentsEnabled;
@@ -1298,12 +1386,12 @@ function _renderSubjectPairedHtml(s) {
     // teaching_assignments by the caller), else a generic fallback.
     const commentLabel   = commentEntry?.teacherName ? _esc(commentEntry.teacherName) + ':' : 'Subject Teacher:';
     return `
-    <table style="width:100%;border-collapse:collapse;margin-bottom:8px;font-size:11px;page-break-inside:avoid;break-inside:avoid">
+    <table style="${tableFixed};margin-bottom:8px;font-size:11px;page-break-inside:avoid;break-inside:avoid">
       <tr${row.failed ? ' style="color:#dc2626"' : ''}>
-        <td style="${tdS};font-weight:700;min-width:120px">${_esc(row.nameLine)}</td>
+        <td style="${tdS};width:${colWidthStyle[0]}%;font-weight:700">${_esc(row.nameLine)}</td>
         ${markCells}
-        <td style="${tdC};font-weight:700">${_esc(row.scoreText)}</td>
-        <td style="${tdC}">${row.gradeText ? `<span style="display:inline-block;min-width:20px;padding:1px 8px;border-radius:10px;background:${ACCENT_WASH};color:${ACCENT};font-weight:700">${_esc(row.gradeText)}</span>` : ''}</td>
+        <td style="${tdC};width:${avgW}%;font-weight:700">${_esc(row.scoreText)}</td>
+        <td style="${tdC};width:${gradeW}%">${row.gradeText ? `<span style="display:inline-block;min-width:20px;padding:1px 8px;border-radius:10px;background:${ACCENT_WASH};color:${ACCENT};font-weight:700">${_esc(row.gradeText)}</span>` : ''}</td>
         ${devCell}
       </tr>
       ${commentEnabled ? `
@@ -1393,6 +1481,7 @@ function _renderSubjectPairedHtml(s) {
       ${s.summary.showRanking ? `<td style="${tdS}">${_esc(s.summary.rankText)}</td>` : ''}
     </tr>
   </table>
+  ${_assessmentKeyHtml(s)}
   ${s.attendance ? `<p style="font-size:11px;color:#475569;margin:0 0 12px"><b>Attendance:</b> ${_esc(s.attendance.text)}</p>` : ''}
   ${s.gradingKey.length ? `
   <div style="page-break-inside:avoid;break-inside:avoid">
@@ -1425,6 +1514,7 @@ function _renderSubjectPairedHtml(s) {
 </style>
 </head><body>
 ${watermarkHtml}
+${logoWatermarkHtml}
 ${coverHtml}
 ${academicHtml}
 </body></html>`;
@@ -1550,6 +1640,16 @@ function _renderMarksThenCommentsPdf(doc, s, images, isFirstPage) {
   ensureSpaceAfterResults(_measureOverallPerformancePdf(doc, s, PAGE_WIDTH));
   rowY = _drawOverallPerformancePdf(doc, s, X, PAGE_WIDTH, rowY);
 
+  /* ASSESSMENT KEY — same placement/reasoning as subject_paired above. */
+  const keyText = _assessmentKeyText(s);
+  if (keyText) {
+    doc.font(FONTS.sansRegular).fontSize(7.5);
+    const keyH = doc.heightOfString(keyText, { width: PAGE_WIDTH });
+    ensureSpaceAfterResults(keyH + 6);
+    doc.fillColor(INK_FAINT).text(keyText, X, rowY, { width: PAGE_WIDTH });
+    rowY += keyH + 6;
+  }
+
   if (s.attendance) {
     ensureSpaceAfterResults(30);
     doc.rect(X, rowY, PAGE_WIDTH, 26).fill(SURFACE).stroke(RULE);
@@ -1666,6 +1766,7 @@ function _renderMarksThenCommentsHtml(s) {
   const watermarkHtml = s.watermarkText
     ? `<div style="position:fixed;top:45%;left:50%;transform:translate(-50%,-50%) rotate(-30deg);font-size:90px;font-weight:900;color:#cc0000;opacity:0.08;pointer-events:none;white-space:nowrap;z-index:999">${_esc(s.watermarkText)}</div>`
     : '';
+  const logoWatermarkHtml = _logoWatermarkHtml(s.cover.logoUrl);
   const coverHtml = _renderCoverHtml(s);
 
   // Same BRAND-consistency fix as subject_paired's identical HTML gap above.
@@ -1723,6 +1824,7 @@ function _renderMarksThenCommentsHtml(s) {
     <tbody>${subjectRows}</tbody>
   </table>
   ${s.resultsTable.rankingNote ? `<p style="font-size:9px;color:#64748b;margin:0 0 14px">${_esc(s.resultsTable.rankingNote)}</p>` : ''}
+  ${_assessmentKeyHtml(s)}
   ${s.attendance ? `<p style="font-size:11px;color:#475569;margin:0 0 14px"><b>Attendance:</b> ${_esc(s.attendance.text)}</p>` : ''}
   ${s.gradingKey.length ? `
   <div style="page-break-inside:avoid;break-inside:avoid">
@@ -1826,6 +1928,7 @@ function _renderMarksThenCommentsHtml(s) {
 </style>
 </head><body>
 ${watermarkHtml}
+${logoWatermarkHtml}
 ${coverHtml}
 ${marksHtml}
 ${commentsHtml}
@@ -2017,6 +2120,7 @@ function _renderKindergartenHtml(s) {
   const watermarkHtml = s.watermarkText
     ? `<div style="position:fixed;top:45%;left:50%;transform:translate(-50%,-50%) rotate(-30deg);font-size:90px;font-weight:900;color:#cc0000;opacity:0.08;pointer-events:none;white-space:nowrap;z-index:999">${_esc(s.watermarkText)}</div>`
     : '';
+  const logoWatermarkHtml = _logoWatermarkHtml(s.cover.logoUrl);
   const coverHtml = _renderCoverHtml(s);
   const showScore = s.display.showScore, showGrade = s.display.showGrade;
 
@@ -2096,6 +2200,7 @@ function _renderKindergartenHtml(s) {
 </style>
 </head><body>
 ${watermarkHtml}
+${logoWatermarkHtml}
 ${coverHtml}
 ${subjectsHtml}
 ${overallHtml}

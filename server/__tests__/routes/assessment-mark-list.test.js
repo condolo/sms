@@ -132,6 +132,39 @@ describe('GET /api/assessment/mark-list — stays in sync with Report Cards (202
   });
 });
 
+describe('GET /api/assessment/mark-list — excludes a deactivated student, same default as every other roster', () => {
+  // Raised directly: this route only ever excluded withdrawn/graduated, so
+  // a suspended, inactive, or transferred student still showed up here
+  // even though they're correctly hidden from Attendance, the Markbook's
+  // own roster, and the Report Cards picker (classes.js/streams.js GET
+  // /:id/students, both fixed to default to status:'active' — see their
+  // own comments). Covers every non-active status, not just the two this
+  // used to check.
+  beforeEach(() => { mockUser = { schoolId: SCHOOL, userId: 'usr_admin', role: 'admin' }; });
+
+  test.each(['inactive', 'suspended', 'transferred', 'withdrawn', 'graduated'])(
+    'a %s student is excluded entirely, not just absent from a cell',
+    async (status) => {
+      mockDb.students.push({
+        id: 'stu_C', schoolId: SCHOOL, classId: 'cls_1', streamId: 'strm_X', status,
+        firstName: 'Cam', lastName: 'C', admissionNumber: 'C1',
+      });
+      const res = await supertest(buildApp()).get(url({ classId: 'cls_1', termNumber: 1, assessmentType: 'MT' }));
+      expect(res.status).toBe(200);
+      expect(res.body.data.cells.stu_C).toBeUndefined();
+    }
+  );
+
+  test('an active student is unaffected', async () => {
+    mockDb.students.push({
+      id: 'stu_C', schoolId: SCHOOL, classId: 'cls_1', streamId: 'strm_X', status: 'active',
+      firstName: 'Cam', lastName: 'C', admissionNumber: 'C1',
+    });
+    const res = await supertest(buildApp()).get(url({ classId: 'cls_1', termNumber: 1, assessmentType: 'MT' }));
+    expect(res.body.data.cells.stu_C).toBeDefined();
+  });
+});
+
 describe('GET /api/assessment/mark-list/export — CSV matches the on-screen view exactly', () => {
   beforeEach(() => { mockUser = { schoolId: SCHOOL, userId: 'usr_admin', role: 'admin' }; });
 
