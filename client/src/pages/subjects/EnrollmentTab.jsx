@@ -115,13 +115,21 @@ export default function EnrollmentTab({ flash }) {
     finally { setEnrolling(null); }
   }
 
-  async function handleUnenroll(enrollmentId) {
+  async function handleUnenroll(enrollmentId, force = false) {
     setUnenrolling(enrollmentId);
     try {
-      await enrollApi.unenroll(enrollmentId);
+      await enrollApi.unenroll(enrollmentId, force);
       refetchEnroll(); invalidateCounts();
       flash('Student unenrolled');
-    } catch (err) { flash(err.message || 'Unenroll failed', 'error'); }
+    } catch (err) {
+      // Has recorded marks — ask before proceeding instead of silently
+      // dropping the student from the subject's roster/grade entry.
+      if (!force && err.code === 'HAS_MARKS' && window.confirm(`${err.message} Continue anyway?`)) {
+        setUnenrolling(null);
+        return handleUnenroll(enrollmentId, true);
+      }
+      flash(err.message || 'Unenroll failed', 'error');
+    }
     finally { setUnenrolling(null); }
   }
 

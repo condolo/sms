@@ -755,7 +755,7 @@ export const studentSubjects = {
   list:     (params) => _get('/student-subjects', params),
   enroll:   (data)   => _post('/student-subjects', data),
   bulk:     (data)   => _post('/student-subjects/bulk', data),
-  unenroll: (id)     => _delete(`/student-subjects/${id}`),
+  unenroll: (id, force) => _delete(`/student-subjects/${id}${force ? '?force=true' : ''}`),
 };
 
 export const classSubjects = {

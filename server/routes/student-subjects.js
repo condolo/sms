@@ -10,7 +10,7 @@ const { v4: uuidv4 } = require('uuid');
 const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
-const { ok, created, E } = require('../utils/response');
+const { ok, created, fail, E } = require('../utils/response');
 
 const router = express.Router();
 
@@ -164,12 +164,28 @@ router.post('/bulk', authMiddleware, rbac('subjects', 'update'), async (req, res
   } catch (err) { console.error('[student-subjects POST /bulk]', err); return E.serverError(res); }
 });
 
-/* DELETE /api/student-subjects/:id — unenroll */
+/* DELETE /api/student-subjects/:id — unenroll
+   ?force=true bypasses the has-marks warning below (the client re-sends
+   the same request with this flag once the user confirms). Unenrolling
+   never deletes the marks themselves — they're left in place, just no
+   longer reachable from this subject's roster — this only warns before
+   that happens. */
 router.delete('/:id', authMiddleware, rbac('subjects', 'update'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const doc = await tenantModel('student_subjects', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId });
-    if (!doc) return E.notFound(res, 'Enrollment not found');
+    const enrollment = await tenantModel('student_subjects', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
+    if (!enrollment) return E.notFound(res, 'Enrollment not found');
+
+    if (req.query.force !== 'true') {
+      const markCount = await tenantModel('assessment_marks', tenantContext(req)).countDocuments({
+        schoolId, studentId: enrollment.studentId, subjectId: enrollment.subjectId,
+      });
+      if (markCount > 0) {
+        return fail(res, 'HAS_MARKS', `This student already has ${markCount} recorded mark${markCount !== 1 ? 's' : ''} for this subject. Unenrolling will not delete those marks, but the student will disappear from this subject's roster and grade entry.`, 409, { markCount });
+      }
+    }
+
+    await tenantModel('student_subjects', tenantContext(req)).deleteOne({ id: req.params.id, schoolId });
     return ok(res, { message: 'Student unenrolled successfully' });
   } catch (err) { console.error('[student-subjects DELETE /:id]', err); return E.serverError(res); }
 });
