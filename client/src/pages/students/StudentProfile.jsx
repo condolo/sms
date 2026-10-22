@@ -1291,7 +1291,12 @@ function GradesTab({ data, loading }) {
                 <td className="px-4 py-3 font-medium text-slate-800">{row.subject ?? row._id}</td>
                 <td className="px-4 py-3 text-right">
                   <span className={`font-semibold ${pctColor(row.avgPct)}`}>
-                    {row.avgPct != null ? `${Math.round(row.avgPct)}%` : '—'}
+                    {/* 1 decimal, not rounded to a whole number — row.grade
+                        is banded off this exact value server-side, so
+                        rounding alone made two subjects at e.g. 79.6%/80.3%
+                        both read "80%" while landing in different grade
+                        bands with nothing visible to explain why. */}
+                    {row.avgPct != null ? `${row.avgPct.toFixed(1)}%` : '—'}
                   </span>
                 </td>
                 <td className="px-4 py-3 text-right font-medium text-slate-700">{row.grade ?? '—'}</td>

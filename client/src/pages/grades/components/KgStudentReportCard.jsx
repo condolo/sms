@@ -155,7 +155,13 @@ const KgStudentReportCard = forwardRef(function KgStudentReportCard({
                   {subj.possible > 0 ? `${subj.earned}/${subj.possible} · ` : ''}
                 </span>
                 <span className="font-semibold text-slate-700">
-                  {subj.subjectAvgPct != null ? `${Math.round(subj.subjectAvgPct)}%` : '—'}
+                  {/* 1 decimal, not rounded to a whole number — the grade
+                      beside it is banded off this same precise value (see
+                      kg-report.js), so rounding here alone made two
+                      subjects with identical displayed %s show different
+                      grades with nothing visible to explain why. Matches
+                      the precision the printed report card already uses. */}
+                  {subj.subjectAvgPct != null ? `${subj.subjectAvgPct.toFixed(1)}%` : '—'}
                 </span>
                 {showGrade && subj.subjectGrade && (
                   <span className={`ml-1.5 font-bold ${gradeColor(subj.subjectGrade)}`}>{subj.subjectGrade}</span>
@@ -198,7 +204,7 @@ const KgStudentReportCard = forwardRef(function KgStudentReportCard({
       <div className="px-5 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
         <p className="text-xs font-semibold text-slate-600">Overall Average</p>
         <p className="text-sm font-bold text-slate-800">
-          {student.overallAvgPct != null ? `${Math.round(student.overallAvgPct)}%` : '—'}
+          {student.overallAvgPct != null ? `${student.overallAvgPct.toFixed(1)}%` : '—'}
           {showGrade && student.overallGrade && (
             <span className={`ml-2 ${gradeColor(student.overallGrade)}`}>{student.overallGrade}</span>
           )}
