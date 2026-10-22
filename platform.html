@@ -666,7 +666,7 @@ async function openTicket(id) {
         </div>
         ${messages}
         <textarea id="ticket-reply-${t.id}" rows="3" placeholder="Reply (visible in the platform console only)…"
-          style="width:100%;margin-top:10px;border:1px solid #e5e7eb;border-radius:8px;padding:10px;font-size:13px"></textarea>
+          class="pa-input" style="margin-top:10px"></textarea>
         <div style="display:flex;gap:8px;margin-top:8px">
           <button class="pa-btn primary" onclick="ticketReply('${t.id}', false)">Send reply</button>
           <button class="pa-btn" onclick="ticketReply('${t.id}', true)">Add internal note</button>
@@ -1265,7 +1265,7 @@ function showOrgActivation(orgId) {
   showModal(
     `Multi-School Settings — ${org.name}`,
     `<div style="display:flex;flex-direction:column;gap:14px;text-align:left">
-      <div style="padding:10px 12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;font-size:12px;color:#1e40af">
+      <div class="pa-note">
         Enabling this activates JWT enrichment and the school switcher for already-authenticated staff, <strong>and</strong> makes this organization's slug (<code>${org.slug}.msingi.io</code>) a shared login page. The login page is only functionally live once the platform-wide <code>IDENTITY_CUTOVER_ENABLED</code> environment variable is also set — a global, operator-only lever this dashboard cannot flip or verify.
       </div>
 
@@ -1478,7 +1478,7 @@ async function renderDiagnostics() {
           <p style="font-size:14px;color:#374151;margin:0 0 12px">Use these tools to verify that core platform services are working correctly.</p>
         </div>
 
-        <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:16px 20px">
+        <div class="pa-subpanel">
           <div style="font-weight:600;font-size:14px;margin-bottom:4px">📧 Email / SMTP</div>
           <p style="font-size:13px;color:#6b7280;margin:0 0 12px">Sends a test email to the PLATFORM_EMAIL address. If you're not receiving emails on registration/approval, start here.</p>
           <button class="pa-btn primary" id="btn-test-email" onclick="runEmailTest()">
@@ -1487,7 +1487,7 @@ async function renderDiagnostics() {
           <div id="email-test-result" style="margin-top:12px;display:none"></div>
         </div>
 
-        <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:16px 20px">
+        <div class="pa-subpanel">
           <div style="font-weight:600;font-size:14px;margin-bottom:4px">🗄️ Database</div>
           <p style="font-size:13px;color:#6b7280;margin:0 0 12px">Checks MongoDB connection state.</p>
           <button class="pa-btn" onclick="runDbCheck()">
@@ -1508,7 +1508,7 @@ async function renderDiagnostics() {
           <div id="orphan-result" style="margin-top:12px;display:none"></div>
         </div>
 
-        <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:16px 20px">
+        <div class="pa-subpanel">
           <div style="font-weight:600;font-size:14px;margin-bottom:4px">📋 Environment Variables Required</div>
           <p style="font-size:13px;color:#6b7280;margin:0 0 8px">These must be set in Render dashboard → Environment:</p>
           <table style="font-size:12px;border-collapse:collapse;width:100%">
@@ -2808,20 +2808,20 @@ async function renderBranding() {
       Changes take effect immediately — no redeployment needed.
     </p>
     <div id="branding-msg" style="display:none;margin-bottom:16px"></div>
-    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:28px;margin-bottom:20px">
+    <div class="pa-panel">
       <h3 style="margin:0 0 20px;font-size:15px;font-weight:600;color:#111827">Identity</h3>
       <div style="display:grid;gap:16px">
         <div>
-          <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">Platform Name</label>
-          <input id="ps-name" type="text" placeholder="Msingi" style="width:100%;border:1px solid #d1d5db;border-radius:8px;padding:10px 12px;font-size:14px;box-sizing:border-box"/>
+          <label class="pa-label">Platform Name</label>
+          <input id="ps-name" type="text" placeholder="Msingi" class="pa-input"/>
         </div>
         <div>
-          <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">Tagline</label>
-          <input id="ps-tagline" type="text" placeholder="The Digital Operating System for Modern Schools." style="width:100%;border:1px solid #d1d5db;border-radius:8px;padding:10px 12px;font-size:14px;box-sizing:border-box"/>
+          <label class="pa-label">Tagline</label>
+          <input id="ps-tagline" type="text" placeholder="The Digital Operating System for Modern Schools." class="pa-input"/>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
           <div>
-            <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">Logo</label>
+            <label class="pa-label">Logo</label>
             <div style="display:flex;align-items:center;gap:12px">
               <div id="ps-logo-preview" onclick="document.getElementById('ps-logo-file').click()"
                    style="width:80px;height:48px;border:2px dashed #d1d5db;border-radius:8px;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;background:#f9fafb;flex-shrink:0">
@@ -2836,7 +2836,7 @@ async function renderBranding() {
             <p style="font-size:11px;color:#9ca3af;margin:6px 0 0">Recommended: 200×50px PNG/SVG, max 500KB</p>
           </div>
           <div>
-            <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">Favicon</label>
+            <label class="pa-label">Favicon</label>
             <div style="display:flex;align-items:center;gap:12px">
               <div id="ps-favicon-preview" onclick="document.getElementById('ps-favicon-file').click()"
                    style="width:40px;height:40px;border:2px dashed #d1d5db;border-radius:8px;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;background:#f9fafb;flex-shrink:0">
@@ -2852,7 +2852,7 @@ async function renderBranding() {
           </div>
         </div>
         <div>
-          <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">Primary Brand Colour</label>
+          <label class="pa-label">Primary Brand Colour</label>
           <div style="display:flex;gap:10px;align-items:center">
             <input id="ps-color-picker" type="color" value="#4f46e5" style="width:44px;height:40px;border:1px solid #d1d5db;border-radius:8px;padding:2px;cursor:pointer"/>
             <input id="ps-color" type="text" placeholder="#4f46e5" maxlength="7" style="width:120px;border:1px solid #d1d5db;border-radius:8px;padding:10px 12px;font-size:14px;font-family:monospace"/>
@@ -2862,22 +2862,22 @@ async function renderBranding() {
       </div>
     </div>
 
-    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:28px;margin-bottom:20px">
+    <div class="pa-panel">
       <h3 style="margin:0 0 20px;font-size:15px;font-weight:600;color:#111827">Contact Information</h3>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
         <div>
-          <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">Contact Email</label>
-          <input id="ps-email" type="email" placeholder="support@msingi.io" style="width:100%;border:1px solid #d1d5db;border-radius:8px;padding:10px 12px;font-size:14px;box-sizing:border-box"/>
+          <label class="pa-label">Contact Email</label>
+          <input id="ps-email" type="email" placeholder="support@msingi.io" class="pa-input"/>
         </div>
         <div>
-          <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">WhatsApp / Support Phone</label>
-          <input id="ps-phone" type="text" placeholder="+254 769 024 153" style="width:100%;border:1px solid #d1d5db;border-radius:8px;padding:10px 12px;font-size:14px;box-sizing:border-box"/>
+          <label class="pa-label">WhatsApp / Support Phone</label>
+          <input id="ps-phone" type="text" placeholder="+254 769 024 153" class="pa-input"/>
         </div>
       </div>
     </div>
 
-    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:28px;margin-bottom:28px">
-      <h3 style="margin:0 0 6px;font-size:15px;font-weight:600;color:#111827">Social Media Links</h3>
+    <div class="pa-panel">
+      <h3 style="margin-bottom:6px">Social Media Links</h3>
       <p style="font-size:12px;color:#9ca3af;margin:0 0 20px">Full URLs (e.g. https://twitter.com/msingi). Leave blank to hide the icon.</p>
       <div style="display:grid;gap:14px">
         ${[
@@ -2890,8 +2890,8 @@ async function renderBranding() {
           <div style="display:flex;align-items:center;gap:12px">
             <i class="${icon}" style="width:20px;text-align:center;color:#6b7280;font-size:16px"></i>
             <div style="flex:1">
-              <label style="display:block;font-size:11px;font-weight:600;color:#6b7280;margin-bottom:4px">${label}</label>
-              <input id="${id}" type="url" placeholder="${ph}" style="width:100%;border:1px solid #d1d5db;border-radius:8px;padding:8px 12px;font-size:13px;box-sizing:border-box"/>
+              <label class="pa-label" style="margin-bottom:4px">${label}</label>
+              <input id="${id}" type="url" placeholder="${ph}" class="pa-input"/>
             </div>
           </div>
         `).join('')}
