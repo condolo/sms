@@ -25,6 +25,7 @@ const fs          = require('fs');
 const path        = require('path');
 const { execSync } = require('child_process');
 const scanRoutes  = require('./_rbac-scan');
+const execStatus  = require('./lib/exec-status');
 
 const CI = process.argv.includes('--ci') || process.env.CI === 'true';
 
@@ -62,6 +63,14 @@ function readJson(p) {
 }
 function exec(cmd) {
   try { return execSync(cmd, { encoding: 'utf8', stdio: ['pipe','pipe','pipe'] }).trim(); } catch { return null; }
+}
+
+/* Like exec(), but keeps the exit status so a caller can tell "the command
+   ran and failed" apart from "the command could not run at all" — and can
+   judge success by exit code instead of by parsing the command's prose.
+   status === null means the process could not be started. */
+function runForStatus(cmd) {
+  return execStatus.runForStatus(cmd);
 }
 
 /* ── Module Tier Classification ─────────────────────────────────── */
@@ -126,10 +135,19 @@ function checkRbac() {
   return { coverage: scan.coverage, baseline, pass: scan.coverage >= baseline, issues: scan.issues };
 }
 
+/* Runs the security scan and judges it by EXIT CODE, not by matching words
+   in its output. The previous heuristic
+     pass = !out.includes('fail') && !out.includes('found')
+   could never pass: security-scan.js's own success line is
+   "Security scan passed - no dangerous patterns found.", which contains
+   "found" — so a completely clean scan was reported as a failed check and
+   the release gate always ended in "RELEASE BLOCKED". Matching on prose is
+   fragile in both directions anyway (a violation's own wording could omit
+   either word); the script's exit status is the contract it documents
+   ("Exit 0 = clean. Exit 1 = violations found"). */
 function checkSecurityPatterns() {
-  const result = exec('node scripts/security-scan.js 2>&1');
-  const pass   = result !== null && !result.toLowerCase().includes('fail') && !result.toLowerCase().includes('found');
-  return { pass, output: result ? result.slice(0, 200) : 'Could not run' };
+  const judged = execStatus.judgeByExitStatus(runForStatus('node scripts/security-scan.js 2>&1'));
+  return { pass: judged.pass, output: judged.output || 'Could not run' };
 }
 
 function checkTests() {

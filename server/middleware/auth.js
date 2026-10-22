@@ -7,6 +7,11 @@ const SessionService       = require('../services/sessionService');
 const AuditService         = require('../services/audit');
 const { csrfOk, PLATFORM_CSRF_COOKIE_NAME } = require('../utils/csrf');
 const demo = require('../utils/demo');
+const {
+  resolveCapabilities,
+  hasCapability,
+  requiredCapability,
+} = require('../config/platformCapabilities');
 
 /* Standard error envelope — matches { success, error: { code, message } } used everywhere */
 function _unauth(res, code, message) {
@@ -166,7 +171,37 @@ function platformAdmin(req, res, next) {
    req.platformAdmin stays a plain boolean for either shape, unchanged,
    so ops.js/audit.js/billing.js's existing "is this a platform
    operator at all" checks need no changes. */
-function platformSession(req, res, next) {
+/* Live-operator cache — platform_operators is read once per session per
+   30s so capability changes and suspensions take effect promptly without
+   a DB round-trip on every platform request. Invalidated eagerly by
+   invalidateOperatorCache() whenever the Team routes write an operator. */
+const _platOpCache = new Map();               // operatorId → { at, operator }
+const PLAT_OP_CACHE_TTL = 30 * 1000;
+
+async function _loadOperator(id) {
+  if (!id) return null;
+  const hit = _platOpCache.get(id);
+  if (hit && Date.now() - hit.at < PLAT_OP_CACHE_TTL) return hit.operator;
+  const Model = _model('platform_operators');
+  /* Skip the read entirely when there is no live connection (unit tests,
+     startup) — an unconnected Mongoose query would buffer for its default
+     10s before failing. A model without a `.db` handle means it is mocked,
+     so the read is allowed through to the stub. */
+  const dbState = Model && Model.db && Model.db.readyState;
+  if (dbState !== undefined && dbState !== 1) return null;
+  const operator = await Model.findOne({ id }).lean();
+  _platOpCache.set(id, { at: Date.now(), operator: operator || null });
+  return operator || null;
+}
+
+/* Called by the Team management routes after any operator write, so a
+   suspension or capability change is not hidden behind the 30s cache. */
+function invalidateOperatorCache(id) {
+  if (id) _platOpCache.delete(id);
+  else _platOpCache.clear();
+}
+
+async function platformSession(req, res, next) {
   const token  = req.cookies?.platform_token;
   const secret = process.env.PLATFORM_JWT_SECRET;
 
@@ -190,10 +225,43 @@ function platformSession(req, res, next) {
       req.platformAdmin = true;
       req.platformOperator = { id: payload.operatorId, name: payload.name, email: payload.email, tier: payload.tier };
       req.platformOperatorTier = payload.tier;
+
+      /* Hydrate live capabilities from the operator record. If the record
+         cannot be read (deleted, or a unit test with no DB), fall back to
+         the tier carried in the token — the same access that tier had
+         before this layer existed, so nothing is ever widened implicitly. */
+      try {
+        const op = await _loadOperator(payload.operatorId);
+        if (op) {
+          if (op.status === 'suspended' || op.status === 'removed' || op.isActive === false) {
+            return res.status(401).json({ success: false, error: { code: 'PLATFORM_OPERATOR_INACTIVE', message: 'This platform account is no longer active.' } });
+          }
+          if (op.sessionsRevokedAt && payload.iat != null) {
+            if (payload.iat * 1000 < new Date(op.sessionsRevokedAt).getTime()) {
+              return res.status(401).json({ success: false, error: { code: 'PLATFORM_SESSION_EXPIRED', message: 'Platform session expired. Please sign in again.' } });
+            }
+          }
+          req.platformOperator = {
+            id: op.id,
+            name: op.name,
+            email: op.email,
+            tier: op.tier || payload.tier,
+            template: op.template || null,
+            status: op.status || 'active',
+          };
+          req.platformOperatorTier = op.tier || payload.tier;
+          req.platformCaps = resolveCapabilities(op);
+        }
+      } catch (err) {
+        // Non-fatal: fall back to tier-only resolution below.
+        console.error('[platform] operator capability hydrate failed:', err.message);
+      }
+      if (!req.platformCaps) req.platformCaps = resolveCapabilities({ tier: req.platformOperatorTier });
     } else if (payload.sub === 'platform-admin') {
       req.platformAdmin = true;
       req.platformOperator = null;
       req.platformOperatorTier = 'owner'; // legacy shared credential — always full access, as it always implicitly was
+      req.platformCaps = ['*'];
     } else {
       throw new Error('invalid subject');
     }
@@ -203,14 +271,51 @@ function platformSession(req, res, next) {
   }
 }
 
-/* Owner-tier gate — layered on top of platformSession. A support-tier
-   operator can reach any platformSession-gated route that doesn't also
-   require this; owner-tier is required for anything mutating or
-   otherwise sensitive. See platform.js's router-level wiring for which
-   routes that covers. */
+/* Resolve the caller's capability set. platformSession hydrates it from the
+   live operator record; when that has not run (a stubbed session in tests,
+   or a route mounted without it) fall back to the tier claim, which is the
+   pre-capability semantics. An unknown/absent tier resolves to no
+   capabilities, so an unauthenticated mount can never accidentally pass. */
+function _effectiveCaps(req) {
+  if (Array.isArray(req.platformCaps)) return req.platformCaps;
+  return resolveCapabilities({ tier: req.platformOperatorTier });
+}
+
+/* Owner-tier gate — layered on top of platformSession. Kept as-is for the
+   two routes that call it directly (a support-tier operator can reach any
+   platformSession-gated route that doesn't also require this). */
 function requireOwnerTier(req, res, next) {
   if (req.platformOperatorTier === 'owner') return next();
+  if (hasCapability(_effectiveCaps(req), '*')) return next();
   return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'This action requires owner-tier platform access.' } });
 }
 
-module.exports = { authMiddleware, platformAdmin, platformSession, requireOwnerTier };
+/* Capability gate — the single enforcement point wired into platform.js
+   right after platformSession. Looks the (method, path) up in the policy
+   table and requires the mapped capability.
+
+   Unmatched routes keep the pre-capability behaviour exactly: a GET is
+   allowed for any authenticated operator, any other verb requires owner.
+   That means a route added later is never accidentally opened up. */
+function requirePlatformCapability(req, res, next) {
+  const required = requiredCapability(req.method, req.path);
+  if (required === null) return next();                 // explicitly any operator
+  if (required === undefined) {                          // no rule — legacy default
+    if (req.method === 'GET') return next();
+    return requireOwnerTier(req, res, next);
+  }
+  if (hasCapability(_effectiveCaps(req), required)) return next();
+  return res.status(403).json({
+    success: false,
+    error: { code: 'FORBIDDEN', message: `This action requires the "${required}" platform capability.` },
+  });
+}
+
+module.exports = {
+  authMiddleware,
+  platformAdmin,
+  platformSession,
+  requireOwnerTier,
+  requirePlatformCapability,
+  invalidateOperatorCache,
+};

@@ -296,6 +296,8 @@ const INDEXES = [
     indexes: [
       { key: { email: 1 }, name: 'platform_ops_email', unique: true, sparse: true },
       { key: { id: 1 },    name: 'platform_ops_id', unique: true, sparse: true },
+      { key: { status: 1 }, name: 'platform_ops_status' },
+      { key: { template: 1 }, name: 'platform_ops_template' },
     ],
   },
 

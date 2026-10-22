@@ -6,7 +6,91 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [v5.203.0] — 2026-10-19 — feat(exams): Kindergarten indicators move from the template to the Markbook
+## [v5.203.1] - 2026-10-21 - fix(release-gate): the security-pattern check could never pass
+
+`npm run platform:release-gate` always ended in **"RELEASE BLOCKED — 1 critical check(s) failed"**, on a completely clean tree, because `checkSecurityPatterns()` judged the scan by matching words in its output:
+
+```js
+pass = !out.includes('fail') && !out.includes('found')
+```
+
+`scripts/security-scan.js`'s own success line is *"Security scan passed - no dangerous patterns found."* — it contains **found**, so the check failed every time. Prose-matching was fragile in the other direction too: a genuine violation was only detected if its wording happened to contain one of those two substrings.
+
+The script documents its real contract at the top (*"Exit 0 = clean. Exit 1 = violations found"*), so the gate now judges it by **exit status**. The decision lives in a new `scripts/lib/exec-status.js` (`runForStatus` / `judgeByExitStatus` / `runAndJudge`), which keeps three states distinct: exit 0 → pass, non-zero → fail, and **could not be started → fail closed** (a gate that could not run its check must not report success).
+
+**The bug was untested, so it is now pinned.** `server/__tests__/scripts/release-gate-security-check.test.js` (12 tests) asserts the historical success line now *passes*, that a violation whose wording contains neither "fail" nor "found" still *fails*, that an unrunnable scan fails closed, and that the repository's real scan exits 0 and is judged a pass. Verified by mutation: reintroducing the old prose heuristic fails 6 of the 12 tests, so the regression test genuinely bites.
+
+Found while fixing the ADR-0008 platform-team work after a deliberate "did you actually run the repo's own gates?" check; the security-scan and release-gate scripts were otherwise untouched by that change.
+
+---
+
+## [v5.204.3] - 2026-10-22 - style(platform): refresh the console's visual design
+
+Direct feedback with screenshots: the Team page "looks bad" and the schools table is "too oldschool". Both were fair — the console was flat white cards on a near-white canvas, a hairline border on every box, no elevation, and rows of small bordered buttons with icon + label repeated seven times per row.
+
+Direction: **"instrument panel, not admin panel."** The console is an operator's cockpit — a few staff running many schools in long desktop sessions. So: ink-navy chrome, depth from *soft shadow on a tinted canvas* instead of a border on every box, tabular figures wherever numbers line up, and one brand accent — the indigo→violet gradient the product already uses in its emails — spent in exactly three places (the brand mark, the active nav rail, the primary button). Nothing else gets it.
+
+- **Token layer rewritten** in `css/platform.css`: surfaces, ink, lines, brand, status and elevation as named variables; `--gray-*` kept as aliases so older rules keep working.
+- **Elevation + type**: cards are 12px-radius surfaces with layered shadow on a `#f5f6fb` canvas; micro-labels are 11px uppercase with wider tracking; counts and table figures use `font-variant-numeric: tabular-nums` so columns line up.
+- **Semantic status palette.** `open` used to render red (`#fee2e2`/`#991b1b`) — which made a normal support queue read as a wall of errors. Red is now reserved for failure; one `.pa-pill` scale covers every status in the console (blue = queued, amber = waiting on someone else, green = done, red = went wrong), replacing two separate inline-style maps.
+- **Wide tables keep their actions.** The last column is pinned to the right edge with a soft shadow, so "Log in" can never be hidden behind a horizontal scroll; the slug column ellipsises with the full value on hover, and names no longer stack onto three lines.
+- **Row actions stop shouting.** Seven labelled bordered buttons per row became one labelled primary action plus quiet icon buttons with real tooltips (and `aria-label`s). Applied to the schools table, the organizations table (whose five buttons were stacking into 170px-tall rows — now 58px) and the Team table.
+- **Team view rebuilt on the system**: proper card header with a meta line, a labelled four-field form grid, capability toggles in a grouped grid instead of a cramped inline block, and an action footer row.
+- **Landing CMS fixed**: the section body had no horizontal padding, so every field ran flush to the card edge; labels and inputs were not on the system, and the conviction-pair grid declared two columns for three children, wrapping the delete button onto its own row. Now inset, labelled, and a three-column row with a quiet icon delete.
+- **Defined the classes the markup already used but no stylesheet ever styled**: `.pa-input`, `.pa-label`, `.pa-error`, `.pa-btn-primary`, `.cms-field`, `.cms-conv-*`.
+- **Accessibility**: visible `:focus-visible` rings, `aria-label` on every icon-only action, `prefers-reduced-motion` respected, and breakpoints at 1080/860px (the sidebar stacks and the identity block hides on narrow screens).
+
+Verified in a browser at 1028px and 1280px across all fourteen views: no view overflows horizontally, the page never scrolls sideways (only the table wrapper does), and every row action was exercised end to end after the markup refactor — invite, role change, suspend, reactivate, revoke sessions, remove — all still hitting the same endpoints.
+
+---
+
+## [v5.204.2] - 2026-10-22 - fix(platform): picker offered removed members; the demo-request queue filtered on a status that does not exist
+
+Two more defects, found by clicking the remaining Team/Onboarding actions in a browser and by auditing the route table against the capability policy.
+
+1. **The assignee pickers offered removed and suspended members.** The console kept one list (`_teamMembers`) for two different jobs: the Team table — which deliberately shows removed members, because their record is the audit trail — and the assignee pickers. A member I had just removed was still offered as an assignee, so work could be assigned to someone who can never see it. The pickers now use a separate list fed by `GET /api/platform/operators/directory` (active members only), and that list is re-fetched on demand rather than cached, so a suspension is reflected immediately.
+2. **The onboarding queue filtered demo requests on a status that does not exist.** The real vocabulary is `pending_otp → verified → provisioning → pending_review → provisioned`; there is no `pending`. `GET /my-work` queried `status: 'pending'`, so the demo-request half of the onboarding queue and its counters were **permanently empty** — the feature looked broken rather than wrong. Now `pending_review`, matching the console's own Demo Requests badge.
+
+Also added, in the same round:
+
+- **`server/__tests__/routes/platform-permission-matrix.test.js`** — the permission matrix, for every role template against every gated route. The expected result is derived from the template definition itself, so changing a role moves the expectation with it; the test then has to agree with reality. A hand-written expectation table would just be a second copy of the same decision, free to drift.
+- **`server/__tests__/routes/platform-policy-coverage.test.js`** — every mutating platform route must have a capability, or be declared public; and no policy rule may be dead. The audit behind it found the table complete: 76 routes, 71 policied, the remaining 5 being the public auth/settings routes registered before the session gate.
+
+---
+
+## [v5.204.1] - 2026-10-21 - fix(platform): four console/email defects found by driving the team UI in a browser
+
+Found by clicking through the platform console with Playwright against the local server, and by auditing the captured invite email. All four are in the ADR-0008 work.
+
+1. **The console was bricked after the invite flow.** `_showInvitePanel()` rewrites the lock card in place (hides the username/password fields and the sign-in button, shows the invite form) and never undid it. Anyone who used an invite link and then signed out was left staring at the invite form with **no way to sign in again** — the console was unusable in that tab until a manual refresh. `_showLogin()` now calls a new `_resetLockScreen()` that restores the sign-in form, and every path back to the lock screen goes through it.
+2. **The invite result message was wiped instantly.** `teamInvite()` wrote its confirmation and *then* called `renderTeam()`, which replaces the whole view — so the message vanished before it could be read, and (far worse) so did **the invite link returned when the email could not be sent**, leaving the inviter with no way to deliver it. The refresh now happens first and the message is written after it.
+3. **The role chip showed the raw template key** ("Support_agent") instead of the human label ("Support agent"). `GET /me` now returns `templateLabel` and the console renders that.
+4. **The base URL had three definitions with two different fallbacks.** `APP_URL` was defined in `email.js` and `school-url.js` (falling back to `https://msingi.io`) and again in `routes/platform.js` (falling back to **`http://localhost:3005`**) and in `utils/demo.js` (**`http://localhost:3005`**). If `APP_URL` were ever unset in a deployment, the platform-team invite email and the demo-tenant emails would have linked to `localhost` — resolvable only on the server itself, so an invitee could never activate their account and the invite would silently expire. New `server/utils/app-url.js` is now the single definition; `email.js`, `school-url.js`, `demo.js`, `lesson-email.js` and `platform.js` all use it, and `server/__tests__/utils/app-url.test.js` (5 tests) fails if any module reads `process.env.APP_URL` directly again.
+
+Verified in a browser: invite link → validation (short password, mismatched password) → activation → console with the correct capability-gated nav → claim a ticket from *My Work* → sign out → sign back in. Also verified the failure path with SMTP stopped: the inviter is shown the link instead of losing it.
+
+---
+
+## [v5.204.0] - 2026-10-21 - feat(platform): scoped platform team members, invites and work queues (ADR-0008)
+
+Direct request: "super admin team member or users to do some tasks like managing tickets onboarding etc." Until now the only unit of platform permission was a binary `tier` — every GET open to any tier, every mutating verb requiring `owner`. That made a real team member impossible: the choice was full owner (delete schools, impersonate, grant entitlements) or read-only-everything — and accounts could only be created by SSH-ing in and running `scripts/create-platform-operator.js`.
+
+**A capability layer now sits on top of the tier, and never widens an existing account.** `server/config/platformCapabilities.js` is the single source of truth: 13 capabilities, 7 role templates (`owner`, `support_agent`, `onboarding`, `billing`, `content`, `viewer`, `custom`) and a `(method, path) → capability` policy table. `tier:'owner'` is always `['*']`; legacy `tier:'support'` maps to the read-only `viewer` template, so shipping this cannot silently grant anyone write access. A grant is `template` ∪ per-operator `capabilities` overrides.
+
+- `middleware/auth.js`: `requirePlatformCapability` replaces the blanket verb check in `routes/platform.js` (one enforcement point). Unmatched routes keep the historical default (GET allowed, else owner), so a route added later is never accidentally opened up. `platformSession` now hydrates capabilities from the live operator record (30 s cache, `invalidateOperatorCache()` on write) and rejects suspended/removed accounts and tokens older than `sessionsRevokedAt` — **revocation lands on the next request, not the next 2-hour token**.
+- Team management API: `GET /me`, `GET /operators`, `GET /operators/capabilities`, `GET /operators/directory` (minimal id/name/email for the assignee picker), `POST /operators/invite`, `POST /operators/:id/resend-invite`, `PATCH /operators/:id`, `POST /operators/:id/{suspend,reactivate,revoke-sessions}`, `DELETE /operators/:id` (soft — the audit trail keeps the record).
+- **Invites, not one-time passwords**: `POST /operators/invite` emails a `${APP_URL}/platform?invite=<token>` link. Only the SHA-256 hash is stored; single-use, 72 h. `POST /auth/accept-invite` (public, rate-limited) exchanges it for a password + session. If delivery fails the link is returned to the inviter — and only then. An unaccepted invite stays `isActive:false` so the env-var bootstrap credential is not disabled early.
+- **Three refusals that protect the platform** (`server/services/platformOperators.js`, unit-tested): no escalation (cannot grant a capability, or the `*` owner sentinel, that you do not hold), no last-owner-out (cannot suspend/demote/remove the final active owner), no self-lockout (cannot remove your own `operators.manage`, suspend or delete yourself).
+- **Work queues**: `POST /tickets/:id/assign`, `POST /schools/:id/assign` and `POST /demo-requests/:id/assign` (claim any onboarding item), `GET /tickets?assigned=me|none|<operatorId>`, and `GET /my-work` — your tickets, your onboarding approvals, the unassigned backlog for both, past-SLA items and pending counts. The legacy free-text `assignee` field is kept in sync.
+- **Platform console** (`platform.html`, `css/platform.css`): capability-gated nav, a "signed in as …" identity block, a **Team** view (invite form with template + capability overrides, member table, row actions), a **My Work** view (ticket queue **and** owned onboarding approvals), an assignee picker on tickets, pending-school cards and demo-request cards, and an invite-acceptance panel for `?invite=` links. The UI hides what you cannot use; the server remains the enforcement point.
+
+Tests: 5 new suites — `platform-capabilities.test.js` (23), `services/platformOperators.test.js` (15), `routes/platform-capability-gate.test.js` (21), `routes/platform-operators-api.test.js` (26), `routes/platform-ticket-assign.test.js` (22) — plus `csrf-protection.test.js` updated for `platformSession` becoming async. Full suite: 338/338 suites, 3511/3511 tests (the assign suite grew to 22 with the onboarding-queue cases after the initial full run). Verified live against the local server: owner vs support_agent capability resolution, invite → accept → login, a support agent creating a ticket (201) but refused impersonation (403), suspension rejecting an existing session on the next request (401), ticket assign → `assigned=me` → `my-work` → unassign, and claiming a pending school and a demo request → both appearing under `my-work.onboarding`.
+
+Two real bugs the new tests caught: `POST /operators/invite` destructured the invitee's address as `email`, shadowing the module-scope mailer (invites would have failed in production); and the first gate read only `req.platformCaps`, so any unhydrated path denied everyone including owners.
+
+---
+
+## [v5.203.0] - 2026-10-19 - feat(exams): Kindergarten indicators move from the template to the Markbook
 
 Direct pushback on the original design: "whoever is setting the template is like an admin, he doesn't know all the indicators per subject, and these indicators vary depending on what content was set, so they can't be static — they have to be added manually in the Markbook." Confirmed live: the one real KG template (sch_demo) had performance bands configured but zero subjects/indicators — the admin had nowhere sensible to author per-subject competency text that actually matches what was taught that term.
 

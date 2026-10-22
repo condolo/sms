@@ -42,6 +42,25 @@
     </button>
 
     <div class="pa-lock-error" id="login-error" style="display:none"></div>
+
+    <!-- Shown instead of the sign-in form when the page is opened from an
+         invite link (?invite=<token>). The token is single-use + expiring. -->
+    <div id="invite-panel" style="display:none">
+      <p style="margin-top:18px">Welcome to the Msingi platform team. Choose a password to activate your account.</p>
+      <div class="pa-lock-field">
+        <label>New password</label>
+        <input type="password" id="invite-password" placeholder="At least 8 characters" autocomplete="new-password">
+      </div>
+      <div class="pa-lock-field">
+        <label>Confirm password</label>
+        <input type="password" id="invite-password2" placeholder="Repeat password" autocomplete="new-password"
+               onkeydown="if(event.key==='Enter') acceptInvite()">
+      </div>
+      <button class="pa-lock-btn" id="invite-btn" onclick="acceptInvite()">
+        <i class="fas fa-user-check"></i> Activate account
+      </button>
+      <div class="pa-lock-error" id="invite-error" style="display:none"></div>
+    </div>
   </div>
 </div>
 
@@ -61,6 +80,9 @@
     <nav class="pa-nav">
       <button class="pa-nav-item active" onclick="showView('overview')" id="nav-overview">
         <i class="fas fa-chart-pie"></i> Overview
+      </button>
+      <button class="pa-nav-item" onclick="showView('mywork')" id="nav-mywork">
+        <i class="fas fa-list-check"></i> My Work
       </button>
       <button class="pa-nav-item" onclick="showView('pending')" id="nav-pending">
         <i class="fas fa-hourglass-half"></i> Pending
@@ -98,9 +120,13 @@
       <button class="pa-nav-item" onclick="showView('billing')" id="nav-billing">
         <i class="fas fa-file-invoice"></i> Billing Overview
       </button>
+      <button class="pa-nav-item" onclick="showView('team')" id="nav-team" style="display:none">
+        <i class="fas fa-users-gear"></i> Team
+      </button>
     </nav>
 
     <div class="pa-sidebar-footer">
+      <div class="pa-whoami" id="pa-whoami"></div>
       <button class="pa-logout-btn" onclick="logout()">
         <i class="fas fa-sign-out-alt"></i> Sign Out
       </button>
@@ -185,7 +211,7 @@ async function login() {
 
     if (res.ok) {
       passwordEl.value = '';   // clear sensitive field
-      _showApp();
+      await _showApp();
     } else if (res.status === 429) {
       _showErr(err, 'Too many failed attempts. Please wait 15 minutes before trying again.');
     } else {
@@ -200,16 +226,20 @@ async function login() {
   btn.innerHTML = '<i class="fas fa-arrow-right-to-bracket"></i> Sign In';
 }
 
-function _showApp() {
+async function _showApp() {
   document.getElementById('lock-screen').style.display = 'none';
   document.getElementById('app-shell').style.display   = 'flex';
   _updateClock();
   setInterval(_updateClock, 60000);
+  await _loadMe();
   showView('overview');
-  api('GET', '/schools/pending').then(list => _updatePendingBadge(list.length)).catch(()=>{});
+  if (_can('onboarding.view')) {
+    api('GET', '/schools/pending').then(list => _updatePendingBadge(list.length)).catch(()=>{});
+  }
 }
 
 function _showLogin(message) {
+  _resetLockScreen();
   document.getElementById('lock-screen').style.display = 'flex';
   document.getElementById('app-shell').style.display   = 'none';
   document.getElementById('login-username').value      = '';
@@ -221,6 +251,32 @@ function _showLogin(message) {
   }
 }
 
+/* Restore the sign-in form.
+   _showInvitePanel() rewrites the lock card in place (hides the username /
+   password fields and the sign-in button, shows the invite form). Without
+   this reset, anyone who used an invite link and then signed out was left
+   staring at the invite form with no way to sign in again — the console
+   was effectively bricked in that tab until a manual refresh. Every path
+   that returns to the lock screen goes through here. */
+function _resetLockScreen() {
+  const lock = document.getElementById('lock-screen');
+  if (!lock) return;
+  const heading = lock.querySelector('h2');
+  const sub     = lock.querySelector('p');
+  if (heading) heading.textContent = 'Platform Admin';
+  if (sub) sub.textContent = 'This area is restricted to Msingi system administrators. Sign in with your platform credentials.';
+  ['login-username', 'login-password'].forEach(id => {
+    const field = document.getElementById(id)?.closest('.pa-lock-field');
+    if (field) field.style.display = '';
+  });
+  const btn = document.getElementById('login-btn');
+  if (btn) btn.style.display = '';
+  const panel = document.getElementById('invite-panel');
+  if (panel) panel.style.display = 'none';
+  const err = document.getElementById('login-error');
+  if (err) { err.textContent = ''; err.style.display = 'none'; }
+}
+
 function _updateClock() {
   document.getElementById('topbar-time').textContent =
     new Date().toLocaleString('en-GB', { dateStyle:'medium', timeStyle:'short' });
@@ -228,7 +284,68 @@ function _updateClock() {
 
 async function logout() {
   try { await fetch('/api/platform/auth/logout', { method: 'POST', credentials: 'include' }); } catch (e) {}
+  _me = null;
   _showLogin();
+}
+
+/* ── Identity & capabilities ────────────────────────────────
+   GET /api/platform/me tells us who is signed in and what they may do.
+   The console uses it to hide sections the operator cannot use — the
+   server enforces every call regardless, this is presentation only. */
+let _me = { caps: [] };
+
+function _can(cap) {
+  const caps = (_me && _me.caps) || [];
+  return caps.includes('*') || caps.includes(cap);
+}
+
+function _applyCapabilityUI() {
+  // Sections a limited team member should not see at all.
+  const gated = {
+    'nav-settings':  null,           // placeholder (no such id today)
+    'nav-schools':   'schools.view',
+    'nav-organizations': 'schools.view',
+    'nav-provision': 'onboarding.manage',
+    'nav-pending':   'onboarding.view',
+    'nav-demos':     'onboarding.view',
+    'nav-tickets':   'tickets.view',
+    'nav-billing':   'billing.view',
+    'nav-diagnostics': 'diagnostics.view',
+    'nav-announcements': 'content.manage',
+    'nav-branding':  'content.manage',
+    'nav-landing':   'content.manage',
+    'nav-team':      'operators.manage',
+  };
+  Object.entries(gated).forEach(([id, cap]) => {
+    const el = document.getElementById(id);
+    if (!el || !cap) return;
+    el.style.display = _can(cap) ? '' : 'none';
+  });
+
+  const who = document.getElementById('pa-whoami');
+  if (who) {
+    const op = (_me && _me.operator) || {};
+    /* Prefer the server's human-readable role name ("Support agent") over
+       the raw template key ("support_agent"). */
+    const roleLabel = op.templateLabel || (op.tier === 'owner' ? 'Owner' : (op.template || 'custom'));
+    who.innerHTML = `<strong>${_esc(op.name || 'Platform Admin')}</strong>`
+      + `<span class="pa-role-chip">${_esc(roleLabel)}</span>`;
+  }
+
+  // If the current view is no longer permitted, fall back to Overview.
+  if (_currentView && _currentView !== 'overview' && gated['nav-' + _currentView] && !_can(gated['nav-' + _currentView])) {
+    showView('overview');
+  }
+}
+
+async function _loadMe() {
+  try {
+    const data = await api('GET', '/me');
+    _me = data;
+  } catch (e) {
+    _me = { caps: [] };
+  }
+  _applyCapabilityUI();
 }
 
 function _showErr(el, msg) {
@@ -315,10 +432,10 @@ function showView(view) {
   document.querySelectorAll('.pa-nav-item').forEach(el => el.classList.remove('active'));
   document.getElementById('nav-' + view)?.classList.add('active');
 
-  const titles = { overview:'Overview', pending:'Pending Approvals', demos:'Demo Requests', tickets:'Support Tickets', schools:'Registered Schools', organizations:'Organizations', provision:'Provision New School', announcements:'System Announcements', diagnostics:'System Diagnostics', branding:'Branding & Platform Settings', landing:'Landing Page CMS', billing:'Billing Overview' };
+  const titles = { overview:'Overview', mywork:'My Work', pending:'Pending Approvals', demos:'Demo Requests', tickets:'Support Tickets', schools:'Registered Schools', organizations:'Organizations', provision:'Provision New School', announcements:'System Announcements', diagnostics:'System Diagnostics', branding:'Branding & Platform Settings', landing:'Landing Page CMS', billing:'Billing Overview', team:'Platform Team' };
   document.getElementById('view-title').textContent = titles[view] || view;
 
-  const views = { overview: renderOverview, pending: renderPending, demos: renderDemoRequests, tickets: renderTickets, schools: renderSchools, organizations: renderOrganizations, provision: renderProvision, announcements: renderAnnouncements, diagnostics: renderDiagnostics, branding: renderBranding, landing: renderLandingCMS, billing: renderBillingOverview };
+  const views = { overview: renderOverview, mywork: renderMyWork, pending: renderPending, demos: renderDemoRequests, tickets: renderTickets, schools: renderSchools, organizations: renderOrganizations, provision: renderProvision, announcements: renderAnnouncements, diagnostics: renderDiagnostics, branding: renderBranding, landing: renderLandingCMS, billing: renderBillingOverview, team: renderTeam };
   (views[view] || (() => {}))();
 }
 
@@ -334,8 +451,7 @@ const _DEMO_STATUS_STYLE = {
   purged:          'background:#f1f5f9;color:#94a3b8',
 };
 function _demoBadge(status) {
-  const style = _DEMO_STATUS_STYLE[status] || 'background:#f1f5f9;color:#475569';
-  return `<span style="${style};padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700">${_esc(status || 'unknown')}</span>`;
+  return `<span class="pa-pill ${_esc(status || '')}">${_esc((status || 'unknown').replace(/_/g, ' '))}</span>`;
 }
 function _fmtWhen(v) {
   if (!v) return '-';
@@ -347,6 +463,7 @@ async function renderDemoRequests() {
   const el = document.getElementById('pa-content');
   el.innerHTML = '<div class="pa-loading"><i class="fas fa-circle-notch fa-spin"></i> Loading demo requests.</div>';
   try {
+    await _ensureTeamMembers();
     const data = await api('GET', '/demo-requests');
     const requests = data.requests || [];
     const pending = requests.filter(r => r.status === 'pending_review').length;
@@ -385,6 +502,13 @@ function _demoRequestCard(r) {
     : '';
   const actions = [];
   if (r.status === 'pending_review') {
+    actions.push(`<span style="font-size:12px;color:#6b7280;display:inline-flex;align-items:center;gap:6px;margin-right:8px">
+        <i class="fas fa-user-check"></i> Owner
+        <select onchange="demoAssign('${r.id}', this.value)" style="border:1px solid #d1d5db;border-radius:6px;padding:4px 8px;font-size:12px">
+          <option value="">— Unassigned —</option>
+          ${_assignableMembers.map(op => `<option value="${_esc(op.id)}" ${r.assigneeId === op.id ? 'selected' : ''}>${_esc(op.name)}</option>`).join('')}
+        </select>
+      </span>`);
     actions.push(`<button class="pa-btn success" onclick="demoApprove('${r.id}')"><i class="fas fa-check"></i> Approve</button>`);
     actions.push(`<button class="pa-btn danger" onclick="demoReject('${r.id}')"><i class="fas fa-times"></i> Reject</button>`);
   }
@@ -450,8 +574,7 @@ const _TICKET_STATUS_STYLE = {
   closed:      'background:#f1f5f9;color:#475569',
 };
 function _ticketBadge(status) {
-  const style = _TICKET_STATUS_STYLE[status] || 'background:#f1f5f9;color:#475569';
-  return `<span style="${style};padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700">${_esc((status || '').replace('_', ' '))}</span>`;
+  return `<span class="pa-pill ${_esc(status || '')}">${_esc((status || '').replace('_', ' '))}</span>`;
 }
 
 let _ticketFilter = 'active';
@@ -520,6 +643,7 @@ function _ticketCard(t) {
 
 async function openTicket(id) {
   try {
+    await _ensureTeamMembers();
     const data = await api('GET', `/tickets/${id}`);
     const t = data.ticket;
     const messages = (t.messages || []).map(m => `
@@ -531,9 +655,18 @@ async function openTicket(id) {
     const html = `
       <div style="padding:16px 18px">
         <p style="font-size:13px;color:#374151;white-space:pre-wrap;margin:0 0 10px">${_esc(t.description) || '<em>No description</em>'}</p>
+        <div style="display:flex;align-items:center;gap:8px;margin:0 0 12px;flex-wrap:wrap">
+          <span style="font-size:12px;color:#6b7280"><i class="fas fa-user-check"></i> Assigned to:</span>
+          <select id="ticket-assignee-${t.id}" onchange="ticketAssign('${t.id}', this.value)"
+                  style="border:1px solid #d1d5db;border-radius:6px;padding:4px 8px;font-size:12px">
+            <option value="">— Unassigned —</option>
+            ${_assignableMembers.map(op => `<option value="${_esc(op.id)}" ${t.assigneeId === op.id ? 'selected' : ''}>${_esc(op.name)}</option>`).join('')}
+          </select>
+          ${t.slaDueAt ? `<span style="font-size:12px;color:${new Date(t.slaDueAt) < new Date() ? '#b91c1c' : '#6b7280'}">SLA ${new Date(t.slaDueAt) < new Date() ? 'breached' : 'due'} ${_fmtWhen(t.slaDueAt)}</span>` : ''}
+        </div>
         ${messages}
         <textarea id="ticket-reply-${t.id}" rows="3" placeholder="Reply (visible in the platform console only)…"
-          style="width:100%;margin-top:10px;border:1px solid #e5e7eb;border-radius:8px;padding:10px;font-size:13px"></textarea>
+          class="pa-input" style="margin-top:10px"></textarea>
         <div style="display:flex;gap:8px;margin-top:8px">
           <button class="pa-btn primary" onclick="ticketReply('${t.id}', false)">Send reply</button>
           <button class="pa-btn" onclick="ticketReply('${t.id}', true)">Add internal note</button>
@@ -692,6 +825,7 @@ async function renderPending() {
   el.innerHTML = '<div class="pa-loading"><i class="fas fa-circle-notch fa-spin"></i> Loading pending schools…</div>';
 
   try {
+    await _ensureTeamMembers();
     const schools = await api('GET', '/schools/pending');
     _updatePendingBadge(schools.length);
 
@@ -749,6 +883,14 @@ function _pendingCard(s) {
         </div>
       </div>
       <div class="pending-card-actions">
+        <span style="font-size:12px;color:#6b7280;display:inline-flex;align-items:center;gap:6px;margin-right:8px">
+          <i class="fas fa-user-check"></i> Owner
+          <select onchange="schoolAssign('${s._id}', this.value)"
+                  style="border:1px solid #d1d5db;border-radius:6px;padding:4px 8px;font-size:12px">
+            <option value="">— Unassigned —</option>
+            ${_assignableMembers.map(op => `<option value="${_esc(op.id)}" ${s.assigneeId === op.id ? 'selected' : ''}>${_esc(op.name)}</option>`).join('')}
+          </select>
+        </span>
         <button class="pa-btn success" onclick="approveSchool('${s._id}','${_esc(s.name)}')">
           <i class="fas fa-check"></i> Approve
         </button>
@@ -902,10 +1044,10 @@ function _schoolRow(s) {
   return `
     <tr>
       <td>
-        <strong style="display:block;font-size:13px;color:var(--gray-900)">${_esc(s.name)}</strong>
-        <span style="font-size:11px;color:var(--gray-400)">${_esc(s.email)||''}</span>
+        <strong style="display:block;font-size:13px;font-weight:600;color:var(--text)">${_esc(s.name)}</strong>
+        <span class="pa-muted" style="font-size:11.5px">${_esc(s.email)||''}</span>
       </td>
-      <td><code style="font-size:12px;background:var(--gray-100);padding:2px 6px;border-radius:4px">${_esc(s.slug)||'—'}</code></td>
+      <td><code class="slug" title="${_esc(s.slug)}">${_esc(s.slug)||'—'}</code></td>
       <td><span class="plan-pill ${s.plan||'core'}">${_esc(s.plan)||'core'}</span></td>
       <td>${planExpStr}</td>
       <td><span class="status-dot ${status}">${statusLabel}</span></td>
@@ -914,27 +1056,26 @@ function _schoolRow(s) {
       <td>${trialStr}</td>
       <td>
         <div class="pa-action-wrap">
-          <button class="pa-btn" title="Log in as admin" onclick="confirmImpersonate('${s._id}','${_esc(s.name)}')">
+          <button class="pa-btn" title="Sign in as this school's admin" onclick="confirmImpersonate('${s._id}','${_esc(s.name)}')">
             <i class="fas fa-user-secret"></i> Log in
           </button>
-          <button class="pa-btn" title="Change plan" onclick="changePlan('${s._id}','${_esc(s.plan)}','${_esc(s.name)}','${_esc(s.planExpiresAt || '')}')">
-            <i class="fas fa-layer-group"></i> Plan
+          <button class="pa-btn-icon" title="Change plan" aria-label="Change plan for ${_esc(s.name)}" onclick="changePlan('${s._id}','${_esc(s.plan)}','${_esc(s.name)}','${_esc(s.planExpiresAt || '')}')">
+            <i class="fas fa-layer-group"></i>
           </button>
-          <button class="pa-btn" title="Edit school name (slug is fixed and cannot be changed)" onclick="editSchoolName('${s._id}','${_esc(s.name)}')">
-            <i class="fas fa-pen"></i> Rename
+          <button class="pa-btn-icon" title="Rename school (its slug is fixed)" aria-label="Rename ${_esc(s.name)}" onclick="editSchoolName('${s._id}','${_esc(s.name)}')">
+            <i class="fas fa-pen"></i>
           </button>
-          <button class="pa-btn" title="Grant/revoke capabilities independent of plan tier" onclick="showEntitlements('${s._id}','${_esc(s.name)}')">
-            <i class="fas fa-unlock-alt"></i> Entitlements
+          <button class="pa-btn-icon" title="Grant or revoke capabilities regardless of plan" aria-label="Entitlements for ${_esc(s.name)}" onclick="showEntitlements('${s._id}','${_esc(s.name)}')">
+            <i class="fas fa-unlock"></i>
           </button>
-          <button class="pa-btn" title="View/add superadmin accounts" onclick="showSuperadmins('${s._id}','${_esc(s.name)}')">
-            <i class="fas fa-user-shield"></i> Superadmins
+          <button class="pa-btn-icon" title="View and add superadmin accounts" aria-label="Superadmins for ${_esc(s.name)}" onclick="showSuperadmins('${s._id}','${_esc(s.name)}')">
+            <i class="fas fa-user-shield"></i>
           </button>
           ${s.isActive
-            ? `<button class="pa-btn danger" title="Suspend school" onclick="toggleActive('${s._id}',false,'${_esc(s.name)}')"><i class="fas fa-ban"></i></button>`
-            : `<button class="pa-btn success" title="Reinstate school" onclick="toggleActive('${s._id}',true,'${_esc(s.name)}')"><i class="fas fa-check"></i></button>`
+            ? `<button class="pa-btn-icon danger" title="Suspend school" aria-label="Suspend ${_esc(s.name)}" onclick="toggleActive('${s._id}',false,'${_esc(s.name)}')"><i class="fas fa-ban"></i></button>`
+            : `<button class="pa-btn-icon success" title="Reinstate school" aria-label="Reinstate ${_esc(s.name)}" onclick="toggleActive('${s._id}',true,'${_esc(s.name)}')"><i class="fas fa-check"></i></button>`
           }
-          <button class="pa-btn" title="Delete school permanently"
-            style="color:#dc2626;border-color:#fca5a5"
+          <button class="pa-btn-icon danger" title="Delete school permanently" aria-label="Delete ${_esc(s.name)}"
             onclick="deleteSchool('${s._id}','${_esc(s.name)}')">
             <i class="fas fa-trash-alt"></i>
           </button>
@@ -1029,21 +1170,23 @@ function _orgRow(o) {
       <td><span class="status-dot ${o.status === 'active' ? 'active' : ''}">${o.status || '—'}</span></td>
       <td style="color:var(--gray-400);font-size:12px">${created}</td>
       <td>
-        <button class="pa-btn" title="View member schools" onclick="viewOrgSchools('${o.id}')">
-          <i class="fas fa-eye"></i> View Schools
-        </button>
-        <button class="pa-btn" title="Multi-school & shared-slug-login settings" onclick="showOrgActivation('${o.id}')">
-          <i class="fas fa-sliders-h"></i> Multi-School
-        </button>
-        <button class="pa-btn" title="Edit organization name (slug is fixed and cannot be changed)" onclick="editOrgName('${o.id}','${o.name.replace(/'/g,"\\'")}')">
-          <i class="fas fa-pen"></i> Rename
-        </button>
-        <button class="pa-btn" title="Logo, color, tagline, and login background for this org's shared portal" onclick="showOrgBranding('${o.id}')">
-          <i class="fas fa-palette"></i> Branding
-        </button>
-        <button class="pa-btn" title="Add a read-only Group Director/CEO account — sees a merged analytics view across every school in this org, nothing else" onclick="showAddDirector('${o.id}','${o.name.replace(/'/g,"\\'")}')" ${o._stats.activeCount === 0 ? 'disabled' : ''}>
-          <i class="fas fa-chart-line"></i> Add Director
-        </button>
+        <div class="pa-action-wrap">
+          <button class="pa-btn" title="View member schools" onclick="viewOrgSchools('${o.id}')">
+            <i class="fas fa-eye"></i> View Schools
+          </button>
+          <button class="pa-btn-icon" title="Multi-school and shared-slug-login settings" aria-label="Multi-school settings for ${_esc(o.name)}" onclick="showOrgActivation('${o.id}')">
+            <i class="fas fa-sliders-h"></i>
+          </button>
+          <button class="pa-btn-icon" title="Rename organization (its slug is fixed)" aria-label="Rename ${_esc(o.name)}" onclick="editOrgName('${o.id}','${o.name.replace(/'/g,"\\'")}')">
+            <i class="fas fa-pen"></i>
+          </button>
+          <button class="pa-btn-icon" title="Logo, colour, tagline and login background for this org's shared portal" aria-label="Branding for ${_esc(o.name)}" onclick="showOrgBranding('${o.id}')">
+            <i class="fas fa-palette"></i>
+          </button>
+          <button class="pa-btn-icon" title="Add a read-only Group Director/CEO account for this organization" aria-label="Add director to ${_esc(o.name)}" onclick="showAddDirector('${o.id}','${o.name.replace(/'/g,"\\'")}')" ${o._stats.activeCount === 0 ? 'disabled' : ''}>
+            <i class="fas fa-chart-line"></i>
+          </button>
+        </div>
       </td>
     </tr>`;
 }
@@ -1122,7 +1265,7 @@ function showOrgActivation(orgId) {
   showModal(
     `Multi-School Settings — ${org.name}`,
     `<div style="display:flex;flex-direction:column;gap:14px;text-align:left">
-      <div style="padding:10px 12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;font-size:12px;color:#1e40af">
+      <div class="pa-note">
         Enabling this activates JWT enrichment and the school switcher for already-authenticated staff, <strong>and</strong> makes this organization's slug (<code>${org.slug}.msingi.io</code>) a shared login page. The login page is only functionally live once the platform-wide <code>IDENTITY_CUTOVER_ENABLED</code> environment variable is also set — a global, operator-only lever this dashboard cannot flip or verify.
       </div>
 
@@ -1335,7 +1478,7 @@ async function renderDiagnostics() {
           <p style="font-size:14px;color:#374151;margin:0 0 12px">Use these tools to verify that core platform services are working correctly.</p>
         </div>
 
-        <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:16px 20px">
+        <div class="pa-subpanel">
           <div style="font-weight:600;font-size:14px;margin-bottom:4px">📧 Email / SMTP</div>
           <p style="font-size:13px;color:#6b7280;margin:0 0 12px">Sends a test email to the PLATFORM_EMAIL address. If you're not receiving emails on registration/approval, start here.</p>
           <button class="pa-btn primary" id="btn-test-email" onclick="runEmailTest()">
@@ -1344,7 +1487,7 @@ async function renderDiagnostics() {
           <div id="email-test-result" style="margin-top:12px;display:none"></div>
         </div>
 
-        <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:16px 20px">
+        <div class="pa-subpanel">
           <div style="font-weight:600;font-size:14px;margin-bottom:4px">🗄️ Database</div>
           <p style="font-size:13px;color:#6b7280;margin:0 0 12px">Checks MongoDB connection state.</p>
           <button class="pa-btn" onclick="runDbCheck()">
@@ -1365,7 +1508,7 @@ async function renderDiagnostics() {
           <div id="orphan-result" style="margin-top:12px;display:none"></div>
         </div>
 
-        <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:16px 20px">
+        <div class="pa-subpanel">
           <div style="font-weight:600;font-size:14px;margin-bottom:4px">📋 Environment Variables Required</div>
           <p style="font-size:13px;color:#6b7280;margin:0 0 8px">These must be set in Render dashboard → Environment:</p>
           <table style="font-size:12px;border-collapse:collapse;width:100%">
@@ -2665,20 +2808,20 @@ async function renderBranding() {
       Changes take effect immediately — no redeployment needed.
     </p>
     <div id="branding-msg" style="display:none;margin-bottom:16px"></div>
-    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:28px;margin-bottom:20px">
+    <div class="pa-panel">
       <h3 style="margin:0 0 20px;font-size:15px;font-weight:600;color:#111827">Identity</h3>
       <div style="display:grid;gap:16px">
         <div>
-          <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">Platform Name</label>
-          <input id="ps-name" type="text" placeholder="Msingi" style="width:100%;border:1px solid #d1d5db;border-radius:8px;padding:10px 12px;font-size:14px;box-sizing:border-box"/>
+          <label class="pa-label">Platform Name</label>
+          <input id="ps-name" type="text" placeholder="Msingi" class="pa-input"/>
         </div>
         <div>
-          <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">Tagline</label>
-          <input id="ps-tagline" type="text" placeholder="The Digital Operating System for Modern Schools." style="width:100%;border:1px solid #d1d5db;border-radius:8px;padding:10px 12px;font-size:14px;box-sizing:border-box"/>
+          <label class="pa-label">Tagline</label>
+          <input id="ps-tagline" type="text" placeholder="The Digital Operating System for Modern Schools." class="pa-input"/>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
           <div>
-            <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">Logo</label>
+            <label class="pa-label">Logo</label>
             <div style="display:flex;align-items:center;gap:12px">
               <div id="ps-logo-preview" onclick="document.getElementById('ps-logo-file').click()"
                    style="width:80px;height:48px;border:2px dashed #d1d5db;border-radius:8px;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;background:#f9fafb;flex-shrink:0">
@@ -2693,7 +2836,7 @@ async function renderBranding() {
             <p style="font-size:11px;color:#9ca3af;margin:6px 0 0">Recommended: 200×50px PNG/SVG, max 500KB</p>
           </div>
           <div>
-            <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">Favicon</label>
+            <label class="pa-label">Favicon</label>
             <div style="display:flex;align-items:center;gap:12px">
               <div id="ps-favicon-preview" onclick="document.getElementById('ps-favicon-file').click()"
                    style="width:40px;height:40px;border:2px dashed #d1d5db;border-radius:8px;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;background:#f9fafb;flex-shrink:0">
@@ -2709,7 +2852,7 @@ async function renderBranding() {
           </div>
         </div>
         <div>
-          <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">Primary Brand Colour</label>
+          <label class="pa-label">Primary Brand Colour</label>
           <div style="display:flex;gap:10px;align-items:center">
             <input id="ps-color-picker" type="color" value="#4f46e5" style="width:44px;height:40px;border:1px solid #d1d5db;border-radius:8px;padding:2px;cursor:pointer"/>
             <input id="ps-color" type="text" placeholder="#4f46e5" maxlength="7" style="width:120px;border:1px solid #d1d5db;border-radius:8px;padding:10px 12px;font-size:14px;font-family:monospace"/>
@@ -2719,22 +2862,22 @@ async function renderBranding() {
       </div>
     </div>
 
-    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:28px;margin-bottom:20px">
+    <div class="pa-panel">
       <h3 style="margin:0 0 20px;font-size:15px;font-weight:600;color:#111827">Contact Information</h3>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
         <div>
-          <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">Contact Email</label>
-          <input id="ps-email" type="email" placeholder="support@msingi.io" style="width:100%;border:1px solid #d1d5db;border-radius:8px;padding:10px 12px;font-size:14px;box-sizing:border-box"/>
+          <label class="pa-label">Contact Email</label>
+          <input id="ps-email" type="email" placeholder="support@msingi.io" class="pa-input"/>
         </div>
         <div>
-          <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">WhatsApp / Support Phone</label>
-          <input id="ps-phone" type="text" placeholder="+254 769 024 153" style="width:100%;border:1px solid #d1d5db;border-radius:8px;padding:10px 12px;font-size:14px;box-sizing:border-box"/>
+          <label class="pa-label">WhatsApp / Support Phone</label>
+          <input id="ps-phone" type="text" placeholder="+254 769 024 153" class="pa-input"/>
         </div>
       </div>
     </div>
 
-    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:28px;margin-bottom:28px">
-      <h3 style="margin:0 0 6px;font-size:15px;font-weight:600;color:#111827">Social Media Links</h3>
+    <div class="pa-panel">
+      <h3 style="margin-bottom:6px">Social Media Links</h3>
       <p style="font-size:12px;color:#9ca3af;margin:0 0 20px">Full URLs (e.g. https://twitter.com/msingi). Leave blank to hide the icon.</p>
       <div style="display:grid;gap:14px">
         ${[
@@ -2747,8 +2890,8 @@ async function renderBranding() {
           <div style="display:flex;align-items:center;gap:12px">
             <i class="${icon}" style="width:20px;text-align:center;color:#6b7280;font-size:16px"></i>
             <div style="flex:1">
-              <label style="display:block;font-size:11px;font-weight:600;color:#6b7280;margin-bottom:4px">${label}</label>
-              <input id="${id}" type="url" placeholder="${ph}" style="width:100%;border:1px solid #d1d5db;border-radius:8px;padding:8px 12px;font-size:13px;box-sizing:border-box"/>
+              <label class="pa-label" style="margin-bottom:4px">${label}</label>
+              <input id="${id}" type="url" placeholder="${ph}" class="pa-input"/>
             </div>
           </div>
         `).join('')}
@@ -3035,12 +3178,12 @@ function _cmsSection(id, title, inner) {
   return `
     <div class="pa-card" id="cms-sec-${id}">
       <div class="pa-card-header" style="cursor:pointer;user-select:none" onclick="_toggleCmsSection('${id}')">
-        <h3 style="margin:0;display:flex;align-items:center;gap:8px">
-          <i class="fas fa-chevron-down" id="cms-chevron-${id}" style="font-size:11px;color:#94a3b8;transition:transform .2s"></i>
+        <h3 style="margin:0;display:flex;align-items:center;gap:9px">
+          <i class="fas fa-chevron-down" id="cms-chevron-${id}" style="font-size:11px;color:var(--faint);transition:transform .2s"></i>
           ${title}
         </h3>
       </div>
-      <div id="cms-body-${id}" style="padding:16px 0 0">
+      <div id="cms-body-${id}" class="cms-body">
         ${inner}
       </div>
     </div>`;
@@ -3078,7 +3221,7 @@ function _convictionRows() {
     <div class="cms-conv-row" data-index="${i}" style="display:grid;grid-template-columns:1fr 1fr 32px;gap:8px;align-items:center">
       <input class="cms-conv-before" type="text" placeholder="Before (old pain)" value="${(p.before||'').replace(/"/g,'&quot;')}" />
       <input class="cms-conv-after"  type="text" placeholder="After (Msingi solution)" value="${(p.after||'').replace(/"/g,'&quot;')}" />
-      <button onclick="this.closest('.cms-conv-row').remove()" style="background:#fee2e2;border:none;border-radius:6px;color:#dc2626;cursor:pointer;padding:6px">
+      <button class="pa-btn-icon danger" title="Remove this pair" aria-label="Remove this pair" onclick="this.closest('.cms-conv-row').remove()">
         <i class="fas fa-trash"></i>
       </button>
     </div>`).join('');
@@ -3248,12 +3391,377 @@ async function renderBillingOverview() {
   }
 }
 
+/* ══════════════════════════════════════════════════════════════
+   PLATFORM TEAM — invite and manage operator accounts
+   Visible only with the 'operators.manage' capability; every call is
+   re-checked server-side.
+   ══════════════════════════════════════════════════════════════ */
+let _teamCatalog = null;   // { capabilities, groups, templates }
+let _teamMembers = [];
+
+function _teamStatusChip(status) {
+  const map = {
+    active:    ['#dcfce7', '#166534', 'Active'],
+    invited:   ['#fef3c7', '#92400e', 'Invite pending'],
+    suspended: ['#fee2e2', '#991b1b', 'Suspended'],
+    removed:   ['#f1f5f9', '#475569', 'Removed'],
+  };
+  const [bg, fg, label] = map[status] || map.removed;
+  return `<span style="background:${bg};color:${fg};padding:3px 10px;border-radius:999px;font-size:11.5px;font-weight:600;white-space:nowrap">${label}</span>`;
+}
+
+async function renderTeam() {
+  const root = document.getElementById('pa-content');
+  root.innerHTML = '<div class="pa-loading"><i class="fas fa-circle-notch fa-spin"></i> Loading team…</div>';
+  try {
+    if (!_teamCatalog) _teamCatalog = await api('GET', '/operators/capabilities');
+    const data = await api('GET', '/operators');
+    _teamMembers = data.operators || [];
+    root.innerHTML = _teamHtml();
+  } catch (err) {
+    root.innerHTML = `<div class="pa-empty">${_esc(_apiErrorMessage(err))}</div>`;
+  }
+}
+
+function _teamHtml() {
+  const templates = (_teamCatalog && _teamCatalog.templates) || [];
+  const caps      = (_teamCatalog && _teamCatalog.capabilities) || [];
+  const groups    = (_teamCatalog && _teamCatalog.groups) || [];
+
+  const canGrantOwner = _can('*');
+
+  const roleOptions = templates
+    .filter(t => canGrantOwner || t.key !== 'owner')
+    .map(t => `<option value="${_esc(t.key)}" title="${_esc(t.description || '')}">${_esc(t.label)}</option>`)
+    .join('');
+
+  const capToggles = groups.map(g => {
+    const items = caps.filter(c => c.group === g).map(c =>
+      `<label class="pa-cap-row">
+         <input type="checkbox" class="pa-cap" value="${_esc(c.key)}">
+         <span>${_esc(c.label)}</span>
+         <code>${_esc(c.key)}</code>
+       </label>`).join('');
+    return `<div><div class="pa-cap-group">${_esc(g)}</div>${items}</div>`;
+  }).join('');
+
+  const rows = _teamMembers.map(op => {
+    const isMe = (_me && _me.operator && _me.operator.id === op.id) || op.email === (_me && _me.operator && _me.operator.email);
+    const roleSelect = `<select class="pa-input" onchange="teamChangeRole('${_esc(op.id)}', this.value)" ${isMe ? 'disabled' : ''} style="width:auto;min-width:150px;padding:5px 28px 5px 10px;font-size:12.5px">
+      ${templates.map(t => `<option value="${_esc(t.key)}" ${op.template === t.key ? 'selected' : ''}>${_esc(t.label)}</option>`).join('')}
+    </select>`;
+    const actions = isMe
+      ? '<span class="pa-muted" style="font-size:12px">You</span>'
+      : `
+        <div class="pa-action-wrap">
+          ${op.status === 'active'
+            ? `<button class="pa-btn-icon" title="Suspend — they lose access immediately" aria-label="Suspend ${_esc(op.name)}" onclick="teamSuspend('${_esc(op.id)}')"><i class="fas fa-pause"></i></button>`
+            : (op.status === 'invited'
+                ? `<button class="pa-btn-icon" title="Resend the invite email" aria-label="Resend invite to ${_esc(op.name)}" onclick="teamResend('${_esc(op.id)}')"><i class="fas fa-paper-plane"></i></button>`
+                : `<button class="pa-btn-icon success" title="Reactivate — restore access" aria-label="Reactivate ${_esc(op.name)}" onclick="teamReactivate('${_esc(op.id)}')"><i class="fas fa-play"></i></button>`)}
+          <button class="pa-btn-icon" title="Revoke sessions — forces them to sign in again" aria-label="Revoke sessions for ${_esc(op.name)}" onclick="teamRevoke('${_esc(op.id)}')"><i class="fas fa-arrow-right-from-bracket"></i></button>
+          <button class="pa-btn-icon danger" title="Remove — access ends now, the record stays for the audit trail" aria-label="Remove ${_esc(op.name)}" onclick="teamRemove('${_esc(op.id)}')"><i class="fas fa-trash-can"></i></button>
+        </div>`;
+    const extra = (op.overrides && op.overrides.length)
+      ? `<div class="pa-muted" style="font-size:11px;margin-top:3px">+ ${op.overrides.map(_esc).join(', ')}</div>` : '';
+    return `<tr>
+      <td><strong style="font-weight:600;color:var(--text)">${_esc(op.name)}</strong>${op.title ? `<div class="pa-muted" style="font-size:12px">${_esc(op.title)}</div>` : ''}</td>
+      <td>${_esc(op.email)}</td>
+      <td>${roleSelect}${extra}</td>
+      <td>${_teamStatusChip(op.status)}</td>
+      <td class="pa-muted" style="font-size:12px">${op.lastLoginAt ? _esc(new Date(op.lastLoginAt).toLocaleDateString('en-GB')) : '—'}</td>
+      <td style="white-space:nowrap">${actions}</td>
+    </tr>`;
+  }).join('');
+
+  return `
+    <div class="pa-card">
+      <div class="pa-card-header">
+        <h3>Invite a team member</h3>
+        <span class="pa-muted" style="font-size:12px">Invites expire after 72 hours</span>
+      </div>
+      <div class="pa-form">
+        <div class="pa-form-row" style="grid-template-columns:1.1fr 1.3fr 1fr 1fr">
+          <div class="pa-field">
+            <label for="team-name">Full name</label>
+            <input id="team-name" placeholder="e.g. Amina Otieno" autocomplete="off">
+          </div>
+          <div class="pa-field">
+            <label for="team-email">Work email</label>
+            <input id="team-email" type="email" placeholder="name@msingi.io" autocomplete="off">
+          </div>
+          <div class="pa-field">
+            <label for="team-title">Job title <span style="font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></label>
+            <input id="team-title" placeholder="e.g. Support lead" autocomplete="off">
+          </div>
+          <div class="pa-field">
+            <label for="team-template">Role</label>
+            <select id="team-template">
+              <option value="">Choose a role…</option>${roleOptions}
+            </select>
+          </div>
+        </div>
+        <details>
+          <summary style="cursor:pointer;font-size:12.5px;font-weight:550;color:var(--primary);padding:2px 0">Extra capabilities beyond the role</summary>
+          <div class="pa-cap-grid">${capToggles}</div>
+        </details>
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-top:1px solid var(--line-soft);padding-top:15px">
+          <button class="pa-btn primary" onclick="teamInvite()"><i class="fas fa-paper-plane"></i> Send invite</button>
+          <span class="pa-muted" style="font-size:12px">They set their own password from the emailed link.</span>
+        </div>
+        <div id="team-invite-result"></div>
+      </div>
+    </div>
+
+    <div class="pa-card">
+      <div class="pa-card-header">
+        <h3>Team</h3>
+        <span class="pa-muted" style="font-size:12px">${_teamMembers.length} ${_teamMembers.length === 1 ? 'member' : 'members'}</span>
+      </div>
+      <div class="pa-table-wrap">
+        <table class="pa-table">
+          <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Last sign-in</th><th style="text-align:right">Actions</th></tr></thead>
+          <tbody>${rows || '<tr><td colspan="6" style="text-align:center;color:var(--faint);padding:28px">No team members yet.</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+async function teamInvite() {
+  const name     = document.getElementById('team-name').value.trim();
+  const email    = document.getElementById('team-email').value.trim();
+  const title    = document.getElementById('team-title').value.trim();
+  const template = document.getElementById('team-template').value;
+  const capabilities = Array.from(document.querySelectorAll('.pa-cap:checked')).map(c => c.value);
+  const out = document.getElementById('team-invite-result');
+
+  if (!name || !email || !template) { out.innerHTML = '<span style="color:#b91c1c">Name, email and a role are required.</span>'; return; }
+
+  out.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Sending…';
+  try {
+    const res = await api('POST', '/operators/invite', { name, email, title, template, capabilities });
+    /* Refresh the member table FIRST, then write the result. The order
+       matters: renderTeam() replaces the whole view, so a message written
+       before it would be wiped instantly — which silently swallowed the
+       success confirmation, and (far worse) the invite link returned when
+       the email could not be sent, leaving the inviter with no way to
+       deliver it. */
+    await renderTeam();
+    const box = document.getElementById('team-invite-result');
+    if (box) {
+      box.innerHTML = res.inviteUrl
+        ? `<div style="background:#fef3c7;border-radius:8px;padding:12px;font-size:13px">
+             The invite was created, but the email could not be sent. Send this link to them directly:
+             <div style="margin-top:6px"><input readonly value="${_esc(res.inviteUrl)}" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:8px" onclick="this.select()"></div>
+           </div>`
+        : `<span style="color:#166534">Invite sent — ${_esc(email)} should receive it shortly.</span>`;
+    }
+  } catch (err) {
+    const box = document.getElementById('team-invite-result');
+    if (box) box.innerHTML = `<span style="color:#b91c1c">${_esc(err.message || 'Could not send the invite.')}</span>`;
+  }
+}
+
+async function _teamAct(id, action, label) {
+  try { await api('POST', `/operators/${id}/${action}`); toast(label); renderTeam(); }
+  catch (err) { toast(err.message || 'Action failed', 'error'); }
+}
+const teamSuspend    = (id) => _teamAct(id, 'suspend', 'Member suspended');
+const teamReactivate = (id) => _teamAct(id, 'reactivate', 'Member reactivated');
+const teamRevoke     = (id) => _teamAct(id, 'revoke-sessions', 'Sessions revoked');
+const teamResend     = (id) => _teamAct(id, 'resend-invite', 'Invite resent');
+
+async function teamRemove(id) {
+  if (!confirm('Remove this team member? They lose access immediately. This keeps their record for the audit trail.')) return;
+  try { await api('DELETE', `/operators/${id}`); toast('Member removed'); renderTeam(); }
+  catch (err) { toast(err.message || 'Could not remove', 'error'); }
+}
+
+async function teamChangeRole(id, template) {
+  try { await api('PATCH', `/operators/${id}`, { template }); toast('Role updated'); renderTeam(); }
+  catch (err) { toast(err.message || 'Could not update role', 'error'); renderTeam(); }
+}
+
+/* ── Invite acceptance (?invite=<token>) ─────────────────────
+   Opened from the emailed link. Exchanges the single-use token for a
+   password and signs the operator straight in. */
+function _inviteTokenFromUrl() {
+  return new URLSearchParams(window.location.search).get('invite');
+}
+
+function _showInvitePanel() {
+  document.getElementById('lock-screen').style.display = 'flex';
+  document.getElementById('app-shell').style.display  = 'none';
+  document.querySelector('#lock-screen > .pa-lock-card > h2').textContent = 'Join the platform team';
+  document.querySelector('#lock-screen > .pa-lock-card > p').textContent =
+    'Set a password to activate your operator account.';
+  // Hide the sign-in form, show the invite form.
+  document.getElementById('login-username').closest('.pa-lock-field').style.display = 'none';
+  document.getElementById('login-password').closest('.pa-lock-field').style.display = 'none';
+  document.getElementById('login-btn').style.display = 'none';
+  document.getElementById('invite-panel').style.display = 'block';
+}
+
+async function acceptInvite() {
+  const token = _inviteTokenFromUrl();
+  const pw    = document.getElementById('invite-password').value;
+  const pw2   = document.getElementById('invite-password2').value;
+  const btn   = document.getElementById('invite-btn');
+  const err   = document.getElementById('invite-error');
+
+  if (!pw || pw.length < 8) { _showErr(err, 'Password must be at least 8 characters.'); return; }
+  if (pw !== pw2)           { _showErr(err, 'The two passwords do not match.'); return; }
+
+  btn.disabled  = true;
+  btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Activating…';
+  err.style.display = 'none';
+  try {
+    const res  = await fetch('/api/platform/auth/accept-invite', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, password: pw }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      document.getElementById('invite-password').value  = '';
+      document.getElementById('invite-password2').value = '';
+      window.history.replaceState({}, '', window.location.pathname); // drop the token from the URL
+      await _showApp();
+      return;
+    }
+    _showErr(err, (data && data.error && data.error.message) || 'This invite is invalid or has expired.');
+  } catch (e) {
+    _showErr(err, 'Could not reach the server. Please try again.');
+  }
+  btn.disabled  = false;
+  btn.innerHTML = '<i class="fas fa-user-check"></i> Activate account';
+}
+
+async function ticketAssign(id, operatorId) {
+  try {
+    await api('POST', `/tickets/${id}/assign`, { operatorId: operatorId || null });
+    toast(operatorId ? 'Ticket assigned' : 'Ticket unassigned');
+  } catch (err) {
+    toast(err.message || 'Could not assign', 'error');
+  }
+}
+
+/* Same idea for the onboarding queue. A claimed school/demo request shows
+   up in that operator's My Work "Onboarding" list. */
+async function schoolAssign(id, operatorId) {
+  try {
+    await api('POST', `/schools/${_assignKey(id)}/assign`, { operatorId: operatorId || null });
+    toast(operatorId ? 'Approval assigned' : 'Approval unassigned');
+  } catch (err) {
+    toast(err.message || 'Could not assign', 'error');
+  }
+}
+async function demoAssign(id, operatorId) {
+  try {
+    await api('POST', `/demo-requests/${id}/assign`, { operatorId: operatorId || null });
+    toast(operatorId ? 'Demo request assigned' : 'Demo request unassigned');
+  } catch (err) {
+    toast(err.message || 'Could not assign', 'error');
+  }
+}
+/* Pending-school cards carry a Mongo _id; encode it safely for a URL. */
+function _assignKey(id) { return encodeURIComponent(String(id)); }
+
+/* Operators for the assignee picker. Loaded from the minimal directory
+   route — a support agent cannot read the full team list.
+
+   Kept SEPARATE from _teamMembers on purpose: the Team table lists
+   removed and suspended members too (their record is the audit trail),
+   and using that list to populate an assignee picker offered removed
+   members as assignees — work that nobody would ever see. The directory
+   route only returns active members, which is what a picker should offer.
+
+   Re-fetched on demand rather than cached: it is one small request, and
+   a cached copy went stale the moment someone was suspended or removed. */
+let _assignableMembers = [];
+
+async function _ensureTeamMembers() {
+  try {
+    const data = await api('GET', '/operators/directory');
+    _assignableMembers = data.operators || [];
+  } catch (e) { /* picker simply stays empty */ }
+  return _assignableMembers;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   MY WORK — the caller's own queue plus the unassigned backlog
+   ══════════════════════════════════════════════════════════════ */
+async function renderMyWork() {
+  const root = document.getElementById('pa-content');
+  root.innerHTML = '<div class="pa-loading"><i class="fas fa-circle-notch fa-spin"></i> Loading your work…</div>';
+  try {
+    await _ensureTeamMembers();
+    const d = await api('GET', '/my-work');
+    const box = (list, empty) => list.length
+      ? list.map(t => _ticketCard(t)).join('')
+      : `<div class="pa-empty"><p style="color:#9ca3af;font-size:13px">${empty}</p></div>`;
+    root.innerHTML = `
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">
+        ${[['Assigned to me', d.counts.assignedToMe, '#4f46e5'],
+            ['Unassigned', d.counts.unassigned, '#f59e0b'],
+            ['SLA breached', d.counts.slaBreached, '#b91c1c'],
+            ['My onboarding', d.counts.myOnboarding, '#0ea5e9'],
+            ['Unassigned onboarding', d.counts.unassignedOnboarding, '#8b5cf6']]
+          .map(([label, n, colour]) => `<div class="pa-card" style="flex:1;min-width:140px;padding:14px 16px">
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:#94a3b8">${label}</div>
+            <div style="font-size:24px;font-weight:700;color:${colour}">${n}</div>
+          </div>`).join('')}
+      </div>
+      <div class="pa-card" style="margin-bottom:16px">
+        <h3 style="margin-top:0">Assigned to me</h3>
+        ${box(d.assignedToMe, 'Nothing assigned to you right now.')}
+      </div>
+      <div class="pa-card" style="margin-bottom:16px">
+        <h3 style="margin-top:0">Onboarding <span style="font-size:13px;font-weight:400;color:#94a3b8">— approvals you own</span></h3>
+        ${(_onboardingRows(d.onboarding)) || '<div class="pa-empty"><p style="color:#9ca3af;font-size:13px">No onboarding items assigned to you.</p></div>'}
+      </div>
+      <div class="pa-card" style="margin-bottom:16px">
+        <h3 style="margin-top:0">Unassigned queue <span style="font-size:13px;font-weight:400;color:#94a3b8">— claim by opening a ticket</span></h3>
+        ${box(d.unassigned, 'The unassigned queue is empty.')}
+      </div>
+      ${d.slaBreached.length ? `<div class="pa-card"><h3 style="margin-top:0;color:#b91c1c">Past SLA</h3>${box(d.slaBreached, '')}</div>` : ''}`;
+  } catch (err) {
+    root.innerHTML = `<div class="pa-empty">${_esc(_apiErrorMessage(err))}</div>`;
+  }
+}
+
+/* Compact rows for the onboarding items an operator owns. */
+function _onboardingRows(onboarding) {
+  if (!onboarding) return '';
+  const rows = [
+    ...(onboarding.schools || []).map(s => ({
+      label: s.name, meta: `School approval · ${s.slug || ''}`, when: s.createdAt,
+      action: `onclick="showView('pending')"`, actionLabel: 'Review',
+    })),
+    ...(onboarding.demoRequests || []).map(r => ({
+      label: r.schoolName || r.name || r.email || 'Demo request', meta: `Demo request · ${r.status || ''}`, when: r.createdAt,
+      action: `onclick="showView('demos')"`, actionLabel: 'Review',
+    })),
+  ];
+  if (!rows.length) return '';
+  return `<div class="pa-table-wrap"><table class="pa-table"><tbody>${rows.map(r => `
+    <tr>
+      <td><strong>${_esc(r.label)}</strong><div style="font-size:12px;color:#6b7280">${_esc(r.meta)}</div></td>
+      <td style="font-size:12px;color:#6b7280">${_fmtWhen(r.when)}</td>
+      <td><button class="pa-btn pa-btn-sm" ${r.action}>${_esc(r.actionLabel)}</button></td>
+    </tr>`).join('')}</tbody></table></div>`;
+}
+
 /* ── Boot: silently restore session from HttpOnly cookie ── */
 window.addEventListener('DOMContentLoaded', async () => {
+  // An invite link takes priority over any existing session.
+  if (_inviteTokenFromUrl()) { _showInvitePanel(); return; }
   try {
-    const res = await fetch('/api/platform/stats', { credentials: 'include' });
-    if (res.ok) { _showApp(); }
-    // 401/403 → stay on login screen (default)
+    // /me is readable by any authenticated operator regardless of role, so
+    // it is the right probe for "is there a session to restore?".
+    const res = await fetch('/api/platform/me', { credentials: 'include' });
+    if (res.ok) { await _showApp(); }
+    // 401 → stay on login screen (default)
   } catch (e) {
     // Server unreachable — stay on login screen
   }
@@ -3261,3 +3769,4 @@ window.addEventListener('DOMContentLoaded', async () => {
 </script>
 </body>
 </html>
+

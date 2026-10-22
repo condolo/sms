@@ -66,10 +66,12 @@ Platform Kernel
 ### 2.1 Identity
 Owns: authentication, session management, JWT signing, role assignment, multi-tenant user resolution, RBAC.
 
-Source of truth: `users`, `sessions`, `role_permissions` collections.
+Source of truth: `users`, `sessions`, `role_permissions` collections. Platform-side: `platform_operators` (see below).
 
 Current state: implemented (`auth.js`, `rbac.js`, `tenant.js`).  
 AuditService: `auth.login` and `user.role_changed` are now instrumented. `auth.login_failed` and `auth.password_changed` are the next instrumentation targets.
+
+**Platform operators (ADR-0008).** Msingi staff are `platform_operators` accounts, not school users. Access is governed by `server/config/platformCapabilities.js` — a capability registry plus a `(method, path) → capability` policy table, enforced once by `requirePlatformCapability` in `routes/platform.js`. A grant is `template` (role) ∪ per-operator `capabilities` overrides; `tier:'owner'` is always `['*']`. Accounts are created by email invite (single-use, hashed, 72 h) and can be suspended or session-revoked with immediate effect. Legacy `tier:'support'` maps to the read-only `viewer` template so the layer never widens an existing account. Team management is itself the `operators.manage` capability.
 
 ---
 
@@ -315,6 +317,7 @@ Every subsystem has a named owner. Today that is one person. The structure survi
 | Subsystem | Owner Role | API namespace | UI location |
 |-----------|-----------|---------------|-------------|
 | Identity | Identity Team | `/api/auth`, `/api/users` | Login, Profile, Settings → Users |
+| Identity (platform) | Platform Team | `/api/platform/operators`, `/api/platform/me` | Platform Console → Team |
 | Security | Platform Team | `/api/platform` (partial), CI scripts | Platform Console → Security |
 | Operations | Platform Team | `/api/ops` | Platform Console → Health, Integrity |
 | Monitoring | Platform Team | `/api/ops/metrics` (planned) | Platform Console → Monitoring |

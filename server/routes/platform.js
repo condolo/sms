@@ -9,7 +9,7 @@ const bcrypt     = require('bcryptjs');
 const jwt        = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const rateLimit  = require('express-rate-limit');
-const { platformSession, requireOwnerTier } = require('../middleware/auth');
+const { platformSession, requireOwnerTier, requirePlatformCapability, invalidateOperatorCache } = require('../middleware/auth');
 const { invalidatePlanCache } = require('../middleware/plan');
 const { invalidatePermCache }  = require('../middleware/rbac');
 const { withFinanceSubGrants } = require('../middleware/explicit-sub');
@@ -21,10 +21,27 @@ const { issueCsrfCookie, clearCsrfCookie, PLATFORM_CSRF_COOKIE_NAME } = require(
 const email    = require('../utils/email');
 const { dispatchNotification } = require('../utils/notify-dispatch');
 const { tenantModel, platformModel } = require('../utils/tenant-model');
+const { appUrl, RAW_APP_URL } = require('../utils/app-url');
 const { provisionOrganizationForSchool } = require('../utils/provision-organizations');
 const { provisionMembershipForUser } = require('../utils/provision-memberships');
 const { provisionIdentityForUser } = require('../utils/provision-identities');
 const { MODULE_REGISTRY } = require('../config/moduleRegistry');
+const {
+  CAPABILITIES,
+  CAPABILITY_GROUPS,
+  TEMPLATES,
+  LEGACY_TIER_TEMPLATE,
+  resolveCapabilities,
+} = require('../config/platformCapabilities');
+const {
+  generateInviteToken,
+  hashInviteToken,
+  inviteExpiryFrom,
+  escalationViolations,
+  projectedCapabilities,
+  isOwner,
+  parseOperatorInput,
+} = require('../services/platformOperators');
 const { SYSTEM_ROLES } = require('../utils/role-validation');
 
 const router = express.Router();
@@ -163,7 +180,7 @@ router.post('/auth/login', _loginLimiter, async (req, res) => {
     return res.status(401).json({ success: false, error: { code: 'INVALID_CREDENTIALS', message: 'Invalid username or password.' } });
   }
 
-  const token = jwt.sign({ sub: 'platform-operator', operatorId: operator.id, name: operator.name, email: operator.email, tier: operator.tier }, secret, { expiresIn: '2h' });
+  const token = jwt.sign({ sub: 'platform-operator', operatorId: operator.id, name: operator.name, email: operator.email, tier: operator.tier, template: operator.template || null }, secret, { expiresIn: '2h' });
   res.cookie('platform_token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 2 * 60 * 60 * 1000 });
   issueCsrfCookie(res, 2 * 60 * 60 * 1000, PLATFORM_CSRF_COOKIE_NAME);
   await Operators.updateOne({ id: operator.id }, { $set: { lastLoginAt: new Date().toISOString() } });
@@ -179,20 +196,101 @@ router.post('/auth/logout', (req, res) => {
   return res.json({ success: true });
 });
 
+/* POST /api/platform/auth/accept-invite — PUBLIC.
+   A team member invited via POST /operators/invite lands here from the
+   emailed link with a token and their chosen password. The token is
+   single-use and expiring; only its SHA-256 hash was ever stored, so a
+   leaked database row does not yield a working invite link. Setting the
+   password activates the account, which is also the moment the legacy
+   env-var bootstrap credential stops working (see the login route). */
+const _acceptInviteLimiter = rateLimit({
+  windowMs:        15 * 60 * 1000,
+  max:             10,
+  standardHeaders: true,
+  legacyHeaders:   false,
+  message: { success: false, error: { code: 'RATE_LIMIT', message: 'Too many attempts. Please wait 15 minutes.' } },
+});
+
+router.post('/auth/accept-invite', _acceptInviteLimiter, async (req, res) => {
+  try {
+    const secret = process.env.PLATFORM_JWT_SECRET || '';
+    if (!secret) return res.status(503).json({ success: false, error: { code: 'MISCONFIGURED', message: 'Platform admin is not configured on this server.' } });
+
+    const { token, password } = req.body || {};
+    if (!token || !password) {
+      return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'A token and a new password are required.' } });
+    }
+    if (String(password).length < 8) {
+      return res.status(400).json({ success: false, error: { code: 'WEAK_PASSWORD', message: 'Password must be at least 8 characters.' } });
+    }
+
+    const Operators = _model('platform_operators');
+    const operator = await Operators.findOne({ inviteTokenHash: hashInviteToken(token) }).lean();
+    if (!operator || operator.status !== 'invited') {
+      return res.status(400).json({ success: false, error: { code: 'INVALID_INVITE', message: 'This invite is invalid or has already been used.' } });
+    }
+    if (operator.inviteExpiresAt && new Date(operator.inviteExpiresAt) < new Date()) {
+      return res.status(400).json({ success: false, error: { code: 'INVITE_EXPIRED', message: 'This invite has expired. Ask a team owner to send a new one.' } });
+    }
+
+    const passwordHash = await bcrypt.hash(String(password), 12);
+    const now = new Date().toISOString();
+    await Operators.updateOne({ id: operator.id }, {
+      $set: {
+        passwordHash,
+        status: 'active',
+        isActive: true,
+        inviteTokenHash: null,
+        inviteExpiresAt: null,
+        updatedAt: now,
+      },
+    });
+    invalidateOperatorCache(operator.id);
+
+    const session = jwt.sign(
+      { sub: 'platform-operator', operatorId: operator.id, name: operator.name, email: operator.email, tier: operator.tier, template: operator.template || null },
+      secret,
+      { expiresIn: '2h' }
+    );
+    res.cookie('platform_token', session, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 2 * 60 * 60 * 1000 });
+    issueCsrfCookie(res, 2 * 60 * 60 * 1000, PLATFORM_CSRF_COOKIE_NAME);
+
+    await Operators.updateOne({ id: operator.id }, { $set: { lastLoginAt: now } });
+    AuditService.log({
+      action: 'platform.operator.invite_accepted',
+      actor: { userId: operator.id, role: `platform_${operator.tier}`, email: operator.email },
+      schoolId: null,
+      target: { type: 'platform_operator', id: operator.id, label: operator.email },
+      details: { template: operator.template || null },
+      req,
+    });
+
+    return res.json({ success: true, operator: { id: operator.id, name: operator.name, email: operator.email, tier: operator.tier, template: operator.template || null } });
+  } catch (err) {
+    console.error('[platform/accept-invite]', err);
+    return res.status(500).json({ success: false, error: { code: 'INTERNAL', message: err.message } });
+  }
+});
+
 // All routes below require a valid platform session cookie
 router.use(platformSession);
 
-// Security Baseline Register, PLAT-01 — support-tier operators may reach any
-// read-only (GET) route below, matching the register's own stated scope
-// ("support can view schools/metadata/billing but cannot impersonate,
-// delete a school, or grant entitlements"). Every mutating verb requires
-// owner tier, gated once here rather than needing to be individually added
-// to ~35 route registrations. The legacy shared-credential token is always
-// owner-tier (see platformSession), so this changes nothing for it.
-router.use((req, res, next) => {
-  if (req.method === 'GET') return next();
-  return requireOwnerTier(req, res, next);
-});
+// Security Baseline Register, PLAT-01 (extended) — every route below is
+// gated on a *capability* rather than a binary tier. The mapping lives in
+// server/config/platformCapabilities.js (POLICY) — one table, one place to
+// read what each operator role may do. A route with no POLICY entry keeps
+// the historical behaviour (GET allowed, everything else owner-only), so a
+// newly added route is never accidentally opened up.
+//
+// The typeof guard exists only for unit tests that replace the whole
+// middleware/auth module with a stub carrying platformSession but not this
+// newer export — without it, router.use(undefined) throws at import time.
+// A real server always has it; the fallback is exactly the pre-capability
+// gate (GET allowed, everything else owner), so the stub keeps its old
+// meaning rather than silently opening up.
+router.use(typeof requirePlatformCapability === 'function'
+  ? requirePlatformCapability
+  : ((req, res, next) => (req.method === 'GET' ? next() : requireOwnerTier(req, res, next))));
 
 // Was a locally duplicated model factory missing the `id: false` schema
 // option the canonical one (server/utils/model.js) carries — that option
@@ -219,6 +317,33 @@ function _platformActor(req) {
   }
   return { userId: 'platform', role: 'platform', email: null };
 }
+
+/* GET /api/platform/me — who am I, and what may I do?
+   Lets the console render only the sections an operator can actually use
+   (defence in depth: the server still enforces every call). Any
+   authenticated operator may read their own identity and capability set. */
+router.get('/me', (req, res) => {
+  const caps = Array.isArray(req.platformCaps)
+    ? req.platformCaps
+    : resolveCapabilities({ tier: req.platformOperatorTier });
+  return res.json({
+    success: true,
+    operator: req.platformOperator
+      ? {
+          id: req.platformOperator.id,
+          name: req.platformOperator.name,
+          email: req.platformOperator.email,
+          tier: req.platformOperator.tier,
+          template: req.platformOperator.template || null,
+          // Human-readable role name for the console ("Support agent", not
+          // the raw template key "support_agent").
+          templateLabel: TEMPLATES[req.platformOperator.template]?.label
+            || (req.platformOperator.tier === 'owner' ? 'Owner' : null),
+        }
+      : { id: 'platform', name: 'Platform Admin', email: null, tier: 'owner', template: 'owner', templateLabel: 'Owner' },
+    caps,
+  });
+});
 
 /* GET /api/platform/schools — list all schools with stats */
 router.get('/schools', async (req, res) => {
@@ -762,6 +887,40 @@ router.get('/schools/pending', async (req, res) => {
     const schools = await School.find({ status: 'pending' }).lean();
     res.json(schools);
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* POST /api/platform/schools/:id/assign — claim a pending approval.
+   The pending-approvals UI addresses schools by Mongo `_id`; fall back to
+   the application `id` field so either form works. */
+router.post('/schools/:id/assign', async (req, res) => {
+  try {
+    const School = _model('schools');
+    const key = String(req.params.id);
+    let filter = null, school = null;
+    try { filter = { _id: new mongoose.Types.ObjectId(key) }; school = await School.findOne(filter).lean(); } catch { /* not an ObjectId */ }
+    if (!school) { filter = { id: key }; school = await School.findOne(filter).lean(); }
+    if (!school) return res.status(404).json({ success: false, error: 'School not found' });
+
+    const { operatorId } = req.body || {};
+    let assigneeId = null, assigneeName = null;
+    if (operatorId) {
+      const operator = await _model('platform_operators').findOne({ id: String(operatorId) }).lean();
+      if (!operator) return res.status(404).json({ success: false, error: 'Operator not found' });
+      assigneeId = operator.id;
+      assigneeName = operator.name || operator.email;
+    }
+
+    await School.updateOne(filter, { $set: { assigneeId, assigneeName, updatedAt: new Date().toISOString() } });
+    AuditService.log({
+      action: 'platform.school.assigned',
+      actor: _platformActor(req), schoolId: null,
+      target: { type: 'school', id: school.id || key, label: school.name || null },
+      details: { assigneeId, assigneeName }, req,
+    });
+    return res.json({ success: true, assigneeId, assigneeName });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 /* GET /api/platform/organizations — list organizations with their member
@@ -2529,13 +2688,17 @@ router.get('/test-email', requireOwnerTier, async (req, res) => {
   const smtpUser    = process.env.SMTP_USER;
   const smtpPass    = process.env.SMTP_PASS;
   const platformAddr = process.env.PLATFORM_EMAIL || smtpUser;
-  const appUrl      = process.env.APP_URL || '(not set)';
+  /* RAW_APP_URL, not APP_URL: this panel deliberately reports the value the
+     operator actually has configured — including "not set" — so a
+     misconfigured deployment is visible. The shared helper's APP_URL would
+     silently mask it behind the fallback. */
+  const configuredAppUrl = RAW_APP_URL || '(not set)';
 
   const config = {
     SMTP_USER:      smtpUser     ? `${smtpUser.slice(0, 4)}***` : '❌ NOT SET',
     SMTP_PASS:      smtpPass     ? '*** (set)'                   : '❌ NOT SET',
     PLATFORM_EMAIL: platformAddr ? platformAddr                   : '❌ NOT SET',
-    APP_URL:        appUrl,
+    APP_URL:        configuredAppUrl,
     smtpReady:      !!(smtpUser && smtpPass),
   };
 
@@ -2793,8 +2956,40 @@ router.get('/demo-requests', async (req, res) => {
   }
 });
 
-router.get('/demo-requests/:id', async (req, res) => {
+/* POST /api/platform/demo-requests/:id/assign — claim a demo request */
+router.post('/demo-requests/:id/assign', async (req, res) => {
   try {
+    const Requests = platformModel('demo_requests');
+    const existing = await Requests.findOne({ id: req.params.id }).lean();
+    if (!existing) return res.status(404).json({ success: false, error: 'Demo request not found' });
+
+    const { operatorId } = req.body || {};
+    let assigneeId = null, assigneeName = null;
+    if (operatorId) {
+      const operator = await _model('platform_operators').findOne({ id: String(operatorId) }).lean();
+      if (!operator) return res.status(404).json({ success: false, error: 'Operator not found' });
+      assigneeId = operator.id;
+      assigneeName = operator.name || operator.email;
+    }
+
+    const updated = await Requests.findOneAndUpdate(
+      { id: req.params.id },
+      { $set: { assigneeId, assigneeName, updatedAt: new Date().toISOString() } },
+      { new: true }
+    ).lean();
+    AuditService.log({
+      action: 'platform.demo_request.assigned',
+      actor: _platformActor(req), schoolId: null,
+      target: { type: 'demo_request', id: updated.id, label: updated.schoolName || updated.email || null },
+      details: { assigneeId, assigneeName }, req,
+    });
+    return res.json({ success: true, request: updated });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.get('/demo-requests/:id', async (req, res) => {  try {
     const doc = await platformModel('demo_requests').findOne({ id: req.params.id }).lean();
     if (!doc) return res.status(404).json({ success: false, error: 'Request not found' });
     const tenant = doc.tenantId ? await _model('schools').findOne({ id: doc.tenantId }).lean() : null;
@@ -2859,10 +3054,17 @@ function _escapeRegex(s) {
 
 router.get('/tickets', async (req, res) => {
   try {
-    const { status, category, q, limit = 100 } = req.query;
+    const { status, category, q, limit = 100, assigned } = req.query;
     const filter = {};
     if (status) filter.status = { $in: String(status).split(',') };
     if (category) filter.category = category;
+    /* assigned=me → only the caller's tickets; assigned=none → the
+       unclaimed backlog; assigned=<operatorId> → that person's.
+       `{ assigneeId: null }` matches both null and missing, so it does
+       not collide with the $or the search clause builds below. */
+    if (assigned === 'me') filter.assigneeId = (req.platformOperator && req.platformOperator.id) || null;
+    else if (assigned === 'none') filter.assigneeId = null;
+    else if (assigned) filter.assigneeId = String(assigned);
     if (q) {
       const needle = _escapeRegex(q);
       filter.$or = [
@@ -2916,6 +3118,8 @@ router.post('/tickets', async (req, res) => {
       tenantId: null,
       demoRequestId: null,
       assignee: assignee ? String(assignee).slice(0, 200) : null,
+      assigneeId: null,
+      assigneeName: assignee ? String(assignee).slice(0, 200) : null,
       tags: [],
       messages: [],
       slaDueAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
@@ -2937,8 +3141,7 @@ router.post('/tickets', async (req, res) => {
   }
 });
 
-router.patch('/tickets/:id', async (req, res) => {
-  try {
+router.patch('/tickets/:id', async (req, res) => {  try {
     const allowed = ['status', 'priority', 'category', 'assignee', 'subject'];
     const set = { updatedAt: new Date().toISOString() };
     for (const k of allowed) {
@@ -2964,6 +3167,98 @@ router.patch('/tickets/:id', async (req, res) => {
     });
     return res.json({ success: true, ticket: updated });
   } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* POST /api/platform/tickets/:id/assign — claim or hand over a ticket.
+   `operatorId: null` (or omitted) unassigns. Keeps the legacy free-text
+   `assignee` field in sync so anything still reading it keeps working. */
+router.post('/tickets/:id/assign', async (req, res) => {
+  try {
+    const Tickets = platformModel('tickets');
+    const { operatorId } = req.body || {};
+    const now = new Date().toISOString();
+
+    let assigneeId = null, assigneeName = null;
+    if (operatorId) {
+      const operator = await _model('platform_operators').findOne({ id: String(operatorId) }).lean();
+      if (!operator) return res.status(404).json({ success: false, error: 'Operator not found' });
+      assigneeId = operator.id;
+      assigneeName = operator.name || operator.email;
+    }
+
+    const updated = await Tickets.findOneAndUpdate(
+      { id: req.params.id },
+      { $set: { assigneeId, assigneeName, assignee: assigneeName, updatedAt: now } },
+      { new: true }
+    ).lean();
+    if (!updated) return res.status(404).json({ success: false, error: 'Ticket not found' });
+
+    AuditService.log({
+      action: 'platform.ticket.assigned',
+      actor: _platformActor(req),
+      schoolId: null,
+      target: { type: 'ticket', id: updated.id, label: updated.ref },
+      details: { assigneeId, assigneeName },
+      req,
+    });
+    return res.json({ success: true, ticket: updated });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* GET /api/platform/my-work — the operator's own queue.
+   Readable by any authenticated operator: it only ever returns the
+   caller's own assignments plus the unassigned backlog counts. */
+router.get('/my-work', async (req, res) => {
+  try {
+    const me = req.platformOperator || { id: 'platform' };
+    const Tickets = platformModel('tickets');
+    const openish = ['open', 'in_progress', 'waiting'];
+
+    const [assigned, unassigned, breached, pendingSchools, demoRequests,
+           mySchools, myDemos, unassignedSchools, unassignedDemos] = await Promise.all([
+      Tickets.find({ assigneeId: me.id, status: { $in: openish } }).sort({ updatedAt: -1 }).limit(50).lean(),
+      Tickets.find({ assigneeId: null, status: { $in: openish } })
+        .sort({ createdAt: 1 }).limit(50).lean(),
+      Tickets.find({ status: { $in: openish }, slaDueAt: { $lt: new Date().toISOString() } })
+        .sort({ slaDueAt: 1 }).limit(25).lean(),
+      _model('schools').countDocuments({ status: 'pending' }),
+      platformModel('demo_requests').countDocuments({ status: 'pending_review' }),
+      /* Onboarding queue, split by ownership the same way tickets are.
+         Demo requests reach the review queue as 'pending_review' (the
+         statuses before it are 'pending_otp' and 'verified', which are
+         still the applicant's own to finish). */
+      _model('schools').find({ status: 'pending', assigneeId: me.id }).sort({ createdAt: 1 }).limit(25).lean(),
+      platformModel('demo_requests').find({ status: 'pending_review', assigneeId: me.id }).sort({ createdAt: 1 }).limit(25).lean(),
+      _model('schools').countDocuments({ status: 'pending', assigneeId: null }),
+      platformModel('demo_requests').countDocuments({ status: 'pending_review', assigneeId: null }),
+    ]);
+
+    return res.json({
+      success: true,
+      operator: { id: me.id, name: me.name || null, email: me.email || null },
+      assignedToMe: assigned || [],
+      unassigned: unassigned || [],
+      slaBreached: breached || [],
+      onboarding: {
+        schools: mySchools || [],
+        demoRequests: myDemos || [],
+      },
+      counts: {
+        assignedToMe: (assigned || []).length,
+        unassigned: (unassigned || []).length,
+        slaBreached: (breached || []).length,
+        pendingSchools: pendingSchools || 0,
+        demoRequests: demoRequests || 0,
+        myOnboarding: (mySchools || []).length + (myDemos || []).length,
+        unassignedOnboarding: (unassignedSchools || 0) + (unassignedDemos || 0),
+      },
+    });
+  } catch (err) {
+    console.error('[platform GET /my-work]', err);
     return res.status(500).json({ success: false, error: err.message });
   }
 });
@@ -3022,6 +3317,361 @@ router.post('/tickets/:id/messages', async (req, res) => {
     }
 
     return res.json({ success: true, ticket: updated });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   Platform Team — manage named platform_operators accounts
+   Gated by the 'operators.manage' capability (see
+   config/platformCapabilities.js POLICY).
+   ══════════════════════════════════════════════════════════════ */
+
+/* The capability set of the caller, matching middleware/auth.js's own
+   resolution so an owner or a legacy credential is always full-power. */
+function _actorCaps(req) {
+  return Array.isArray(req.platformCaps) ? req.platformCaps : resolveCapabilities({ tier: req.platformOperatorTier });
+}
+function _actor(req) {
+  return req.platformOperator || { id: 'platform', name: 'Platform Admin', email: null };
+}
+/* Never return passwordHash or the invite token hash to a client. */
+function _operatorPublic(op) {
+  return {
+    id: op.id,
+    name: op.name,
+    email: op.email,
+    title: op.title || '',
+    tier: op.tier,
+    template: op.template || null,
+    capabilities: resolveCapabilities(op),
+    overrides: Array.isArray(op.capabilities) ? op.capabilities : [],
+    status: op.status || (op.isActive ? 'active' : 'invited'),
+    isActive: !!op.isActive,
+    lastLoginAt: op.lastLoginAt || null,
+    createdAt: op.createdAt || null,
+    invitedBy: op.invitedBy || null,
+    inviteExpiresAt: op.status === 'invited' ? (op.inviteExpiresAt || null) : null,
+  };
+}
+function _tierForTemplate(template) {
+  return template === 'owner' ? 'owner' : 'support';
+}
+async function _otherActiveOwnerExists(Operators, exceptId) {
+  const owners = await Operators.find({ isActive: true }).lean();
+  return (owners || []).some(o => o.id !== exceptId && isOwner(o));
+}
+function _platformUrl() {
+  return appUrl();
+}
+
+/* GET /api/platform/operators/directory — minimal, active-operators-only
+   list (id + name + email) used by the assignee picker. Deliberately not
+   the full /operators payload: a support agent needs to be able to assign
+   work without being able to see or manage the team's credentials, roles
+   or statuses. */
+router.get('/operators/directory', async (req, res) => {
+  try {
+    const operators = await _model('platform_operators')
+      .find({ isActive: true, status: { $ne: 'suspended' } })
+      .sort({ name: 1 })
+      .lean();
+    return res.json({
+      success: true,
+      operators: (operators || []).map(o => ({ id: o.id, name: o.name, email: o.email })),
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* GET /api/platform/operators — list the team */
+router.get('/operators', async (req, res) => {
+  try {
+    const operators = await _model('platform_operators').find({}).sort({ createdAt: 1 }).lean();
+    return res.json({ success: true, operators: (operators || []).map(_operatorPublic) });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* GET /api/platform/operators/capabilities — the catalogue the Team UI
+   renders (capability list + role templates). Not sensitive: it describes
+   the permission model, not who holds what. */
+router.get('/operators/capabilities', (req, res) => {
+  return res.json({
+    success: true,
+    capabilities: CAPABILITIES,
+    groups: CAPABILITY_GROUPS,
+    templates: Object.entries(TEMPLATES).map(([key, t]) => ({ key, label: t.label, description: t.description, caps: t.caps })),
+    legacyTierTemplate: LEGACY_TIER_TEMPLATE,
+  });
+});
+
+/* POST /api/platform/operators/invite — create an invited operator and
+   email them a set-password link. */
+router.post('/operators/invite', async (req, res) => {
+  try {
+    const parsed = parseOperatorInput(req.body, { requireName: true });
+    if (!parsed.ok) return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: parsed.error } });
+    // `toEmail` deliberately, not `email` — a local `email` would shadow the
+    // module-scope `email` mailer imported at the top of this file, and the
+    // invite send below would then call `.sendPlatformOperatorInvite` on a
+    // string. (Caught by the operator-api test suite.)
+    const { name, email: toEmail, title, template, capabilities } = parsed.value;
+
+    const Operators = _model('platform_operators');
+    const existing = await Operators.findOne({ email: toEmail }).lean();
+    if (existing) return res.status(409).json({ success: false, error: { code: 'ALREADY_EXISTS', message: 'An operator with that email already exists.' } });
+
+    /* No escalation: you cannot mint an account more powerful than you are. */
+    const projected = projectedCapabilities({ template, capabilities });
+    const violations = escalationViolations(_actorCaps(req), projected);
+    if (violations.length) {
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: `You cannot grant capabilities you do not hold: ${violations.join(', ')}` } });
+    }
+
+    const now = new Date().toISOString();
+    const token = generateInviteToken();
+    const expiresAt = inviteExpiryFrom();
+    const operator = {
+      id: `plop_${Date.now().toString(36)}${crypto.randomBytes(3).toString('hex')}`,
+      name,
+      email: toEmail,
+      title,
+      tier: _tierForTemplate(template),
+      template,
+      capabilities,
+      status: 'invited',
+      isActive: false,
+      passwordHash: null,
+      inviteTokenHash: hashInviteToken(token),
+      inviteExpiresAt: expiresAt,
+      invitedBy: { id: _actor(req).id, name: _actor(req).name, email: _actor(req).email },
+      lastLoginAt: null,
+      sessionsRevokedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await Operators.create(operator);
+    invalidateOperatorCache(operator.id);
+
+    const inviteUrl = `${_platformUrl()}/platform?invite=${token}`;
+    let emailSent = false;
+    try {
+      emailSent = await email.sendPlatformOperatorInvite({
+        name,
+        email: toEmail,
+        inviterName: _actor(req).name,
+        templateLabel: TEMPLATES[template]?.label,
+        inviteUrl,
+        expiresAt,
+      });
+    } catch (err) {
+      console.error('[platform/operators/invite] email failed:', err.message);
+    }
+
+    AuditService.log({
+      action: 'platform.operator.invited',
+      actor: _platformActor(req),
+      schoolId: null,
+      target: { type: 'platform_operator', id: operator.id, label: operator.email },
+      details: { template, capabilities },
+      req,
+    });
+
+    return res.status(201).json({
+      success: true,
+      operator: _operatorPublic(operator),
+      emailSent,
+      /* Only surfaced when the email could not be sent (e.g. no SMTP in a
+         local environment) so the inviter can deliver the link another
+         way. Never returned on a successful send. */
+      inviteUrl: emailSent ? undefined : inviteUrl,
+    });
+  } catch (err) {
+    console.error('[platform/operators/invite]', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* POST /api/platform/operators/:id/resend-invite */
+router.post('/operators/:id/resend-invite', async (req, res) => {
+  try {
+    const Operators = _model('platform_operators');
+    const operator = await Operators.findOne({ id: req.params.id }).lean();
+    if (!operator) return res.status(404).json({ success: false, error: 'Operator not found' });
+    if (operator.status === 'active') return res.status(400).json({ success: false, error: 'This operator has already accepted their invite.' });
+    if (operator.status === 'removed') return res.status(400).json({ success: false, error: 'This operator has been removed.' });
+
+    const token = generateInviteToken();
+    const expiresAt = inviteExpiryFrom();
+    await Operators.updateOne({ id: operator.id }, {
+      $set: {
+        status: 'invited',
+        isActive: false,
+        inviteTokenHash: hashInviteToken(token),
+        inviteExpiresAt: expiresAt,
+        updatedAt: new Date().toISOString(),
+      },
+    });
+    invalidateOperatorCache(operator.id);
+
+    const inviteUrl = `${_platformUrl()}/platform?invite=${token}`;
+    let emailSent = false;
+    try {
+      emailSent = await email.sendPlatformOperatorInvite({
+        name: operator.name,
+        email: operator.email,
+        inviterName: _actor(req).name,
+        templateLabel: TEMPLATES[operator.template]?.label,
+        inviteUrl,
+        expiresAt,
+      });
+    } catch (err) {
+      console.error('[platform/operators/resend-invite] email failed:', err.message);
+    }
+
+    AuditService.log({
+      action: 'platform.operator.invite_resent',
+      actor: _platformActor(req), schoolId: null,
+      target: { type: 'platform_operator', id: operator.id, label: operator.email },
+      details: {}, req,
+    });
+
+    return res.json({ success: true, emailSent, inviteUrl: emailSent ? undefined : inviteUrl });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* PATCH /api/platform/operators/:id — name / title / role / capabilities */
+router.patch('/operators/:id', async (req, res) => {
+  try {
+    const Operators = _model('platform_operators');
+    const operator = await Operators.findOne({ id: req.params.id }).lean();
+    if (!operator) return res.status(404).json({ success: false, error: 'Operator not found' });
+
+    const parsed = parseOperatorInput(req.body);
+    if (!parsed.ok) return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: parsed.error } });
+    const { name, title, template, capabilities } = parsed.value;
+
+    const nextTemplate = template !== undefined ? template : (operator.template || 'custom');
+    const nextCaps = req.body?.capabilities !== undefined ? capabilities : (Array.isArray(operator.capabilities) ? operator.capabilities : []);
+    const projected = projectedCapabilities({ template: nextTemplate, capabilities: nextCaps });
+
+    const violations = escalationViolations(_actorCaps(req), projected);
+    if (violations.length) {
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: `You cannot grant capabilities you do not hold: ${violations.join(', ')}` } });
+    }
+    /* Self-lockout guard: don't let a manager edit away their own access. */
+    if (operator.id === _actor(req).id && !projected.includes('*') && !projected.includes('operators.manage')) {
+      return res.status(400).json({ success: false, error: { code: 'SELF_LOCKOUT', message: 'You cannot remove your own team-management capability.' } });
+    }
+    /* Last-owner guard: demoting the final owner would leave nobody able to administer the platform. */
+    if (isOwner(operator) && !isOwner({ tier: _tierForTemplate(nextTemplate), template: nextTemplate })) {
+      if (!(await _otherActiveOwnerExists(Operators, operator.id))) {
+        return res.status(400).json({ success: false, error: { code: 'LAST_OWNER', message: 'This is the only active owner. Promote another owner first.' } });
+      }
+    }
+
+    const set = { template: nextTemplate, capabilities: nextCaps, tier: _tierForTemplate(nextTemplate), updatedAt: new Date().toISOString() };
+    if (name !== undefined && name !== '') set.name = name;
+    if (title !== undefined) set.title = title;
+    await Operators.updateOne({ id: operator.id }, { $set: set });
+    invalidateOperatorCache(operator.id);
+
+    AuditService.log({
+      action: 'platform.operator.updated',
+      actor: _platformActor(req), schoolId: null,
+      target: { type: 'platform_operator', id: operator.id, label: operator.email },
+      details: { changes: Object.keys(set).filter(k => k !== 'updatedAt'), template: nextTemplate },
+      req,
+    });
+
+    const fresh = await Operators.findOne({ id: operator.id }).lean();
+    return res.json({ success: true, operator: _operatorPublic(fresh || { ...operator, ...set }) });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* POST /api/platform/operators/:id/suspend */
+router.post('/operators/:id/suspend', async (req, res) => {
+  try {
+    const Operators = _model('platform_operators');
+    const operator = await Operators.findOne({ id: req.params.id }).lean();
+    if (!operator) return res.status(404).json({ success: false, error: 'Operator not found' });
+    if (operator.id === _actor(req).id) return res.status(400).json({ success: false, error: { code: 'SELF_SUSPEND', message: 'You cannot suspend your own account.' } });
+    if (isOwner(operator) && !(await _otherActiveOwnerExists(Operators, operator.id))) {
+      return res.status(400).json({ success: false, error: { code: 'LAST_OWNER', message: 'This is the only active owner. Promote another owner first.' } });
+    }
+
+    const now = new Date().toISOString();
+    await Operators.updateOne({ id: operator.id }, { $set: { status: 'suspended', isActive: false, sessionsRevokedAt: now, updatedAt: now } });
+    invalidateOperatorCache(operator.id);
+
+    AuditService.log({ action: 'platform.operator.suspended', actor: _platformActor(req), schoolId: null, target: { type: 'platform_operator', id: operator.id, label: operator.email }, details: {}, req });
+    return res.json({ success: true });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* POST /api/platform/operators/:id/reactivate */
+router.post('/operators/:id/reactivate', async (req, res) => {
+  try {
+    const Operators = _model('platform_operators');
+    const operator = await Operators.findOne({ id: req.params.id }).lean();
+    if (!operator) return res.status(404).json({ success: false, error: 'Operator not found' });
+    if (operator.status === 'invited') return res.status(400).json({ success: false, error: { code: 'NOT_ACTIVE', message: 'This invite has not been accepted yet — resend the invite instead.' } });
+    if (operator.status === 'removed') return res.status(400).json({ success: false, error: { code: 'REMOVED', message: 'This operator has been removed.' } });
+
+    await Operators.updateOne({ id: operator.id }, { $set: { status: 'active', isActive: true, updatedAt: new Date().toISOString() } });
+    invalidateOperatorCache(operator.id);
+    AuditService.log({ action: 'platform.operator.reactivated', actor: _platformActor(req), schoolId: null, target: { type: 'platform_operator', id: operator.id, label: operator.email }, details: {}, req });
+    return res.json({ success: true });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* POST /api/platform/operators/:id/revoke-sessions — force re-login */
+router.post('/operators/:id/revoke-sessions', async (req, res) => {
+  try {
+    const Operators = _model('platform_operators');
+    const operator = await Operators.findOne({ id: req.params.id }).lean();
+    if (!operator) return res.status(404).json({ success: false, error: 'Operator not found' });
+    const now = new Date().toISOString();
+    await Operators.updateOne({ id: operator.id }, { $set: { sessionsRevokedAt: now, updatedAt: now } });
+    invalidateOperatorCache(operator.id);
+    AuditService.log({ action: 'platform.operator.sessions_revoked', actor: _platformActor(req), schoolId: null, target: { type: 'platform_operator', id: operator.id, label: operator.email }, details: {}, req });
+    return res.json({ success: true });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* DELETE /api/platform/operators/:id — soft-remove (never a hard delete,
+   so the audit trail keeps pointing at a real record) */
+router.delete('/operators/:id', async (req, res) => {
+  try {
+    const Operators = _model('platform_operators');
+    const operator = await Operators.findOne({ id: req.params.id }).lean();
+    if (!operator) return res.status(404).json({ success: false, error: 'Operator not found' });
+    if (operator.id === _actor(req).id) return res.status(400).json({ success: false, error: { code: 'SELF_REMOVE', message: 'You cannot remove your own account.' } });
+    if (isOwner(operator) && !(await _otherActiveOwnerExists(Operators, operator.id))) {
+      return res.status(400).json({ success: false, error: { code: 'LAST_OWNER', message: 'This is the only active owner. Promote another owner first.' } });
+    }
+
+    const now = new Date().toISOString();
+    await Operators.updateOne({ id: operator.id }, {
+      $set: { status: 'removed', isActive: false, sessionsRevokedAt: now, inviteTokenHash: null, inviteExpiresAt: null, updatedAt: now },
+    });
+    invalidateOperatorCache(operator.id);
+    AuditService.log({ action: 'platform.operator.removed', actor: _platformActor(req), schoolId: null, target: { type: 'platform_operator', id: operator.id, label: operator.email }, details: {}, req });
+    return res.json({ success: true });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }

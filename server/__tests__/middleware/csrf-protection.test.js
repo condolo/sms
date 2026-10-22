@@ -106,37 +106,37 @@ describe('platformSession — platform-operator CSRF enforcement (own cookie nam
     return jwt.sign({ sub: 'platform-operator', operatorId: 'op_1', name: 'X', email: 'x@msingi.io', tier: 'owner' }, SECRET, { expiresIn: '2h' });
   }
 
-  test('a mutating platform request with the platform csrf cookie and matching header succeeds', () => {
+  test('a mutating platform request with the platform csrf cookie and matching header succeeds', async () => {
     const { req, res } = makeReqRes({
       method: 'POST',
       cookies: { platform_token: platformToken(), [PLATFORM_CSRF_COOKIE_NAME]: 'zzz' },
       headers: { [CSRF_HEADER_NAME]: 'zzz' },
     });
     const next = jest.fn();
-    platformSession(req, res, next);
+    await platformSession(req, res, next);
     expect(next).toHaveBeenCalledTimes(1);
   });
 
-  test('a mutating platform request with the platform csrf cookie but a mismatched header is rejected', () => {
+  test('a mutating platform request with the platform csrf cookie but a mismatched header is rejected', async () => {
     const { req, res } = makeReqRes({
       method: 'DELETE',
       cookies: { platform_token: platformToken(), [PLATFORM_CSRF_COOKIE_NAME]: 'zzz' },
       headers: { [CSRF_HEADER_NAME]: 'not-zzz' },
     });
     const next = jest.fn();
-    platformSession(req, res, next);
+    await platformSession(req, res, next);
     expect(next).not.toHaveBeenCalled();
     expect(res.statusCode).toBe(403);
   });
 
-  test('the SCHOOL-tenant csrf_token cookie does not satisfy the platform check — the two are deliberately separate', () => {
+  test('the SCHOOL-tenant csrf_token cookie does not satisfy the platform check — the two are deliberately separate', async () => {
     const { req, res } = makeReqRes({
       method: 'POST',
       cookies: { platform_token: platformToken(), [CSRF_COOKIE_NAME]: 'zzz' }, // wrong cookie name for this session type
       headers: { [CSRF_HEADER_NAME]: 'zzz' },
     });
     const next = jest.fn();
-    platformSession(req, res, next);
+    await platformSession(req, res, next);
     // No platform_csrf_token cookie present at all → passes through (legacy-session rule) — this proves the two namespaces are independent, not that cross-use is accepted.
     expect(next).toHaveBeenCalledTimes(1);
   });

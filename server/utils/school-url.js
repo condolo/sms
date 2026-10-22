@@ -11,7 +11,7 @@
 
 const { _model } = require('./model');
 
-const APP_URL = process.env.APP_URL || 'https://msingi.io';
+const { APP_URL } = require('./app-url');
 
 async function schoolLoginUrl(schoolId) {
   try {
