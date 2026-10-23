@@ -54,7 +54,14 @@ const DEFAULT_REPORT_CONFIG = {
   showStudentPhoto:         true,
   principalSignatureLabel: 'Principal',
   classTeacherSignatureLabel: 'Class Teacher',
-  footerNote:          'This report card is computer-generated and is valid without a handwritten signature.',
+  // Reported directly: "without a handwritten signature" reads as if no
+  // one signs it, when the class teacher still does — the disclaimer is
+  // about the document's authenticity as issued, not about skipping a
+  // signature. No UI writes a custom footerNote anywhere in the app
+  // today (see docs/audits/REPORT_CARD_PLATFORM_FUNCTIONAL_ARCHITECTURE.md),
+  // so every school reads this exact default live via _mergeConfig below
+  // — changing it here is a live, retroactive fix, not a migration.
+  footerNote:          'This report card is computer-generated and is valid without alteration.',
   // Class-teacher observation ratings (2026-09) — a real gap found live:
   // a school's actual report card had a "Class Teacher Observations"
   // section (Engaged/Teamwork/Confidence/Responsibility/Reflective/
