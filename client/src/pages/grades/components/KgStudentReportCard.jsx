@@ -151,18 +151,26 @@ const KgStudentReportCard = forwardRef(function KgStudentReportCard({
             <div className="flex items-center justify-between mb-2">
               <p className="text-xs font-bold text-slate-700">{subj.name}</p>
               <p className="text-xs">
-                <span className="text-slate-400">
-                  {subj.possible > 0 ? `${subj.earned}/${subj.possible} · ` : ''}
-                </span>
-                <span className="font-semibold text-slate-700">
-                  {/* 1 decimal, not rounded to a whole number — the grade
-                      beside it is banded off this same precise value (see
-                      kg-report.js), so rounding here alone made two
-                      subjects with identical displayed %s show different
-                      grades with nothing visible to explain why. Matches
-                      the precision the printed report card already uses. */}
-                  {subj.subjectAvgPct != null ? `${subj.subjectAvgPct.toFixed(1)}%` : '—'}
-                </span>
+                {/* Band-only: no number was ever typed for this subject —
+                    the band itself (e.g. "Secure") is the whole story. */}
+                {subj.bandOnly ? (
+                  <span className="font-semibold text-slate-700">{subj.subjectBandLabel || '—'}</span>
+                ) : (
+                  <>
+                    <span className="text-slate-400">
+                      {subj.possible > 0 ? `${subj.earned}/${subj.possible} · ` : ''}
+                    </span>
+                    <span className="font-semibold text-slate-700">
+                      {/* 1 decimal, not rounded to a whole number — the grade
+                          beside it is banded off this same precise value (see
+                          kg-report.js), so rounding here alone made two
+                          subjects with identical displayed %s show different
+                          grades with nothing visible to explain why. Matches
+                          the precision the printed report card already uses. */}
+                      {subj.subjectAvgPct != null ? `${subj.subjectAvgPct.toFixed(1)}%` : '—'}
+                    </span>
+                  </>
+                )}
                 {showGrade && subj.subjectGrade && (
                   <span className={`ml-1.5 font-bold ${gradeColor(subj.subjectGrade)}`}>{subj.subjectGrade}</span>
                 )}
@@ -173,7 +181,7 @@ const KgStudentReportCard = forwardRef(function KgStudentReportCard({
                 <tr className="text-slate-400 text-left">
                   <th className="font-medium pb-1">Indicator</th>
                   <th className="font-medium pb-1 w-32">Band</th>
-                  {showScore && <th className="font-medium pb-1 w-20 text-right">Score</th>}
+                  {showScore && !subj.bandOnly && <th className="font-medium pb-1 w-20 text-right">Score</th>}
                 </tr>
               </thead>
               <tbody>
@@ -187,7 +195,7 @@ const KgStudentReportCard = forwardRef(function KgStudentReportCard({
                         <span className="text-slate-300 italic">Not scored</span>
                       )}
                     </td>
-                    {showScore && (
+                    {showScore && !subj.bandOnly && (
                       <td className="py-1.5 text-right text-slate-600">
                         {ind.score != null ? `${ind.score}/${ind.maxScore}` : '—'}
                       </td>
@@ -204,7 +212,9 @@ const KgStudentReportCard = forwardRef(function KgStudentReportCard({
       <div className="px-5 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
         <p className="text-xs font-semibold text-slate-600">Overall Average</p>
         <p className="text-sm font-bold text-slate-800">
-          {student.overallAvgPct != null ? `${student.overallAvgPct.toFixed(1)}%` : '—'}
+          {student.overallBandOnly
+            ? (student.overallBandLabel || '—')
+            : (student.overallAvgPct != null ? `${student.overallAvgPct.toFixed(1)}%` : '—')}
           {showGrade && student.overallGrade && (
             <span className={`ml-2 ${gradeColor(student.overallGrade)}`}>{student.overallGrade}</span>
           )}

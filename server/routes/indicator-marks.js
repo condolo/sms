@@ -64,7 +64,7 @@ const { isYearArchived } = require('../utils/archival');
 const ScopeEngine         = require('../utils/scopeEngine');
 const { restrictToTaught } = require('../utils/teaching-scope');
 const { scopeMiddleware } = require('../middleware/scopeMiddleware');
-const { resolveRcTemplate } = require('../utils/rc-template-scale');
+const { resolveRcTemplate, effectiveBandsForSubjectId, isBandOnlySubject } = require('../utils/rc-template-scale');
 
 const router  = express.Router();
 const PLAN    = planGate('grades');
@@ -86,7 +86,11 @@ const IndicatorMarkSchema = z.object({
   templateId:     z.string().min(1),
   indicatorId:    z.string().min(1),
   bandId:         z.string().nullish(),
-  score:          z.number().min(0),
+  // Required for ordinary numeric entry; a band-only subject sends no
+  // score at all (the teacher only picks a band) — the server resolves
+  // it from the picked band's own points below, never trusting a
+  // client-supplied number for one of these marks even if it sent one.
+  score:          z.number().min(0).optional(),
   termNumber:     z.number().int().min(1).max(3),
   academicYearId: z.string().nullish(),
   isPublished:    z.boolean().default(true),
@@ -228,6 +232,25 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), as
       const maxScore = maxScoreByIndicator[`${key}::${d.indicatorId}`];
       if (maxScore === undefined) {
         return E.badRequest(res, `Unknown indicator "${d.indicatorId}" — add it in the Markbook first.`);
+      }
+      // Band-only subject: no number is ever typed or trusted from the
+      // client — resolve the mark's score server-side from the band's
+      // own points, the moment the mark is saved, so every existing
+      // reader downstream (kg-report.js, the PDF/portal renderers) keeps
+      // reading a plain `score` number without needing to know where it
+      // came from. The legacy per-indicator maxScore check below simply
+      // doesn't apply here (the ceiling is the band set's own max, a
+      // subject-wide constant kg-report.js already accounts for).
+      if (isBandOnlySubject(template, d.subjectId)) {
+        if (!d.bandId) return E.badRequest(res, 'A band must be selected for this indicator.');
+        const bands = effectiveBandsForSubjectId(template, d.subjectId);
+        const band = bands.find(b => b.id === d.bandId);
+        if (!band) return E.badRequest(res, `Band "${d.bandId}" does not belong to this subject's performance bands.`);
+        d.score = band.defaultScore;
+        continue;
+      }
+      if (d.score == null) {
+        return E.badRequest(res, 'score is required for this indicator.');
       }
       if (d.score > maxScore) {
         return E.badRequest(res, `Score ${d.score} exceeds this indicator's maximum of ${maxScore}.`);

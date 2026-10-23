@@ -192,6 +192,8 @@ function _hashSnapshot(snap) {
         kgSubjects:    snap.kgSubjects,
         overallAvgPct: snap.overallAvgPct,
         overallGrade:  snap.overallGrade,
+        overallBandOnly:  snap.overallBandOnly,
+        overallBandLabel: snap.overallBandLabel,
         publishedAt:   snap.publishedAt,
       })
     : JSON.stringify({
@@ -1369,6 +1371,8 @@ router.post('/kg/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'
         subjects:          kg?.subjects ?? [],
         overallAvgPct:     kg?.overallAvgPct ?? null,
         overallGrade:      kg?.overallGrade ?? null,
+        overallBandOnly:   kg?.overallBandOnly ?? false,
+        overallBandLabel:  kg?.overallBandLabel ?? null,
         display:           kg?.display ?? template.display ?? {},
       };
     }));
@@ -1515,6 +1519,8 @@ router.post('/kg/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
           kgSubjects:   kg?.subjects ?? [],
           overallAvgPct: kg?.overallAvgPct ?? null,
           overallGrade:  kg?.overallGrade ?? null,
+          overallBandOnly:  kg?.overallBandOnly ?? false,
+          overallBandLabel: kg?.overallBandLabel ?? null,
           kgDisplay:     template.display ?? {},
 
           comments: _resolveSnapComments(prev, draft),
@@ -2701,8 +2707,10 @@ function _computeKgReportSections(snap, config, extra = {}) {
     },
     kgSubjects: snap.kgSubjects || [],
     overall: {
-      avgPct: snap.overallAvgPct,
-      grade:  snap.overallGrade,
+      avgPct:    snap.overallAvgPct,
+      grade:     snap.overallGrade,
+      bandOnly:  snap.overallBandOnly || false,
+      bandLabel: snap.overallBandLabel || null,
     },
     gradingKey: gradeBands.map((b, i) => ({
       grade:  b.grade,

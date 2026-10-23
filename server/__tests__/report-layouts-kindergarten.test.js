@@ -166,3 +166,51 @@ describe('kindergarten — faint school-logo watermark ("for every school")', ()
     expect(withoutLogo.calls.some(c => c.method === 'image')).toBe(false);
   });
 });
+
+describe('kindergarten — band-only scoring (2026-10-23): subject/overall show the band, not a percentage', () => {
+  function bandOnlySnap(overrides = {}) {
+    return baseSnap({
+      kgSubjects: [{
+        name: 'Literacy',
+        indicators: [{ text: 'Recognises letters', bandLabel: 'Secure', bandGrade: 'A', score: null, maxScore: null }],
+        bandOnly: true, subjectBandLabel: 'Secure', subjectGrade: 'A', subjectAvgPct: 71.4,
+      }],
+      overallBandOnly: true, overallBandLabel: 'Secure', overallGrade: 'A', overallAvgPct: 71.4,
+      ...overrides,
+    });
+  }
+
+  test('HTML: subject average shows the band label, never the percentage', () => {
+    const html = LAYOUTS.kindergarten.renderHtml(computeSections(bandOnlySnap()));
+    expect(html).toContain('SUBJECT AVERAGE');
+    expect(html).toMatch(/Secure[^%]*— Grade A/);
+    expect(html).not.toContain('71.4%');
+  });
+
+  test('HTML: overall average shows the band label, never the percentage, and no numeric grading key', () => {
+    const html = LAYOUTS.kindergarten.renderHtml(computeSections(bandOnlySnap()));
+    expect(html).toContain('OVERALL AVERAGE');
+    expect(html).not.toContain('71.4%');
+    expect(html).not.toContain('Grading Scale');
+  });
+
+  test('a non-band-only subject in the SAME report still shows its real percentage', () => {
+    const snap = bandOnlySnap({
+      kgSubjects: [
+        { name: 'Literacy', indicators: [], bandOnly: true, subjectBandLabel: 'Secure', subjectGrade: 'A', subjectAvgPct: 71.4 },
+        { name: 'Numeracy', indicators: [], bandOnly: false, subjectGrade: 'B', subjectAvgPct: 68.2 },
+      ],
+    });
+    const html = LAYOUTS.kindergarten.renderHtml(computeSections(snap));
+    expect(html).toContain('68.2%');
+    expect(html).not.toContain('71.4%'); // the band-only subject's own % stays hidden
+  });
+
+  test('PDF: draws the band label text, not a percentage string, for a band-only subject/overall', () => {
+    const { spy, calls } = makeSpyDoc();
+    LAYOUTS.kindergarten.renderPdf(spy, computeSections(bandOnlySnap()), {}, true);
+    const texts = calls.filter(c => c.method === 'text').map(c => c.args[0]);
+    expect(texts.some(t => typeof t === 'string' && t.includes('Secure'))).toBe(true);
+    expect(texts.some(t => typeof t === 'string' && t.includes('71.4%'))).toBe(false);
+  });
+});

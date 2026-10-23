@@ -98,6 +98,10 @@ function emptyTemplate() {
     ],
     subjects: [],
     display: { showScore: true, showGrade: true, showSubjectAvg: true, showOverallAvg: true },
+    // Band-only scoring (2026-10-23, direct request): off by default — a
+    // teacher types a score as before unless a template (or a specific
+    // subject within it) opts in. See SubjectEditor's own override below.
+    bandOnlyScoring: false,
   };
 }
 
@@ -175,9 +179,13 @@ function BandRow({ band, onChange, onRemove }) {
 }
 
 /* ── SubjectEditor ───────────────────────────────────────────── */
-function SubjectEditor({ subject, templateBands, subjectOptions, onChange, onRemove }) {
+function SubjectEditor({ subject, templateBands, templateBandOnly, subjectOptions, onChange, onRemove }) {
   const [expanded, setExpanded] = useState(true);
   const hasOverride = Array.isArray(subject.performanceBands);
+  // Band-only override — undefined means "inherit the template's own
+  // bandOnlyScoring," same convention as the bands override above.
+  const bandOnlyHasOverride = subject.bandOnlyScoring != null;
+  const effectiveBandOnly = bandOnlyHasOverride ? subject.bandOnlyScoring : templateBandOnly;
 
   // Linked to a real subjects-collection record (required, 2026-10) —
   // without this there is no teaching_assignments row to check, so
@@ -291,6 +299,34 @@ function SubjectEditor({ subject, templateBands, subjectOptions, onChange, onRem
                 </button>
               </div>
             )}
+          </div>
+
+          {/* Per-subject band-only override — independent of the bands
+              override above: a subject can use its own band LIST while
+              still typing scores, or use the template's bands while
+              skipping the number entirely. Starts as "inherit the
+              template"; touching it sets an explicit value for this
+              subject from then on, same as every other per-subject
+              override on this screen. */}
+          <div className="mt-3 pt-3 border-t border-slate-100">
+            <label className="flex items-center justify-between cursor-pointer group">
+              <span className="text-xs text-slate-500 group-hover:text-slate-700 transition">
+                Band-only entry for {subject.name || 'this subject'} — no number typed, just the band
+                {!bandOnlyHasOverride && <span className="ml-1 text-slate-400">(following template)</span>}
+              </span>
+              <button
+                type="button"
+                onClick={() => onChange({ ...subject, bandOnlyScoring: !effectiveBandOnly })}
+                className={`relative inline-flex h-4.5 w-8 items-center rounded-full transition-colors shrink-0 ${
+                  effectiveBandOnly ? 'bg-indigo-600' : 'bg-slate-200'
+                }`}
+                title="Toggling sets an explicit value for this subject, independent of the template from then on"
+              >
+                <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${
+                  effectiveBandOnly ? 'translate-x-4' : 'translate-x-0.5'
+                }`} />
+              </button>
+            </label>
           </div>
         </div>
       )}
@@ -675,6 +711,17 @@ function TemplateSlideOver({ initial, classes, subjectOptions, onSave, onClose, 
               When a teacher selects a band, the default score auto-fills. Grade is the letter assigned.
             </p>
 
+            {/* Band-only scoring (2026-10-23, direct request) — off by
+                default. A subject can override this independently
+                (SubjectEditor below), same convention as its own bands. */}
+            <div className="mb-3 pb-3 border-b border-slate-100">
+              <ToggleSwitch
+                label="Band-only entry — teachers pick a band, no score is typed. The subject's grade comes from the band itself, not a numeric percentage."
+                checked={form.bandOnlyScoring}
+                onChange={v => setForm(f => ({ ...f, bandOnlyScoring: v }))}
+              />
+            </div>
+
             {/* Column headers */}
             <div className="grid grid-cols-[1fr_72px_54px_auto_28px] gap-2 px-2 mb-1">
               <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Band label</span>
@@ -744,6 +791,7 @@ function TemplateSlideOver({ initial, classes, subjectOptions, onSave, onClose, 
                   key={subj._uid}
                   subject={subj}
                   templateBands={form.performanceBands}
+                  templateBandOnly={form.bandOnlyScoring}
                   subjectOptions={optionsForRow(subj.subjectId)}
                   onChange={updated => updateSubject(subj._uid, updated)}
                   onRemove={() => removeSubject(subj._uid)}
@@ -845,6 +893,11 @@ function TemplateCard({ template, sectionMap, onEdit, onDelete, deleting }) {
             {template.isDefault && sectionName && (
               <span className="inline-flex items-center text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded border text-indigo-700 bg-indigo-50 border-indigo-200">
                 Default for {sectionName}
+              </span>
+            )}
+            {template.bandOnlyScoring && (
+              <span className="inline-flex items-center text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded border text-purple-700 bg-purple-50 border-purple-200">
+                Band-only
               </span>
             )}
           </div>
