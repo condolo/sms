@@ -6,6 +6,31 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.206.0] - 2026-10-22 - feat(platform): Google sign-in for the platform console
+
+**What changed:** the platform console (`/platform`) now supports Google OAuth sign-in alongside the existing email/password login. An operator whose Google profile email matches a `platform_operators` row (case-insensitive) signs in; an unknown email is rejected (no auto-provisioning — a platform account is still a deliberate invite). Reuses the school-side `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` OAuth client; the Google client's authorized redirect URIs need `<PUBLIC_URL>/api/platform/auth/google/callback`.
+
+**How it works:**
+
+- `server/routes/platform.js` — three new public routes, all before the `platformSession` gate:
+  - `GET /api/platform/auth/google` — 302 to `accounts.google.com` (503 when `GOOGLE_CLIENT_ID` is unset, so the console can hide the button).
+  - `GET /api/platform/auth/google/callback` — exchanges the Google auth code, resolves the operator by email, issues a 30-second single-use exchange code (CSPRNG, in-memory, same pattern as the school-side `_issueExchangeCode`), and redirects to `/platform?code=<code>`. The JWT never appears in the URL. Distinct redirect errors: `not_an_operator`, `google_denied`, `google_not_configured`, `google_failed`.
+  - `POST /api/platform/auth/google/exchange` — the console POSTs the code; the route mints `platform_token` + the CSRF cookie exactly like the password login, so capability gating and the CSRF double-submit work unchanged. Single-use (second call 410s).
+- `platform.html` — a "Sign in with Google" button (with a divider) below the password form, shown only when the server reports Google is configured (a same-origin `no-cors` probe of `GET /auth/google`). On boot, a `?code=` from the callback is exchanged for the session cookie; `?error=` renders a friendly message. The code is stripped from the URL immediately to prevent replay.
+- `css/platform.css` — `pa-lock-alt` / `pa-lock-alt-divider` styles for the "or" divider.
+
+**What it does NOT change:**
+
+- The invite flow is untouched: invited operators still set a password via `POST /auth/accept-invite` before either sign-in method works (an invited-but-not-activated account is `isActive: false` and is rejected by the Google lookup).
+- The school-side `/api/auth/google` flow is untouched — the platform flow is a parallel, separate implementation (different redirect URIs, different cookie, different audience).
+- The legacy env-var bootstrap credential still works when no operator exists (the Google path requires an existing operator row, so it cannot substitute for the bootstrap).
+
+**Tested:** `server/__tests__/routes/platform-google.test.js` (14 tests) covers the redirect params, the 503-when-unconfigured probe, email matching (case-insensitive), no-auto-provision, suspended-operator rejection, cancelled/expired/failed round-trips, the exchange-code lifecycle (single-use, 30s expiry, JWT identity, CSRF cookie, `/me` works with the minted token), and the 400/410 edge cases. `fetch` is stubbed so no real Google round-trip happens in CI.
+
+**To enable in a deployment:** set `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` (the same client the school side uses) and make sure the Google OAuth client's authorized redirect URIs include `https://<your-host>/api/platform/auth/google/callback`. The button appears on the platform login screen automatically.
+
+---
+
 ## [v5.203.1] - 2026-10-21 - fix(release-gate): the security-pattern check could never pass
 
 `npm run platform:release-gate` always ended in **"RELEASE BLOCKED — 1 critical check(s) failed"**, on a completely clean tree, because `checkSecurityPatterns()` judged the scan by matching words in its output:

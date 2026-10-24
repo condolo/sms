@@ -41,6 +41,28 @@
       <i class="fas fa-arrow-right-to-bracket"></i> Sign In
     </button>
 
+    <!-- Google sign-in (team operators). Shown only when the server reports
+         Google OAuth is configured — probe /api/platform/auth/google on load
+         (see _probeGoogleSignIn below); a 503 means GOOGLE_CLIENT_ID is unset.
+         The callback redirects here with ?code=<30s single-use exchange code>. -->
+    <div class="pa-lock-alt" id="login-google-wrap" style="display:none">
+      <div class="pa-lock-alt-divider"><span>or</span></div>
+      <a class="pa-lock-alt-btn" id="login-google-btn"
+         href="/api/platform/auth/google" target="_blank" rel="noopener"
+         style="display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:11px 16px;margin-top:4px;
+                background:#fff;color:#3c4043;border:1px solid #dadce0;border-radius:var(--radius-sm);
+                font-size:14px;font-weight:600;text-decoration:none;transition:background .15s,border-color .15s;
+                font-family:inherit;cursor:pointer">
+        <svg width="16" height="16" viewBox="0 0 48 48" aria-hidden="true">
+          <path fill="#FFC107" d="M43.611 20.093H42V20H27v8h7.609a13.2 13.2 0 0 1-3.863 6.512c-.448.37-.935.686-1.45.947v5.184c.967.262 2.01.4 3.09.4 7.212 0 13.125-5.913 13.125-13.125 0-.453-.038-.902-.113-1.339z"/>
+          <path fill="#FF3D00" d="M6 12c-2.21 0-4 1.79-4 4v12c0 2.21 1.79 4 4 4h13.39c-.252-.773-.39-1.59-.39-2.455v-5.184A9.04 9.04 0 0 1 9.904 27 9 9 0 0 1 9 13.5 9.04 9.04 0 0 1 13.39 12H6z"/>
+          <path fill="#4CAF50" d="M20.89 38c-4.945 0-8.99-3.955-8.99-8.9 0-.604.06-1.194.175-1.76l-6.558-3.352L.867 29.54c.966 5.52 5.883 9.66 11.716 9.66 2.937 0 5.657-1.08 7.74-2.844l-5.588-4.655c-.915.977-2.204 1.587-3.634 1.587-2.555 0-4.645-2.09-4.645-4.645s2.09-4.645 4.645-4.645c1.43 0 2.719.61 3.634 1.587l5.588-4.655A11.968 11.968 0 0 0 20.89 38z"/>
+          <path fill="#1976D2" d="M43.611 20.093H42V20H27v8h7.609a13.2 13.2 0 0 1-5.598 4.21l6.447 5.24A18 18 0 0 0 44 20.474c0-.453-.038-.902-.113-1.339l-5.136.958h.973z"/>
+        </svg>
+        Sign in with Google
+      </a>
+    </div>
+
     <div class="pa-lock-error" id="login-error" style="display:none"></div>
 
     <!-- Shown instead of the sign-in form when the page is opened from an
@@ -359,6 +381,58 @@ function togglePasswordVis(btn) {
   const show = inp.type === 'text';
   inp.type = show ? 'password' : 'text';
   btn.querySelector('i').className = show ? 'fas fa-eye' : 'fas fa-eye-slash';
+}
+
+/* ── Google sign-in (team operators) ─────────────────────
+   The callback redirects back to /platform?code=<30s single-use code>.
+   We POST it to /auth/google/exchange, which mints platform_token exactly
+   like the password login does, then re-boots the session as usual. */
+const _GOOGLE_ERROR_MESSAGES = {
+  google_denied:         'Google sign-in was cancelled. You can try again.',
+  google_not_configured: 'Google sign-in is not enabled on this server.',
+  google_failed:         'Google sign-in failed. Please try again.',
+  not_an_operator:       'That Google account is not a platform operator. Ask a team lead to invite you (or sign in with your password).',
+};
+
+async function _handleGoogleCode(code) {
+  const errEl = document.getElementById('login-error');
+  try {
+    const res  = await fetch('/api/platform/auth/google/exchange', {
+      method:      'POST',
+      credentials: 'include',
+      headers:     { 'Content-Type': 'application/json' },
+      body:        JSON.stringify({ code }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.success) {
+      window.history.replaceState({}, '', window.location.pathname); // drop ?code=
+      await _showApp();
+      return true;
+    }
+    _showErr(errEl, (data.error && data.error.message) || 'Google sign-in failed. Please try again.');
+  } catch (e) {
+    _showErr(errEl, 'Could not reach the server to complete Google sign-in.');
+  }
+  return false;
+}
+
+function _probeGoogleSignIn() {
+  // Show the Google button only when the server has GOOGLE_CLIENT_ID set.
+  // GET /auth/google is a cheap probe: 503 (not configured) vs 302 (ready).
+  // We use HEAD + redirect:'manual' so the browser reads the 3xx status
+  // WITHOUT following the redirect to accounts.google.com — that follow is
+  // what trips the page's "connect-src 'self'" CSP. We only ever need the
+  // status code, so a manual redirect (no body) is exactly what we want.
+  fetch('/api/platform/auth/google', { method: 'HEAD', redirect: 'manual', credentials: 'include' })
+    .then(r => {
+      // A manual redirect yields an opaque/3xx response when configured;
+      // a 503 (not configured) or opaque/0 comes back. Show the button for
+      // anything that isn't an explicit 503.
+      if (r.status !== 503) {
+        document.getElementById('login-google-wrap').style.display = '';
+      }
+    })
+    .catch(() => { /* server unreachable — leave hidden */ });
 }
 
 /* ── API helpers ────────────────────────────────────────── */
@@ -3754,8 +3828,30 @@ function _onboardingRows(onboarding) {
 
 /* ── Boot: silently restore session from HttpOnly cookie ── */
 window.addEventListener('DOMContentLoaded', async () => {
-  // An invite link takes priority over any existing session.
+  // Google OAuth callback lands here as ?code=<single-use 30s exchange code>.
+  // An invite link takes priority over everything, including a pending code.
   if (_inviteTokenFromUrl()) { _showInvitePanel(); return; }
+
+  const bootParams = new URLSearchParams(window.location.search);
+  const gCode   = bootParams.get('code');
+  const gError  = bootParams.get('error');
+
+  if (gCode) {
+    // Drop the code from the URL immediately so a refresh can't replay it.
+    window.history.replaceState({}, '', window.location.pathname);
+    const ok = await _handleGoogleCode(gCode);
+    return; // _showApp() was called on success; on failure we're on the lock screen
+  }
+
+  if (gError) {
+    window.history.replaceState({}, '', window.location.pathname);
+    const errEl = document.getElementById('login-error');
+    _showErr(errEl, _GOOGLE_ERROR_MESSAGES[gError] || 'Google sign-in failed. Please try again.');
+    // Fall through to probe + session check below.
+  }
+
+  _probeGoogleSignIn();
+
   try {
     // /me is readable by any authenticated operator regardless of role, so
     // it is the right probe for "is there a session to restore?".

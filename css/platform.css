@@ -236,6 +236,32 @@ body {
   display: none;
 }
 
+/* ── Alternate sign-in (Google) — divider + button ──────── */
+.pa-lock-alt { margin-top: 14px; }
+.pa-lock-alt-divider {
+  position: relative;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+}
+.pa-lock-alt-divider::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 50% 0;
+  width: 100%;
+  border-top: 1px solid var(--border, #e2e8f0);
+}
+.pa-lock-alt-divider span {
+  position: relative;
+  z-index: 1;
+  background: var(--surface, #fff);
+  padding: 0 10px;
+  font-size: 11px;
+  color: var(--text-dim, #94a3b8);
+  text-transform: lowercase;
+  letter-spacing: .02em;
+}
+
 /* ── App shell ────────────────────────────────────────────── */
 .pa-shell { display: flex; min-height: 100vh; }
 

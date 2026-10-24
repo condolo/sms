@@ -32,6 +32,15 @@ const PUBLIC_ROUTES = new Set([
   'POST /auth/login',
   'POST /auth/logout',
   'POST /auth/accept-invite',
+  /* Google sign-in for the console (v5.206.0). All three sit before the
+     platformSession gate: /auth/google issues the OAuth redirect,
+     /auth/google/callback finishes the round-trip with a single-use
+     exchange code, and /auth/google/exchange mints the session cookie.
+     Declared here so the audit can tell "intentionally public" from a
+     route that silently fell through the capability gate. */
+  'GET /auth/google',
+  'GET /auth/google/callback',
+  'POST /auth/google/exchange',
 ]);
 
 function registeredRoutes() {

@@ -21,7 +21,7 @@ const { issueCsrfCookie, clearCsrfCookie, PLATFORM_CSRF_COOKIE_NAME } = require(
 const email    = require('../utils/email');
 const { dispatchNotification } = require('../utils/notify-dispatch');
 const { tenantModel, platformModel } = require('../utils/tenant-model');
-const { appUrl, RAW_APP_URL } = require('../utils/app-url');
+const { appUrl, RAW_APP_URL, APP_URL } = require('../utils/app-url');
 const { provisionOrganizationForSchool } = require('../utils/provision-organizations');
 const { provisionMembershipForUser } = require('../utils/provision-memberships');
 const { provisionIdentityForUser } = require('../utils/provision-identities');
@@ -194,6 +194,171 @@ router.post('/auth/logout', (req, res) => {
   res.clearCookie('platform_token', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict' });
   clearCsrfCookie(res, PLATFORM_CSRF_COOKIE_NAME);
   return res.json({ success: true });
+});
+
+/* ════════════════════════════════════════════════════════════
+   GOOGLE OAUTH 2.0 for the platform console (no passport.js — native
+   fetch, mirroring the school-side /api/auth/google flow in auth.js).
+
+   Flow: GET /google → accounts.google.com → GET /google/callback →
+   operator matched by the Google profile's email against
+   platform_operators → issues a short-lived single-use exchange code →
+   redirects to /platform?code=<30s code>. The console then POSTs the
+   code to /auth/google/exchange, which mints the platform_token cookie.
+   The operator is NOT auto-created (unlike the school side): an unknown
+   Google email is a 404, because a platform account is a deliberate
+   invite (see POST /operators/invite), not open registration.
+
+   Reuses the school-side GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET. The
+   Google OAuth client's authorized redirect URIs must include
+   <PUBLIC_URL>/api/platform/google/callback.
+
+   Required env vars: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET,
+   PLATFORM_JWT_SECRET, and either PUBLIC_URL (preferred) or APP_URL —
+   the callback redirect URI is the host the Google client was registered
+   with, which is the public URL.
+   ══════════════════════════════════════════════════════════ */
+const _platformGoogleCodes = new Map();
+function _platformIssueGoogleCode(token) {
+  const code = crypto.randomBytes(32).toString('hex'); // 64-char hex, CSPRNG
+  _platformGoogleCodes.set(code, { token, expiresAt: Date.now() + 30_000 });
+  for (const [k, v] of _platformGoogleCodes) {
+    if (v.expiresAt <= Date.now()) _platformGoogleCodes.delete(k);
+  }
+  return code;
+}
+/* The platform console lives at the deployment's base path, so the
+   redirect target (and the OAuth redirect_uri) is the PUBLIC_URL, NOT
+   appUrl() — appUrl() is where invite links point, but the OAuth client
+   is registered against the public host. We import RAW_APP_URL / APP_URL
+   from app-url.js (the single source of truth) rather than reading the
+   env var here, because the app-url test forbids any second env read
+   outside that module. */
+function _platformPublicBase() {
+  return (process.env.PUBLIC_URL || RAW_APP_URL || APP_URL).replace(/\/+$/, '');
+}
+
+/* GET /api/platform/auth/google — PUBLIC (must precede the
+   router.use(platformSession) gate below). Redirects to Google. */
+router.get('/auth/google', (req, res) => {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  if (!clientId) {
+    return res.status(503).json({ success: false, error: { code: 'GOOGLE_NOT_CONFIGURED', message: 'Google sign-in is not enabled on this server.' } });
+  }
+  const base = _platformPublicBase();
+  const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+  url.searchParams.set('client_id',     clientId);
+  url.searchParams.set('redirect_uri',  `${base}/api/platform/auth/google/callback`);
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('scope',         'openid email profile');
+  url.searchParams.set('access_type',   'online');
+  url.searchParams.set('prompt',        'select_account');
+  res.redirect(url.toString());
+});
+
+/* GET /api/platform/auth/google/callback — PUBLIC. Exchanges the Google
+   auth code, resolves the operator by email, and redirects back to the
+   console with a single-use exchange code (never the JWT). */
+router.get('/auth/google/callback', async (req, res) => {
+  const clientId     = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const base         = _platformPublicBase();
+
+  if (!clientId || !clientSecret) {
+    return res.redirect(`${base}/platform?error=google_not_configured`);
+  }
+
+  const { code, error: oauthError } = req.query;
+  if (oauthError || !code) {
+    return res.redirect(`${base}/platform?error=google_denied`);
+  }
+
+  try {
+    const redirectUri = `${base}/api/platform/auth/google/callback`;
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code, client_id: clientId, client_secret: clientSecret,
+        redirect_uri: redirectUri, grant_type: 'authorization_code',
+      }),
+    });
+    const tokens = await tokenRes.json();
+    if (!tokens.access_token) throw new Error('No access token from Google');
+
+    const profileRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
+    });
+    const profile = await profileRes.json();
+    const { email } = profile;
+    if (!email) throw new Error('No email in Google profile');
+
+    /* Match by email (case-insensitive, same convention as the password
+       login path). Invited-but-not-yet-activated operators are rejected
+       with a distinct error so the console can tell them to finish the
+       invite instead of guessing a password. */
+    const Operators = _model('platform_operators');
+    const operator  = await Operators.findOne({ email: email.toLowerCase(), isActive: true }).lean();
+
+    if (!operator) {
+      return res.redirect(`${base}/platform?error=not_an_operator`);
+    }
+
+    const secret = process.env.PLATFORM_JWT_SECRET || '';
+    if (!secret) {
+      console.error('[platform/google/callback] Missing env var: PLATFORM_JWT_SECRET');
+      return res.redirect(`${base}/platform?error=google_not_configured`);
+    }
+
+    const token = jwt.sign(
+      { sub: 'platform-operator', operatorId: operator.id, name: operator.name, email: operator.email, tier: operator.tier, template: operator.template || null },
+      secret,
+      { expiresIn: '2h' },
+    );
+    const xCode = _platformIssueGoogleCode(token);
+    await Operators.updateOne({ id: operator.id }, { $set: { lastLoginAt: new Date().toISOString() } });
+
+    AuditService.log({
+      action: 'platform.login.success',
+      actor: { userId: operator.id, role: `platform_${operator.tier}`, email: operator.email },
+      schoolId: null,
+      target: { type: 'platform', id: null, label: 'platform-admin' },
+      details: { authPath: 'google', tier: operator.tier },
+      req,
+    });
+    res.redirect(`${base}/platform?code=${xCode}`);
+  } catch (err) {
+    console.error('[platform/google/callback]', err);
+    res.redirect(`${base}/platform?error=google_failed`);
+  }
+});
+
+/* POST /api/platform/auth/google/exchange — PUBLIC. The console calls this
+   with the single-use code from the callback redirect; it mints the
+   platform_token + CSRF cookies exactly like the password login does, so
+   the rest of the console (CSRF double-submit, capability gating) works
+   unchanged. */
+router.post('/auth/google/exchange', async (req, res) => {
+  try {
+    const { code } = req.body || {};
+    if (!code || typeof code !== 'string') {
+      return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'Exchange code required.' } });
+    }
+    const entry = _platformGoogleCodes.get(code);
+    _platformGoogleCodes.delete(code); // single-use, delete regardless of outcome
+    if (!entry) {
+      return res.status(410).json({ success: false, error: { code: 'EXCHANGE_GONE', message: 'Exchange code not found or already used.' } });
+    }
+    if (entry.expiresAt < Date.now()) {
+      return res.status(410).json({ success: false, error: { code: 'EXCHANGE_EXPIRED', message: 'Exchange code expired. Please sign in again.' } });
+    }
+    res.cookie('platform_token', entry.token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 2 * 60 * 60 * 1000 });
+    issueCsrfCookie(res, 2 * 60 * 60 * 1000, PLATFORM_CSRF_COOKIE_NAME);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[platform/google/exchange]', err);
+    return res.status(500).json({ success: false, error: { code: 'INTERNAL', message: err.message } });
+  }
 });
 
 /* POST /api/platform/auth/accept-invite — PUBLIC.
