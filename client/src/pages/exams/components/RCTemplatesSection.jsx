@@ -139,8 +139,23 @@ function ColorPicker({ value, onChange }) {
   );
 }
 
+/* Every band the server will accept needs a non-empty label AND grade
+   (BandSchema: `grade: z.string().min(1)...`) — reported directly: a
+   template update 422'd with a raw "performanceBands.3.grade — String
+   must contain at least 1 character(s)" after adding 2 new bands and
+   not yet typing their grade. addBand() seeds `grade: ''`, and nothing
+   client-side ever checked that before hitting Save, so the only
+   feedback was that cryptic server message, pointing at an array index
+   rather than a visible row. Used to both gate Save and highlight the
+   exact empty inputs inline. */
+function bandsIncomplete(bands) {
+  return (bands ?? []).some(b => !b.label?.trim() || !b.grade?.trim());
+}
+
 /* ── BandRow ─────────────────────────────────────────────────── */
 function BandRow({ band, onChange, onRemove }) {
+  const labelEmpty = !band.label?.trim();
+  const gradeEmpty = !band.grade?.trim();
   return (
     <div className="grid grid-cols-[1fr_72px_54px_auto_28px] gap-2 items-center py-1.5 px-2 rounded-lg bg-slate-50 border border-slate-100">
       <input
@@ -148,7 +163,10 @@ function BandRow({ band, onChange, onRemove }) {
         onChange={e => onChange({ ...band, label: e.target.value })}
         placeholder="e.g. Excellent"
         maxLength={60}
-        className="text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+        title={labelEmpty ? 'Required — every band needs a label' : undefined}
+        className={`text-sm border rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 ${
+          labelEmpty ? 'border-red-300 focus:ring-red-400/40 bg-red-50/40' : 'border-slate-200 focus:ring-indigo-400/40'
+        }`}
       />
       <div className="relative">
         <input
@@ -164,7 +182,10 @@ function BandRow({ band, onChange, onRemove }) {
         onChange={e => onChange({ ...band, grade: e.target.value.toUpperCase().slice(0, 6) })}
         placeholder="A"
         maxLength={6}
-        className="text-sm font-bold text-center border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+        title={gradeEmpty ? 'Required — every band needs a grade' : undefined}
+        className={`text-sm font-bold text-center border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 ${
+          gradeEmpty ? 'border-red-300 focus:ring-red-400/40 bg-red-50/40' : 'border-slate-200 focus:ring-indigo-400/40'
+        }`}
       />
       <ColorPicker value={band.color} onChange={color => onChange({ ...band, color })} />
       <button
@@ -297,6 +318,9 @@ function SubjectEditor({ subject, templateBands, templateBandOnly, subjectOption
                 >
                   <Plus size={10} /> Add band for this subject
                 </button>
+                {bandsIncomplete(subject.performanceBands) && (
+                  <p className="text-[11px] text-red-600">Every band needs both a label and a grade (highlighted above) before you can save.</p>
+                )}
               </div>
             )}
           </div>
@@ -528,11 +552,18 @@ function TemplateSlideOver({ initial, classes, subjectOptions, onSave, onClose, 
     setForm(f => ({ ...f, display: { ...f.display, [key]: !f.display[key] } }));
   }
 
+  // Template bands plus every subject's own override bands (if any) —
+  // the server validates both arrays the same way, so Save must gate on
+  // both, not just the template-level list.
+  const bandsAreIncomplete = bandsIncomplete(form.performanceBands)
+    || form.subjects.some(s => s.performanceBands && bandsIncomplete(s.performanceBands));
+
   /* ── Submit ── */
   function handleSubmit(e) {
     e.preventDefault();
     if (!form.name.trim())              return;
     if (form.performanceBands.length === 0) return;
+    if (bandsAreIncomplete)             return; // every band needs a label AND a grade — see bandsIncomplete()
     if (form.isDefault && !form.sectionId) return; // same guard as the server
     if (form.subjects.some(s => !s.subjectId)) return; // every subject must be linked to a real one
 
@@ -745,6 +776,9 @@ function TemplateSlideOver({ initial, classes, subjectOptions, onSave, onClose, 
             {form.performanceBands.length === 0 && (
               <p className="text-xs text-slate-400 italic text-center py-2">At least one band is required</p>
             )}
+            {bandsIncomplete(form.performanceBands) && (
+              <p className="text-xs text-red-600 mt-1.5">Every band needs both a label and a grade (highlighted above) before you can save.</p>
+            )}
 
             <button
               type="button" onClick={addBand}
@@ -857,7 +891,7 @@ function TemplateSlideOver({ initial, classes, subjectOptions, onSave, onClose, 
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={saving || !form.name.trim() || form.performanceBands.length === 0 || (form.isDefault && !form.sectionId) || form.subjects.some(s => !s.subjectId)}
+            disabled={saving || !form.name.trim() || form.performanceBands.length === 0 || bandsAreIncomplete || (form.isDefault && !form.sectionId) || form.subjects.some(s => !s.subjectId)}
             className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-sm font-medium px-5 py-2 rounded-lg transition"
           >
             {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
