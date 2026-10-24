@@ -163,6 +163,35 @@ async function _downloadPdf(path, filename, params) {
   URL.revokeObjectURL(a.href);
 }
 
+// POST counterpart to _downloadPdf — for a PDF-generating route whose
+// input is a JSON body too large/structured for a query string (a draft
+// report card preview: student, subjects, config, etc., same payload
+// previewHtml already sends). Same school-slug header, credentials, and
+// blob-download trigger; adds the CSRF header _postFile already needs
+// for a mutating-shaped POST.
+async function _downloadPdfPost(path, filename, body) {
+  const { slug } = detectSchool();
+  const headers = { 'Content-Type': 'application/json' };
+  if (slug) headers['X-School-Slug'] = slug;
+  const csrf = _csrfToken();
+  if (csrf) headers['X-CSRF-Token'] = csrf;
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'POST', headers, credentials: 'include', body: JSON.stringify(body ?? {}),
+  });
+  if (!res.ok) {
+    const json = await res.json().catch(() => null);
+    throw new APIError('PDF_FAILED', json?.error?.message ?? 'Failed to generate PDF', res.status);
+  }
+  const blob = await res.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+}
+
 // Sends a raw file (docx binary or csv text) as the request body with its
 // real Content-Type, rather than JSON-wrapping it — matches the server's
 // own expectation (express.raw/express.text on that specific route, same
@@ -1126,6 +1155,12 @@ export const reportCards = {
   // "download" path was opening the HTML render in a new window and
   // relying on the browser's own print-to-PDF.
   pdf: (id, filename) => _downloadPdf(`/report-cards/${id}/pdf`, filename ?? `report-card-${id}.pdf`),
+  // Direct PDF download for a draft (unpublished) report card — the
+  // pre-publish twin of `pdf` above, sharing previewHtml's exact payload
+  // shape. Raised directly: before this, a draft could only be printed
+  // via the browser's own Print → Save as PDF dialog over the HTML
+  // preview, not downloaded with one click.
+  previewPdf: (data, filename) => _downloadPdfPost('/report-cards/preview-pdf', filename ?? `report-card-${data?.student?.studentId ?? 'draft'}.pdf`, data),
   // Bulk, cursor-streamed PDF for a whole class, optionally narrowed to
   // one stream (GET /bulk-pdf — also fully implemented, RBAC/scope-
   // checked, and never reachable from the UI before this). Raised

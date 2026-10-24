@@ -3212,6 +3212,130 @@ router.post('/preview-html', authMiddleware, PLAN, MODGATE, rbac('grades', 'read
   } catch (err) { console.error('[report-cards/preview-html]', err); return E.serverError(res); }
 });
 
+/* ══════════════════════════════════════════════════════════════
+   POST /preview-pdf  — direct-download PDF counterpart to POST
+   /preview-html, for a live, unpublished draft. Until this route
+   existed, the only way to get a PDF of a report card before it was
+   published was the browser's own Print → Save as PDF dialog over
+   the HTML preview — workable, but not a one-click download (raised
+   directly). Published snapshots already have this via GET /:id/pdf;
+   this is its pre-publish twin, sharing the exact same snap/sections
+   construction as /preview-html (see that route's own header for why
+   it doesn't re-run /generate's aggregation) and the exact same
+   PDFKit rendering GET /:id/pdf uses — only the image-URL source
+   differs, since a draft has no persisted snapshot to read
+   principalSignatureUrl/schoolStampUrl off: those come from the same
+   live school lookup (schoolWithSignOff) /preview-html already does.
+   ══════════════════════════════════════════════════════════════ */
+router.post('/preview-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), async (req, res) => {
+  try {
+    const { data, error } = _validate(PreviewHtmlSchema, req.body);
+    if (error) return E.validation(res, error);
+    const { student, studentInfo, classId, className, termNum, academicYear, school, draftComment, studentDeviations, behaviourSummary: beh, config: clientConfig } = data;
+    const { schoolId } = req.jwtUser;
+
+    const previewStudentDoc = await tenantModel('students', tenantContext(req))
+      .findOne({ schoolId, id: student.studentId }).select('streamId').lean().catch(() => null);
+    let previewStreamName = '';
+    if (previewStudentDoc?.streamId) {
+      const strm = await tenantModel('streams', tenantContext(req))
+        .findOne({ schoolId, id: previewStudentDoc.streamId }).select('name').lean().catch(() => null);
+      previewStreamName = strm?.name || '';
+    }
+
+    const gradingSchema = clientConfig?.gradeScale?.bands ?? [];
+
+    const snap = {
+      status: 'draft', superseded: false, version: 1,
+      studentId: student.studentId,
+      studentName: [studentInfo?.firstName, studentInfo?.lastName].filter(Boolean).join(' ') || student.studentId,
+      admissionNo: studentInfo?.admissionNumber || '',
+      studentPhotoUrl: studentInfo?.photo || null,
+      className: className || '',
+      streamName: previewStreamName,
+      termNumber: termNum ?? null, academicYear: academicYear || '',
+      schoolName: school?.name || '',
+      reportLabel: clientConfig?.reportLabel || null,
+      gradingSchema,
+      assessmentWeights: _convertCustomTypesToWeights(clientConfig?.customTypes ?? []),
+      passMark: clientConfig?.passMark, rankingSubjectStrategy: null,
+      subjects: student.subjects, totalScore: student.totalScore, averageScore: student.averageScore,
+      gpa: student.gpa, subjectCount: student.subjectCount,
+      rankings: student.rankings ?? {},
+      comments: _resolveSnapComments(null, { ...draftComment, classTeacherName: draftComment?.classTeacherName || student.classTeacherName || '' }),
+    };
+    const config = await _loadConfig(schoolId);
+
+    const subjectDocs = await tenantModel('subjects', tenantContext(req))
+      .find({ schoolId, id: { $in: Object.keys(student.subjects || {}) } })
+      .select('id name').lean().catch(() => []);
+    const subjectNames = Object.fromEntries(subjectDocs.map(s => [s.id, s.name]));
+
+    const assignmentDocs = classId
+      ? await tenantModel('teaching_assignments', tenantContext(req))
+          .find({ schoolId, classId, subjectId: { $in: Object.keys(student.subjects || {}) } })
+          .select('subjectId teacherName').lean().catch(() => [])
+      : [];
+    const subjectTeacherNames = {};
+    for (const a of assignmentDocs) {
+      if (!subjectTeacherNames[a.subjectId]) subjectTeacherNames[a.subjectId] = a.teacherName || '';
+    }
+
+    const signOffDoc = await _model('schools').findOne({ id: schoolId }, { principalSignatureUrl: 1, schoolStampUrl: 1, principalName: 1, timezone: 1, address: 1, tagline: 1, email: 1, phone: 1, website: 1, country: 1 }).lean().catch(() => null);
+    const schoolWithSignOff = {
+      ...school,
+      principalSignatureUrl: signOffDoc?.principalSignatureUrl || null,
+      schoolStampUrl:        signOffDoc?.schoolStampUrl        || null,
+      principalName:         signOffDoc?.principalName         || null,
+      timezone:              signOffDoc?.timezone              || null,
+      address:                signOffDoc?.address  || school?.address  || '',
+      tagline:                signOffDoc?.tagline  || school?.tagline  || '',
+      email:                  signOffDoc?.email    || school?.email    || '',
+      phone:                  signOffDoc?.phone    || school?.phone    || '',
+      website:                signOffDoc?.website  || school?.website  || '',
+      country:                signOffDoc?.country  || '',
+    };
+
+    const subjectTeacherCommentsLive = (await _getAssessmentConfig(schoolId, null).catch(() => null))?.subjectTeacherCommentsEnabled;
+
+    const attData = await attendanceSummary(schoolId, student.studentId, classId).catch(() => null);
+
+    const sections = _buildReportSections(snap, config, attData, {
+      school: schoolWithSignOff, behaviour: beh ?? null, deviations: studentDeviations ?? null,
+      subjectTeacherCommentsEnabled: subjectTeacherCommentsLive !== false,
+      subjectNames, subjectTeacherNames,
+    });
+    const previewSectionId = classId ? await sectionIdForClass(schoolId, classId) : null;
+    const { layoutKey } = await resolveTemplate(tenantContext(req), schoolId, previewSectionId);
+
+    let PDFDocument;
+    try { PDFDocument = require('pdfkit'); }
+    catch { return res.status(501).json({ error: 'pdfkit not installed. Run: npm install pdfkit' }); }
+
+    const doc     = new PDFDocument({ margin: 40, size: 'A4' });
+    const buffers = [];
+    doc.on('data', chunk => buffers.push(chunk));
+    doc.on('end', () => {
+      const pdf = Buffer.concat(buffers);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="report-${student.studentId}-draft.pdf"`);
+      res.setHeader('Content-Length', pdf.length);
+      res.send(pdf);
+    });
+
+    // Same image set GET /:id/pdf fetches — sourced from the live school
+    // lookup above instead of a persisted snapshot, since a draft has none.
+    const pdfImages = await _fetchSignatureImages(schoolWithSignOff);
+    pdfImages.studentPhoto = config.showStudentPhoto !== false
+      ? await _fetchImageBuf(studentInfo?.photo).catch(() => null)
+      : null;
+    pdfImages.schoolLogo = await _fetchImageBuf(schoolWithSignOff.logoUrl).catch(() => null);
+
+    getLayout(layoutKey).renderPdf(doc, sections, pdfImages, true);
+    doc.end();
+  } catch (err) { console.error('[report-cards/preview-pdf]', err); return E.serverError(res); }
+});
+
 /* ── Draft Comments — pre-publish per-student comment store ───
    GET /draft-comments is registered earlier in this file, alongside
    GET /bulk-pdf, ahead of GET /:id (registration-order fix, see the

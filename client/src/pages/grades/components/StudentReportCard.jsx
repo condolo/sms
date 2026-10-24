@@ -30,7 +30,7 @@
      behaviourSummary — { merits, demerits, points, total } | null
    ============================================================ */
 import { Fragment, useState, useCallback, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
-import { Printer, Save, Check, BarChart2, MessageSquare, Award, CheckCircle, Loader2, CalendarCheck } from 'lucide-react';
+import { Printer, Download, Save, Check, BarChart2, MessageSquare, Award, CheckCircle, Loader2, CalendarCheck } from 'lucide-react';
 import { DEFAULT_CUSTOM_TYPES, _gradeFromScale } from '../constants.js';
 import { reportCards as reportCardsApi } from '@/api/client.js';
 
@@ -433,6 +433,34 @@ const StudentReportCard = forwardRef(function StudentReportCard({
     }
   }
 
+  /* ── Download PDF (direct, 2026-10) — one click instead of Print's
+     browser-dialog "Save as PDF". A published snapshot downloads its
+     already-persisted render (GET /:id/pdf, already existed); a draft
+     now has its own direct route (POST /preview-pdf) instead of being
+     stuck with Print-to-PDF as the only option before publish. ── */
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
+
+  async function downloadPdf() {
+    setDownloadingPdf(true);
+    try {
+      if (snapshot?.id) {
+        await reportCardsApi.pdf(snapshot.id);
+      } else {
+        await reportCardsApi.previewPdf({
+          student, studentInfo, classId, className, termNum, academicYear, school,
+          draftComment: comment,
+          studentDeviations, behaviourSummary,
+          config: { gradeScale, customTypes: types, reportLabel },
+        });
+      }
+    } catch (err) {
+      console.error('[StudentReportCard] PDF download failed', err);
+      window.alert('Failed to generate the PDF. Please try again.');
+    } finally {
+      setDownloadingPdf(false);
+    }
+  }
+
   /* ── On-screen render ───────────────────────────────────── */
   return (
     <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
@@ -464,6 +492,10 @@ const StudentReportCard = forwardRef(function StudentReportCard({
               <span className="ml-1.5 text-indigo-600">{meanGrade?.grade ?? ''}</span>
             </p>
           </div>
+          <button onClick={downloadPdf} disabled={downloadingPdf} title="Download PDF directly"
+            className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition">
+            {downloadingPdf ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} Download PDF
+          </button>
           <button onClick={printCard} disabled={printing} title="Print / Save PDF"
             className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition">
             {printing ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />} Print
