@@ -442,6 +442,8 @@ Some classes — typically early-years ones — aren't graded with a single nume
 3. Save. The subject's overall percentage is calculated as earned ÷ possible across all its indicators.
 4. There's no submit step — scores stay editable for every student until the class/term's report cards are published. Publishing locks them automatically (see §9 below); an admin can unlock a specific subject afterward for a rare correction.
 
+**Band-only subjects (2026-10-23):** some schools set a template — or an individual subject within it — to **band-only scoring**. There, step 2 above has no number box at all: you only pick a Performance Band per indicator, nothing to type or override. The subject's grade is then the band nearest the average of the bands you picked across its indicators, not a percentage lookup. You can't tell this is on just by looking at the indicator list — it only shows once you open a student to score them. Ask your admin (Exams → Kindergarten Templates) if you expected a score box and aren't seeing one, or vice versa.
+
 Report cards for these classes are generated and published from the same **Report Cards → Generate & Publish** screen as every other class — just pick the class and term as usual; the screen detects the Kindergarten template automatically and shows the matching preview (indicator/band/score per subject, not the numeric table).
 
 ### Report Cards

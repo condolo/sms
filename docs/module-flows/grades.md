@@ -2,6 +2,8 @@
 
 ## Enter marks in the Markbook
 
+For classes assigned a Kindergarten competency template, the Markbook switches to indicator-based entry; follow the [Kindergarten Teacher Guide](../KINDERGARTEN_TEACHER_GUIDE.md). The standard numeric instructions below apply to subjects using the numeric grid.
+
 The Markbook is the single current source for numeric assessment marks and the source used by report-card calculations. Exams records the scheduled sitting; teachers do not enter marks in an exam-results screen.
 
 1. Open **Exams → Markbook** and choose the academic year, term, class, subject, assessment window/type, and instance.

@@ -2,6 +2,8 @@
 
 ## What the Exams module does
 
+For assessment-office setup, Mark List checks, Kindergarten templates, publication, and correction workflows, see the [Exams Office Guide](../EXAMS_OFFICER_GUIDE.md).
+
 Exams records the sitting: its name, class, subject, date/time, room, and scheduling status. **Marks are entered in Exams → Markbook**, not on the exam record. The Markbook is the source used by report cards.
 
 ## Teacher workflow

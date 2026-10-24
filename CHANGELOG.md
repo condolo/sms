@@ -6,6 +6,46 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.207.1] - 2026-10-24 - docs: role guides, plus setup-to-report-cards walkthroughs for Exam Office and Kindergarten
+
+Added a full set of per-role user guides (Behaviour Officer, eLearning, Hostel Manager, Inventory & Library Manager, Medical Centre, School Leadership, Student, Teacher, Transport Manager) with matching `.docx` exports, following the existing `docs/*_GUIDE.md` convention.
+
+Two new procedural guides, written after live reports of confusion on both: `docs/KG_MARKLIST_GUIDE.md` walks a Kindergarten teacher through the two separate steps that are easy to conflate — defining an "Indicators for this term" list (text only, no scoring) versus opening an individual student to actually pick a band per indicator — plus the pre-publish preview/print workaround since there is no direct PDF download before a report card is published. `docs/EXAMS_OFFICE_SETUP_TO_REPORTCARDS_GUIDE.md` is the companion end-to-end walkthrough for exam office staff: Assessment Types/weights → Grading Scales → Assessment Schedule (what actually opens a Markbook window) → Kindergarten Templates, through numeric/band marks entry and the Review moderation queue, to Report Cards preview/publish and post-publish correction. Existing `ADMISSIONS_GUIDE.md`, `EXAMS_OFFICER_GUIDE.md`, `FINANCE_GUIDE.md`, `HR_GUIDE.md`, and the `module-flows/` docs were refreshed to match current behaviour.
+
+## [v5.207.0] - 2026-10-23 - feat(kg-reports): band-only scoring for Kindergarten competency indicators
+
+Direct request, after a walkthrough of the existing competency-band Markbook: "instead of manual score for each indicator, we have a drop down scale which a teacher can choose... now we will have aggregate points and Grade, so grade will be attached to scale not score." Confirmed understanding and pushed back on the open design questions before building, per instruction — specifically how a subject's (and the overall) grade should be derived once there's no number to average, and whether this applies school-wide or is opt-in.
+
+**Opt-in, per template, overridable per subject** (`rc_templates.bandOnlyScoring`, default `false` — no existing school's Markbook or report cards change unless this is turned on). When active for a subject, the teacher picks a Performance Band only; no number is typed or shown anywhere in that subject's entry UI, and the indicator's own `maxScore` has nothing to configure either.
+
+- **The server derives the score, never trusts the client for it**: `POST /indicator-marks/bulk` resolves the picked band's own `defaultScore` and stores that — picking "Excellent" and separately typing a contradicting number is no longer possible, closing a latent correctness gap in the previous always-numeric design.
+- **Grading**: a band-only subject's grade is the band nearest the average of the picked bands' own points (`server/utils/rc-template-scale.js`'s new `snapToNearestBand`), not a `grade_boundaries` percentage lookup. The **overall** grade always follows the *template's* own `bandOnlyScoring` default, independent of any individual subject's override, so a report mixing band-only and numeric subjects still has one unambiguous rule for its single overall figure.
+- **Rendering**: the PDF and HTML Kindergarten layouts, and the live portal/editor view (`KgStudentReportCard.jsx`), show the band label instead of a percentage for any band-only figure, and omit the numeric grading-scale legend wherever nothing numeric remains on the page to explain.
+
+New `server/utils/rc-template-scale.js` helpers (`effectiveBandsForSubjectId`, `isBandOnlySubject`, `maxBandScore`, `snapToNearestBand`), each independently unit-tested (11 cases). `server/utils/kg-report.js`'s `computeKgReport` — the real report-computation path, not just the Markbook's display — and `report-cards.js`'s `/kg/generate`/`/kg/publish` and `_computeKgReportSections` all carry the new `bandOnly`/`overallBandOnly`/`*BandLabel` fields end to end, including through the persisted publish snapshot. Tests: 47 new/updated cases across `rc-template-scale.test.js`, `kg-report-indicator-definitions.test.js`, `indicator-marks.test.js`, `rc-templates-schema.test.js`, and `report-layouts-kindergarten.test.js`. Full suite: 346/346 suites, 3618/3618 tests (two earlier runs showed worker-crash flakiness unrelated to this change, confirmed clean on a stabilized `--maxWorkers=2` re-run). Live-verified: the admin toggle (template-level and per-subject) saves and persists correctly against the demo school.
+
+## [v5.206.0] - 2026-10-23 - fix(report-cards): footer disclaimer no longer implies no one signs it
+
+Direct report, with screenshot: *"This report card is computer-generated and is valid without a handwritten signature"* reads as though no one signs it — but the class teacher does. Changed the live default (`academic-config.js`'s `DEFAULT_REPORT_CONFIG.footerNote`) to *"This report card is computer-generated and is valid without alteration."* Needed no migration: `_mergeConfig`'s existing fallback chain means every school still on the default wording picks this up immediately, retroactively, on every report generated from now on.
+
+## [v5.205.2] - 2026-10-22 - fix(classes): legacy classes leaked whole-class/whole-stream rosters for electives
+
+Reported directly, with screenshots: Chemistry (Year 12, elective) showed 3/7 students enrolled on the Enrollment tab, but the Markbook listed all 7. Traced it myself rather than assuming the first hypothesis (a `class_subjects.isCompulsoryForClass` mismatch, disproven — the record was already correctly flagged elective) — the real bug was `GET /classes/:id/students` using `cls.id` (undefined for any class that predates the UUID-`id` migration and never got one backfilled) instead of the canonical `cls.id || String(cls._id)` everywhere it checked elective/scope status, so `isElective`/`canTeachElective` silently failed closed to "not elective, show everyone" for every such legacy class.
+
+A second, more severe instance of the identical mistake sat in the access-control check right next to it: `ScopeEngine.isClassInScope(req, 'students', cls.id)` was called with the same undefined id, and `isClassInScope` treats a falsy `classId` as "nothing to check" → `true` — meaning a stream-scoped teacher on a legacy class saw **every** stream's roster, not just their own, a real PII exposure, not just a cosmetic roster count. Both call sites fixed by resolving `canonicalClassId` once, up front.
+
+Diagnosed "for all other subjects" per instruction, not just the one reported — direct live-DB verification against MLA's Year 12/Chemistry confirmed the fix returns exactly the 3 enrolled students (not 7), with compulsory subjects unaffected. Deliberately did **not** "fix" the separate, unrelated enrollment-completeness gaps found during the same audit — doing so would have made elective-detection enrollment-drift-tolerant at the cost of breaking correctly-functioning compulsory subjects. New tests in `classes-elective-stream-scope.test.js` and `classes-streams-students-scope.test.js` (a legacy-class fixture with no `id` field, for both the roster-narrowing and the access-control case). Full suite: 345/345 suites, 3582/3582 tests.
+
+## [v5.205.1] - 2026-10-22 - fix(grades): show avg% to 1 decimal so it matches the grade banded from it
+
+Reported directly: Chemistry showing 80% = grade A while Biology showing 80% = grade B looked inconsistent. Confirmed by checking the actual stored values, not assuming a grading-logic bug: both the Student Profile Grades tab and the Kindergarten report-card editor view were rounding the displayed percentage (`Math.round`) while the grade itself was resolved from the unrounded figure underneath — e.g. a real 79.6% rounds to "80%" on screen but correctly bands as the grade for 79.6%. Report cards themselves were never affected, only these two display-only screens. Both now show one decimal place (`toFixed(1)`) so the visible number and the grade next to it always agree.
+
+## [v5.205.0] - 2026-10-22 - fix(subjects): warn before unenrolling a student who already has marks
+
+Unenrolling a student from a subject gave no warning even when that student already had assessment marks recorded against it — the marks were silently orphaned with no further way to reach them through the normal UI. `DELETE /student-subjects/:id` now checks `assessment_marks` for that student+subject first and refuses with a `HAS_MARKS` (409) response carrying the mark count, unless the caller explicitly passes `?force=true`. The client's `EnrollmentTab.jsx` catches this, shows a confirm dialog naming the mark count, and retries with the force flag only on confirmation — so the common case (no marks yet) is unaffected, and the one with marks now requires a deliberate second click instead of silently discarding data. New `student-subjects-has-marks.test.js` (4 cases).
+
+---
+
 ## [v5.203.1] - 2026-10-21 - fix(release-gate): the security-pattern check could never pass
 
 `npm run platform:release-gate` always ended in **"RELEASE BLOCKED — 1 critical check(s) failed"**, on a completely clean tree, because `checkSecurityPatterns()` judged the scan by matching words in its output:

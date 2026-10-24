@@ -2,7 +2,7 @@
 
 These guides are practical operating references for setting up, using, updating, and checking the modules in the Msingi school application. They are based on the current UI, server routes, module registry, existing user/admin manuals, and relevant changelog entries. They are intended to help school administrators and staff follow supported UI workflows; they are not a substitute for deployment or code-change instructions in the Developer Guide.
 
-For a first-time teacher's end-to-end onboarding and daily workflow, see the [Teacher Step-by-Step Guide](../TEACHER_GUIDE.md).
+For a first-time teacher's end-to-end onboarding and daily workflow, see the [Teacher Step-by-Step Guide](../TEACHER_GUIDE.md). Kindergarten teachers using competency-indicator assessment should also use the [Kindergarten Teacher Guide](../KINDERGARTEN_TEACHER_GUIDE.md).
 
 Detailed role guides are also available for [Students](../STUDENT_GUIDE.md), [Behaviour and Pastoral Officers](../BEHAVIOUR_OFFICER_GUIDE.md), [Medical Centre staff](../MEDICAL_CENTRE_GUIDE.md), [Transport Managers](../TRANSPORT_MANAGER_GUIDE.md), [Hostel Managers](../HOSTEL_MANAGER_GUIDE.md), [eLearning users](../ELEARNING_GUIDE.md), [School Leadership](../SCHOOL_LEADERSHIP_GUIDE.md), [Inventory and Library Managers](../INVENTORY_LIBRARY_MANAGER_GUIDE.md), and the specialist roles listed in the module index below.
 
@@ -29,8 +29,8 @@ The registry has 29 permission modules. Some are embedded in another screen: **E
 | Timetable | [timetable.md](timetable.md) | Timetable; see the [Timetabler Guide](../TIMETABLER_GUIDE.md) |
 | Subjects | [subjects.md](subjects.md) | Subjects |
 | Lessons | [lessons.md](lessons.md) | Lessons |
-| Grades & Marks | [grades.md](grades.md) | Exams / Grades |
-| Exams | [exams.md](exams.md) | Exams tab; see the [Exams Officer Guide](../EXAMS_OFFICER_GUIDE.md) |
+| Grades & Marks | [grades.md](grades.md) · [Kindergarten Teacher Guide](../KINDERGARTEN_TEACHER_GUIDE.md) | Exams / Grades |
+| Exams | [exams.md](exams.md) · [Exams Office Guide](../EXAMS_OFFICER_GUIDE.md) | Exams tab |
 | Assessment Scheduling | [assessment.md](assessment.md) | Exams → Configuration / Reminders |
 | Report Card Settings | [report-cards.md](report-cards.md) | Report Cards |
 | eLearning | [elearning.md](elearning.md) · [eLearning Guide](../ELEARNING_GUIDE.md) | eLearning |
