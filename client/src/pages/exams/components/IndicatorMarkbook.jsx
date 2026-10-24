@@ -40,7 +40,7 @@
    lock below — a class's whole CA window being locked is a different
    concern from this one subject's marks being under review.
    ============================================================ */
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { X, Save, Loader2, CheckCircle2, AlertTriangle, Lock, ChevronRight, Plus, Pencil, Trash2, ListChecks } from 'lucide-react';
@@ -438,6 +438,37 @@ export default function IndicatorMarkbook({
      indicator-definitions query key so the list and every open
      slide-over stay in sync without a manual refetch call. */
   const defsQueryKey = ['indicator-definitions', { classId, subjectId, termNumber, academicYearId }];
+
+  /* ── Pre-fill a blank class/subject/term from a sibling class in the
+     same section (2026-10-24, direct request) — some schools model
+     Kindergarten as several separate classes (KG1/KG2/KG3/Playgroup),
+     not streams of one class, so a teacher opening KG2's Science got a
+     blank "Indicators for this term" even after KG1's Science was
+     already fully typed in. Fires once per class/subject/term the
+     moment the list is confirmed empty; a no-op server-side (and here)
+     when there's nothing to copy, so a genuinely first-ever indicator
+     set still shows the normal empty state untouched. ── */
+  const copyAttempted = useRef(new Set());
+  const { mutate: copyFromSection } = useMutation({
+    mutationFn: () => api.definitions.copyFromSection({ classId, subjectId, termNumber, academicYearId: academicYearId || undefined }),
+    onSuccess: (res) => {
+      if (res?.data?.copied > 0) {
+        qc.invalidateQueries({ queryKey: defsQueryKey });
+        setToast({ msg: `Pre-filled ${res.data.copied} indicator${res.data.copied === 1 ? '' : 's'} from another class in this section — edit as needed for this class.`, type: 'success' });
+      }
+    },
+    // Silent failure — this is a convenience pre-fill, not a required
+    // action; the teacher can still add indicators by hand as before.
+  });
+  useEffect(() => {
+    if (entryClosed || !classId || !subjectId || !indicatorDefsData) return;
+    if (indicators.length > 0) return;
+    const key = `${classId}|${subjectId}|${termNumber}|${academicYearId || ''}`;
+    if (copyAttempted.current.has(key)) return;
+    copyAttempted.current.add(key);
+    copyFromSection();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [classId, subjectId, termNumber, academicYearId, indicatorDefsData, indicators.length, entryClosed]);
 
   const { mutate: addIndicator, isPending: addingIndicator } = useMutation({
     mutationFn: (data) => api.definitions.create({ classId, subjectId, termNumber, academicYearId: academicYearId || undefined, ...data }),

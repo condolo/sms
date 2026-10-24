@@ -445,6 +445,114 @@ router.post('/definitions', authMiddleware, PLAN, MODGATE, rbac('grades', 'creat
   }
 });
 
+const CopyFromSectionSchema = z.object({
+  classId:        z.string().min(1),
+  subjectId:      z.string().min(1),
+  termNumber:     z.number().int().min(1).max(3),
+  academicYearId: z.string().nullish(),
+});
+
+/**
+ * POST /api/indicator-marks/definitions/copy-from-section
+ *
+ * Direct request, 2026-10-24: a school may model its Kindergarten
+ * section as several separate CLASSES (KG1, KG2, KG3, Playgroup — each
+ * with its own streams underneath), not one class with several streams.
+ * Streams of one class already share the same indicator_definitions
+ * rows for free (classId-scoped, never streamId-scoped — see this
+ * file's header), but sibling CLASSES in the same section are genuinely
+ * separate classId's, so a teacher opening KG2's Science got a blank
+ * list even after KG1's Science was already fully typed in.
+ *
+ * Pre-fill, then independent — NOT a live-shared list: this copies the
+ * sibling class's current indicator text into brand-new rows owned by
+ * the destination class. Editing KG2's copy afterward never touches
+ * KG1's originals, since the two age groups may genuinely need to
+ * diverge (confirmed direction — a Playgroup indicator and a KG3
+ * indicator for "Numeracy" are not assumed to always match).
+ *
+ * Deliberately a no-op (200, copied:0), never an error, when the
+ * destination already has indicators (never overwrites real teacher
+ * input) or no sibling class has anything yet to copy — the client
+ * calls this automatically whenever a class/subject/term's indicator
+ * list loads empty, so a plain "first ever indicator for this school"
+ * case must fall through silently to the normal empty state.
+ */
+router.post('/definitions/copy-from-section', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const parsed = CopyFromSectionSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return E.validation(res, parsed.error.issues.map(i => ({ field: i.path.join('.'), message: i.message })));
+    }
+    const { classId, subjectId, termNumber, academicYearId } = parsed.data;
+
+    if (academicYearId && await isYearArchived(schoolId, academicYearId)) {
+      return E.badRequest(res, 'This academic year is locked — indicators cannot be added or modified.');
+    }
+    if (!(await isInCurriculum(req, classId, subjectId))) {
+      return E.badRequest(res, 'This subject is not part of this class\'s curriculum — add it in Curriculum first.');
+    }
+    const denial = await _indicatorManageDenial(req, classId, subjectId);
+    if (denial) return E.forbidden(res, denial);
+
+    // Same guard POST /definitions enforces — the destination class/
+    // subject must actually be on indicator-based entry before anything
+    // is written into indicator_definitions for it. The Markbook never
+    // mounts this route for a non-KG class/subject, but the route itself
+    // must not rely on that; a direct call with an arbitrary classId/
+    // subjectId is the exact case this closes.
+    const template = await resolveRcTemplate(schoolId, classId);
+    if (!template || !(template.subjects ?? []).some(s => s.subjectId === subjectId)) {
+      return E.badRequest(res, 'This class/subject is not assigned a Kindergarten/competency template — add it in Kindergarten Templates first.');
+    }
+
+    if (await _indicatorsLocked(req, schoolId, classId, subjectId, termNumber, academicYearId)) {
+      return E.forbidden(res, 'Indicators are locked — the report card for this term has been published. Ask an administrator to unlock it for a correction.');
+    }
+
+    const Defs = tenantModel('indicator_definitions', tenantContext(req));
+
+    // Never overwrite real input — only ever fills a genuinely blank list.
+    const alreadyHas = await Defs.countDocuments({
+      schoolId, classId, subjectId, termNumber, ..._yearFilterPart(academicYearId || null),
+    });
+    if (alreadyHas > 0) return ok(res, { copied: 0, reason: 'destination already has indicators' });
+
+    const cls = await tenantModel('classes', tenantContext(req)).findOne({ schoolId, id: classId }).select('sectionKey').lean();
+    if (!cls?.sectionKey) return ok(res, { copied: 0, reason: 'class has no section' });
+
+    const siblingClasses = await tenantModel('classes', tenantContext(req))
+      .find({ schoolId, sectionKey: cls.sectionKey, id: { $ne: classId } }).select('id').lean();
+    const siblingIds = siblingClasses.map(c => c.id);
+    if (siblingIds.length === 0) return ok(res, { copied: 0, reason: 'no sibling classes in this section' });
+
+    // Strictly the same subject + term(+year) — never a different subject's
+    // indicators, never a different term's. Earliest-created sibling set
+    // wins as the source, so the first teacher to type these in for the
+    // section becomes the one everyone else's blank list pre-fills from.
+    const candidates = await Defs.find({
+      schoolId, classId: { $in: siblingIds }, subjectId, termNumber, ..._yearFilterPart(academicYearId || null),
+    }).sort({ createdAt: 1 }).lean();
+    if (candidates.length === 0) return ok(res, { copied: 0, reason: 'no sibling indicators yet for this subject/term' });
+
+    const sourceClassId = candidates[0].classId;
+    const sourceDefs = candidates.filter(d => d.classId === sourceClassId);
+
+    const now = new Date().toISOString();
+    const copies = sourceDefs.map((d, i) => ({
+      id: uuidv4(), schoolId, classId, subjectId, termNumber, academicYearId: academicYearId || null,
+      text: d.text, maxScore: d.maxScore, order: d.order ?? i,
+      createdAt: now, updatedAt: now, createdBy: userId, updatedBy: userId,
+    }));
+    await Defs.insertMany(copies);
+    return ok(res, { copied: copies.length, sourceClassId });
+  } catch (err) {
+    console.error('[indicator-marks POST/definitions/copy-from-section]', err);
+    return E.serverError(res);
+  }
+});
+
 /**
  * PUT /api/indicator-marks/definitions/:id
  * Edit an indicator's text/maxScore/order.

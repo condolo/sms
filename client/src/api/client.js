@@ -1206,6 +1206,13 @@ export const indicatorMarks = {
     create: (data)        => _post('/indicator-marks/definitions', data),
     update: (id, data)   => _put(`/indicator-marks/definitions/${id}`, data),
     remove: (id)          => _delete(`/indicator-marks/definitions/${id}`),
+    // Pre-fills a genuinely blank class/subject/term from a sibling
+    // class in the same section (e.g. KG2 from KG1's already-typed
+    // list) — a no-op (copied:0) when there's nothing to copy or the
+    // destination already has indicators of its own. See
+    // server/routes/indicator-marks.js's own header for the full
+    // "pre-filled, then independent" reasoning.
+    copyFromSection: (data) => _post('/indicator-marks/definitions/copy-from-section', data),
   },
 };
 
