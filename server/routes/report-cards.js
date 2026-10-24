@@ -1384,6 +1384,148 @@ router.post('/kg/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'
   }
 });
 
+/* ══════════════════════════════════════════════════════════════
+   POST /kg/preview-html, POST /kg/preview-pdf — the Kindergarten
+   counterparts to the numeric path's own preview-html/preview-pdf.
+   Reported directly, with a screenshot: the KG report preview had no
+   Print or Download button at all — KgStudentReportCard.jsx never had
+   one, unlike StudentReportCard.jsx's equivalent.
+
+   Unlike the numeric preview routes, this one DOES re-run the
+   aggregation (computeKgReport) instead of trusting client-sent data —
+   safe here specifically because a KG report has no ranking/GPA
+   concept to lose by re-deriving it (see kg-report.js's own header:
+   "no rank/GPA concept for a competency-band report"), so there is no
+   single-student-can't-reproduce-the-real-rank problem the numeric
+   route's own header explains. Re-deriving also means this always
+   reflects the current Markbook, the same guarantee /kg/generate
+   already gives the on-screen preview.
+
+   Shares its snap-construction with /kg/publish's own shape (same
+   field set, status:'draft' instead of 'published') rather than a
+   third, drifting copy — draft comments are read live from
+   report_card_draft_comments, same source /kg/publish itself reads at
+   publish time, so Print/Download show the actually-saved remarks.
+   ══════════════════════════════════════════════════════════════ */
+const KgPreviewSchema = GenerateSchema.extend({ studentId: z.string().min(1) });
+
+async function _resolveKgPreview(req, data) {
+  const { schoolId } = req.jwtUser;
+  const { classId, termId, termNumber: termNum, academicYearId, studentId } = data;
+  const ctx = tenantContext(req);
+  const scope = await _resolveTermScope(schoolId, ctx, { academicYearId, termId, termNumber: termNum });
+
+  const template = await resolveRcTemplate(schoolId, classId);
+  if (!template) return { errorStatus: 400, errorMessage: 'This class has no Kindergarten template assigned — use the ordinary Generate & Publish instead.' };
+  if (!termNum) return { errorStatus: 400, errorMessage: 'termNumber is required.' };
+
+  const reportSectionId = await sectionIdForClass(schoolId, classId);
+  const scale = await resolveGradeScale(schoolId, reportSectionId, null);
+  if (!scale) return { errorStatus: 400, errorMessage: _noScaleMessage(classId) };
+
+  const { students, streamNameById, houseNameById, classTeacherByStream } = await _loadKgRoster(req, schoolId, classId);
+  const stu = students.find(s => s.id === studentId);
+  if (!stu) return { errorStatus: 404, errorMessage: 'Student not found in this class, or not currently active.' };
+
+  const kg = await computeKgReport(ctx, schoolId, classId, stu.id, termNum, scope.academicYearId, scale);
+
+  const draft = await tenantModel('report_card_draft_comments', ctx)
+    .findOne({ schoolId, studentId: stu.id, termNumber: termNum }).lean();
+
+  const { className, academicYear } = await _resolveDisplayNames(schoolId, ctx, { classId, academicYearId: scope.academicYearId, termId: scope.termId });
+
+  const school = await _model('schools').findOne({ id: schoolId })
+    .select('name logoUrl tagline address phone email website country principalSignatureUrl schoolStampUrl principalName timezone showStudentPhoto')
+    .lean();
+
+  const config = await _loadConfig(schoolId);
+
+  const snap = {
+    status: 'draft', superseded: false, version: 1,
+    studentId: stu.id,
+    studentName: `${stu.firstName} ${stu.lastName}`.trim() || stu.id,
+    admissionNo: stu.admissionNumber || '',
+    studentPhotoUrl: stu.photo || null,
+    streamName: stu.streamId ? (streamNameById[stu.streamId] || '') : '',
+    houseName:  stu.houseId  ? (houseNameById[stu.houseId]   || '') : '',
+    classId, className: className || '',
+    termNumber: termNum, academicYear: academicYear || '',
+    schoolName: school?.name || '',
+    gradingSchema: scale.bands,
+    templateId: template.id, templateName: template.name,
+    kgSubjects: kg?.subjects ?? [],
+    overallAvgPct:    kg?.overallAvgPct ?? null,
+    overallGrade:     kg?.overallGrade ?? null,
+    overallBandOnly:  kg?.overallBandOnly ?? false,
+    overallBandLabel: kg?.overallBandLabel ?? null,
+    kgDisplay: template.display ?? {},
+    comments: _resolveSnapComments(null, {
+      ...draft,
+      classTeacherName: draft?.classTeacherName || (stu.streamId ? classTeacherByStream[stu.streamId] : '') || '',
+    }),
+    principalSignatureUrl: school?.principalSignatureUrl || null,
+    schoolStampUrl:        school?.schoolStampUrl        || null,
+    schoolPrincipalName:   school?.principalName          || null,
+  };
+
+  return { snap, school, config, sections: _computeKgReportSections(snap, config, { school }) };
+}
+
+router.post('/kg/preview-html', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), async (req, res) => {
+  try {
+    const { data, error } = _validate(KgPreviewSchema, req.body);
+    if (error) return E.validation(res, error);
+    const resolved = await _resolveKgPreview(req, data);
+    if (resolved.errorStatus) {
+      return resolved.errorStatus === 404 ? E.notFound(res, resolved.errorMessage) : E.badRequest(res, resolved.errorMessage);
+    }
+    const html = getLayout('kindergarten').renderHtml(resolved.sections);
+    return ok(res, { html });
+  } catch (err) {
+    console.error('[report-cards/kg/preview-html]', err);
+    return E.serverError(res);
+  }
+});
+
+router.post('/kg/preview-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), async (req, res) => {
+  try {
+    const { data, error } = _validate(KgPreviewSchema, req.body);
+    if (error) return E.validation(res, error);
+    const resolved = await _resolveKgPreview(req, data);
+    if (resolved.errorStatus) {
+      return resolved.errorStatus === 404 ? E.notFound(res, resolved.errorMessage) : E.badRequest(res, resolved.errorMessage);
+    }
+    const { sections, snap, school, config } = resolved;
+
+    let PDFDocument;
+    try { PDFDocument = require('pdfkit'); }
+    catch { return res.status(501).json({ error: 'pdfkit not installed. Run: npm install pdfkit' }); }
+
+    const doc     = new PDFDocument({ margin: 40, size: 'A4' });
+    const buffers = [];
+    doc.on('data', chunk => buffers.push(chunk));
+    doc.on('end', () => {
+      const pdf = Buffer.concat(buffers);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="kg-report-${snap.studentId}-draft.pdf"`);
+      res.setHeader('Content-Length', pdf.length);
+      res.send(pdf);
+    });
+
+    const pdfImages = await _fetchSignatureImages(snap);
+    pdfImages.studentPhoto = config.showStudentPhoto !== false
+      ? await _fetchImageBuf(snap.studentPhotoUrl).catch(() => null)
+      : null;
+    pdfImages.schoolLogo = await _fetchImageBuf(school?.logoUrl).catch(() => null);
+
+    getLayout('kindergarten').renderPdf(doc, sections, pdfImages, true);
+    doc.end();
+  } catch (err) {
+    console.error('[report-cards/kg/preview-pdf]', err);
+    return E.serverError(res);
+  }
+});
+
 /* ── POST /report-cards/kg/publish — versioned batch snapshot ─────── */
 router.post('/kg/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), async (req, res) => {
   const { schoolId, userId, role } = req.jwtUser;

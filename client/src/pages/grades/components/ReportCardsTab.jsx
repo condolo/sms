@@ -850,6 +850,8 @@ ${docs.map(h => `<div>${_bodyOf(h)}</div>`).join('\n')}
               key={student.studentId}
               ref={el => registerCardRef(student.studentId, el)}
               student={student}
+              classId={classId}
+              academicYearId={yearId || undefined}
               className={className}
               termNum={Number(termNum)}
               academicYear={displayAcademicYear}

@@ -1125,6 +1125,12 @@ export const reportCards = {
   kg: {
     generate: (data) => _post('/report-cards/kg/generate', data),
     publish:  (data) => _post('/report-cards/kg/publish', data),
+    // Print/Download for a single KG student's draft preview — the
+    // Kindergarten counterpart to previewHtml/previewPdf below. Added
+    // directly on request: KgStudentReportCard.jsx had neither button
+    // at all, unlike the ordinary numeric report card.
+    previewHtml: (data)           => _post('/report-cards/kg/preview-html', data),
+    previewPdf:  (data, filename) => _downloadPdfPost('/report-cards/kg/preview-pdf', filename ?? `kg-report-${data?.studentId ?? 'draft'}.pdf`, data),
   },
   snapshots: {
     list:   (params) => _get('/report-cards', params),
