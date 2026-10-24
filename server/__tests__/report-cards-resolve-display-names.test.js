@@ -65,3 +65,62 @@ describe('_resolveDisplayNames', () => {
     expect(result).toEqual({ className: '', academicYear: '', termName: '' });
   });
 });
+
+/* ── Dual-ID safe (2026-10-25) — reported directly, live: a published
+   MLA report showed Stream "10A" correctly but Class blank. Confirmed
+   directly against the real DB: the class ("Year 10") predates the
+   UUID-`id` migration — only its Mongo `_id` exists — and this
+   function's class lookup matched on `id` alone, so it silently found
+   nothing for every such legacy class. These tests use a REAL
+   filter-matching mock (the three above don't filter at all) so the
+   `$or` clause this fix adds is actually exercised, not just present
+   in the source. ── */
+describe('_resolveDisplayNames — dual-ID safe class lookup', () => {
+  let classStore;
+  const SCHOOL = 'school_A';
+
+  function mockMatches(doc, filter) {
+    if (filter.$or) return filter.$or.some(sub => mockMatches(doc, sub));
+    return Object.entries(filter).every(([k, v]) => doc[k] === v);
+  }
+
+  beforeEach(() => {
+    jest.resetModules();
+    classStore = [];
+    jest.doMock('../utils/tenant-model', () => ({
+      tenantModel: jest.fn((col) => {
+        if (col === 'classes') {
+          return { findOne: (filter) => ({ select: () => ({ lean: () => Promise.resolve(classStore.find(d => mockMatches(d, filter)) ?? null) }) }) };
+        }
+        if (col === 'academic_years') {
+          return { findOne: () => ({ select: () => ({ lean: () => Promise.resolve(null) }) }) };
+        }
+        throw new Error(`unexpected tenantModel('${col}') call in this test`);
+      }),
+      tenantContext: jest.fn(() => ({})),
+    }));
+  });
+
+  test('a post-migration class (real UUID `id`) resolves exactly as before', async () => {
+    classStore = [{ schoolId: SCHOOL, id: 'cls_uuid_1', name: 'Form 1A' }];
+    const router = require('../routes/report-cards');
+    const result = await router._resolveDisplayNames(SCHOOL, {}, { classId: 'cls_uuid_1', academicYearId: null, termId: null });
+    expect(result.className).toBe('Form 1A');
+  });
+
+  test('a legacy class with no `id` field — only a Mongo `_id` — now resolves by its `_id`', async () => {
+    const legacyMongoId = '6a32d9214551eb4cbd47d1f0'; // real 24-char hex shape, matches MLA's actual legacy class
+    classStore = [{ schoolId: SCHOOL, _id: legacyMongoId, name: 'Year 10' }]; // no `id` field at all
+    const router = require('../routes/report-cards');
+    const result = await router._resolveDisplayNames(SCHOOL, {}, { classId: legacyMongoId, academicYearId: null, termId: null });
+    expect(result.className).toBe('Year 10');
+  });
+
+  test('a UUID classId is never probed against `_id` — no cast-error risk, no false match', async () => {
+    const uuid = 'not-a-valid-object-id-uuid-1234';
+    classStore = [{ schoolId: SCHOOL, _id: '6a32d9214551eb4cbd47d1f0', name: 'Should Never Match' }];
+    const router = require('../routes/report-cards');
+    const result = await router._resolveDisplayNames(SCHOOL, {}, { classId: uuid, academicYearId: null, termId: null });
+    expect(result.className).toBe(''); // genuinely no match — not the unrelated legacy class
+  });
+});

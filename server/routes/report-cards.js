@@ -592,8 +592,23 @@ async function _resolveTermScope(schoolId, ctx, { academicYearId, termId, termNu
    same posture as streamName/houseName just below, which were never
    client-trusted to begin with. */
 async function _resolveDisplayNames(schoolId, ctx, { classId, academicYearId, termId }) {
+  // Dual-ID safe — reported directly, live: a class that predates the
+  // UUID-`id` migration (e.g. MLA's "Year 10") has no `id` field, only
+  // its Mongo `_id`. `classId` arrives here as whichever form the rest
+  // of the app already resolved to (the canonical `doc.id || String(doc._id)`
+  // convention), so a lookup that only ever matches `id` silently found
+  // nothing for that class and published a report with a BLANK Class
+  // field — confirmed directly against a real MLA report card (Stream
+  // "10A" correct, Class empty). Same `$or`/ObjectId-validity guard
+  // students.js's own `_entityIdForms` uses, so an `id` that happens not
+  // to be a valid ObjectId (the normal, post-migration case) never
+  // throws a cast error by being probed against `_id` anyway.
+  const classIdOr = [{ id: classId }];
+  if (classId && mongoose.Types.ObjectId.isValid(classId) && String(classId).length === 24) {
+    classIdOr.push({ _id: classId });
+  }
   const [cls, year] = await Promise.all([
-    tenantModel('classes', ctx).findOne({ schoolId, id: classId }).select('name').lean().catch(() => null),
+    tenantModel('classes', ctx).findOne({ schoolId, $or: classIdOr }).select('name').lean().catch(() => null),
     academicYearId
       ? tenantModel('academic_years', ctx).findOne({ schoolId, id: academicYearId }).select('name terms').lean().catch(() => null)
       : Promise.resolve(null),

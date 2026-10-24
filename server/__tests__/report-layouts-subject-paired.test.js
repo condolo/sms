@@ -89,24 +89,27 @@ describe('subject_paired.renderPdf — structure', () => {
   // RCE8 — the cover no longer forces its own page (reviewer: "Do not
   // reserve a full page for learner identity unless the content
   // actually requires it"); with only 2 subjects, everything in this
-  // fixture used to fit on page 1. The assessment-type key (new: "what
-  // does CA/HW/MT/ET mean", drawn just after marks) adds one more short
-  // line here — a real, if small, amount of extra vertical space — which
-  // is just enough to push this specific tight 2-subject fixture onto a
-  // second page. One extra addPage is the correct, physical consequence
-  // of genuinely new content, not a layout regression.
+  // fixture fits on page 1. The photo-placeholder fix (2026-10-25) now
+  // skips reserving PHOTO_H of vertical space entirely when
+  // `cover.studentPhotoUrl` is unset (this fixture's default) instead
+  // of always reserving it for an empty box — freeing exactly enough
+  // room to bring this tight 2-subject fixture back under one page,
+  // the same kind of margin-sensitive shift this test already called
+  // out for the assessment-type key addition before it. Zero addPage
+  // calls is the correct, physical consequence of genuinely less
+  // content, not a layout regression.
   test('does not force a separate cover page when the content fits on page 1', () => {
     const { spy, calls } = makeSpyDoc();
     const sections = computeSections();
     LAYOUTS.subject_paired.renderPdf(spy, sections, {}, true);
-    expect(calls.filter(c => c.method === 'addPage').length).toBe(1);
+    expect(calls.filter(c => c.method === 'addPage').length).toBe(0);
   });
 
   test('isFirstPage=false still adds exactly the one leading page (outer per-student break)', () => {
     const { spy, calls } = makeSpyDoc();
     const sections = computeSections();
     LAYOUTS.subject_paired.renderPdf(spy, sections, {}, false);
-    expect(calls.filter(c => c.method === 'addPage').length).toBe(2);
+    expect(calls.filter(c => c.method === 'addPage').length).toBe(1);
   });
 
   test('does not throw when nothing optional is configured (no photo, no behaviour, no attendance)', () => {
@@ -458,5 +461,56 @@ describe('subject_paired — faint school-logo watermark ("for every school")', 
     const sections = computeSections();
     LAYOUTS.subject_paired.renderPdf(spy, sections, {}, true);
     expect(calls.some(c => c.method === 'image')).toBe(false);
+  });
+});
+
+/* ── Photo placeholder respects the "Show Student Photo" toggle
+   (2026-10-25) — reported directly, live: turning the setting off in
+   Report Card settings still showed an empty photo box with a "PHOTO"
+   placeholder in the downloaded PDF for a student with no photo on
+   file, while the HTML/print preview correctly showed nothing for the
+   same report. Root cause: the PDF cover drew its box+placeholder off
+   `images.studentPhoto` (the fetched buffer — falsy for BOTH "toggle
+   off" and "no photo uploaded"), while the HTML renderer's own
+   `photoHtml` is gated on `cover.studentPhotoUrl`, which
+   `_computeReportSections` already nulls out when the toggle is off.
+   The PDF cover now reads the same `cover.studentPhotoUrl` field, so
+   the two agree. ── */
+describe('subject_paired — PDF photo placeholder honours showStudentPhoto, matching the HTML renderer (2026-10-25)', () => {
+  test('toggle off, no photo on file either — PDF draws nothing, same as HTML', () => {
+    const { spy, calls } = makeSpyDoc();
+    const sections = computeSections({ studentPhotoUrl: 'https://cdn.example/jane.jpg' }, { showStudentPhoto: false });
+    LAYOUTS.subject_paired.renderPdf(spy, sections, {}, true);
+    expect(calls.some(c => c.method === 'text' && c.args[0] === 'PHOTO')).toBe(false);
+
+    const html = LAYOUTS.subject_paired.renderHtml(sections);
+    expect(html).not.toContain('jane.jpg'); // HTML agrees: toggle off means no <img> either
+  });
+
+  test('toggle on, but this student genuinely has no photo uploaded — PDF draws the placeholder box, matching the toggle-on intent', () => {
+    const { spy, calls } = makeSpyDoc();
+    const sections = computeSections({ studentPhotoUrl: null }, { showStudentPhoto: true });
+    // A real photo URL with the toggle ON is the one case HTML shows nothing for too (no url = no <img>),
+    // so this asserts the CURRENT parity point: neither renderer invents a placeholder when there's truly no photo URL.
+    LAYOUTS.subject_paired.renderPdf(spy, sections, {}, true);
+    expect(calls.some(c => c.method === 'text' && c.args[0] === 'PHOTO')).toBe(false);
+  });
+
+  test('toggle on AND a real photo URL — PDF draws the placeholder frame (ready for the fetched image)', () => {
+    const { spy, calls } = makeSpyDoc();
+    const sections = computeSections({ studentPhotoUrl: 'https://cdn.example/jane.jpg' }, { showStudentPhoto: true });
+    LAYOUTS.subject_paired.renderPdf(spy, sections, {}, true);
+    // No real image buffer supplied in `images` here, so it falls to the
+    // placeholder box + "PHOTO" label — proving the block runs at all
+    // when studentPhotoUrl is set, the counterpart to the toggle-off case above.
+    expect(calls.some(c => c.method === 'text' && c.args[0] === 'PHOTO')).toBe(true);
+  });
+
+  test('toggle on, real photo URL AND a real fetched buffer — PDF draws the actual image, not the placeholder', () => {
+    const { spy, calls } = makeSpyDoc();
+    const sections = computeSections({ studentPhotoUrl: 'https://cdn.example/jane.jpg' }, { showStudentPhoto: true });
+    LAYOUTS.subject_paired.renderPdf(spy, sections, { studentPhoto: Buffer.from('fake-photo') }, true);
+    expect(calls.some(c => c.method === 'text' && c.args[0] === 'PHOTO')).toBe(false);
+    expect(calls.some(c => c.method === 'image')).toBe(true);
   });
 });

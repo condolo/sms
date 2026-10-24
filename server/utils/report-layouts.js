@@ -873,17 +873,31 @@ function _drawCoverPdf(doc, s, images) {
   });
   const identityBottom = metaStartY + Math.ceil(metaRows.length / 2) * 25;
 
+  // Reported directly, live: turning "Show Student Photo" off in Report
+  // Card settings still showed an empty photo box with a "PHOTO"
+  // placeholder in the downloaded PDF, even though the HTML/print
+  // preview correctly showed nothing — `_renderCoverHtml`'s own
+  // `photoHtml` is gated on `cover.studentPhotoUrl` (already `null`
+  // when the toggle is off — see `_computeReportSections`), but this
+  // block drew its box+placeholder off `images.studentPhoto` instead —
+  // the FETCHED buffer, which is falsy both when the toggle is off AND
+  // when a student genuinely has no photo on file, so it drew the same
+  // "reserve the space" placeholder either way. Now gated on the same
+  // field the HTML renderer already uses, so the two agree: no toggle,
+  // no photo on file → nothing drawn, not just no image.
   const photoX = X + PAGE_WIDTH - PHOTO_W;
-  doc.rect(photoX - 1, y - 1, PHOTO_W + 2, PHOTO_H + 2).stroke(RULE);
-  if (images.studentPhoto) {
-    try { doc.image(images.studentPhoto, photoX, y, { width: PHOTO_W, height: PHOTO_H, cover: [PHOTO_W, PHOTO_H] }); }
-    catch (_) { doc.rect(photoX, y, PHOTO_W, PHOTO_H).fill(SURFACE); }
-  } else {
-    doc.rect(photoX, y, PHOTO_W, PHOTO_H).fill(SURFACE);
-    doc.fillColor(INK_FAINT).font(FONTS.sansRegular).fontSize(7).text('PHOTO', photoX, y + PHOTO_H / 2 - 4, { width: PHOTO_W, align: 'center' });
+  if (cover.studentPhotoUrl) {
+    doc.rect(photoX - 1, y - 1, PHOTO_W + 2, PHOTO_H + 2).stroke(RULE);
+    if (images.studentPhoto) {
+      try { doc.image(images.studentPhoto, photoX, y, { width: PHOTO_W, height: PHOTO_H, cover: [PHOTO_W, PHOTO_H] }); }
+      catch (_) { doc.rect(photoX, y, PHOTO_W, PHOTO_H).fill(SURFACE); }
+    } else {
+      doc.rect(photoX, y, PHOTO_W, PHOTO_H).fill(SURFACE);
+      doc.fillColor(INK_FAINT).font(FONTS.sansRegular).fontSize(7).text('PHOTO', photoX, y + PHOTO_H / 2 - 4, { width: PHOTO_W, align: 'center' });
+    }
   }
 
-  y = Math.max(identityBottom, y + PHOTO_H) + 16;
+  y = Math.max(identityBottom, cover.studentPhotoUrl ? y + PHOTO_H : 0) + 16;
   doc.moveTo(X, y).lineTo(X + PAGE_WIDTH, y).lineWidth(0.75).stroke(RULE_SOFT);
   return y + 10;
 }
