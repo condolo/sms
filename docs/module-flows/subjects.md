@@ -20,4 +20,4 @@ Create the subject catalogue before linking subjects to classes, students, or te
 
 **Sources:** `client/src/pages/subjects/`; `server/routes/subjects.js`, `departments.js`, `class-subjects.js`, `student-subjects.js`, `subject-rules.js`.
 
-**Recent change notes:** see [CHANGELOG.md](../../CHANGELOG.md), especially v5.124.0 for page-level access when Subjects permission is removed.
+**Recent change notes:** always check [CHANGELOG.md](../../CHANGELOG.md) before changing curriculum or enrollment workflows. v5.187.0 synchronized the catalogue compulsory flag with class curriculum links; v5.188.0 blocks marking a subject that is not in the class curriculum; v5.189.0 documents/diagnoses elective enrollment gaps for late-joining students. Earlier permission behavior is covered by v5.124.0.

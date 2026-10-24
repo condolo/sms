@@ -1,26 +1,27 @@
 # Exams
 
-The detailed exam lifecycle and role exceptions are in the [Exams Officer Guide](../EXAMS_OFFICER_GUIDE.md). The usual sequence is:
+## What the Exams module does
 
-1. Create/schedule an exam with class, subject, type, date, start/end time, and maximum mark.
-2. Move it through the permitted status transitions as it is sat and results are entered.
-3. Enter results in the markbook; use the system's explicit absent/exempt/missing states where appropriate. If you teach more than one stream of the same class/subject, a stream picker appears — enter one stream's roster at a time rather than expecting them merged.
-4. Complete moderation and approval. Locking freezes entry; unlocking is deliberately more restricted.
-5. Publish only after verifying results and approval, then archive when the exam is complete.
+Exams records the sitting: its name, class, subject, date/time, room, and scheduling status. **Marks are entered in Exams → Markbook**, not on the exam record. The Markbook is the source used by report cards.
 
-Use status history to understand who changed an exam and when. Do not bypass the lifecycle by editing data through generic data tools.
+## Teacher workflow
 
+1. Open **Exams** and review the exam timetable or sitting details for your class/subject.
+2. If your role permits it, update the exam's permitted scheduling status as the sitting proceeds. Use the status history to see who made a status change and when.
+3. Enter student results in **Exams → Markbook**, using the correct academic year, term, class, subject, assessment window/type, and instance.
+4. Check the Markbook's save confirmation and resolve any conflicts. Use the explicit mark states for absent, missing, exempt, or incomplete students.
+5. Report errors in the sitting details or schedule to the exams officer/administrator. Report-card publication is a separate workflow and locks the relevant marks.
+
+The current exam lifecycle is a scheduling tracker, not a result-approval chain. Do not follow older instructions that describe entering `exam_results`, approving exam results, or publishing marks from the exam record.
 
 ## Setup, updates, and verification
 
-### Prepare and maintain an exam
+Before a sitting, confirm the academic period, class, subject, date/time, room, and assessment type. Assessment windows and weights are configured separately under Assessment/Grades configuration. A scheduled window closing does not itself mean marks were published; an explicit lock or report-card publication may prevent further edits. Follow the current Markbook message and ask an administrator about a locked mark.
 
-Before creating an exam, verify the academic period, class, subject, assessment type, and maximum mark. Set a start and end time if the sitting has one — the exams officer's own Add Exam form and the subject teacher's Announce Sitting form both collect it, and it is what students and staff see on their Upcoming Exams dashboards. Save it as a draft first; check the detail page and status before scheduling. As the exam progresses, use the supported status actions and review the Markbook for missing/invalid entries before moderation and approval. After publication, verify the intended audience/result visibility. If a button is unavailable, consult the Exams Officer Guide for status and grant requirements; do not edit exam status through generic tools.
+If historical marks appear missing, determine whether they were entered through the retired Exams → Results flow. The repository includes a dry-run-first migration from `exam_results` into `assessment_marks`; a school administrator/developer must review its findings and conflicts before any migration is applied.
 
-Scheduling an assessment-type window (e.g. Mid-Term) in Assessment Scheduling (see [assessment.md](assessment.md)) does not need a separate "activate" step: the window is automatically open the moment today's date falls inside it, and a teacher can still enter results after it closes — closing only nags via reminders, it never blocks entry. Only an explicit schedule lock blocks entry, and that lock can be reopened with a recorded reason.
+**Access:** Exams and Grades use separate permission keys. Scheduling actions, mark entry, configuration, publication, and post-publication correction may require different grants.
 
-**Access:** Exams and Grades are separate permission keys. Lock/unlock, result entry, deletion, and publication are not necessarily granted together.
+**Sources:** `client/src/pages/exams/ExamsPage.jsx`; `server/routes/exams.js`, `assessment.js`, `mark-submissions.js`; `server/scripts/migrate-exam-results-to-markbook.js`; [Exams Officer Guide](../EXAMS_OFFICER_GUIDE.md).
 
-**Sources:** `client/src/pages/exams/ExamsPage.jsx`; `server/routes/exams.js`, `exam-series.js`, `mark-submissions.js`.
-
-**Recent change notes:** see [CHANGELOG.md](../../CHANGELOG.md), especially v5.58.0, v5.106.0–v5.107.0 for exam lifecycle permissions and class/subject scope, v5.130.0 for the per-stream picker when a teacher teaches more than one stream of a class, and v5.145.0 for start/end time on the Add Exam form and its display on Upcoming Exams dashboards.
+**Recent change notes:** always check [CHANGELOG.md](../../CHANGELOG.md) before changing the assessment workflow. Relevant changes include v5.166.0–v5.168.0 (legacy year reads and Markbook consolidation), v5.170.3 (Review tab for the mark-submission queue), v5.173.0 and v5.177.0 (Kindergarten mark locking and publish-time locking), v5.181.0 (Kindergarten Templates moved under Exams), v5.184.0 (template subjects limited to class curriculum), and v5.186.0–v5.188.0 (stream diagnostics and curriculum guards).

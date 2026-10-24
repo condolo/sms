@@ -1,22 +1,23 @@
 # Finance
 
-Use the detailed [Finance Guide](../FINANCE_GUIDE.md) for fee structures, invoice generation, payments, M-Pesa, overdue accounts, and exports.
+## Single source of truth
 
-1. Set up fee types and a fee structure for the right year/term and student/class scope.
-2. Review the structure, then generate invoices and inspect totals before issuing them.
-3. Open the student's invoice to record a payment with amount, date, method, and reference. Confirm the resulting balance/status.
-4. Review overdue and summary views; use export only for authorized business purposes and store downloaded files securely.
-5. Configure M-Pesa only with verified platform credentials and test the payment flow before relying on it operationally.
+Use the [Finance Officer Guide](../FINANCE_GUIDE.md) for the full accounts-office workflow: fee settings and structures, invoice creation and import, term billing, transport/activity charges, discounts, payments and receipts, M-Pesa, overdue follow-up, and reconciliation. It is the only detailed user-facing Finance procedure; this index page intentionally does not duplicate its steps.
 
+## Quick route map
 
-## Setup, updates, and verification
+- **Finance → Overview:** collection totals and current financial summary.
+- **Invoices:** search, filter, issue draft admission invoices, void eligible invoices, and import invoice CSVs.
+- **Payments:** record payments and print receipts.
+- **Fee Structure → Fee Settings:** fee types, discount policies, and overdue reminder schedule.
+- **Extra-Curricular:** activity catalogue and student enrolments.
+- **Term Billing:** preview and generate term invoices for transport and activity charges; manage eligible term early-payment confirmations.
+- **Overdue:** review overdue balances and export the overdue list as CSV.
 
-### Set up fees and maintain balances
+Role grants are granular. In particular, **Run Term Billing**, **Confirm Early Payment**, and **Manage Extra-Curricular Activities & Enrolments** are explicit grants; a general Finance grant does not imply them. Check the main guide and current Settings permissions when an action is unavailable.
 
-Before generating invoices, confirm the academic period, fee items, fee structure, student/class scope, discounts, and any auto-generation rules. Preview totals and invoice counts; issue only after checking a sample student and approving the batch. Record receipts against the correct invoice and verify the remaining balance. Correct mistakes through the supported void/refund/adjustment process with an audit reason; do not overwrite balances directly. Reconcile payment-provider transactions before treating an online payment as settled.
+## Sources and change history
 
-**Access:** Finance role permissions govern invoices, payments, fee structures, imports, exports, and M-Pesa configuration. Void/payment correction actions are more sensitive than read access.
+Current UI: `client/src/pages/finance/`. Server behavior: `server/routes/finance.js`, `server/routes/import-export.js`, `server/routes/transport.js`, `server/routes/extracurricular.js`, and `server/utils/term-billing.js`.
 
-**Sources:** `client/src/pages/finance/`; `server/routes/finance.js`, `mpesa.js`, `billing.js`; [School Administrator Guide](../SCHOOL_ADMIN_GUIDE.md#13-data-export--backup).
-
-**Recent change notes:** see [CHANGELOG.md](../../CHANGELOG.md), especially v5.61.0–v5.68.0 for fee items, discounts, admission invoices, and payment display.
+Always check [CHANGELOG.md](../../CHANGELOG.md) before following or changing this workflow. Finance changes include v5.169.0–v5.169.3 (term billing, reminder/discount rules, explicit permissions, bulk activity enrolment) and v5.179.0–v5.180.0 (permission-save and backfill fixes). The main [Finance Officer Guide](../FINANCE_GUIDE.md) was reconciled through v5.194.0 on 2026-10-16.

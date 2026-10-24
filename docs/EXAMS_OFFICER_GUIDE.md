@@ -1,87 +1,52 @@
 # Msingi — Exams Officer Guide
 
-> **Audience:** Staff assigned the **Exams Officer** role. Covers scheduling exams, the Markbook, assessment configuration, and reminders. Every plan includes the full Exams module — access here is a role permission, not a subscription tier (see the School Administrator Guide, §9).
+> **Audience:** Exams officers and school staff authorized to manage assessments. Screen access and individual actions depend on the school's role permissions. This guide follows the current Exams/Markbook workflow; check the [changelog](../CHANGELOG.md) for changes after this review.
 
----
+## 1. The two related workflows
 
-## Table of Contents
+**Exams** records scheduled sittings (title, class, subject, date/time, room and status). **Exams → Markbook** is where teachers enter numeric assessment marks and subject comments. Report Cards reads the Markbook records. The old exam-results entry and approval workflow is retired; do not use it as the normal marks workflow.
 
-1. [What You Can Access](#1-what-you-can-access)
-2. [Exam Status Lifecycle](#2-exam-status-lifecycle)
-3. [Creating and Scheduling an Exam](#3-creating-and-scheduling-an-exam)
-4. [Markbook](#4-markbook)
-5. [Configuration](#5-configuration)
-6. [Reminders](#6-reminders)
-7. [Locking and Unlocking — the One Step That Needs a Grant](#7-locking-and-unlocking--the-one-step-that-needs-a-grant)
+The current page can include **Exams, Markbook, Review, Reminders, Configuration**, and **Kindergarten Templates** tabs. Which tabs and actions appear depends on your role and permissions.
 
----
+## 2. Schedule a sitting
 
-## 1. What You Can Access
+1. Open **Exams → Exams** and choose **Add Exam** or the teacher sitting-announcement flow available for the assigned subject.
+2. Select the correct academic year, term, class, subject, assessment type, date/time, and room/details shown by the form.
+3. Save, then confirm the sitting appears with the intended class, subject, date/time, and status.
+4. Use the schedule status to track the sitting: **Scheduled → In Progress → Completed**, or **Cancelled** where appropriate. Exam status does not approve, publish, or store marks.
 
-The **Exams Officer** role has full access (view, create, update, delete) to **Exams, Grades, and Assessment**. You also have view-only access to Students, Classes, Report Cards, Growth Profile, Events, Library, Hostel, and Transport, and messaging access.
+Assessment windows, assessment types, and weights are configured separately. A closed window or elapsed deadline does not itself mean marks were submitted or locked.
 
-The Exams module has four tabs: **Exams, Markbook, Reminders, Configuration.**
+## 3. Enter and review marks
 
----
+Teachers enter marks from **Exams → Markbook** using the correct academic year, term, class, stream (when applicable), subject, assessment type/window, and instance. The roster depends on class/stream placement and subject enrollment. If a student or subject is missing, confirm those assignments before entering marks; do not create a substitute record under a different selection.
 
-## 2. Exam Status Lifecycle
+Mark entry is autonomous before report-card publication. Teachers save marks in the Markbook and should verify them by reopening the same selection. Use the explicit **Absent, Missing, Exempt,** or **Incomplete** states where applicable rather than substituting a numeric zero. Subject comments are separate from marks and can be saved independently; a mark submission does not save a comment.
 
-Every exam moves through a fixed sequence of statuses, each unlocking the next available action:
+The **Review** tab is the cross-class mark-submission queue for users who have access. It supports reviewing submissions and applicable approve/reject/lock actions. This moderation queue is not the place teachers enter marks, and the presence or absence of a review action does not change the Markbook source of truth.
 
-| Status | What it means | Action available |
-|---|---|---|
-| **Draft** | Being set up, not yet scheduled | — |
-| **Scheduled** | Date/class/subject confirmed | Start Exam |
-| **In Progress** | Being sat | Mark Completed |
-| **Completed** | Sat, marks being entered | Moderate, Lock *(needs a grant — see §7)* |
-| **Moderated** | Reviewed for consistency | Approve, Reopen |
-| **Approved** | Signed off | Lock *(needs a grant — see §7)* |
-| **Locked** | Marks frozen — no further edits | Publish Results, Unlock *(needs a grant — see §7)* |
-| **Published** | Visible to students/parents | Archive |
-| **Archived** | Read-only, historical | — |
+## 4. Publish report cards and mark locking
 
-As an Exams Officer, you can drive the exam through **every one of these transitions yourself** — Start, Complete, Moderate, Approve, Publish, Archive, and Cancel — the same as Admin/Superadmin. **Locking and unlocking are the one exception**, kept deliberately more restrictive since they freeze/unfreeze results outright — see §7.
+Report-card generation and publication are handled in **Report Cards**, not by changing an exam's status. Review the selected year, term, and class, check validation and preview messages, then use the authorized publish action. Publication creates the report snapshot and automatically locks the relevant marks. Until publication, marks remain editable unless a separate authorized lock is in effect.
 
----
-
-## 3. Creating and Scheduling an Exam
-
-Go to **Exams → Exams → Add Exam**. Set the class, subject, exam type/assessment type, date, and maximum score. The exam starts in **Draft**, then move it to **Scheduled** once the date is confirmed.
-
----
-
-## 4. Markbook
-
-Go to **Exams → Markbook** to enter scores for a class/subject/exam in a spreadsheet-style grid. Each student's mark can also be flagged instead of scored: **Absent, Missing, Exempted,** or **Incomplete** — use these rather than leaving a blank or entering a 0, since they're treated differently in report-card averaging.
-
-Marks can only be entered/edited while the exam is **not yet Locked, Published, or Archived** — once locked, the Markbook for that exam becomes read-only.
-
----
+For a post-publication correction, use the locked-marks workflow and follow its permission and reason requirements. A correction should be reviewed in the Markbook and report card before the marks are locked again. Do not create duplicate marks or change the exam status to try to unlock a published result.
 
 ## 5. Configuration
 
-Go to **Exams → Configuration** to manage:
+Use **Exams → Configuration** for the assessment types/weights, grading scales, and assessment schedule controls available to your role. Confirm the active academic year and term before configuring a cycle. A change in configuration does not automatically rewrite an already published report-card snapshot.
 
-- **Grading Scales** — the grade boundary bands your school uses (e.g. A ≥ 80, B ≥ 70…), each with a letter grade, points value, and label.
-- **Assessment Types** — the weighted components that make up a final grade (e.g. CATs, Exams, Assignments). **Weights must total 100%** — the page won't let you save otherwise.
-- **Assessment Schedule** — which assessment types are expected in which term, for tracking completion.
+**Kindergarten Templates** now lives under **Exams**, not Report Cards or Settings. Assign the intended template to the class or its section default, check that its subjects match the class curriculum, and verify its indicators and grading bands before teachers enter indicator marks. Kindergarten uses its own Markbook and report-card path.
 
----
+## 6. Reminders and missing-data troubleshooting
 
-## 6. Reminders
+Use **Reminders** to see upcoming sittings and marking/moderation tasks. When a teacher reports a missing mark or comment, first write down their exact year, term, class, stream, subject, assessment type/window, and instance selection. Reopen that exact Markbook selection and check the roster, save confirmation, and locked state. Check subject enrollment/curriculum and whether the relevant report card has been published. Do not tell the teacher to re-enter the mark until you have checked whether an existing record is stored under a different selection or legacy year.
 
-Go to **Exams → Reminders** for upcoming exam dates and outstanding marking/moderation tasks, so nothing slips past its own status deadline.
+Older marks can have yearless records or can exist in the retired `exam_results` collection. Treat any migration or bulk correction as a separate, reviewed data operation; do not attempt it from the normal UI.
 
----
+## 7. Access and role permissions
 
-## 7. Locking and Unlocking — the One Step That Needs a Grant
+Exams, Grades/Markbook, Assessment configuration, Review, Report Cards, and sensitive post-publication correction actions can have distinct permissions. Being an Exams Officer does not by itself guarantee every action. Ask the administrator to check the relevant capability in **Settings → Roles & Permissions** if a tab or action is missing. Never share credentials or work around a missing permission by editing records outside the supported workflow.
 
-Locking an exam freezes its results permanently against further edits; unlocking reverses that. Because of how consequential that is, it's held to a higher bar than the rest of the pipeline: by default, only **Admin** and **Superadmin** can lock or unlock an exam.
+**Sources:** `client/src/pages/exams/ExamsPage.jsx`, `client/src/pages/grades/components/ReportCardsTab.jsx`, `server/routes/exams.js`, `assessment.js`, `mark-submissions.js`, and `report-cards.js`.
 
-**Your school can extend that to you specifically.** From **Settings → Roles & Permissions**, an admin can grant the **Exams Officer** role (or you individually) the `exams.lock` and/or `exams.unlock` permission — they're independent, so a grant of one doesn't imply the other. Once granted, the **Lock**/**Unlock** buttons appear for you exactly where you'd expect them (on a Completed/Approved exam, and on a Locked one), both from the exam's detail panel and via a direct status change — either way is respected identically.
-
-Without that grant, you can still do everything else in the pipeline — Moderate, Approve, Publish, Archive — up to the point of actually locking; ask your admin to lock/unlock those specific exams, or request the grant if this is a routine part of your work.
-
----
-
-*Last reviewed: 2026-09-05 — checked directly against `client/src/pages/exams/ExamsPage.jsx` and `server/routes/exams.js` (TRANSITION_ROLES, `_checkTransition`, `POST /:id/lock`), after fixing the gap this guide originally documented.*
+**Changelog checked:** v5.194.0 (2026-10-15), including v5.166.0–v5.168.0 (Markbook source consolidation), v5.170.3 (Review tab), v5.173.0/v5.177.0 (mark locking and submission workflow), and v5.178.0/v5.181.0/v5.184.0 (Kindergarten workflow and template location/curriculum scope). Check the linked changelog for later changes.

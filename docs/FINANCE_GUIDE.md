@@ -1,6 +1,6 @@
 # Msingi — Finance Officer Guide
 
-> **Audience:** Staff assigned the **Finance** role. Covers fee structures, invoicing, term billing, transport and extra-curricular charges, recording payments, early payment, M-Pesa, and the Overdue and Summary views. Every plan includes the full Finance module — access here is a role permission, not a subscription tier (see the School Administrator Guide, §9).
+> **Audience:** School finance/accounts office staff and administrators responsible for school billing. This is the single operational guide for Finance. Access is controlled by role permissions; special actions may require separate explicit grants even when the Finance page is available.
 
 ---
 
@@ -8,33 +8,34 @@
 
 1. [What You Can Access](#1-what-you-can-access)
 2. [Fee Structures](#2-fee-structures)
-3. [Term Billing](#3-term-billing)
-4. [Early Payment](#4-early-payment)
-5. [Transport Fares](#5-transport-fares)
-6. [Extra-Curricular Activities](#6-extra-curricular-activities)
-7. [Invoices](#7-invoices)
-8. [Recording Payments](#8-recording-payments)
-9. [Opening Balances](#9-opening-balances)
-10. [M-Pesa Integration](#10-m-pesa-integration)
-11. [Overdue Accounts and Reminders](#11-overdue-accounts-and-reminders)
-12. [Summary Dashboard](#12-summary-dashboard)
-13. [Exporting Finance Data](#13-exporting-finance-data)
+3. [Generate and issue invoices](#3-generate-and-issue-invoices)
+4. [Term Billing](#4-term-billing)
+5. [Early Payment](#5-early-payment)
+6. [Transport Fares](#6-transport-fares)
+7. [Extra-Curricular Activities](#7-extra-curricular-activities)
+8. [Invoices](#8-invoices)
+9. [Recording and reconciling payments](#9-recording-and-reconciling-payments)
+10. [Opening balances and invoice CSV import](#10-opening-balances-and-invoice-csv-import)
+11. [M-Pesa Integration](#11-m-pesa-integration)
+12. [Overdue Accounts and Reminders](#12-overdue-accounts-and-reminders)
+13. [Summary Dashboard](#13-summary-dashboard)
+14. [Exporting Finance Data](#14-exporting-finance-data)
 
 ---
 
 ## 1. What You Can Access
 
-The **Finance** role has full access (view, create, update, delete) to the **Finance** module, plus view-only access to Students, Report Cards, Events, Library, Hostel, and Transport, and messaging access for parent/staff communication. You do not have access to Grades, Exams, HR, Attendance, or Behaviour by default — ask your School Admin (Settings → Roles & Permissions) if your school has customised this.
+The built-in **Finance** role is normally configured for finance operations, but each school's grants can differ. The Finance page includes **Overview, Invoices, Overdue, Payments, Fee Structure, Extra-Curricular,** and **Term Billing**. Tabs or actions can be unavailable when permissions are missing. Ask an authorized administrator to check the Finance module grants in **Settings → Roles & Permissions**.
 
-The Finance module has these tabs: **Summary, Invoices, Overdue, Payments, Fee Structure, Extra-Curricular, Term Billing.**
-
-Three finance actions need their own permission, which the general finance rights do not cover. Ask your School Admin to grant them under Settings → Roles & Permissions → Finance if you need them:
+Three actions use explicit Finance permissions; a general Finance grant does not imply them. Ask an authorized administrator to check the corresponding grant under **Settings → Roles & Permissions → Finance**:
 
 - **Run Term Billing** — preview and create term invoices.
-- **Confirm Early Payment** — confirm early payment, and change its deadline or percentage before confirming.
+- **Confirm Early Payment** — confirm qualifying term-invoice discounts and change their deadline before confirmation.
 - **Manage Extra-Curricular Activities & Enrolments** — create or change activities, and enrol or end students.
 
-If you can't see one of these actions, your role doesn't have that permission yet. Your School Admin can grant it.
+Invoice creation/import, recording payments, fee-structure management, voiding invoices, and M-Pesa configuration also have their own controls. Grant only the actions needed for the staff member's work. The permission save guard may prevent an administrator from granting a capability they do not themselves hold; see the latest Settings/Finance entries in the changelog if permission saving is rejected.
+
+If you can't see an action, ask an authorized administrator to check its permission. Do not repeat an import or payment action to work around a missing control.
 
 ---
 
@@ -56,19 +57,29 @@ A fee structure is a reusable template — a term's tuition, a trip fee, a unifo
 
 **Fee structures do not repeat by themselves.** There is no "one-time" or "per term" setting. A termly fee is created by generating the structure again for that term. A one-time fee is generated once.
 
+### Fee Settings: fee types, discounts, and reminders
+
+From **Finance → Fee Structure → Fee Settings**, authorized staff can maintain:
+
+- **Fee Types** used to label invoice line items. Existing invoice lines retain their stored fee-type key; changing or removing a catalogue label does not rewrite old invoices. Mark a type refundable only when it represents a refundable deposit under the school's policy.
+- **Discount Policies** for sibling tiers, Director's-family and referral flags, and early payment. Set a policy active only after confirming its percentage/tier rules and which student/family records qualify. Policies apply when invoices are generated or payment is recorded, depending on the policy type.
+- **Overdue Invoice Reminders**: enable/disable reminders, set days before due date, due-date reminder, and repeat interval. Email/in-app channels are controlled separately in Notification Settings. Term Billing invoices are excluded by default; opt in only if the school wants reminders sent for those invoices.
+
+## 3. Generate and issue invoices
+
 ### Generating invoices from a structure
 
 Click **Generate Invoices**. This creates one invoice per matching active student. Students who **already have an invoice from that same structure are skipped**, so it's safe to re-run after adding new students mid-term.
 
 ### Admission charges (automatic on enrolment)
 
-A fee structure can be set to **generate automatically when a student is enrolled**. This only works for structures that apply to all students. Each new admission then gets a **draft** invoice, which you review and issue. Nothing reaches the parent until you issue it.
+A fee structure can be set to generate an invoice automatically when a student is enrolled. This applies only to fee structures scoped to **All active students**.
 
-A few things are not handled by the system: the admission fee is not marked non-refundable or non-transferable, there is no refund process for the caution fee (it is marked refundable, but nothing tracks a refund), and admission charges can't be limited to one class.
+Invoices generated by an admission auto-rule are **drafts**. Review the student, line items, amount and due date in **Invoices**, then issue the invoice. Issuing sends the normal invoice-created notification through the school's notification settings. Do not assume a draft invoice has been sent to the guardian.
 
----
+**Limits:** admission auto-generation applies only to fee structures scoped to all students. A refundable fee-type label is not itself a refund workflow; check the school's approved refund process separately.
 
-## 3. Term Billing
+## 4. Term Billing
 
 Go to **Finance → Term Billing**. Term billing adds each student's **transport fare** and **extra-curricular activities** to their invoice for one term.
 
@@ -85,7 +96,7 @@ Each new term invoice notifies guardians through the school's notification setti
 
 ---
 
-## 4. Early Payment
+## 5. Early Payment
 
 Early payment is paid **by the first day of the term**. It gives a discount on the term's invoice.
 
@@ -100,7 +111,7 @@ For fee-structure invoices (not term invoices), early payment still applies auto
 
 ---
 
-## 5. Transport Fares
+## 6. Transport Fares
 
 Transport charges come from the **route**, and each student takes one of two fare types.
 
@@ -112,23 +123,25 @@ A transport assignment with no fare type, or a route with no fare for it, is nev
 
 ---
 
-## 6. Extra-Curricular Activities
+## 7. Extra-Curricular Activities
 
 Go to **Finance → Extra-Curricular**.
 
 - **Activities and amounts:** each activity has a name and an amount per term. Add an activity with **Add activity**. Use **Deactivate** to stop an activity from being billed. Deactivating does not remove existing enrolments.
 - **Students enrolled:** choose a class, search, and tick one or more students. Choose the activity, the **From** date and an optional **To** date, and click **Enrol**. Each student gets their own enrolment. Students already in that activity are skipped and reported.
-- **End an enrolment** with **End** and a date. The record is kept for history and is no longer billed from that date.
+- **End an enrolment** with **End** and a date. The record is kept for history. Term Billing charges the activity's full term amount when an active enrolment overlaps any part of that term; it does not prorate by the start/end dates.
 
 Enrolled students are billed in Term Billing for each term they're enrolled in.
 
 ---
 
-## 7. Invoices
+## 8. Invoices
 
 Go to **Finance → Invoices**.
 
 Each invoice shows its status: **unpaid**, **partial**, **paid**, or **void**. Status is computed automatically from `amountPaid` against the invoice total — you never set it directly.
+
+Use the academic-period and status filters to find invoices; search by invoice or student. Open/print an invoice to verify the student, line items, total, payments, balance, and due date before following up. An invoice list is not a substitute for reconciling the Payments ledger.
 
 Invoices created by **Term Billing** show the title *Term billing — [term name]*. A balance brought forward from before, if your school has one, appears as a separate invoice.
 
@@ -138,30 +151,32 @@ Available on any invoice that is **not already paid or void**. Click the void ic
 
 ---
 
-## 8. Recording Payments
+## 9. Recording and reconciling payments
 
 Go to **Finance → Payments → Record Payment**, or from a specific invoice.
 
 Fields: student/invoice, **Amount**, **Payment Method** (Cash, M-Pesa, Bank Transfer, Cheque, Card, Other), **Payment Date**, and optional notes. Save — the invoice's `amountPaid` and status update immediately, and a receipt is available from the Payments list.
 
-> **M-Pesa payments made via STK Push or paybill are reconciled automatically** (see §10) and appear here without manual entry — only record a payment by hand for cash, bank transfer, cheque, or a manual M-Pesa entry that wasn't auto-matched.
+> **M-Pesa payments made via STK Push or paybill may be reconciled automatically** (see §11) and appear here without manual entry. Check the Payments list and invoice balance before making a manual entry, so an already-reconciled payment is not recorded a second time.
 
 Balances are worked out from the payment records. A payment you record is what changes the balance, so always record a payment rather than changing an invoice's amount paid by any other means.
 
 ---
 
-## 9. Opening Balances
+## 10. Opening balances and invoice CSV import
 
-**Not yet available as an import.** The system does not keep an opening balance for each student. What exists today:
+For migration balances, use **Finance → Invoices → Import**. This is separate from the student CSV import and can create invoices for students who are already in Msingi.
 
-- **New students** imported with the student CSV can have an opening-fee amount, which creates one invoice for them. This does not work for students who are already in the system: their rows are skipped.
-- **Students already in the system** who owe from before the current term cannot be given a balance in Msingi yet. No screen adds a single invoice to an existing student (the only single-invoice route is the API, which the interface does not use), so the balance has to be recorded outside the system until the balance-only import is built.
+1. Download the Finance template from the Import panel. Use the student's exact **admissionNumber**, invoice **title**, line **description**, **amount**, optional **amountPaid**, and optional **dueDate** (`YYYY-MM-DD`).
+2. Each row creates one invoice with exactly one line item. Multiple rows for the same student create multiple separate invoices; use clear titles/descriptions to distinguish them.
+3. Check that `amountPaid` does not exceed `amount`. A positive `amountPaid` also creates a matching payment record with method **Other** so the invoice balance and payment ledger agree.
+4. Upload the CSV, review the import results and row errors, then reconcile the created invoices and payments in Msingi before using the balances operationally.
 
-A balance-only import for existing students is designed and waiting for decisions. See `docs/design/opening-balance-import.md`.
+This import is for historical/opening data: it does not set an academic year or term, and it does not send the usual new-invoice notification. Existing-student rows that do not resolve to an admission number in this school are rejected. **The import creates new invoices; it is not an update or upsert and rerunning a file can create duplicates.** Reconcile the file and results first; do not rerun blindly. Maximum 500 rows per batch. For new students being created in bulk, the student import also supports optional opening-fee columns; do not re-import students just to add balances to already-onboarded students.
 
----
+For ordinary current-term fees, use **Fee Structure → Generate Invoices** or **Term Billing** rather than the migration import.
 
-## 10. M-Pesa Integration
+## 11. M-Pesa Integration
 
 Configured once by a School Admin at **Settings → School Profile → M-Pesa Integration** (Daraja API). If you need this set up or changed, that's who to ask — Finance staff use it day-to-day but the credentials themselves are an admin-level setting.
 
@@ -171,7 +186,7 @@ Fields an admin configures: Consumer Key, Consumer Secret, Paybill/Till Number, 
 
 ---
 
-## 11. Overdue Accounts and Reminders
+## 12. Overdue Accounts and Reminders
 
 Go to **Finance → Overdue** for a live list of every unpaid or partially-paid invoice past its due date, sorted so the most overdue balances surface first. Use this for fee-collection follow-up calls or reminder messages, rather than filtering the full Invoices list by hand.
 
@@ -182,16 +197,16 @@ Go to **Finance → Overdue** for a live list of every unpaid or partially-paid 
 
 ---
 
-## 12. Summary Dashboard
+## 13. Summary Dashboard
 
-Go to **Finance → Summary** for the headline numbers: total invoiced, total collected, total outstanding, and the collection rate for the current period — the same figures that feed the platform Dashboard's Fee Collection card.
-
----
-
-## 13. Exporting Finance Data
-
-Each list (Invoices, Payments) has an **Export** button that downloads a CSV. Exports respect whatever filters are currently applied on screen — filter to a class or date range first, and the export matches exactly what you see.
+Go to **Finance → Overview** for the headline numbers: total invoiced, total collected, total outstanding, and the collection rate for the current period — the same figures that feed the platform Dashboard's Fee Collection card.
 
 ---
 
-*Last updated: 2026-10-05 — checked against `client/src/pages/finance/` and `server/routes/finance.js`, `transport.js`, `extracurricular.js` and `utils/term-billing.js`.*
+## 14. Exporting Finance Data
+
+The **Overdue** view has an **Export CSV** action. The **Invoices** view has a CSV **Import** action, and **Payments** supports printing individual receipts; those views do not currently provide the same list-export button. Use exports only for an authorized business purpose, store downloaded files securely, and reconcile them against the live records before relying on them as a ledger.
+
+---
+
+*Last reviewed: 2026-10-16 — reconciled with `CHANGELOG.md` through v5.194.0, including Finance v5.169.0–v5.169.3 and the Finance permission-save/backfill fixes v5.179.0–v5.180.0. Checked against the Finance UI, CSV importer, finance/transport/extra-curricular routes, and term-billing rules. Finance is the single detailed accounts-office guide; see [module-flows/finance.md](module-flows/finance.md) only for a short pointer and source map.*

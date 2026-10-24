@@ -1,6 +1,6 @@
 # Admissions
 
-Follow the detailed [Admissions Guide](../ADMISSIONS_GUIDE.md) for required fields, guardian details, pipeline stages, and enrollment.
+Follow the detailed [Admissions and Front Office Guide](../ADMISSIONS_GUIDE.md) for enquiry handling, required fields, guardian details, pipeline stages, enrollment, and post-enrollment handover. Msingi tracks applications; visitor sign-in, general enquiry logging, and appointments remain school processes unless a separately configured feature is available.
 
 1. Open Admissions and use Board to move between stages or List to search/filter.
 2. Add an application and complete the fields required by the school's admission settings.

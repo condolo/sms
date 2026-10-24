@@ -1,124 +1,171 @@
-# Msingi — Admissions Guide
+# Msingi Admissions and Front Office Guide
 
-> **Audience:** Staff assigned the **Admissions Officer** role, or anyone running a school's application-to-enrollment process. Covers the full pipeline, the application form's required and optional fields, the Mother/Father guardian rule, converting an accepted applicant into a student, and bulk import as an alternative path. Every plan includes the full Admissions module — access here is a role permission, not a subscription tier (see the School Administrator Guide, §9).
+**Audience:** Admissions officers, reception and front-office staff, and school staff who receive prospective families or coordinate applications. This guide explains how to handle an enquiry, record and progress an application, enroll an accepted applicant, and hand off work to the right school team. Msingi provides the Admissions application pipeline and related student/enrollment workflows; it does not provide a visitor register, inquiry CRM, appointment scheduler, or front-desk call log. Follow the school's approved process for those activities and record application-relevant decisions in Msingi.
 
----
+## Table of contents
 
-## Table of Contents
+1. [Purpose and role boundaries](#1-purpose-and-role-boundaries)
+2. [Before you start](#2-before-you-start)
+3. [A front-office enquiry from first contact to application](#3-a-front-office-enquiry-from-first-contact-to-application)
+4. [Admissions pipeline](#4-admissions-pipeline)
+5. [Create an application](#5-create-an-application)
+6. [Required information and guardian contacts](#6-required-information-and-guardian-contacts)
+7. [Review, follow up, and change stages](#7-review-follow-up-and-change-stages)
+8. [Accept and enroll an applicant](#8-accept-and-enroll-an-applicant)
+9. [After enrollment and handover](#9-after-enrollment-and-handover)
+10. [Bulk student import](#10-bulk-student-import)
+11. [Daily front-office and admissions routines](#11-daily-front-office-and-admissions-routines)
+12. [Privacy, safety, and record quality](#12-privacy-safety-and-record-quality)
+13. [Troubleshooting and escalation](#13-troubleshooting-and-escalation)
+14. [Administrator setup and verification](#14-administrator-setup-and-verification)
+15. [Source notes and change history](#15-source-notes-and-change-history)
 
-1. [What You Can Access](#1-what-you-can-access)
-2. [The Pipeline](#2-the-pipeline)
-3. [Board and List Views](#3-board-and-list-views)
-4. [Creating a New Application](#4-creating-a-new-application)
-5. [Required Fields](#5-required-fields)
-6. [Mother and Father — Entered Separately](#6-mother-and-father--entered-separately)
-7. [Moving an Application Through Stages](#7-moving-an-application-through-stages)
-8. [Enrolling an Accepted Applicant](#8-enrolling-an-accepted-applicant)
-9. [Alternative: Bulk Import Instead of the Pipeline](#9-alternative-bulk-import-instead-of-the-pipeline)
-10. [The Admissions Funnel](#10-the-admissions-funnel)
+## 1. Purpose and role boundaries
 
----
+Use this guide to move a prospective student from first contact through a complete, reviewed application and a verified enrollment. The admissions record is the working record for the application; the Student record becomes the school's operational record after enrollment.
 
-## 1. What You Can Access
+The Admissions Officer role is configured for Admissions access and the student access needed by enrollment. Actual access can vary by the account's assigned role, school permissions, and module availability. If a menu or action is missing, ask the school administrator to check the account's role and permissions. Do not borrow another person's login or ask them to perform a change under your name.
 
-The **Admissions Officer** role has full access (view, create, update, delete) to **Admissions**, plus **read/create/update** on **Students** (needed for the enroll step, §8), view-only on Classes, and messaging/resources access for communicating with applicant families.
+Msingi does not replace the school's reception procedures. Record visitors, calls, walk-ins, appointments, document receipts, and safeguarding incidents using the school's approved register or process. Do not claim an enquiry has been entered in Msingi unless an application was actually saved.
 
----
+## 2. Before you start
 
-## 2. The Pipeline
+1. Sign in using your own Msingi account and the school's approved sign-in address.
+2. Confirm that the correct school is selected if your account can access more than one school.
+3. Open Admissions and check the Board or List for an existing record before creating a new one. Search by the applicant's name and available contact details to reduce duplicate applications.
+4. Confirm the school's current intake, available classes/streams, admission requirements, and application process with the admissions lead. Do not promise a place, fee, or start date that has not been approved.
+5. Keep only the information needed for the application. Collect identity and guardian information through the school's approved channels and follow school privacy and safeguarding rules.
 
-Every application sits in exactly one of nine stages:
+## 3. A front-office enquiry from first contact to application
 
-**Enquiry → Application → Assessment → Interview → Offer → Acceptance → Enrolled**, with **Withdrawn** and **Rejected** available at any point to close the pipeline without deleting the record.
+### 3.1 Receive and understand the request
 
-There's no forced order beyond what makes sense for your process — you can move an application forward or back, and skip a stage your school doesn't use (e.g. no Assessment step).
+For a call, email, walk-in, or referral, establish the prospective student's name, the guardian's preferred contact details, the class/intake they are asking about, and what information or next step they need. Explain the school's published admissions process and direct academic, fee, transport, medical, or safeguarding questions to the appropriate staff member. Do not make commitments outside your authority.
 
----
+Use the school's reception, enquiry, or appointment register for contact that has not yet become an application. Msingi's Admissions module is an application pipeline; it is not a general visitor book or a record of every conversation.
 
-## 3. Board and List Views
+### 3.2 Decide whether to create an application
 
-Go to **Admissions**. Two ways to work:
+Create an application when the family is ready to be considered through the school's admissions process, or when the school's policy requires every prospective applicant to be tracked. Before creating it, search Admissions to ensure an application does not already exist. If one exists, update that record and its stage history rather than starting a second record.
 
-- **Board** — a kanban view, one column per stage, cards you drag (or move via the card's own controls) between columns. Best for a quick visual sense of where every applicant currently sits.
-- **List** — a filterable, sortable table. Best for searching a specific applicant or exporting the full pipeline.
+If the family is only requesting general information, provide the approved information and use the school's separate enquiry-tracking process. Avoid entering speculative, sensitive, or unnecessary details in an application.
 
-**Enquiry through Acceptance are working stages — Withdrawn and Rejected are permanent, closed outcomes.** Applications there stay visible, the same way a "Closed Lost" column works in a sales pipeline.
+### 3.3 Explain next steps and ownership
 
-**Enrolled is different, and deliberately so** *(2026-09, revised)*: once an application is fully enrolled — a real Student record exists and is linked to it — it disappears from this board and from the applicant list. Requested directly, after a real case of confusion: a fully-enrolled child showing here *and* in Students at the same time looked like two different records for one person, not one person tracked in two places. The application document itself is never deleted, so the link back to it (see §8 below) still exists in the data — there just isn't a button in this UI yet to browse completed enrollments; ask your Msingi contact if your school needs that view. An application still sitting at Enrolled with **no** linked student yet — the one broken state this platform now actively prevents (see the note in §8) — stays fully visible here, since it still needs the Enroll Student action run.
+Tell the family what information or assessment is needed, who will review it, and how the school will contact them. Use only approved communication channels. If another team must act, make a clear handover using the school's process and include the application reference when one exists.
 
----
+## 4. Admissions pipeline
 
-## 4. Creating a New Application
+Applications can move through **Enquiry → Application → Assessment → Interview → Offer → Acceptance → Enrolled**. **Withdrawn** and **Rejected** are closed outcomes. Schools can skip stages they do not use and can move an application back when corrections or another review are needed.
 
-Click **New Application**. The form is organised into: Applicant Details, House (optional), Mother/Father, Emergency Contact, Previous School (optional), Pipeline, and Fee Discounts.
+Use **Board** for a visual view grouped by stage and **List** to find, search, sort, or filter applications. The application reference is generated by Msingi when the record is saved.
 
-A unique **application reference** is generated automatically on save — you don't set this yourself.
+An application that has been successfully enrolled and linked to a Student record is hidden from the default active board/list so staff do not mistake it for a second student record. It remains stored and linked. A record labelled Enrolled without a linked Student remains visible because it needs attention. Use the available completed-record option in the UI where permitted; if unavailable, ask an administrator for an authorized historical export or support route. Do not recreate the application to make it visible.
 
-**Fee Discounts** (Director's family / Referred family): tick either that applies now, at application stage, rather than after enrolling — if your school has an active Director's or Referral discount policy in Finance, ticking here means it's already reflected on the admission draft invoice, not something Accounts has to notice and correct later. Sibling discounts don't need a checkbox at all — if the same parent email is already on file for an older sibling, Msingi links the family and applies the discount automatically the moment you enroll.
+## 5. Create an application
 
----
+1. Open **Admissions** and choose **New Application**.
+2. Enter the applicant's first and last name, then complete the fields the school's Admission Requirements currently require.
+3. Add Mother and/or Father details in their separate fields; see §6.
+4. Add optional details when known and relevant: middle name, house, allergies, emergency contact, ID/passport, previous school, target class/stream, and intake term.
+5. Select the appropriate initial stage, normally **Enquiry** or **Application**, based on the school's process. Never choose Enrolled to skip the enrollment action.
+6. Set Director's family or Referred family discounts at the application stage only when the school confirms that the applicant qualifies and the relevant Finance policy exists.
+7. Save, then confirm the application appears in Admissions and note its generated reference for follow-up.
 
-## 5. Required Fields
+Avoid saving a second application because a save appears slow. Refresh or search by applicant name first; a successful first save may already have created the record.
 
-**First Name** and **Last Name** are always mandatory. Beyond that, your school decides:
+## 6. Required information and guardian contacts
 
-- **Gender**
-- **Date of Birth**
-- **At least one parent** — Mother or Father named at all
-- **A named parent's email** — Mother or Father, once named, given an email (see §6)
+First Name and Last Name are always required. The school controls whether Gender, Date of Birth, at least one named parent, and an email for each named parent are required. The default settings described in the application form require these fields, but administrators can change them in **Settings → School Profile → Admission Requirements**. Check the school's current rules rather than relying on an old printed checklist.
 
-All four are **on by default** — this is the same behaviour Msingi has always had. To change any of them for your school, go to **Settings → School Profile → Admission Requirements**. Each is an independent toggle: you can, for example, require Date of Birth but not Gender, or accept a phone-only parent contact while still requiring at least one to be named. Whatever you choose applies identically here, on the student bulk-import CSV, and at the enroll step — one setting, everywhere.
+Mother and Father are captured separately, with a name, email, phone, and ID/passport number for each. Email is required for a named parent when the school's requirement is enabled. Primary Contact selects the parent for day-to-day school communication; it does not prevent the other parent from having their own portal access later.
 
-Everything else — middle name, House, Allergies, Emergency Contact, ID/Passport numbers, previous school, target class/stream, intake term — is always optional and can be filled in later by editing the application.
+Do not invent an email address, reuse another family's contact, or enter a staff member's contact to bypass validation. If a guardian has no email, follow the school's approved exception process and ask an administrator whether the relevant requirement can be adjusted for the school. Changing a school-wide requirement is an administrator decision, not an admissions workaround.
 
-> If you're editing an application that predates a change to these settings (or predates your school's Msingi setup entirely) and it's missing something your school currently requires, you'll need to fill that in before the application can be enrolled (§8) — the enroll step blocks with a clear error naming exactly what's missing, rather than creating an incomplete student record.
+## 7. Review, follow up, and change stages
 
----
+Open the application from Board or List to review and edit details. Use the stage control to move the record as decisions are made. Add concise, factual notes when changing stages so the next staff member can understand the decision and next action. Stage history records who changed the stage, when, and notes entered.
 
-## 6. Mother and Father — Entered Separately
+Before moving to Offer or Acceptance, confirm the decision with the authorized admissions decision-maker. Before acceptance, verify that key identity and guardian details are complete and accurate. When an applicant withdraws or is rejected, use the matching closed outcome and follow the school's approval and communication process. Do not delete an application to clear it from the active pipeline; closed outcomes preserve its history.
 
-There is no single "parent" field. Mother and Father each get their own **name, email, phone, and ID/Passport number**.
+If you change guardian details on an older application, Msingi rechecks the current guardian requirements for that edit. Complete any newly required information before saving. A stage-only change does not revalidate or rewrite guardian fields.
 
-**By default, email is required for any parent you name** — phone is optional, but a parent entered with a name and no email will be rejected when you try to save (unless your school has turned this off in Settings — see §5). This is deliberate: email is what lets that parent get their own independent portal login later, once the child is enrolled (see the School Administrator Guide, §7, "Mother and Father can each have their own independent login"). A parent you never plan to give portal access to still needs an email on file to satisfy this rule, unless it's been relaxed — use any address they check, even if they'll never log in.
+## 8. Accept and enroll an applicant
 
-**Primary Contact** picks which parent drives day-to-day school communications (letters, the "registration" contact). It does **not** limit which parent can later get a portal account — both can, independently, once enrolled, regardless of which one is Primary Contact.
+Enrollment is an explicit action available from an accepted application. Changing a stage to Enrolled is not a substitute and is blocked by the application workflow.
 
----
+Before clicking **Enroll Student**, verify:
 
-## 7. Moving an Application Through Stages
+- The applicant has reached Acceptance and the offer has been accepted under school policy.
+- The application is the correct record and has no unresolved duplicate.
+- Current required fields, class/stream, and guardian information have been checked.
+- The class/stream and intake are correct; correct them before enrollment if needed.
+- Any Director's or Referral discount is correctly recorded and supported by school policy.
 
-Open the application (from Board or List) and change its stage. Each stage change is logged in the application's **stage history** with who made the change, when, and any notes you add — useful for tracking "why did this applicant drop from Interview to Withdrawn" months later.
+Then open the accepted application and select **Enroll Student**. Msingi assigns the permanent admission number at enrollment, creates the Student record, carries across the application details (including guardian, allergy, and emergency-contact data), and links the Student back to the application. A qualifying fee structure may create a **draft** admission invoice. Finance must review and issue that invoice; enrollment itself does not issue it to the family.
 
-A stage-only change (e.g. Enquiry → Application) never re-checks or touches the Mother/Father fields. Editing a guardian field on an existing application **does** re-check the email-required rule at that point — if the application predates that rule and is missing an email for a named parent, you'll need to add it before that particular save goes through.
+Enrollment is designed to be safe to retry: if it has already succeeded, retrying returns the linked student rather than intentionally creating a second one. After any error or interruption, check the application and Students before repeating the action. If the record is at Acceptance and required information is missing, edit the application, save, and retry. If the student exists but is not linked as expected, stop and escalate rather than manually creating another student.
 
----
+## 9. After enrollment and handover
 
-## 8. Enrolling an Accepted Applicant
+1. Confirm that the Student record exists and that the admission number, class/stream, guardian contacts, and relevant medical details are correct.
+2. If an admission invoice was generated, tell Accounts/Finance that a draft is awaiting review; do not tell the family it is payable until Finance issues it.
+3. Hand over any approved student record or outstanding admissions tasks to the relevant class, academic, finance, health, transport, or boarding staff using the school's established process.
+4. Send the family the school's approved confirmation and next-step information through an authorized channel.
+5. Do not delete the original application. Its link and stage history provide the admissions trail.
 
-Once an application reaches **Acceptance**, open it — its detail panel shows an **Enroll Student** button.
+## 10. Bulk student import
 
-This is a deliberate, explicit action, not something that happens automatically when you change the stage dropdown, because it creates a real, permanent student record. *(2026-09)* The **Move Applicant** dialog (§3) no longer offers "Enrolled" as a destination at all — moving an application there any other way used to silently set the label with none of the real work behind it (no student record, no admission number, no invoice), leaving a card in the Enrolled column that Students had never heard of. If you ever see an application at Enrolled with no linked student, opening it and clicking Enroll Student fixes it — the button still appears, and enrolling is safe to retry. Clicking it:
+For migration of existing students, use **Students → Import** rather than creating applications that did not go through the admissions pipeline. The import validates rows and reports which succeeded or failed. Review the preview/result carefully, resolve errors, and follow the [School Administrator Guide](SCHOOL_ADMIN_GUIDE.md#7-student-enrollment) for the expected columns and controlled import process. Do not repeatedly submit the same file without checking whether the first import created records.
 
-- Assigns the student's **permanent admission number** at that exact moment — never earlier, and never on the application itself.
-- Carries every field across automatically: names, DOB, gender, class/stream/house, both parents' full details, Allergies and Emergency Contact (filed under the new student's Medical tab).
-- Is safe to click more than once — enrolling an already-enrolled application returns the same student record rather than creating a duplicate, so a double-click or a retried request can't create two students for one applicant.
-- Is blocked with a clear error if the application is missing Date of Birth or Gender (see the note in §5) — fix the application, then enroll.
-- If your school has a Finance → Fee Structure (e.g. "New Admission Package" — Admission Fee, Caution Money, etc.) marked to auto-generate on enrollment, a **draft invoice** is created for the new student at the same moment — already correctly discounted if they're a sibling, or Director's/Referral family (see §4), not left at full price for Accounts to notice and fix. It's a draft, not a live invoice — Finance still reviews it and issues it (visible to the parent) from the Invoices tab. Nothing changes here if your school hasn't set one up.
+## 11. Daily front-office and admissions routines
 
-The application and the resulting student stay linked (the application records the new student's ID), so you can always trace an enrolled student back to their original application and its full stage history.
+### At opening
 
----
+- Sign in with your own account and check the Admissions Board/List for new or stalled applications.
+- Review the school's reception and communication registers for follow-ups due today.
+- Confirm who is handling interviews, assessments, decisions, and family callbacks.
 
-## 9. Alternative: Bulk Import Instead of the Pipeline
+### When receiving a visitor or document
 
-If a school is migrating many students at once rather than running them through the enquiry-to-offer pipeline, **Students → Import** accepts a CSV that mirrors this form's fields exactly — same required Date of Birth/Gender, same Mother/Father-with-mandatory-email rule (or use the older combined `parentName` + phone/email columns instead, if that's what your existing records use). Every row is validated before anything is saved, and you get a report of exactly which rows succeeded and which were skipped, with a reason. See the School Administrator Guide, §7, for the full column list.
+- Follow school identification, visitor sign-in, safeguarding, and document-receipt procedures.
+- Do not leave student or applicant records visible on a shared screen or unattended at reception.
+- Store physical documents in the approved secure location and record receipt using the school's process. Msingi Admissions is not a document-scanning or visitor-register system unless a specific configured feature is available to your school.
 
----
+### At closing
 
-## 10. The Admissions Funnel
+- Update any application stage or details that were actually confirmed today; do not use a stage as a reminder or a substitute for a decision.
+- Record unresolved follow-ups and handovers in the school's approved tracker.
+- Sign out on shared devices and secure paper files.
 
-The Dashboard's **Admissions Pipeline** bar chart shows applicant counts by stage at a glance. For full detail on every active application, the Admissions Board (§3) shows everything grouped by stage in one place.
+## 12. Privacy, safety, and record quality
 
----
+Applicant records contain children's and guardians' personal information. Use only your own account, access only records needed for your duties, and share information only with authorized staff or guardians through approved channels. Do not export, photograph, copy to personal storage, or send applicant lists through personal email or messaging apps.
 
-*Last reviewed: 2026-09-11 — §3 reversed a deliberate-but-reconsidered design: a fully-enrolled application (linked to a real Student record) no longer shows on the board or applicant list by default — requested directly, since seeing the same enrolled child in both Admissions and Students at once was itself confusing. The record isn't deleted, only hidden from the default view (`?includeCompleted=true`); an application still missing its Student link stays visible, since it needs attention — checked directly against `server/routes/admissions.js`. Earlier the same day: confirmed the fix below closes every write path: `admissions.js` is the only file in the codebase that ever writes to this collection, and creating a brand-new application directly at "Enrolled" (the third of three paths) is now blocked the same way. A live, read-only check across every school on the platform (with this organisation's authorization) found the same gap at one other real school, Mascit Lab Academy, and in internal demo data — confirming the bug was genuinely systemic, not a one-off. Earlier the same day: §3 and §8 updated: "Enrolled" can no longer be set from the Move Applicant dialog or a plain field update — confirmed live (a real Trinitas school's data) that it previously could, leaving three real applicants "Enrolled" with no linked Student record at all — checked directly against `server/routes/admissions.js` and `client/src/pages/admissions/components/StageModal.jsx`. Earlier: 2026-09-08 — §4 and §8 updated for the billing-sequence fix: Fee Discounts (Director's/Referral) are now set on the application itself, and sibling discounts link automatically before the draft admission invoice is generated (`server/utils/guardian-linking.js`, `server/utils/admission-billing.js`), checked directly against `server/routes/admissions.js`.*
+Collect accurate information directly from the family where possible. Correct errors in the existing record and preserve the application history. Do not create duplicate records to work around permissions, overwrite another staff member's attribution, or change school-wide requirements without authorization. Treat medical details and safeguarding concerns as restricted information and follow the school's escalation process; record them only in the designated authorized area.
+
+## 13. Troubleshooting and escalation
+
+**I cannot see Admissions or an action.** Ask the school administrator to verify your assigned role, Admissions permission, module access, and student-create permission required for enrollment. Do not use another person's account.
+
+**The application will not save.** Read the validation message, check current Admission Requirements, and complete the named fields. For a named parent with no email, follow §6 rather than entering false information.
+
+**The application is missing from the board.** Search List and confirm its stage. A successfully enrolled application linked to a Student is normally hidden from the default active list. Do not create a duplicate.
+
+**An application says Enrolled but there is no Student.** Open it and check whether Enroll Student is available. The route is designed to keep incomplete enrollment visible and permit recovery. If the action fails or there is uncertainty about whether a Student was created, check Students and escalate to the administrator/support before retrying or creating records manually.
+
+**The wrong class, stream, guardian, or fee details were used.** Stop further handover or billing action. Ask the authorized administrator or relevant team to correct the Student/application/invoice using its supported workflow and confirm the result. Do not delete the student or invoice to hide the error.
+
+**A family requests their information or raises a safety concern.** Follow the school's data-protection and safeguarding lead process. Do not disclose records based solely on an unverified phone call or email.
+
+## 14. Administrator setup and verification
+
+Before an intake opens, an administrator should review **Settings → School Profile → Admission Requirements**, confirm class/stream options and intake process, and coordinate with Finance if fee structures should generate admission drafts. Ensure Admissions Officers have the Admissions permissions needed for pipeline work and both Admissions update and Students create permissions for enrollment. Keep school-wide settings changes restricted to authorized administrators.
+
+Run a controlled, non-production or approved test application through creation, stage updates, acceptance, enrollment, Student verification, and draft-invoice review when the school's configuration changes. Verify that a completed linked enrollment leaves the default active pipeline as intended, and that an incomplete enrollment remains visible for correction. Confirm the staff know where to report access, data, or enrollment problems.
+
+## 15. Source notes and change history
+
+This guide was checked against the admissions UI and `server/routes/admissions.js`, plus the existing Admissions module flow and the current changelog through v5.194.0. Relevant documented behavior includes school-specific admission requirements (v5.59.0), setting fee discounts before enrollment and guardian linking (v5.66.0), legacy enrollment validation (v5.57.0), and enrollment lifecycle safeguards and completed-record visibility (v5.82.0–v5.86.0). The front-office reception workflow is described as a school procedure because the current system does not provide a visitor register or enquiry CRM. For implementation detail, see [Admissions module flow](module-flows/admissions.md), [School Administrator Guide](SCHOOL_ADMIN_GUIDE.md), and [CHANGELOG.md](../CHANGELOG.md).
+
+**Maintenance note:** Keep this guide aligned with the admissions screens, server validation, role permissions, and `CHANGELOG.md`. If behavior changes, update this manual and its module-flow link in the same documentation change. Confirm any version/date-specific statements against the changelog before publishing a revised edition.

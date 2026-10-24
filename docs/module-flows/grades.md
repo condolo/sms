@@ -1,25 +1,31 @@
 # Grades & Marks
 
-## Enter marks
+## Enter marks in the Markbook
 
-1. Open **Exams / Grades → Mark Entry** and select class, subject, academic year/term, assessment type, and instance. If you teach more than one stream of that class/subject, use the stream picker and enter one stream's roster at a time.
-2. Enter scores using the expected scale and use the defined absent, missing, exempt, or incomplete states rather than substituting a zero.
-3. Review the grid and save. Check the class statistics and resolve missing/incomplete entries before report approval.
-4. Use the grade/report views to review student progress. Keep comments in the intended subject or class-teacher fields.
+The Markbook is the single current source for numeric assessment marks and the source used by report-card calculations. Exams records the scheduled sitting; teachers do not enter marks in an exam-results screen.
 
-## Before publishing results
+1. Open **Exams → Markbook** and choose the academic year, term, class, subject, assessment window/type, and instance.
+2. If the selected class/subject has more than one stream assigned to you, select the intended stream and verify the roster.
+3. Enter scores using the scale shown. Use **Absent**, **Missing**, **Exempt**, or **Incomplete** when appropriate; do not substitute a numeric zero for a mark state.
+4. Select **Save All Marks**. Wait for confirmation and review any conflict warning before leaving the page.
+5. Reopen the same year, term, class, subject, stream, type, and instance to verify the saved values.
 
-Check assessment weights, grade boundaries, and exam status with the school administrator. Published snapshots preserve the values used at publication; changing settings later does not retroactively recalculate an existing snapshot.
+Marks remain editable until the report card is published for that class and term. Publishing locks the marks. If a published mark needs correction, ask an authorized administrator to use the controlled unlock/correction workflow and provide the required reason.
 
+## Enter comments
 
-## Setup, updates, and verification
+Subject comments are separate from marks. When the selected assessment window has comments enabled, use the Markbook's **Comment** column and save the student's comment separately. Saving marks does not save the comment. The comment is stored per student, subject, and term, not per assessment instance. **Known integrity gap:** the current draft-comment key omits academic year, so a recurring term number can collide with an earlier year's draft; preserve and review existing comments before re-entry or migration. Class/form-teacher remarks and any observation ratings are managed from the Report Cards workflow by users with the required role and assignment.
 
-### Configure, amend, and verify marks
+## Before a reporting cycle
 
-Before a marking period, confirm assessment types/weights and grade boundaries with the authorized administrator. Use the right class, subject, term, instance, and student before entering scores. Save and reopen a sample record to verify persistence; review absent/missing/exempt/incomplete states separately from numeric zeroes. For corrections after submission, use the submission/review workflow and retain the reason. Changes to grading configuration may affect future calculations; verify published snapshots through the report-card workflow.
+Ask the authorized administrator to confirm assessment types, weights, grade boundaries, academic year, and term setup. Review missing/incomplete marks and any save conflicts. Preview report cards and resolve provisional or validation warnings before publication. Published snapshots preserve the published result; a later configuration change does not automatically rewrite them.
 
-**Access:** `grades` controls mark entry and report access. Mark-submission review, report generation/publication, and export may require specific grants. Exams also has its own permission module; see [Exams](exams.md).
+## Missing data checks
 
-**Sources:** `client/src/pages/grades/`, `client/src/pages/exams/ExamsPage.jsx`; `server/routes/grades.js`, `assessment.js`, `mark-submissions.js`, `report-cards.js`; [User Guide](../USER_GUIDE.md#8a-grades--assessment-system-ca--hw--mt--et).
+If a mark appears missing, confirm the full Markbook selection (year, term, class, stream, subject, assessment, instance), student roster, and elective enrollment. Older marks may be stored without an academic-year tag or in the retired `exam_results` collection. Do not bulk re-enter or migrate them without an administrator's read-only reconciliation and conflict review.
 
-**Recent change notes:** see [CHANGELOG.md](../../CHANGELOG.md), especially v5.106.0–v5.107.0 for mark/report scope and configuration grants, and v5.130.0 for the Markbook stream picker when a teacher teaches more than one stream.
+**Access:** Mark entry and grade reads use `grades` permissions; assessment configuration uses the separate `assessment` permission. Publication, unlock, and export actions may have additional permission requirements. See [Exams](exams.md) and [Report Cards](report-cards.md).
+
+**Sources:** `client/src/pages/exams/ExamsPage.jsx`; `client/src/pages/grades/`; `server/routes/assessment.js`, `mark-submissions.js`, `report-cards.js`; [User Guide](../USER_GUIDE.md#8a-grades--assessment-system-ca--hw--mt--et).
+
+**Recent change notes:** always check [CHANGELOG.md](../../CHANGELOG.md) before entering or repairing marks. Relevant changes include v5.166.0–v5.168.0 (legacy year reads and Markbook consolidation), v5.170.2 (subject comments are not locked by mark submission), v5.173.0 and v5.177.0 (Kindergarten marks and numeric Markbook submission/locking behavior), v5.186.0 (stream assignment diagnostics), v5.187.0–v5.189.0 (curriculum integrity and elective enrollment), and v5.193.0 (prevent silent clearing of unseen comment fields).
