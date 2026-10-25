@@ -23,6 +23,8 @@ const { _model } = require('../utils/model');
 const { tenantModel, tenantContext, platformModel } = require('../utils/tenant-model');
 const AuditService = require('../services/audit');
 const { ok, E } = require('../utils/response');
+const email = require('../utils/email');
+const { resolveCapabilities } = require('../config/platformCapabilities');
 
 const router = express.Router();
 
@@ -153,6 +155,35 @@ router.post('/tickets', createLimiter, async (req, res) => { // rbac: any signed
       details: { category: ticket.category, priority: ticket.priority },
       req,
     });
+
+    /* Fan out a new-ticket notice to every active platform operator who
+       can read tickets (capability 'tickets.view' or '*'). One email per
+       recipient, all best-effort — a single bad address never blocks the
+       201, and a failed notice never rolls the ticket back. */
+    (async () => {
+      const Operators = _model('platform_operators');
+      const all = await Operators.find({ isActive: true, status: { $ne: 'suspended' } }).lean();
+      const targets = (all || [])
+        .map(op => {
+          const caps = resolveCapabilities(op);
+          const canView = caps.includes('*') || caps.includes('tickets.view');
+          return canView ? { email: op.email } : null;
+        })
+        .filter(Boolean)
+        .filter(o => o.email);
+      await Promise.all(targets.map(o =>
+        email.sendTicketNotice({
+          to: o.email,
+          ref: ticket.ref,
+          subject: ticket.subject,
+          priority: ticket.priority,
+          source: 'user',
+          schoolName: ticket.schoolName || null,
+          slaDueAt: ticket.slaDueAt,
+          requesterName: ticket.requesterName || null,
+        }).catch(() => {})
+      ));
+    })().catch(() => {});
 
     return res.status(201).json({ success: true, data: _summary(ticket) });
   } catch (err) {

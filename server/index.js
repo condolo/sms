@@ -535,7 +535,7 @@ app.get('*', (req, res) => {
       "script-src 'self' 'unsafe-inline'",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com",
       "font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com",
-      "img-src 'self' data: blob:",
+      "img-src 'self' data: blob: https://*.googleusercontent.com",
       "connect-src 'self'",
       "frame-src 'none'",
       "frame-ancestors 'none'",

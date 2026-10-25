@@ -41,6 +41,28 @@
       <i class="fas fa-arrow-right-to-bracket"></i> Sign In
     </button>
 
+    <!-- Google sign-in (team operators). Shown only when the server reports
+         Google OAuth is configured — probe /api/platform/auth/google on load
+         (see _probeGoogleSignIn below); a 503 means GOOGLE_CLIENT_ID is unset.
+         The callback redirects here with ?code=<30s single-use exchange code>. -->
+    <div class="pa-lock-alt" id="login-google-wrap" style="display:none">
+      <div class="pa-lock-alt-divider"><span>or</span></div>
+      <a class="pa-lock-alt-btn" id="login-google-btn"
+         href="/api/platform/auth/google" target="_blank" rel="noopener"
+         style="display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:11px 16px;margin-top:4px;
+                background:#fff;color:#3c4043;border:1px solid #dadce0;border-radius:var(--radius-sm);
+                font-size:14px;font-weight:600;text-decoration:none;transition:background .15s,border-color .15s;
+                font-family:inherit;cursor:pointer">
+        <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+          <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+          <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+          <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+        </svg>
+        Sign in with Google
+      </a>
+    </div>
+
     <div class="pa-lock-error" id="login-error" style="display:none"></div>
 
     <!-- Shown instead of the sign-in form when the page is opened from an
@@ -328,8 +350,16 @@ function _applyCapabilityUI() {
     /* Prefer the server's human-readable role name ("Support agent") over
        the raw template key ("support_agent"). */
     const roleLabel = op.templateLabel || (op.tier === 'owner' ? 'Owner' : (op.template || 'custom'));
-    who.innerHTML = `<strong>${_esc(op.name || 'Platform Admin')}</strong>`
-      + `<span class="pa-role-chip">${_esc(roleLabel)}</span>`;
+    /* Google profile picture (set by the Google sign-in callback); the
+       src is escaped, and the server only ever persists a
+       googleusercontent.com URL (validated before writing), so this is a
+       trusted, narrow host — see the img-src CSP entry in server/index.js. */
+    const avatar = op.picture
+      ? `<img class="pa-whoami-avatar" src="${_esc(op.picture)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+      : '';
+    who.innerHTML = avatar
+      + `<div class="pa-whoami-text"><strong>${_esc(op.name || 'Platform Admin')}</strong>`
+      + `<span class="pa-role-chip">${_esc(roleLabel)}</span></div>`;
   }
 
   // If the current view is no longer permitted, fall back to Overview.
@@ -359,6 +389,58 @@ function togglePasswordVis(btn) {
   const show = inp.type === 'text';
   inp.type = show ? 'password' : 'text';
   btn.querySelector('i').className = show ? 'fas fa-eye' : 'fas fa-eye-slash';
+}
+
+/* ── Google sign-in (team operators) ─────────────────────
+   The callback redirects back to /platform?code=<30s single-use code>.
+   We POST it to /auth/google/exchange, which mints platform_token exactly
+   like the password login does, then re-boots the session as usual. */
+const _GOOGLE_ERROR_MESSAGES = {
+  google_denied:         'Google sign-in was cancelled. You can try again.',
+  google_not_configured: 'Google sign-in is not enabled on this server.',
+  google_failed:         'Google sign-in failed. Please try again.',
+  not_an_operator:       'That Google account is not a platform operator. Ask a team lead to invite you (or sign in with your password).',
+};
+
+async function _handleGoogleCode(code) {
+  const errEl = document.getElementById('login-error');
+  try {
+    const res  = await fetch('/api/platform/auth/google/exchange', {
+      method:      'POST',
+      credentials: 'include',
+      headers:     { 'Content-Type': 'application/json' },
+      body:        JSON.stringify({ code }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.success) {
+      window.history.replaceState({}, '', window.location.pathname); // drop ?code=
+      await _showApp();
+      return true;
+    }
+    _showErr(errEl, (data.error && data.error.message) || 'Google sign-in failed. Please try again.');
+  } catch (e) {
+    _showErr(errEl, 'Could not reach the server to complete Google sign-in.');
+  }
+  return false;
+}
+
+function _probeGoogleSignIn() {
+  // Show the Google button only when the server has GOOGLE_CLIENT_ID set.
+  // GET /auth/google is a cheap probe: 503 (not configured) vs 302 (ready).
+  // We use HEAD + redirect:'manual' so the browser reads the 3xx status
+  // WITHOUT following the redirect to accounts.google.com — that follow is
+  // what trips the page's "connect-src 'self'" CSP. We only ever need the
+  // status code, so a manual redirect (no body) is exactly what we want.
+  fetch('/api/platform/auth/google', { method: 'HEAD', redirect: 'manual', credentials: 'include' })
+    .then(r => {
+      // A manual redirect yields an opaque/3xx response when configured;
+      // a 503 (not configured) or opaque/0 comes back. Show the button for
+      // anything that isn't an explicit 503.
+      if (r.status !== 503) {
+        document.getElementById('login-google-wrap').style.display = '';
+      }
+    })
+    .catch(() => { /* server unreachable — leave hidden */ });
 }
 
 /* ── API helpers ────────────────────────────────────────── */
@@ -3754,8 +3836,30 @@ function _onboardingRows(onboarding) {
 
 /* ── Boot: silently restore session from HttpOnly cookie ── */
 window.addEventListener('DOMContentLoaded', async () => {
-  // An invite link takes priority over any existing session.
+  // Google OAuth callback lands here as ?code=<single-use 30s exchange code>.
+  // An invite link takes priority over everything, including a pending code.
   if (_inviteTokenFromUrl()) { _showInvitePanel(); return; }
+
+  const bootParams = new URLSearchParams(window.location.search);
+  const gCode   = bootParams.get('code');
+  const gError  = bootParams.get('error');
+
+  if (gCode) {
+    // Drop the code from the URL immediately so a refresh can't replay it.
+    window.history.replaceState({}, '', window.location.pathname);
+    const ok = await _handleGoogleCode(gCode);
+    return; // _showApp() was called on success; on failure we're on the lock screen
+  }
+
+  if (gError) {
+    window.history.replaceState({}, '', window.location.pathname);
+    const errEl = document.getElementById('login-error');
+    _showErr(errEl, _GOOGLE_ERROR_MESSAGES[gError] || 'Google sign-in failed. Please try again.');
+    // Fall through to probe + session check below.
+  }
+
+  _probeGoogleSignIn();
+
   try {
     // /me is readable by any authenticated operator regardless of role, so
     // it is the right probe for "is there a session to restore?".

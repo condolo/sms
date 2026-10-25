@@ -6,6 +6,55 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.206.1] - 2026-10-25 - feat(platform): capture Google profile picture + name on sign-in
+
+**What changed:** when an operator signs in via Google, the platform now syncs the operator's display name and Google-hosted profile picture into their `platform_operators` row, and the console renders the avatar next to the signed-in identity block. The Google OAuth `profile` scope already returned both (`name` + `picture`); this change persists them and exposes them.
+
+**How it works:**
+
+- `server/routes/platform.js` — the callback, **after** the email match (so an unknown Google email still writes nothing, keeping the strict no-auto-provision rule), now persists `name` (trimmed) and a `picture` URL to the operator row, then invalidates the 30-second live-operator cache so the fresh data is visible immediately. A helper (`_platformIsGooglePictureUrl`) only accepts an `https` URL on a `*.googleusercontent.com` host — that's the only host the console's CSP `img-src` will later load, so a hostile userinfo payload can't persist an arbitrary image URL. `GET /me` now returns `picture`.
+- `server/middleware/auth.js` — the live-record hydration in `platformSession` now carries `picture` onto `req.platformOperator` (the JWT-fallback path doesn't — the record is the source of truth, and hydration is what runs in practice).
+- `platform.html` — `pa-whoami` renders the avatar (`<img>`, lazy, `referrerpolicy="no-referrer"`) when the operator has a picture, plus the name + role chip. The "Sign in with Google" button's inline SVG was also corrected — the old path data (drawn for a 48×48 box with the deprecated 2013-era Material palette) rendered a malformed G; it now uses the official Google "G" logo path data (24×24 viewBox, official brand colors `#4285F4` / `#34A853` / `#FBBC05` / `#EA4335`).
+- `css/platform.css` — `.pa-whoami-avatar` (34px circle) + `.pa-whoami-text` wrap styles.
+- `server/index.js` — the `/platform` route's CSP override gains `img-src … https://*.googleusercontent.com` (Google-hosted avatars are third-party; the wildcard covers the `lh<n>` subdomain Google rotates between).
+
+**Tested:** `platform-google.test.js` now 27 tests (was 19) — added: matching login persists name + Google-hosted picture; non-Google-hosted picture dropped (name still saved); non-https picture dropped; unknown Google email writes nothing; minted session's `/me` exposes the picture; **rate-limit** — the 11th request within 15 min 429s with `RATE_LIMIT` (mirrors the school-side authLimiter 10/15min); **callback catch** logs `err.message` only (not the full error object or stack, so a prod log stream can't retain an access token or profile email). `fetch` remains stubbed; no real Google round-trip in CI.
+
+**Also in this release (pre-existing gaps closed by the hardening pass):**
+
+- `POST /api/platform/auth/google/exchange` now rate-limited at 10/15min per IP — same pattern as the school-side `authLimiter`. The 30s single-use code Map already defeats replay, but an unbounded POST budget let a single IP burn through fresh codes (or probe the cookie shape) far faster than a human operator could click.
+- The callback's `catch` now logs `err.message` only (was the full `err` object). The full object, or its stack, can carry an access token / profile email pulled from Google's userinfo — a prod log stream would retain those long after the request ended.
+- `backup-cron.js`'s `BACKUP_COLLECTIONS` was never synced with the platform gap in `routes/backup.js` — `platform_operators` is now included, and its `passwordHash` + `inviteTokenHash` are stripped before the file leaves the server (same pattern the manual export already applies to `users` and `schools`).
+
+**To enable:** nothing new — same `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` as v5.206.0. The avatar simply appears the first time an operator signs in with a Google account that has a profile picture.
+
+---
+
+## [v5.206.0] - 2026-10-22 - feat(platform): Google sign-in for the platform console
+
+**What changed:** the platform console (`/platform`) now supports Google OAuth sign-in alongside the existing email/password login. An operator whose Google profile email matches a `platform_operators` row (case-insensitive) signs in; an unknown email is rejected (no auto-provisioning — a platform account is still a deliberate invite). Reuses the school-side `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` OAuth client; the Google client's authorized redirect URIs need `<PUBLIC_URL>/api/platform/auth/google/callback`.
+
+**How it works:**
+
+- `server/routes/platform.js` — three new public routes, all before the `platformSession` gate:
+  - `GET /api/platform/auth/google` — 302 to `accounts.google.com` (503 when `GOOGLE_CLIENT_ID` is unset, so the console can hide the button).
+  - `GET /api/platform/auth/google/callback` — exchanges the Google auth code, resolves the operator by email, issues a 30-second single-use exchange code (CSPRNG, in-memory, same pattern as the school-side `_issueExchangeCode`), and redirects to `/platform?code=<code>`. The JWT never appears in the URL. Distinct redirect errors: `not_an_operator`, `google_denied`, `google_not_configured`, `google_failed`.
+  - `POST /api/platform/auth/google/exchange` — the console POSTs the code; the route mints `platform_token` + the CSRF cookie exactly like the password login, so capability gating and the CSRF double-submit work unchanged. Single-use (second call 410s).
+- `platform.html` — a "Sign in with Google" button (with a divider) below the password form, shown only when the server reports Google is configured (a same-origin `no-cors` probe of `GET /auth/google`). On boot, a `?code=` from the callback is exchanged for the session cookie; `?error=` renders a friendly message. The code is stripped from the URL immediately to prevent replay.
+- `css/platform.css` — `pa-lock-alt` / `pa-lock-alt-divider` styles for the "or" divider.
+
+**What it does NOT change:**
+
+- The invite flow is untouched: invited operators still set a password via `POST /auth/accept-invite` before either sign-in method works (an invited-but-not-activated account is `isActive: false` and is rejected by the Google lookup).
+- The school-side `/api/auth/google` flow is untouched — the platform flow is a parallel, separate implementation (different redirect URIs, different cookie, different audience).
+- The legacy env-var bootstrap credential still works when no operator exists (the Google path requires an existing operator row, so it cannot substitute for the bootstrap).
+
+**Tested:** `server/__tests__/routes/platform-google.test.js` (14 tests) covers the redirect params, the 503-when-unconfigured probe, email matching (case-insensitive), no-auto-provision, suspended-operator rejection, cancelled/expired/failed round-trips, the exchange-code lifecycle (single-use, 30s expiry, JWT identity, CSRF cookie, `/me` works with the minted token), and the 400/410 edge cases. `fetch` is stubbed so no real Google round-trip happens in CI.
+
+**To enable in a deployment:** set `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` (the same client the school side uses) and make sure the Google OAuth client's authorized redirect URIs include `https://<your-host>/api/platform/auth/google/callback`. The button appears on the platform login screen automatically.
+
+---
+
 ## [v5.207.1] - 2026-10-24 - docs: role guides, plus setup-to-report-cards walkthroughs for Exam Office and Kindergarten
 
 Added a full set of per-role user guides (Behaviour Officer, eLearning, Hostel Manager, Inventory & Library Manager, Medical Centre, School Leadership, Student, Teacher, Transport Manager) with matching `.docx` exports, following the existing `docs/*_GUIDE.md` convention.
@@ -61,6 +110,28 @@ The script documents its real contract at the top (*"Exit 0 = clean. Exit 1 = vi
 **The bug was untested, so it is now pinned.** `server/__tests__/scripts/release-gate-security-check.test.js` (12 tests) asserts the historical success line now *passes*, that a violation whose wording contains neither "fail" nor "found" still *fails*, that an unrunnable scan fails closed, and that the repository's real scan exits 0 and is judged a pass. Verified by mutation: reintroducing the old prose heuristic fails 6 of the 12 tests, so the regression test genuinely bites.
 
 Found while fixing the ADR-0008 platform-team work after a deliberate "did you actually run the repo's own gates?" check; the security-scan and release-gate scripts were otherwise untouched by that change.
+
+---
+
+## [v5.205.0] - 2026-10-22 - feat(platform): new-ticket notice fanned out to the team
+
+**What changed:** when a support ticket is created — either by a school user (`POST /api/support/tickets`) or by a platform operator (`POST /api/platform/tickets`) — every active operator who can read tickets (capability `tickets.view` or `*`) now gets an email. One email per recipient, so a single bad mailbox never sinks the rest. Suspended / removed / capability-less operators are excluded; a failed SMTP never blocks the 201.
+
+**Why:** ADR-0008 listed "notification when work is assigned to you" as a non-goal. In practice, the team wanted to *hear about new tickets* the moment they land — the console alone is not enough when you're on a call. This closes the loop without changing the console's UI.
+
+**How it works:**
+
+- `server/utils/email.js` — new template `sendTicketNotice({ to, ref, subject, priority, source, schoolName, slaDueAt, requesterName })`. Subject carries the ticket ref and subject line; the body links to `/platform/tickets`, shows priority / source / school / SLA due date, and labels the requester when `source === 'user'`.
+- `server/routes/platform.js` — new helper `_ticketCapableOperators()` (active, not-suspended, capability-gated) and `_notifyTeamOfNewTicket(ticket)` (one `sendTicketNotice` per recipient, all errors swallowed). Wired into `POST /tickets` after the ticket is persisted and the audit entry is logged — the fan-out is fire-and-forget, so a slow SMTP never delays the response.
+- `server/routes/support.js` — the school-side route fans out the same notice inline (the selection logic is duplicated there because the route file is self-contained; a future refactor could extract a shared helper). The ticket is persisted first, then the fan-out runs best-effort.
+
+**What it does NOT change:**
+
+- No email on ticket **assignment**, **status change**, or **priority change** — only on creation. Those stay in-scope for a follow-up.
+- The existing `sendSupportReply` path (public operator reply → requester email) is untouched.
+- Demo-school suppression: the support route's fan-out runs for demo schools too (the team *should* know a demo school opened a ticket). The demo guard on `sendSupportReply` is a separate concern (outbound email to a fictional address).
+
+**Tested:** `server/__tests__/routes/platform-ticket-notify.test.js` (10 tests) pins recipient selection by capability + status, the email template's subject / body / link, and the route's fan-out isolation (one failed mailbox doesn't sink the others; no-op when no one is eligible; `source: 'manual'` vs `source: 'user'` labelling). The sibling suites (`platform-ticket-assign`, `platform-operators-api`, `platform-permission-matrix`) all still pass.
 
 ---
 

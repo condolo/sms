@@ -248,6 +248,7 @@ async function platformSession(req, res, next) {
             tier: op.tier || payload.tier,
             template: op.template || null,
             status: op.status || 'active',
+            picture: op.picture || null,
           };
           req.platformOperatorTier = op.tier || payload.tier;
           req.platformCaps = resolveCapabilities(op);

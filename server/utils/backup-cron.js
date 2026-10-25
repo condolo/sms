@@ -88,6 +88,7 @@ const BACKUP_COLLECTIONS = [
 
   // Billing & misc
   'billing_snapshots','comment_banks','user_photos',
+  'platform_operators',
 ];
 
 function _uid() {
@@ -112,6 +113,11 @@ async function _buildBackupForSchool(schoolId) {
     }
     if (col === 'schools') {
       docs = docs.map(({ smtpPassEnc, mpesa, ...rest }) => rest);
+    }
+    if (col === 'platform_operators') {
+      // Same pattern as 'users': the bcrypt passwordHash and the SHA-256
+      // inviteTokenHash must never leave the server in a backup file.
+      docs = docs.map(({ passwordHash, inviteTokenHash, ...rest }) => rest);
     }
 
     data[col]  = docs;
