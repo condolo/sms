@@ -6,6 +6,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.206.1] - 2026-10-25 - feat(platform): capture Google profile picture + name on sign-in
+
+**What changed:** when an operator signs in via Google, the platform now syncs the operator's display name and Google-hosted profile picture into their `platform_operators` row, and the console renders the avatar next to the signed-in identity block. The Google OAuth `profile` scope already returned both (`name` + `picture`); this change persists them and exposes them.
+
+**How it works:**
+
+- `server/routes/platform.js` — the callback, **after** the email match (so an unknown Google email still writes nothing, keeping the strict no-auto-provision rule), now persists `name` (trimmed) and a `picture` URL to the operator row, then invalidates the 30-second live-operator cache so the fresh data is visible immediately. A helper (`_platformIsGooglePictureUrl`) only accepts an `https` URL on a `*.googleusercontent.com` host — that's the only host the console's CSP `img-src` will later load, so a hostile userinfo payload can't persist an arbitrary image URL. `GET /me` now returns `picture`.
+- `server/middleware/auth.js` — the live-record hydration in `platformSession` now carries `picture` onto `req.platformOperator` (the JWT-fallback path doesn't — the record is the source of truth, and hydration is what runs in practice).
+- `platform.html` — `pa-whoami` renders the avatar (`<img>`, lazy, `referrerpolicy="no-referrer"`) when the operator has a picture, plus the name + role chip. The "Sign in with Google" button's inline SVG was also corrected — the old path data (drawn for a 48×48 box with the deprecated 2013-era Material palette) rendered a malformed G; it now uses the official Google "G" logo path data (24×24 viewBox, official brand colors `#4285F4` / `#34A853` / `#FBBC05` / `#EA4335`).
+- `css/platform.css` — `.pa-whoami-avatar` (34px circle) + `.pa-whoami-text` wrap styles.
+- `server/index.js` — the `/platform` route's CSP override gains `img-src … https://*.googleusercontent.com` (Google-hosted avatars are third-party; the wildcard covers the `lh<n>` subdomain Google rotates between).
+
+**Tested:** `platform-google.test.js` now 23 tests (was 19) — added: matching login persists name + Google-hosted picture; non-Google-hosted picture is dropped (name still saved); non-https picture dropped; unknown Google email writes nothing; and the minted session's `/me` exposes the picture. `fetch` remains stubbed; no real Google round-trip in CI.
+
+**To enable:** nothing new — same `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` as v5.206.0. The avatar simply appears the first time an operator signs in with a Google account that has a profile picture.
+
+---
+
 ## [v5.206.0] - 2026-10-22 - feat(platform): Google sign-in for the platform console
 
 **What changed:** the platform console (`/platform`) now supports Google OAuth sign-in alongside the existing email/password login. An operator whose Google profile email matches a `platform_operators` row (case-insensitive) signs in; an unknown email is rejected (no auto-provisioning — a platform account is still a deliberate invite). Reuses the school-side `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` OAuth client; the Google client's authorized redirect URIs need `<PUBLIC_URL>/api/platform/auth/google/callback`.

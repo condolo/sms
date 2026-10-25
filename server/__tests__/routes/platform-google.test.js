@@ -88,9 +88,11 @@ function buildApp() {
 
 /* ── fetch stub ──────────────────────────────────────────────
    token endpoint → { access_token }
-   userinfo endpoint → { email }
+   userinfo endpoint → { email, name, picture }
    Flip googleEmail to null to simulate a profile with no email. */
 let googleEmail = 'owner@msingi.io';
+let googleName  = 'Ollie Owner';
+let googlePicture = 'https://lh3.googleusercontent.com/a/ACg8aHtestowner';
 let googleFetchFail = false;
 function mockFetch(url) {
   if (googleFetchFail) return Promise.resolve({ json: () => Promise.reject(new Error('network down')) });
@@ -98,7 +100,10 @@ function mockFetch(url) {
     return Promise.resolve({ json: () => Promise.resolve({ access_token: 'g-access-token', id_token: 'g-id-token' }) });
   }
   if (String(url).includes('googleapis.com/oauth2/v3/userinfo')) {
-    return Promise.resolve({ json: () => Promise.resolve(googleEmail ? { email: googleEmail } : { name: 'No Email' }) });
+    const profile = {};
+    if (googleEmail) { profile.email = googleEmail; profile.name = googleName; profile.picture = googlePicture; }
+    else profile.name = 'No Email';
+    return Promise.resolve({ json: () => Promise.resolve(profile) });
   }
   return Promise.resolve({ json: () => Promise.resolve({}) });
 }
@@ -117,6 +122,8 @@ beforeEach(() => {
   jest.clearAllMocks();
   global.fetch.mockImplementation(mockFetch);
   googleEmail = 'owner@msingi.io';
+  googleName  = 'Ollie Owner';
+  googlePicture = 'https://lh3.googleusercontent.com/a/ACg8aHtestowner';
   googleFetchFail = false;
   mockOperators = [
     { id: 'op_owner', name: 'Ollie Owner', email: 'owner@msingi.io', tier: 'owner', template: 'owner', isActive: true, status: 'active' },
@@ -217,6 +224,51 @@ describe('GET /auth/google/callback — Google round-trip', () => {
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('https://app.msingi.io/platform?error=google_failed');
   });
+
+  /* Profile picture / name capture: on a matching login the operator's
+     `name` and Google-hosted `picture` are persisted; non-Google-hosted
+     pictures are dropped; an unknown email writes nothing at all. */
+  test('matching login persists the operator name + Google-hosted picture', async () => {
+    googleName = 'Ollie the Owner';
+    googlePicture = 'https://lh3.googleusercontent.com/a/newavatar/owner';
+    const res = await supertest(buildApp()).get('/api/platform/auth/google/callback?code=g-auth-code');
+    expect(res.status).toBe(302);
+    const op = mockOperators.find(o => o.id === 'op_owner');
+    expect(op.name).toBe('Ollie the Owner');
+    expect(op.picture).toBe('https://lh3.googleusercontent.com/a/newavatar/owner');
+    expect(typeof op.lastLoginAt).toBe('string');
+  });
+
+  test('a non-Google-hosted picture URL is dropped (name still saved)', async () => {
+    googleName = 'Ollie the Owner';
+    googlePicture = 'https://example.com/avatar.png'; // not googleusercontent.com
+    const res = await supertest(buildApp()).get('/api/platform/auth/google/callback?code=g-auth-code');
+    expect(res.status).toBe(302);
+    const op = mockOperators.find(o => o.id === 'op_owner');
+    expect(op.name).toBe('Ollie the Owner');
+    expect(op.picture).toBeUndefined();
+  });
+
+  test('a http:// (non-https) picture URL is dropped', async () => {
+    googlePicture = 'http://lh3.googleusercontent.com/a/x';
+    const res = await supertest(buildApp()).get('/api/platform/auth/google/callback?code=g-auth-code');
+    expect(res.status).toBe(302);
+    const op = mockOperators.find(o => o.id === 'op_owner');
+    expect(op.picture).toBeUndefined();
+  });
+
+  test('unknown Google email → no name/picture write at all (strict)', async () => {
+    googleEmail = 'stranger@gmail.com';
+    googleName = 'Stranger';
+    googlePicture = 'https://lh3.googleusercontent.com/a/newavatar/stranger';
+    const res = await supertest(buildApp()).get('/api/platform/auth/google/callback?code=g-auth-code');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('https://app.msingi.io/platform?error=not_an_operator');
+    // The owner's record is untouched — no auto-provisioning of name/picture.
+    const owner = mockOperators.find(o => o.id === 'op_owner');
+    expect(owner.name).toBe('Ollie Owner');
+    expect(owner.picture).toBeUndefined();
+  });
 });
 
 /* ══════════════════════════════════════════════════════════════ */
@@ -263,6 +315,8 @@ describe('POST /auth/google/exchange — code → platform_token', () => {
       .set('Cookie', tokenCookie.split(';')[0]);
     expect(me.status).toBe(200);
     expect(me.body.operator.email).toBe('owner@msingi.io');
+    // The Google picture persisted by the callback is exposed via /me.
+    expect(me.body.operator.picture).toBe('https://lh3.googleusercontent.com/a/ACg8aHtestowner');
   });
 
   test('a code is single-use — the second exchange 410s', async () => {

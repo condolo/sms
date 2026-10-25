@@ -410,6 +410,17 @@ body {
 }
 .pa-whoami strong { display: block; color: #f4f6fb; font-weight: 600; font-size: 12.5px; }
 
+/* Google profile picture (when the operator has signed in with Google) */
+.pa-whoami-avatar {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,.14);
+  object-fit: cover;
+}
+.pa-whoami-text { min-width: 0; overflow: hidden; }
+
 .pa-role-chip {
   display: inline-block;
   margin-top: 3px;

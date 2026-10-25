@@ -237,6 +237,18 @@ function _platformIssueGoogleCode(token) {
 function _platformPublicBase() {
   return (process.env.PUBLIC_URL || RAW_APP_URL || APP_URL).replace(/\/+$/, '');
 }
+/* True only for Google-hosted profile pictures (lh3/lh4 etc. on
+   googleusercontent.com). Keeps a hostile or unexpected userinfo payload
+   from persisting an arbitrary <img src> that the console would then load
+   cross-origin on every render. */
+function _platformIsGooglePictureUrl(url) {
+  if (typeof url !== 'string' || !url) return false;
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'https:' || u.username || u.password) return false;
+    return /(^|\.)googleusercontent\.com$/i.test(u.hostname);
+  } catch { return false; }
+}
 
 /* GET /api/platform/auth/google — PUBLIC (must precede the
    router.use(platformSession) gate below). Redirects to Google. */
@@ -290,7 +302,7 @@ router.get('/auth/google/callback', async (req, res) => {
       headers: { Authorization: `Bearer ${tokens.access_token}` },
     });
     const profile = await profileRes.json();
-    const { email } = profile;
+    const { email, name, picture } = profile;
     if (!email) throw new Error('No email in Google profile');
 
     /* Match by email (case-insensitive, same convention as the password
@@ -316,7 +328,21 @@ router.get('/auth/google/callback', async (req, res) => {
       { expiresIn: '2h' },
     );
     const xCode = _platformIssueGoogleCode(token);
-    await Operators.updateOne({ id: operator.id }, { $set: { lastLoginAt: new Date().toISOString() } });
+
+    /* Keep the operator's display name + avatar in sync with the Google
+       profile — the "profile" scope already returns both (see the
+       /auth/google scope list above), and Google is the source of truth
+       for its own users. Only the Google-hosted avatar (an
+       *\.googleusercontent.com URL) is stored: an arbitrary URL persisted
+       from here would be loaded cross-origin by the console on every
+       /platform render, so a non-Google host is dropped rather than
+       rendered (the CSP img-src whitelist in server/index.js agrees). */
+    const now = new Date().toISOString();
+    const $set = { lastLoginAt: now };
+    if (typeof name === 'string' && name.trim()) $set.name = name.trim();
+    if (_platformIsGooglePictureUrl(picture)) $set.picture = picture;
+    await Operators.updateOne({ id: operator.id }, { $set });
+    invalidateOperatorCache(operator.id); // the 30s live cache would hide this
 
     AuditService.log({
       action: 'platform.login.success',
@@ -500,6 +526,7 @@ router.get('/me', (req, res) => {
           email: req.platformOperator.email,
           tier: req.platformOperator.tier,
           template: req.platformOperator.template || null,
+          picture: req.platformOperator.picture || null,
           // Human-readable role name for the console ("Support agent", not
           // the raw template key "support_agent").
           templateLabel: TEMPLATES[req.platformOperator.template]?.label
