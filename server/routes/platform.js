@@ -354,7 +354,10 @@ router.get('/auth/google/callback', async (req, res) => {
     });
     res.redirect(`${base}/platform?code=${xCode}`);
   } catch (err) {
-    console.error('[platform/google/callback]', err);
+    /* err.message only — the full error object (or its stack) can carry
+       an access token / profile email pulled from Google's userinfo, which
+       a prod log stream would retain long after this request is over. */
+    console.error('[platform/google/callback]', err.message);
     res.redirect(`${base}/platform?error=google_failed`);
   }
 });
@@ -363,8 +366,19 @@ router.get('/auth/google/callback', async (req, res) => {
    with the single-use code from the callback redirect; it mints the
    platform_token + CSRF cookies exactly like the password login does, so
    the rest of the console (CSRF double-submit, capability gating) works
-   unchanged. */
-router.post('/auth/google/exchange', async (req, res) => {
+   unchanged. Mirrors the school-side authLimiter (10/15min per IP): the
+   30s single-use code Map already defeats replay, but an unbounded POST
+   budget would let a single IP burn through fresh codes (or probe the
+   cookie shape) far faster than a human operator could click. */
+const _googleExchangeLimiter = rateLimit({
+  windowMs:        15 * 60 * 1000,
+  max:             10,
+  standardHeaders: true,
+  legacyHeaders:   false,
+  message: { success: false, error: { code: 'RATE_LIMIT', message: 'Too many sign-in attempts. Please wait 15 minutes before trying again.' } },
+});
+
+router.post('/auth/google/exchange', _googleExchangeLimiter, async (req, res) => {
   try {
     const { code } = req.body || {};
     if (!code || typeof code !== 'string') {

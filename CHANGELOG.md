@@ -18,7 +18,13 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - `css/platform.css` — `.pa-whoami-avatar` (34px circle) + `.pa-whoami-text` wrap styles.
 - `server/index.js` — the `/platform` route's CSP override gains `img-src … https://*.googleusercontent.com` (Google-hosted avatars are third-party; the wildcard covers the `lh<n>` subdomain Google rotates between).
 
-**Tested:** `platform-google.test.js` now 23 tests (was 19) — added: matching login persists name + Google-hosted picture; non-Google-hosted picture is dropped (name still saved); non-https picture dropped; unknown Google email writes nothing; and the minted session's `/me` exposes the picture. `fetch` remains stubbed; no real Google round-trip in CI.
+**Tested:** `platform-google.test.js` now 27 tests (was 19) — added: matching login persists name + Google-hosted picture; non-Google-hosted picture dropped (name still saved); non-https picture dropped; unknown Google email writes nothing; minted session's `/me` exposes the picture; **rate-limit** — the 11th request within 15 min 429s with `RATE_LIMIT` (mirrors the school-side authLimiter 10/15min); **callback catch** logs `err.message` only (not the full error object or stack, so a prod log stream can't retain an access token or profile email). `fetch` remains stubbed; no real Google round-trip in CI.
+
+**Also in this release (pre-existing gaps closed by the hardening pass):**
+
+- `POST /api/platform/auth/google/exchange` now rate-limited at 10/15min per IP — same pattern as the school-side `authLimiter`. The 30s single-use code Map already defeats replay, but an unbounded POST budget let a single IP burn through fresh codes (or probe the cookie shape) far faster than a human operator could click.
+- The callback's `catch` now logs `err.message` only (was the full `err` object). The full object, or its stack, can carry an access token / profile email pulled from Google's userinfo — a prod log stream would retain those long after the request ended.
+- `backup-cron.js`'s `BACKUP_COLLECTIONS` was never synced with the platform gap in `routes/backup.js` — `platform_operators` is now included, and its `passwordHash` + `inviteTokenHash` are stripped before the file leaves the server (same pattern the manual export already applies to `users` and `schools`).
 
 **To enable:** nothing new — same `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` as v5.206.0. The avatar simply appears the first time an operator signs in with a Google account that has a profile picture.
 

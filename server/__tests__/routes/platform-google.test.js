@@ -338,3 +338,45 @@ describe('POST /auth/google/exchange — code → platform_token', () => {
     expect(res.body.error.code).toBe('EXCHANGE_GONE');
   });
 });
+
+/* ══════════════════════════════════════════════════════════════
+   Rate limit on /auth/google/exchange (mirrors the school-side
+   authLimiter: 10 requests per 15 min per IP). */
+describe('POST /auth/google/exchange — rate limiter', () => {
+  test('the 11th request within the window 429s', async () => {
+    const app = buildApp();
+    for (let i = 0; i < 10; i++) {
+      const code = await (async () => {
+        const r = await supertest(app).get('/api/platform/auth/google/callback?code=g-auth-code');
+        return new URL(r.headers.location).searchParams.get('code');
+      })();
+      const res = await supertest(app).post('/api/platform/auth/google/exchange').send({ code });
+      expect(res.status).toBe(200); // each fresh code succeeds
+    }
+    // 11th request with a fresh, valid code — must be rate-limited.
+    const code = (await (async () => {
+      const r = await supertest(app).get('/api/platform/auth/google/callback?code=g-auth-code');
+      return new URL(r.headers.location).searchParams.get('code');
+    })());
+    const eleventh = await supertest(app).post('/api/platform/auth/google/exchange').send({ code });
+    expect(eleventh.status).toBe(429);
+    expect(eleventh.body.error.code).toBe('RATE_LIMIT');
+  });
+
+  /* The callback's catch block logs err.message only (not the full error
+     object), so a prod log stream never retains an access token or profile
+     email pulled from Google's userinfo. */
+  test('callback failure logs err.message only (no stack, no full error object)', async () => {
+    const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    googleFetchFail = true;
+    await supertest(buildApp()).get('/api/platform/auth/google/callback?code=g-auth-code');
+    const calls = spy.mock.calls.filter(args => String(args[0]).includes('[platform/google/callback]'));
+    expect(calls.length).toBe(1);
+    const loggedArg = calls[0][1];
+    // err.message is a string like "network down" — NOT an Error instance
+    // (which would carry .stack and could include token/email).
+    expect(typeof loggedArg).toBe('string');
+    expect(loggedArg).not.toContain('at '); // no stack-trace frame
+    spy.mockRestore();
+  });
+});
