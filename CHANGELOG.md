@@ -6,6 +6,42 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.210.0] - 2026-10-25 - feat(report-cards): per-school watermark on/off + opacity
+
+Direct request, after a live watermark complaint traced to a fixed value: "the background logo for mascit is too loud and blocks... I think this is global in the system not just mascit." Confirmed: the faint school-logo watermark (`report-layouts.js`'s `_drawLogoWatermarkPdf`/`_logoWatermarkHtml`) was a hardcoded 7%-opacity, always-on-if-a-logo-exists constant for every school, with no way for a school to turn it down or off.
+
+Two new school-profile fields (`reportCardWatermarkEnabled`, default `true`; `reportCardWatermarkOpacity`, default `0.07`, bounded 0.02–0.3 server-side) — same `academic-config.js` whitelist and validation pattern `principalSignatureUrl`/`schoolStampUrl` already use. Both watermark-drawing functions now take `enabled`/`opacity` arguments (defaulting to the prior always-on/0.07 behaviour so nothing changes for a school that doesn't touch this), threaded through `_computeReportSections`/`_computeKgReportSections`'s `cover` object from a live school-profile read — all 5 render paths that fetch the school doc (`_loadRenderExtras`, `GET /bulk-pdf`, the numeric `preview-html`/`preview-pdf`, and the KG preview routes) now include the two new fields in their projections.
+
+Settings UI: a toggle + opacity slider in Report Cards → Settings → General, placed directly after Principal's Signature (same `academicConfigApi.schoolProfile` read/write path as the signature/stamp uploaders next to it) — opacity shown as a 2–30% slider rather than the raw 0.02–0.3 fraction.
+
+Tests: 23 new/updated cases (6 validation, 17 across the IR/renderer layer confirming enabled/opacity reach both the HTML `<img>` style and the PDF's `doc.opacity()` call, and that the unrelated masthead letterhead logo — which shares the same `cover.logoUrl` but is a separate draw — is never affected by the watermark toggle). Live-verified in a browser: the new control renders in the correct position with the correct default values against the demo school.
+
+## [v5.209.2] - 2026-10-24 - fix(report-cards): blank Class field and ignored photo toggle on published PDFs
+
+Two live bugs reported together from a real published MLA report (Ryan Nyaga, Year 10): Class showed "—" while Stream correctly showed "10A", and the photo box still appeared with "Show Student Photo" switched off.
+
+Root cause 1: MLA's "Year 10" class predates the UUID-`id` migration — only a Mongo `_id`, no `id` field. `_resolveDisplayNames`'s class lookup only ever matched on `id`, so it silently found nothing and the published snapshot froze `className: ''` forever — confirmed directly against the live DB. Fixed with the same `$or`/ObjectId-validity guard `students.js`'s own `_entityIdForms` already uses. Not retroactive — `className` is frozen at publish time by design, so an already-published report needs republishing to pick up the fix.
+
+Root cause 2: `_drawCoverPdf`'s photo block drew its placeholder box whenever no image *buffer* was fetched — true both when the toggle is off and when a student genuinely has no photo — while the HTML renderer was already correctly gated on `cover.studentPhotoUrl` (already nulled by the toggle). The PDF now reads that same field. This one **is** retroactive — the toggle is read live on every render, never frozen.
+
+The third reported issue (this same watermark) could not be reproduced as a code bug at the time — see v5.210.0 above for the feature that resolved it instead, by giving the school direct control. Tests: 9 new/updated cases; full suite 349/349 suites, 3646/3646 tests.
+
+## [v5.209.1] - 2026-10-24 - feat(report-cards): Print and Download PDF for the Kindergarten draft preview
+
+Reported directly, with a screenshot: the KG report preview had neither button at all, unlike the ordinary numeric report card. New `POST /kg/preview-html`/`POST /kg/preview-pdf` re-run `computeKgReport` (safe here specifically because a KG report has no ranking/GPA concept to lose by re-deriving it, unlike the numeric preview routes' own reasoning for avoiding re-aggregation) and share their snap-construction with `/kg/publish`'s own shape via a new `_resolveKgPreview` helper. A published snapshot's Print/Download reuse the existing generic `GET /:id/pdf`/`GET /:id/html` unchanged. 7 new tests; live-verified in a browser against the demo school's real KG indicator data.
+
+## [v5.209.0] - 2026-10-24 - feat(indicator-marks): pre-fill a new KG class's indicators from a sibling class in its section
+
+Direct request: a school may model Kindergarten as several separate classes (KG1/KG2/KG3/Playgroup), not streams of one class — streams of one class already share `indicator_definitions` for free (classId-scoped, never streamId-scoped), but sibling classes are genuinely different classId's. New `POST /indicator-marks/definitions/copy-from-section`: pre-fill, then independent — copies a sibling class's current indicator text (same subject, same term, strictly) into brand-new, separately-owned rows, never a live-shared list, so different age groups can diverge afterward. Fires automatically from the Markbook the moment a class/subject/term's list loads genuinely empty. Verified the sibling-resolution query directly against two real schools' live data before trusting it. 9 new tests.
+
+## [v5.208.1] - 2026-10-24 - fix(exams): Kindergarten Template Save let a band with no grade reach the server
+
+Reported directly with the raw error: a competency-band template's Save let a newly-added band with an empty grade field reach the server, which correctly rejected it but with a cryptic Zod message naming an array index, not a visible row. Save is now disabled while any band (template-level or a subject's override) is missing a label or grade, with the exact empty input highlighted red.
+
+## [v5.208.0] - 2026-10-24 - feat(report-cards): direct PDF download for a draft report card before publish
+
+Until now, downloading a PDF before a report card was published meant Print → the browser's own "Save as PDF" dialog. New `POST /report-cards/preview-pdf` shares `preview-html`'s exact snap/sections construction and `GET /:id/pdf`'s exact PDFKit rendering. 5 new tests, pdfkit itself the real dependency, not mocked.
+
 ## [v5.206.1] - 2026-10-25 - feat(platform): capture Google profile picture + name on sign-in
 
 **What changed:** when an operator signs in via Google, the platform now syncs the operator's display name and Google-hosted profile picture into their `platform_operators` row, and the console renders the avatar next to the signed-in identity block. The Google OAuth `profile` scope already returned both (`name` + `picture`); this change persists them and exposes them.

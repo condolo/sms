@@ -462,6 +462,62 @@ describe('subject_paired — faint school-logo watermark ("for every school")', 
     LAYOUTS.subject_paired.renderPdf(spy, sections, {}, true);
     expect(calls.some(c => c.method === 'image')).toBe(false);
   });
+
+  /* Per-school watermark controls (2026-10-25) — reported directly: a
+     fixed 7% opacity read as "too loud" for one school's own logo. A
+     school can now turn the whole watermark off, or pick its own
+     opacity, instead of living with one universal value. */
+  // The masthead letterhead logo (_renderCoverHtml's own <img>, full
+  // opacity) and the faint background watermark both draw from the
+  // same cover.logoUrl — these assertions target the watermark's own
+  // distinguishing position:fixed style, not the bare URL, so they
+  // can't accidentally pass just because the UNRELATED masthead logo
+  // is still (correctly) there.
+  test('reportCardWatermarkEnabled:false suppresses the HTML watermark specifically, leaving the masthead logo untouched', () => {
+    const sections = computeSections({}, {}, { school: { logoUrl: 'https://cdn.example/logo.png', reportCardWatermarkEnabled: false } });
+    const html = LAYOUTS.subject_paired.renderHtml(sections);
+    expect(html).not.toMatch(/position:fixed;top:45%[^"]*logo\.png|logo\.png"[^>]*position:fixed;top:45%/);
+    expect(html).not.toContain('z-index:998'); // the watermark <img>'s own marker
+    expect(html).toContain('logo.png'); // the masthead letterhead logo is a separate, unaffected <img>
+  });
+
+  test('reportCardWatermarkEnabled:false suppresses the PDF watermark image specifically, leaving the masthead logo draw untouched', () => {
+    const withWatermark = makeSpyDoc();
+    const sectionsOn = computeSections({}, {}, { school: { logoUrl: 'https://cdn.example/logo.png', reportCardWatermarkEnabled: true } });
+    LAYOUTS.subject_paired.renderPdf(withWatermark.spy, sectionsOn, { schoolLogo: Buffer.from('fake-image') }, true);
+    const imageCallsOn = withWatermark.calls.filter(c => c.method === 'image').length;
+
+    const withoutWatermark = makeSpyDoc();
+    const sectionsOff = computeSections({}, {}, { school: { logoUrl: 'https://cdn.example/logo.png', reportCardWatermarkEnabled: false } });
+    LAYOUTS.subject_paired.renderPdf(withoutWatermark.spy, sectionsOff, { schoolLogo: Buffer.from('fake-image') }, true);
+    const imageCallsOff = withoutWatermark.calls.filter(c => c.method === 'image').length;
+
+    // Exactly one fewer doc.image() call with the watermark off — the
+    // masthead logo (drawn separately, same buffer) still renders.
+    expect(imageCallsOff).toBe(imageCallsOn - 1);
+    expect(imageCallsOff).toBeGreaterThan(0); // masthead logo still drew
+  });
+
+  test('a custom reportCardWatermarkOpacity is reflected in the HTML style, not the hardcoded 0.07', () => {
+    const sections = computeSections({}, {}, { school: { logoUrl: 'https://cdn.example/logo.png', reportCardWatermarkOpacity: 0.2 } });
+    const html = LAYOUTS.subject_paired.renderHtml(sections);
+    expect(html).toMatch(/opacity:0\.2[^0-9]/);
+    expect(html).not.toContain('opacity:0.07');
+  });
+
+  test('a custom reportCardWatermarkOpacity is passed straight to doc.opacity() in the PDF', () => {
+    const { spy, calls } = makeSpyDoc();
+    const sections = computeSections({}, {}, { school: { logoUrl: 'https://cdn.example/logo.png', reportCardWatermarkOpacity: 0.2 } });
+    LAYOUTS.subject_paired.renderPdf(spy, sections, { schoolLogo: Buffer.from('fake-image') }, true);
+    const opacityCall = calls.find(c => c.method === 'opacity' && c.args[0] === 0.2);
+    expect(opacityCall).toBeDefined();
+  });
+
+  test('no watermark settings on the school at all falls back to enabled/0.07 — unchanged default behaviour', () => {
+    const sections = computeSections({}, {}, { school: { logoUrl: 'https://cdn.example/logo.png' } });
+    const html = LAYOUTS.subject_paired.renderHtml(sections);
+    expect(html).toMatch(/opacity:0\.07/);
+  });
 });
 
 /* ── Photo placeholder respects the "Show Student Photo" toggle

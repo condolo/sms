@@ -104,6 +104,48 @@ describe('PATCH /api/academic-config/school-profile — signature/stamp validati
     expect(res.status).toBe(400);
   });
 
+});
+
+describe('PATCH /api/academic-config/school-profile — report-card watermark (2026-10-25)', () => {
+  test('accepts enabling/disabling the watermark', async () => {
+    const res = await supertest(buildApp())
+      .patch('/api/academic-config/school-profile')
+      .send({ reportCardWatermarkEnabled: false });
+    expect(res.status).toBe(200);
+    expect(res.body.data.reportCardWatermarkEnabled).toBe(false);
+  });
+
+  test('rejects a non-boolean for reportCardWatermarkEnabled', async () => {
+    const res = await supertest(buildApp())
+      .patch('/api/academic-config/school-profile')
+      .send({ reportCardWatermarkEnabled: 'yes' });
+    expect(res.status).toBe(400);
+  });
+
+  test('accepts an opacity within bounds', async () => {
+    const res = await supertest(buildApp())
+      .patch('/api/academic-config/school-profile')
+      .send({ reportCardWatermarkOpacity: 0.15 });
+    expect(res.status).toBe(200);
+    expect(res.body.data.reportCardWatermarkOpacity).toBe(0.15);
+  });
+
+  test.each([0.01, 0.31, -0.1, 1])('rejects an out-of-bounds opacity (%s)', async (opacity) => {
+    const res = await supertest(buildApp())
+      .patch('/api/academic-config/school-profile')
+      .send({ reportCardWatermarkOpacity: opacity });
+    expect(res.status).toBe(400);
+  });
+
+  test('rejects a non-numeric opacity', async () => {
+    const res = await supertest(buildApp())
+      .patch('/api/academic-config/school-profile')
+      .send({ reportCardWatermarkOpacity: '0.1' });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('PATCH /api/academic-config/school-profile — role check', () => {
   test('a non-admin role is rejected before any validation runs', async () => {
     const app = express();
     app.use(express.json());

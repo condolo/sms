@@ -225,10 +225,19 @@ function _assessmentKeyHtml(s) {
    DRAFT text watermark above (centered, rotated, low-opacity, behind
    content), shown on every report regardless of draft/published status
    — a school's own mark on its own report, not a status indicator. No
-   logo on file is a silent no-op, never a broken-image placeholder. */
-function _logoWatermarkHtml(logoUrl) {
-  if (!logoUrl) return '';
-  return `<img src="${_esc(logoUrl)}" alt="" style="position:fixed;top:45%;left:50%;width:320px;height:320px;object-fit:contain;transform:translate(-50%,-50%);opacity:0.07;pointer-events:none;z-index:998" />`;
+   logo on file is a silent no-op, never a broken-image placeholder.
+
+   `enabled`/`opacity` (2026-10-25) — per-school controls (defaults
+   true / 0.07, matching the value this was hardcoded to before one
+   school reported its own logo reading "too loud" at that fixed
+   number): `enabled` lets a school turn the whole thing off; `opacity`
+   lets it pick its own faintness rather than live with one universal
+   value. Both arguments are optional so every existing call site
+   (and every test fixture) that doesn't pass them keeps the exact
+   prior behaviour. */
+function _logoWatermarkHtml(logoUrl, enabled = true, opacity = 0.07) {
+  if (!logoUrl || enabled === false) return '';
+  return `<img src="${_esc(logoUrl)}" alt="" style="position:fixed;top:45%;left:50%;width:320px;height:320px;object-fit:contain;transform:translate(-50%,-50%);opacity:${opacity};pointer-events:none;z-index:998" />`;
 }
 
 /** Plain-text line version of the assessment key, for PDFKit layouts. */
@@ -240,12 +249,15 @@ function _assessmentKeyText(s) {
 /* PDFKit counterpart of _logoWatermarkHtml — doc.opacity() scopes to
    fill AND image draws (unlike fillOpacity, which is text-only), so it
    has to be explicitly reset after, same save/restore discipline the
-   DRAFT text watermark above already uses for its rotation. */
-function _drawLogoWatermarkPdf(doc, images) {
-  if (!images?.schoolLogo) return;
+   DRAFT text watermark above already uses for its rotation.
+
+   `enabled`/`opacity` (2026-10-25) — same per-school controls
+   _logoWatermarkHtml takes; see that function's own comment. */
+function _drawLogoWatermarkPdf(doc, images, enabled = true, opacity = 0.07) {
+  if (!images?.schoolLogo || enabled === false) return;
   const SIZE = 260;
   doc.save();
-  doc.opacity(0.07);
+  doc.opacity(opacity);
   try {
     doc.image(images.schoolLogo, doc.page.width / 2 - SIZE / 2, doc.page.height / 2 - SIZE / 2, { fit: [SIZE, SIZE] });
   } catch { /* corrupt/unsupported buffer — same silent-skip posture as the cover logo's own fetch */ }
@@ -811,7 +823,7 @@ function _drawCoverPdf(doc, s, images) {
        .text(s.watermarkText, -200, -45, { width: 400, align: 'center' })
        .restore();
   }
-  _drawLogoWatermarkPdf(doc, images);
+  _drawLogoWatermarkPdf(doc, images, cover.watermarkEnabled, cover.watermarkOpacity);
 
   // Masthead — logo left, name/tagline/contact stacked right, left-
   // aligned (reviewer: "the header info of cover page are found in
@@ -1336,7 +1348,7 @@ function _renderSubjectPairedHtml(s) {
   const watermarkHtml = s.watermarkText
     ? `<div style="position:fixed;top:45%;left:50%;transform:translate(-50%,-50%) rotate(-30deg);font-size:90px;font-weight:900;color:#cc0000;opacity:0.08;pointer-events:none;white-space:nowrap;z-index:999">${_esc(s.watermarkText)}</div>`
     : '';
-  const logoWatermarkHtml = _logoWatermarkHtml(s.cover.logoUrl);
+  const logoWatermarkHtml = _logoWatermarkHtml(s.cover.logoUrl, s.cover.watermarkEnabled, s.cover.watermarkOpacity);
   const coverHtml = _renderCoverHtml(s);
 
   // Reported directly: the report card "is very dull... colored table
@@ -1780,7 +1792,7 @@ function _renderMarksThenCommentsHtml(s) {
   const watermarkHtml = s.watermarkText
     ? `<div style="position:fixed;top:45%;left:50%;transform:translate(-50%,-50%) rotate(-30deg);font-size:90px;font-weight:900;color:#cc0000;opacity:0.08;pointer-events:none;white-space:nowrap;z-index:999">${_esc(s.watermarkText)}</div>`
     : '';
-  const logoWatermarkHtml = _logoWatermarkHtml(s.cover.logoUrl);
+  const logoWatermarkHtml = _logoWatermarkHtml(s.cover.logoUrl, s.cover.watermarkEnabled, s.cover.watermarkOpacity);
   const coverHtml = _renderCoverHtml(s);
 
   // Same BRAND-consistency fix as subject_paired's identical HTML gap above.
@@ -2145,7 +2157,7 @@ function _renderKindergartenHtml(s) {
   const watermarkHtml = s.watermarkText
     ? `<div style="position:fixed;top:45%;left:50%;transform:translate(-50%,-50%) rotate(-30deg);font-size:90px;font-weight:900;color:#cc0000;opacity:0.08;pointer-events:none;white-space:nowrap;z-index:999">${_esc(s.watermarkText)}</div>`
     : '';
-  const logoWatermarkHtml = _logoWatermarkHtml(s.cover.logoUrl);
+  const logoWatermarkHtml = _logoWatermarkHtml(s.cover.logoUrl, s.cover.watermarkEnabled, s.cover.watermarkOpacity);
   const coverHtml = _renderCoverHtml(s);
   const showScore = s.display.showScore, showGrade = s.display.showGrade;
 

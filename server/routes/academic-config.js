@@ -826,6 +826,17 @@ const SCHOOL_PROFILE_FIELDS = [
   // tab), which had to be retyped for every student every term. This is
   // the default; a per-report override still wins when one is typed.
   'principalName',
+  // The faint school-logo watermark (report-layouts.js's
+  // _drawLogoWatermarkPdf/_logoWatermarkHtml) was previously a fixed
+  // 7%-opacity, always-on-if-a-logo-exists constant for every school.
+  // Reported directly: one school's logo read as "too loud" at that
+  // fixed value. Rather than guess at one universal number, each
+  // school now controls both whether it shows at all and how faint it
+  // is — reportCardWatermarkEnabled defaults true (same as today's
+  // always-on behaviour) and reportCardWatermarkOpacity defaults to
+  // the same 0.07 that was previously hardcoded, so nothing changes
+  // for a school that never touches this.
+  'reportCardWatermarkEnabled', 'reportCardWatermarkOpacity',
 ];
 
 /* GET /api/academic-config/school-profile */
@@ -861,6 +872,19 @@ router.patch('/school-profile', authMiddleware, async (req, res) => { // rbac: a
       const em = req.body.systemEmail;
       if (em && !/^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(em)) {
         return E.badRequest(res, 'Invalid systemEmail address');
+      }
+    }
+
+    if (req.body.reportCardWatermarkEnabled !== undefined && typeof req.body.reportCardWatermarkEnabled !== 'boolean') {
+      return E.badRequest(res, 'reportCardWatermarkEnabled must be true or false.');
+    }
+    // Bounded well short of fully opaque (1.0) — this is a background
+    // watermark, never meant to compete with the report's own text,
+    // and a value at or near 1.0 would make the page unreadable.
+    if (req.body.reportCardWatermarkOpacity !== undefined) {
+      const op = req.body.reportCardWatermarkOpacity;
+      if (typeof op !== 'number' || !Number.isFinite(op) || op < 0.02 || op > 0.3) {
+        return E.badRequest(res, 'reportCardWatermarkOpacity must be a number between 0.02 and 0.3.');
       }
     }
 

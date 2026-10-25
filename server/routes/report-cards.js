@@ -1450,7 +1450,7 @@ async function _resolveKgPreview(req, data) {
   const { className, academicYear } = await _resolveDisplayNames(schoolId, ctx, { classId, academicYearId: scope.academicYearId, termId: scope.termId });
 
   const school = await _model('schools').findOne({ id: schoolId })
-    .select('name logoUrl tagline address phone email website country principalSignatureUrl schoolStampUrl principalName timezone showStudentPhoto')
+    .select('name logoUrl tagline address phone email website country principalSignatureUrl schoolStampUrl principalName timezone showStudentPhoto reportCardWatermarkEnabled reportCardWatermarkOpacity')
     .lean();
 
   const config = await _loadConfig(schoolId);
@@ -2020,7 +2020,7 @@ router.get('/bulk-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), s
     // Resolved AFTER the zero-match 404 check above — no point paying
     // for these queries on a request that's about to 404 anyway.
     const [bulkSchool, bulkCaConfig, bulkAssignments, bulkSubjectDocs] = await Promise.all([
-      _model('schools').findOne({ id: schoolId }, { name: 1, logoUrl: 1, tagline: 1, address: 1, phone: 1, email: 1, website: 1, country: 1, principalSignatureUrl: 1, schoolStampUrl: 1, principalName: 1, timezone: 1 }).lean().catch(() => null),
+      _model('schools').findOne({ id: schoolId }, { name: 1, logoUrl: 1, tagline: 1, address: 1, phone: 1, email: 1, website: 1, country: 1, principalSignatureUrl: 1, schoolStampUrl: 1, principalName: 1, timezone: 1, reportCardWatermarkEnabled: 1, reportCardWatermarkOpacity: 1 }).lean().catch(() => null),
       _getAssessmentConfig(schoolId, req.query.academicYearId || null),
       tenantModel('teaching_assignments', tenantContext(req))
         .find({ schoolId, classId: req.query.classId }).select('subjectId teacherName').lean().catch(() => []),
@@ -2461,7 +2461,7 @@ async function _loadRenderExtras(req, schoolId, snap) {
     // predates this field being frozen at publish time (every snapshot
     // going forward carries its own, see POST /publish's "Load school
     // signature/stamp URLs for snapshotting" step).
-    _model('schools').findOne({ id: schoolId }, { name: 1, logoUrl: 1, tagline: 1, address: 1, phone: 1, email: 1, website: 1, country: 1, principalSignatureUrl: 1, schoolStampUrl: 1, principalName: 1, timezone: 1 }).lean().catch(() => null),
+    _model('schools').findOne({ id: schoolId }, { name: 1, logoUrl: 1, tagline: 1, address: 1, phone: 1, email: 1, website: 1, country: 1, principalSignatureUrl: 1, schoolStampUrl: 1, principalName: 1, timezone: 1, reportCardWatermarkEnabled: 1, reportCardWatermarkOpacity: 1 }).lean().catch(() => null),
     behaviourSummary(schoolId, snap.studentId).catch(() => null),
     snap.termNumber > 1
       ? tenantModel('report_card_snapshots', tenantContext(req)).findOne({
@@ -2793,6 +2793,12 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
       // of truth, just never threaded into `cover`.
       principalLabel:   config.principalSignatureLabel || 'Principal',
       studentPhotoUrl:  config.showStudentPhoto !== false ? (snap.studentPhotoUrl || null) : null,
+      // Per-school faint-logo watermark controls (2026-10-25) — resolved
+      // live from the school's own profile, same non-frozen posture as
+      // logoUrl/tagline above. Defaults preserve the previous always-on,
+      // 7%-opacity behaviour for a school that never touches this.
+      watermarkEnabled: school?.reportCardWatermarkEnabled !== false,
+      watermarkOpacity: school?.reportCardWatermarkOpacity ?? 0.07,
     },
     gradingKey: gradeBands.map((b, i) => ({
       grade:  b.grade,
@@ -2854,6 +2860,11 @@ function _computeKgReportSections(snap, config, extra = {}) {
       principalName:    resolvedPrincipalName,
       principalLabel:   config.principalSignatureLabel || 'Principal',
       studentPhotoUrl:  config.showStudentPhoto !== false ? (snap.studentPhotoUrl || null) : null,
+      // Per-school faint-logo watermark controls (2026-10-25) — see the
+      // numeric _computeReportSections' identical fields for the full
+      // reasoning; same school-profile source, same defaults.
+      watermarkEnabled: school?.reportCardWatermarkEnabled !== false,
+      watermarkOpacity: school?.reportCardWatermarkOpacity ?? 0.07,
     },
     templateName: snap.templateName || '',
     display: {
@@ -3318,7 +3329,7 @@ router.post('/preview-html', authMiddleware, PLAN, MODGATE, rbac('grades', 'read
     // mistake the published PDF/HTML routes don't make. Extended this
     // existing live lookup to the same full field set those use rather
     // than adding a second, separate one.
-    const signOffDoc = await _model('schools').findOne({ id: schoolId }, { principalSignatureUrl: 1, schoolStampUrl: 1, principalName: 1, timezone: 1, address: 1, tagline: 1, email: 1, phone: 1, website: 1, country: 1 }).lean().catch(() => null);
+    const signOffDoc = await _model('schools').findOne({ id: schoolId }, { principalSignatureUrl: 1, schoolStampUrl: 1, principalName: 1, timezone: 1, address: 1, tagline: 1, email: 1, phone: 1, website: 1, country: 1, reportCardWatermarkEnabled: 1, reportCardWatermarkOpacity: 1 }).lean().catch(() => null);
     const schoolWithSignOff = {
       ...school,
       principalSignatureUrl: signOffDoc?.principalSignatureUrl || null,
@@ -3331,6 +3342,12 @@ router.post('/preview-html', authMiddleware, PLAN, MODGATE, rbac('grades', 'read
       phone:                  signOffDoc?.phone    || school?.phone    || '',
       website:                signOffDoc?.website  || school?.website  || '',
       country:                signOffDoc?.country  || '',
+      // Same per-school watermark controls every other render path uses
+      // (see cover.watermarkEnabled/Opacity in _computeReportSections) —
+      // the client's own cached `school` session object never carries
+      // these, same reasoning as principalSignatureUrl above.
+      reportCardWatermarkEnabled: signOffDoc?.reportCardWatermarkEnabled !== false,
+      reportCardWatermarkOpacity: signOffDoc?.reportCardWatermarkOpacity ?? 0.07,
     };
 
     // Same reasoning as the config fix above — subjectTeacherCommentsEnabled
@@ -3438,7 +3455,7 @@ router.post('/preview-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'
       if (!subjectTeacherNames[a.subjectId]) subjectTeacherNames[a.subjectId] = a.teacherName || '';
     }
 
-    const signOffDoc = await _model('schools').findOne({ id: schoolId }, { principalSignatureUrl: 1, schoolStampUrl: 1, principalName: 1, timezone: 1, address: 1, tagline: 1, email: 1, phone: 1, website: 1, country: 1 }).lean().catch(() => null);
+    const signOffDoc = await _model('schools').findOne({ id: schoolId }, { principalSignatureUrl: 1, schoolStampUrl: 1, principalName: 1, timezone: 1, address: 1, tagline: 1, email: 1, phone: 1, website: 1, country: 1, reportCardWatermarkEnabled: 1, reportCardWatermarkOpacity: 1 }).lean().catch(() => null);
     const schoolWithSignOff = {
       ...school,
       principalSignatureUrl: signOffDoc?.principalSignatureUrl || null,
@@ -3451,6 +3468,12 @@ router.post('/preview-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'
       phone:                  signOffDoc?.phone    || school?.phone    || '',
       website:                signOffDoc?.website  || school?.website  || '',
       country:                signOffDoc?.country  || '',
+      // Same per-school watermark controls every other render path uses
+      // (see cover.watermarkEnabled/Opacity in _computeReportSections) —
+      // the client's own cached `school` session object never carries
+      // these, same reasoning as principalSignatureUrl above.
+      reportCardWatermarkEnabled: signOffDoc?.reportCardWatermarkEnabled !== false,
+      reportCardWatermarkOpacity: signOffDoc?.reportCardWatermarkOpacity ?? 0.07,
     };
 
     const subjectTeacherCommentsLive = (await _getAssessmentConfig(schoolId, null).catch(() => null))?.subjectTeacherCommentsEnabled;

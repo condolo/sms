@@ -307,6 +307,9 @@ function SignatureBrandingSection() {
   const [stampUploading, setStampUploading] = useState(false);
   const [nameDraft, setNameDraft] = useState(null); // null = not yet edited this session
   const [savingName, setSavingName] = useState(false);
+  const [watermarkToggling, setWatermarkToggling] = useState(false);
+  const [opacityDraft, setOpacityDraft] = useState(null); // null = not yet edited this session; otherwise a percentage string
+  const [savingOpacity, setSavingOpacity] = useState(false);
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['academic-config', 'school-profile'],
@@ -326,6 +329,46 @@ function SignatureBrandingSection() {
       setToast({ msg: err?.message ?? 'Failed to save.', type: 'error' });
     } finally {
       setSavingName(false);
+    }
+  }
+
+  // Watermark enabled defaults true (same as the hardcoded always-on
+  // behaviour before this setting existed), opacity defaults 0.07 (7%)
+  // — the same value it was fixed at. Stored server-side as a 0.02–0.3
+  // fraction; shown here as a whole-number percentage, friendlier to
+  // type than "0.07".
+  const watermarkEnabled = profile.reportCardWatermarkEnabled !== false;
+  const watermarkOpacityPct = Math.round((profile.reportCardWatermarkOpacity ?? 0.07) * 100);
+
+  async function toggleWatermark() {
+    setWatermarkToggling(true);
+    try {
+      await academicConfigApi.schoolProfile.update({ reportCardWatermarkEnabled: !watermarkEnabled });
+      qc.invalidateQueries({ queryKey: ['academic-config', 'school-profile'] });
+      setToast({ msg: 'Saved.', type: 'success' });
+    } catch (err) {
+      setToast({ msg: err?.message ?? 'Failed to save.', type: 'error' });
+    } finally {
+      setWatermarkToggling(false);
+    }
+  }
+
+  async function saveWatermarkOpacity() {
+    const pct = Number(opacityDraft);
+    if (!Number.isFinite(pct) || pct < 2 || pct > 30) {
+      setToast({ msg: 'Opacity must be between 2% and 30%.', type: 'error' });
+      return;
+    }
+    setSavingOpacity(true);
+    try {
+      await academicConfigApi.schoolProfile.update({ reportCardWatermarkOpacity: pct / 100 });
+      qc.invalidateQueries({ queryKey: ['academic-config', 'school-profile'] });
+      setOpacityDraft(null);
+      setToast({ msg: 'Saved.', type: 'success' });
+    } catch (err) {
+      setToast({ msg: err?.message ?? 'Failed to save.', type: 'error' });
+    } finally {
+      setSavingOpacity(false);
     }
   }
 
@@ -405,6 +448,44 @@ function SignatureBrandingSection() {
         square={false}
         resize={{ maxW: 500, maxH: 200, format: 'png' }}
       />
+
+      {/* Faint school-logo watermark (2026-10-25) — reported directly:
+          the fixed 7%-opacity watermark read as "too loud" for one
+          school's own logo. Every school now decides for itself whether
+          it shows at all, and how faint, instead of one universal value. */}
+      <div className="border-t border-slate-100 pt-4">
+        <ToggleRow
+          label="Faint logo watermark on report cards"
+          description="A faint, centered copy of the school logo shown behind every report card's content — on by default. Turn off if your logo makes the page hard to read even at its lowest opacity."
+          checked={watermarkEnabled}
+          onToggle={toggleWatermark}
+        />
+        {watermarkToggling && <p className="text-[11px] text-slate-400 mt-1">Saving…</p>}
+
+        {watermarkEnabled && (
+          <div className="mt-3">
+            <label className="block text-xs font-medium text-slate-600 mb-1">Watermark opacity</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="range" min={2} max={30} step={1}
+                value={opacityDraft ?? watermarkOpacityPct}
+                onChange={e => setOpacityDraft(e.target.value)}
+                className="flex-1"
+              />
+              <span className="text-xs font-mono text-slate-600 w-10 text-right">{opacityDraft ?? watermarkOpacityPct}%</span>
+              <button
+                onClick={saveWatermarkOpacity}
+                disabled={savingOpacity || opacityDraft === null || Number(opacityDraft) === watermarkOpacityPct}
+                className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition shrink-0"
+              >
+                {savingOpacity ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                Save
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-1">2% is barely visible; 30% starts competing with the report's own text. The default (7%) suits most logos.</p>
+          </div>
+        )}
+      </div>
 
       <div className="border-t border-slate-100 pt-4">
         <AssetUploader
