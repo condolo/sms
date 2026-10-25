@@ -2,6 +2,10 @@
 
 These guides are practical operating references for setting up, using, updating, and checking the modules in the Msingi school application. They are based on the current UI, server routes, module registry, existing user/admin manuals, and relevant changelog entries. They are intended to help school administrators and staff follow supported UI workflows; they are not a substitute for deployment or code-change instructions in the Developer Guide.
 
+For a first-time teacher's end-to-end onboarding and daily workflow, see the [Teacher Step-by-Step Guide](../TEACHER_GUIDE.md). Kindergarten teachers using competency-indicator assessment should also use the [Kindergarten Teacher Guide](../KINDERGARTEN_TEACHER_GUIDE.md).
+
+Detailed role guides are also available for [Students](../STUDENT_GUIDE.md), [Behaviour and Pastoral Officers](../BEHAVIOUR_OFFICER_GUIDE.md), [Medical Centre staff](../MEDICAL_CENTRE_GUIDE.md), [Transport Managers](../TRANSPORT_MANAGER_GUIDE.md), [Hostel Managers](../HOSTEL_MANAGER_GUIDE.md), [eLearning users](../ELEARNING_GUIDE.md), [School Leadership](../SCHOOL_LEADERSHIP_GUIDE.md), [Inventory and Library Managers](../INVENTORY_LIBRARY_MANAGER_GUIDE.md), and the specialist roles listed in the module index below.
+
 The guides describe the normal UI path. Role permissions, plan entitlements, school configuration, and assigned-record scope can hide actions or narrow the records a user sees. No single user necessarily has access to every task. Never bypass a missing permission by editing the database or using generic data tools.
 
 ## How to use this folder
@@ -18,29 +22,29 @@ The registry has 29 permission modules. Some are embedded in another screen: **E
 
 | Module | Guide | Main screen / entry point |
 |---|---|---|
-| Students | [students.md](students.md) | Students |
+| Students | [students.md](students.md) · [Student Guide](../STUDENT_GUIDE.md) | Students |
 | Teachers | [teachers.md](teachers.md) | Teachers; HR for employment records |
 | Classes & Streams | [classes.md](classes.md) | Classes |
 | Attendance | [attendance.md](attendance.md) | Attendance |
 | Timetable | [timetable.md](timetable.md) | Timetable; see the [Timetabler Guide](../TIMETABLER_GUIDE.md) |
 | Subjects | [subjects.md](subjects.md) | Subjects |
 | Lessons | [lessons.md](lessons.md) | Lessons |
-| Grades & Marks | [grades.md](grades.md) | Exams / Grades |
-| Exams | [exams.md](exams.md) | Exams tab; see the [Exams Officer Guide](../EXAMS_OFFICER_GUIDE.md) |
+| Grades & Marks | [grades.md](grades.md) · [Kindergarten Teacher Guide](../KINDERGARTEN_TEACHER_GUIDE.md) | Exams / Grades |
+| Exams | [exams.md](exams.md) · [Exams Office Guide](../EXAMS_OFFICER_GUIDE.md) | Exams tab |
 | Assessment Scheduling | [assessment.md](assessment.md) | Exams → Configuration / Reminders |
 | Report Card Settings | [report-cards.md](report-cards.md) | Report Cards |
-| eLearning | [elearning.md](elearning.md) | eLearning |
-| Admissions | [admissions.md](admissions.md) | Admissions; see the [Admissions Guide](../ADMISSIONS_GUIDE.md) |
-| Behaviour | [behaviour.md](behaviour.md) | Behaviour |
+| eLearning | [elearning.md](elearning.md) · [eLearning Guide](../ELEARNING_GUIDE.md) | eLearning |
+| Admissions and Front Office | [admissions.md](admissions.md) · [Admissions and Front Office Guide](../ADMISSIONS_GUIDE.md) | Admissions; reception/enquiry intake follows the school's approved front-office process |
+| Behaviour | [behaviour.md](behaviour.md) · [Behaviour Officer Guide](../BEHAVIOUR_OFFICER_GUIDE.md) | Behaviour |
 | Finance | [finance.md](finance.md) | Finance; see the [Finance Guide](../FINANCE_GUIDE.md) |
 | Messages | [messages.md](messages.md) | Messages |
 | Events & Calendar | [events.md](events.md) | Events |
 | HR & Payroll | [hr.md](hr.md) | HR; see the [HR Guide](../HR_GUIDE.md) |
 | Resources | [resources.md](resources.md) | Resources |
 | Library | [library.md](library.md) | Library |
-| Transport | [transport.md](transport.md) | Transport |
-| Hostel | [hostel.md](hostel.md) | Hostel |
-| Medical Centre | [medical.md](medical.md) | Medical |
+| Transport | [transport.md](transport.md) · [Transport Manager Guide](../TRANSPORT_MANAGER_GUIDE.md) | Transport |
+| Hostel | [hostel.md](hostel.md) · [Hostel Manager Guide](../HOSTEL_MANAGER_GUIDE.md) | Hostel |
+| Medical Centre | [medical.md](medical.md) · [Medical Centre Guide](../MEDICAL_CENTRE_GUIDE.md) | Medical |
 | Inventory | [inventory.md](inventory.md) | Inventory |
 | Growth Profile | [growth-profile.md](growth-profile.md) | Growth Profile |
 | Weekly Student Snapshot | [weekly-snapshot.md](weekly-snapshot.md) | Weekly Snapshot |
@@ -60,4 +64,4 @@ Each module guide aims to answer: where to go; what must exist first; how to per
 
 The current permission catalog is `server/config/moduleRegistry.js`. Screen flows live in `client/src/pages/`; API behavior and authorization are implemented in `server/routes/` and `server/middleware/`. Each guide lists primary source files and relevant maintained manuals. The top of `CHANGELOG.md` contains the latest changes; entries there may supersede older instructions in long-form manuals. When a screen, permission, setting, or data lifecycle changes, update its module guide and this index in the same change. Recheck links and procedures against the application before publishing the docs.
 
-**Reviewed:** 2026-09-28 against repository docs, module registry, current UI/routes, and recent changelog entries (through v5.145.0). This is a repository-based guide set, not a live production configuration audit.
+**Index review:** 2026-10-16. The index and guidance on how to maintain this folder were checked against the current guide set and `CHANGELOG.md` through v5.194.0. Individual module guides are not all fully re-audited by this index review; follow each guide's source/recent-change notes and check newer changelog entries before acting. This is a repository-based reference, not a live production configuration audit.

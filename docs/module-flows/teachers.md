@@ -19,4 +19,6 @@ Create or import the teacher record and verify the directory entry before linkin
 
 **Access:** Teacher directory permissions govern the record. Login creation, role assignment, and password reset require user-management authority. Functional responsibilities and account roles are different concepts.
 
-**Sources:** `client/src/pages/teachers/TeacherList.jsx`; `server/routes/teachers.js`, `settings.js`, `users.js`; [HR Guide](../HR_GUIDE.md#2-staff-records).; [CHANGELOG.md](../../CHANGELOG.md)
+**Sources:** `client/src/pages/teachers/TeacherList.jsx`; `server/routes/teachers.js`, `settings.js`, `users.js`; [HR Guide](../HR_GUIDE.md#2-staff-records); [CHANGELOG.md](../../CHANGELOG.md).
+
+**Recent change notes:** always check [CHANGELOG.md](../../CHANGELOG.md) before editing teacher records or assignment guidance. v5.158.0–v5.159.0 aligned teacher edit and teaching-assignment UI/API permissions; v5.192.0 fixed teacher profile edits that silently required email and gender to be resubmitted. HR Staff Type and RBAC role are distinct; see the HR Guide and v5.162.0.

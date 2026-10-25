@@ -40,7 +40,7 @@
    lock below — a class's whole CA window being locked is a different
    concern from this one subject's marks being under review.
    ============================================================ */
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { X, Save, Loader2, CheckCircle2, AlertTriangle, Lock, ChevronRight, Plus, Pencil, Trash2, ListChecks } from 'lucide-react';
@@ -73,6 +73,13 @@ function effectiveBands(template, templateSubject) {
   return templateSubject?.performanceBands?.length ? templateSubject.performanceBands : (template?.performanceBands ?? []);
 }
 
+/* Band-only scoring (2026-10-23) — a subject's own override wins over
+   the template's default, same convention as the bands themselves.
+   Mirrors server/utils/rc-template-scale.js's isBandOnlySubject. */
+function isBandOnly(template, templateSubject) {
+  return templateSubject?.bandOnlyScoring ?? !!template?.bandOnlyScoring;
+}
+
 /* ── Toast ───────────────────────────────────────────────────── */
 function Toast({ msg, type, onDismiss }) {
   const isErr = type === 'error';
@@ -92,7 +99,7 @@ function Toast({ msg, type, onDismiss }) {
 
 /* ── Per-student slide-over ─────────────────────────────────── */
 function StudentIndicatorSlideOver({
-  student, indicators, bands, existingMarks,
+  student, indicators, bands, bandOnly, existingMarks,
   classId, subjectId, streamId, templateId, termNumber, academicYearId,
   onClose, onSaved, onError,
 }) {
@@ -111,9 +118,12 @@ function StudentIndicatorSlideOver({
       ...r,
       [indicatorId]: {
         bandId,
-        // Prefill from the band's default — never overwrites a score the
-        // teacher already typed for this indicator.
-        score: r[indicatorId].score === '' ? (band?.defaultScore ?? '') : r[indicatorId].score,
+        // Band-only: the number isn't a teacher-editable value at all
+        // any more — always exactly the picked band's own points, the
+        // server re-derives it independently anyway and never trusts
+        // whatever's sent here. Numeric mode: unchanged, prefill only,
+        // never overwrites a score the teacher already typed.
+        score: bandOnly ? (band?.defaultScore ?? '') : (r[indicatorId].score === '' ? (band?.defaultScore ?? '') : r[indicatorId].score),
       },
     }));
   }
@@ -124,13 +134,15 @@ function StudentIndicatorSlideOver({
   const { mutate: save, isPending: saving } = useMutation({
     mutationFn: () => {
       const marks = indicators
-        .filter(ind => rows[ind.id].score !== '' && rows[ind.id].score !== null)
+        .filter(ind => bandOnly ? rows[ind.id].bandId !== '' : (rows[ind.id].score !== '' && rows[ind.id].score !== null))
         .map(ind => ({
           studentId: student.id ?? student._id,
           classId, subjectId, templateId,
           indicatorId: ind.id,
           bandId: rows[ind.id].bandId || null,
-          score: Number(rows[ind.id].score),
+          // Band-only: no score sent at all — the server resolves it
+          // from the band. Numeric mode: unchanged.
+          ...(bandOnly ? {} : { score: Number(rows[ind.id].score) }),
           termNumber, academicYearId: academicYearId || undefined,
         }));
       if (marks.length === 0) return Promise.resolve({ data: { saved: 0 } });
@@ -173,21 +185,25 @@ function StudentIndicatorSlideOver({
                     onChange={e => pickBand(ind.id, e.target.value)}
                     className="flex-1 text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
                   >
-                    <option value="">No band</option>
+                    <option value="">{bandOnly ? 'Select a band…' : 'No band'}</option>
                     {bands.map(b => (
                       <option key={b.id} value={b.id}>{b.label} ({b.grade})</option>
                     ))}
                   </select>
-                  <div className="relative shrink-0">
-                    <input
-                      type="number" min="0" max={ind.maxScore} step="0.5"
-                      value={row.score}
-                      onChange={e => setScore(ind.id, e.target.value)}
-                      placeholder="Score"
-                      className="w-20 text-sm text-right border border-slate-200 rounded-lg pl-2 pr-8 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
-                    />
-                    <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 text-[10px] pointer-events-none">/{ind.maxScore}</span>
-                  </div>
+                  {/* Band-only: no number box at all — the band pick
+                      above is the whole score, period. */}
+                  {!bandOnly && (
+                    <div className="relative shrink-0">
+                      <input
+                        type="number" min="0" max={ind.maxScore} step="0.5"
+                        value={row.score}
+                        onChange={e => setScore(ind.id, e.target.value)}
+                        placeholder="Score"
+                        className="w-20 text-sm text-right border border-slate-200 rounded-lg pl-2 pr-8 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+                      />
+                      <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 text-[10px] pointer-events-none">/{ind.maxScore}</span>
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -216,7 +232,7 @@ function StudentIndicatorSlideOver({
    Teacher-owned, scoped to this class+subject+term — see this file's
    own header. Deliberately lightweight compared to RCTemplatesSection's
    old admin editor: one text field, one maxScore field, inline. */
-function IndicatorDefRow({ indicator, disabled, onSave, onDelete }) {
+function IndicatorDefRow({ indicator, bandOnly, disabled, onSave, onDelete }) {
   const [editing, setEditing] = useState(false);
   const [text, setText]       = useState(indicator.text);
   const [maxScore, setMaxScore] = useState(indicator.maxScore ?? 10);
@@ -224,8 +240,8 @@ function IndicatorDefRow({ indicator, disabled, onSave, onDelete }) {
   function commit() {
     const trimmed = text.trim();
     if (!trimmed) { setText(indicator.text); setEditing(false); return; }
-    if (trimmed !== indicator.text || Number(maxScore) !== indicator.maxScore) {
-      onSave({ text: trimmed, maxScore: Number(maxScore) || 10 });
+    if (trimmed !== indicator.text || (!bandOnly && Number(maxScore) !== indicator.maxScore)) {
+      onSave(bandOnly ? { text: trimmed } : { text: trimmed, maxScore: Number(maxScore) || 10 });
     }
     setEditing(false);
   }
@@ -241,13 +257,17 @@ function IndicatorDefRow({ indicator, disabled, onSave, onDelete }) {
           onBlur={commit}
           className="flex-1 text-sm border border-indigo-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
         />
-        <input
-          type="number" min="1" max="1000" value={maxScore}
-          onChange={e => setMaxScore(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter') commit(); }}
-          onBlur={commit}
-          className="w-16 text-sm text-right border border-indigo-300 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
-        />
+        {/* Band-only: an indicator's own ceiling is meaningless — the
+            subject's band set is the only scale that matters now. */}
+        {!bandOnly && (
+          <input
+            type="number" min="1" max="1000" value={maxScore}
+            onChange={e => setMaxScore(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') commit(); }}
+            onBlur={commit}
+            className="w-16 text-sm text-right border border-indigo-300 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+          />
+        )}
       </div>
     );
   }
@@ -255,7 +275,7 @@ function IndicatorDefRow({ indicator, disabled, onSave, onDelete }) {
   return (
     <div className="flex items-center gap-2 py-1 group">
       <p className="flex-1 text-sm text-slate-700">{indicator.text}</p>
-      <span className="text-xs text-slate-400 shrink-0">/{indicator.maxScore ?? 10}</span>
+      {!bandOnly && <span className="text-xs text-slate-400 shrink-0">/{indicator.maxScore ?? 10}</span>}
       {!disabled && (
         <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition">
           <button onClick={() => setEditing(true)} className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition" title="Edit">
@@ -274,7 +294,7 @@ function IndicatorDefRow({ indicator, disabled, onSave, onDelete }) {
   );
 }
 
-function IndicatorManager({ indicators, disabled, onAdd, onSave, onDelete, adding }) {
+function IndicatorManager({ indicators, bandOnly, disabled, onAdd, onSave, onDelete, adding }) {
   const [open, setOpen] = useState(indicators.length === 0);
   const [newText, setNewText] = useState('');
   const [newMax, setNewMax]   = useState(10);
@@ -282,7 +302,7 @@ function IndicatorManager({ indicators, disabled, onAdd, onSave, onDelete, addin
   function submitAdd() {
     const trimmed = newText.trim();
     if (!trimmed) return;
-    onAdd({ text: trimmed, maxScore: Number(newMax) || 10 });
+    onAdd(bandOnly ? { text: trimmed } : { text: trimmed, maxScore: Number(newMax) || 10 });
     setNewText('');
     setNewMax(10);
   }
@@ -312,6 +332,7 @@ function IndicatorManager({ indicators, disabled, onAdd, onSave, onDelete, addin
               <IndicatorDefRow
                 key={ind.id}
                 indicator={ind}
+                bandOnly={bandOnly}
                 disabled={disabled}
                 onSave={data => onSave(ind.id, data)}
                 onDelete={() => onDelete(ind.id)}
@@ -327,13 +348,17 @@ function IndicatorManager({ indicators, disabled, onAdd, onSave, onDelete, addin
                 placeholder="e.g. Able to identify and name the five senses"
                 className="flex-1 text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
               />
-              <input
-                type="number" min="1" max="1000" value={newMax}
-                onChange={e => setNewMax(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') submitAdd(); }}
-                title="Maximum possible score"
-                className="w-16 text-sm text-right border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
-              />
+              {/* Band-only: an indicator's own ceiling is meaningless —
+                  the subject's band set is the only scale that matters. */}
+              {!bandOnly && (
+                <input
+                  type="number" min="1" max="1000" value={newMax}
+                  onChange={e => setNewMax(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') submitAdd(); }}
+                  title="Maximum possible score"
+                  className="w-16 text-sm text-right border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+                />
+              )}
               <button
                 type="button" onClick={submitAdd} disabled={adding || !newText.trim()}
                 className="flex items-center gap-1 text-xs font-medium text-white bg-slate-900 hover:bg-slate-800 disabled:opacity-50 px-3 py-1.5 rounded-lg transition shrink-0"
@@ -358,6 +383,7 @@ export default function IndicatorMarkbook({
   const [openStudentId, setOpenStudentId] = useState(null);
 
   const bands = effectiveBands(template, templateSubject);
+  const bandOnly = isBandOnly(template, templateSubject);
 
   // Indicator TEXT is teacher-managed per class+subject+term (2026-10-19)
   // — NOT read off the template any more. See this file's own header.
@@ -412,6 +438,37 @@ export default function IndicatorMarkbook({
      indicator-definitions query key so the list and every open
      slide-over stay in sync without a manual refetch call. */
   const defsQueryKey = ['indicator-definitions', { classId, subjectId, termNumber, academicYearId }];
+
+  /* ── Pre-fill a blank class/subject/term from a sibling class in the
+     same section (2026-10-24, direct request) — some schools model
+     Kindergarten as several separate classes (KG1/KG2/KG3/Playgroup),
+     not streams of one class, so a teacher opening KG2's Science got a
+     blank "Indicators for this term" even after KG1's Science was
+     already fully typed in. Fires once per class/subject/term the
+     moment the list is confirmed empty; a no-op server-side (and here)
+     when there's nothing to copy, so a genuinely first-ever indicator
+     set still shows the normal empty state untouched. ── */
+  const copyAttempted = useRef(new Set());
+  const { mutate: copyFromSection } = useMutation({
+    mutationFn: () => api.definitions.copyFromSection({ classId, subjectId, termNumber, academicYearId: academicYearId || undefined }),
+    onSuccess: (res) => {
+      if (res?.data?.copied > 0) {
+        qc.invalidateQueries({ queryKey: defsQueryKey });
+        setToast({ msg: `Pre-filled ${res.data.copied} indicator${res.data.copied === 1 ? '' : 's'} from another class in this section — edit as needed for this class.`, type: 'success' });
+      }
+    },
+    // Silent failure — this is a convenience pre-fill, not a required
+    // action; the teacher can still add indicators by hand as before.
+  });
+  useEffect(() => {
+    if (entryClosed || !classId || !subjectId || !indicatorDefsData) return;
+    if (indicators.length > 0) return;
+    const key = `${classId}|${subjectId}|${termNumber}|${academicYearId || ''}`;
+    if (copyAttempted.current.has(key)) return;
+    copyAttempted.current.add(key);
+    copyFromSection();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [classId, subjectId, termNumber, academicYearId, indicatorDefsData, indicators.length, entryClosed]);
 
   const { mutate: addIndicator, isPending: addingIndicator } = useMutation({
     mutationFn: (data) => api.definitions.create({ classId, subjectId, termNumber, academicYearId: academicYearId || undefined, ...data }),
@@ -471,6 +528,7 @@ export default function IndicatorMarkbook({
 
       <IndicatorManager
         indicators={indicators}
+        bandOnly={bandOnly}
         disabled={entryClosed}
         adding={addingIndicator}
         onAdd={addIndicator}
@@ -524,6 +582,7 @@ export default function IndicatorMarkbook({
             student={openStudent}
             indicators={indicators}
             bands={bands}
+            bandOnly={bandOnly}
             existingMarks={marksByStudent[openStudentId] ?? {}}
             classId={classId} subjectId={subjectId} streamId={streamId}
             templateId={template.id} termNumber={termNumber} academicYearId={academicYearId}

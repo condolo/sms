@@ -163,6 +163,35 @@ async function _downloadPdf(path, filename, params) {
   URL.revokeObjectURL(a.href);
 }
 
+// POST counterpart to _downloadPdf — for a PDF-generating route whose
+// input is a JSON body too large/structured for a query string (a draft
+// report card preview: student, subjects, config, etc., same payload
+// previewHtml already sends). Same school-slug header, credentials, and
+// blob-download trigger; adds the CSRF header _postFile already needs
+// for a mutating-shaped POST.
+async function _downloadPdfPost(path, filename, body) {
+  const { slug } = detectSchool();
+  const headers = { 'Content-Type': 'application/json' };
+  if (slug) headers['X-School-Slug'] = slug;
+  const csrf = _csrfToken();
+  if (csrf) headers['X-CSRF-Token'] = csrf;
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'POST', headers, credentials: 'include', body: JSON.stringify(body ?? {}),
+  });
+  if (!res.ok) {
+    const json = await res.json().catch(() => null);
+    throw new APIError('PDF_FAILED', json?.error?.message ?? 'Failed to generate PDF', res.status);
+  }
+  const blob = await res.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+}
+
 // Sends a raw file (docx binary or csv text) as the request body with its
 // real Content-Type, rather than JSON-wrapping it — matches the server's
 // own expectation (express.raw/express.text on that specific route, same
@@ -448,6 +477,7 @@ export const assessment = {
   // with a previous-term/previous-year comparison. See ReportsPage.jsx's
   // Academic tab.
   analytics:    (params)     => _get('/assessment/analytics', params),
+  analyticsPdf: (params)     => _downloadPdf('/assessment/analytics/export.pdf', `assessment-analytics-${new Date().toISOString().slice(0, 10)}.pdf`, params),
 
   // Reminders
   reminders:    (params)     => _get('/assessment/reminders', params),
@@ -765,6 +795,8 @@ export const classSubjects = {
   list:     (params)             => _get('/class-subjects', params),
   /** GET /enrollment-warnings?classId=X  (or no param for school-wide) */
   warnings: (params)             => _get('/class-subjects/enrollment-warnings', params),
+  /** GET /enrollment-analytics?classId=X  — per-class subject-enrollment coverage (Assessment Analytics' enrollment section) */
+  enrollmentAnalytics: (params)  => _get('/class-subjects/enrollment-analytics', params),
   assign:   (data)               => _post('/class-subjects', data),
   bulk:     (data)               => _post('/class-subjects/bulk', data),
   update:   (id, data)           => _put(`/class-subjects/${id}`, data),
@@ -1093,6 +1125,12 @@ export const reportCards = {
   kg: {
     generate: (data) => _post('/report-cards/kg/generate', data),
     publish:  (data) => _post('/report-cards/kg/publish', data),
+    // Print/Download for a single KG student's draft preview — the
+    // Kindergarten counterpart to previewHtml/previewPdf below. Added
+    // directly on request: KgStudentReportCard.jsx had neither button
+    // at all, unlike the ordinary numeric report card.
+    previewHtml: (data)           => _post('/report-cards/kg/preview-html', data),
+    previewPdf:  (data, filename) => _downloadPdfPost('/report-cards/kg/preview-pdf', filename ?? `kg-report-${data?.studentId ?? 'draft'}.pdf`, data),
   },
   snapshots: {
     list:   (params) => _get('/report-cards', params),
@@ -1123,6 +1161,12 @@ export const reportCards = {
   // "download" path was opening the HTML render in a new window and
   // relying on the browser's own print-to-PDF.
   pdf: (id, filename) => _downloadPdf(`/report-cards/${id}/pdf`, filename ?? `report-card-${id}.pdf`),
+  // Direct PDF download for a draft (unpublished) report card — the
+  // pre-publish twin of `pdf` above, sharing previewHtml's exact payload
+  // shape. Raised directly: before this, a draft could only be printed
+  // via the browser's own Print → Save as PDF dialog over the HTML
+  // preview, not downloaded with one click.
+  previewPdf: (data, filename) => _downloadPdfPost('/report-cards/preview-pdf', filename ?? `report-card-${data?.student?.studentId ?? 'draft'}.pdf`, data),
   // Bulk, cursor-streamed PDF for a whole class, optionally narrowed to
   // one stream (GET /bulk-pdf — also fully implemented, RBAC/scope-
   // checked, and never reachable from the UI before this). Raised
@@ -1168,6 +1212,13 @@ export const indicatorMarks = {
     create: (data)        => _post('/indicator-marks/definitions', data),
     update: (id, data)   => _put(`/indicator-marks/definitions/${id}`, data),
     remove: (id)          => _delete(`/indicator-marks/definitions/${id}`),
+    // Pre-fills a genuinely blank class/subject/term from a sibling
+    // class in the same section (e.g. KG2 from KG1's already-typed
+    // list) — a no-op (copied:0) when there's nothing to copy or the
+    // destination already has indicators of its own. See
+    // server/routes/indicator-marks.js's own header for the full
+    // "pre-filled, then independent" reasoning.
+    copyFromSection: (data) => _post('/indicator-marks/definitions/copy-from-section', data),
   },
 };
 

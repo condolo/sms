@@ -19,3 +19,5 @@ Before sending, verify recipients, class/group, and message content, especially 
 **Access:** Messages permissions govern view, send, own-message deletion, and moderation separately.
 
 **Sources:** `client/src/pages/messages/MessagesPage.jsx`; `server/routes/messages.js`; [User Guide](../USER_GUIDE.md#11-communication).; [CHANGELOG.md](../../CHANGELOG.md)
+
+**Recent change notes:** always check [CHANGELOG.md](../../CHANGELOG.md) before sending or changing audience guidance. v5.191.0 added parent-to-school messaging with recipient categories; parents must not be able to address another parent through the school messaging flow. Verify the selected recipient category and audience before sending.

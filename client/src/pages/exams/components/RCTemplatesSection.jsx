@@ -98,6 +98,10 @@ function emptyTemplate() {
     ],
     subjects: [],
     display: { showScore: true, showGrade: true, showSubjectAvg: true, showOverallAvg: true },
+    // Band-only scoring (2026-10-23, direct request): off by default — a
+    // teacher types a score as before unless a template (or a specific
+    // subject within it) opts in. See SubjectEditor's own override below.
+    bandOnlyScoring: false,
   };
 }
 
@@ -135,8 +139,23 @@ function ColorPicker({ value, onChange }) {
   );
 }
 
+/* Every band the server will accept needs a non-empty label AND grade
+   (BandSchema: `grade: z.string().min(1)...`) — reported directly: a
+   template update 422'd with a raw "performanceBands.3.grade — String
+   must contain at least 1 character(s)" after adding 2 new bands and
+   not yet typing their grade. addBand() seeds `grade: ''`, and nothing
+   client-side ever checked that before hitting Save, so the only
+   feedback was that cryptic server message, pointing at an array index
+   rather than a visible row. Used to both gate Save and highlight the
+   exact empty inputs inline. */
+function bandsIncomplete(bands) {
+  return (bands ?? []).some(b => !b.label?.trim() || !b.grade?.trim());
+}
+
 /* ── BandRow ─────────────────────────────────────────────────── */
 function BandRow({ band, onChange, onRemove }) {
+  const labelEmpty = !band.label?.trim();
+  const gradeEmpty = !band.grade?.trim();
   return (
     <div className="grid grid-cols-[1fr_72px_54px_auto_28px] gap-2 items-center py-1.5 px-2 rounded-lg bg-slate-50 border border-slate-100">
       <input
@@ -144,7 +163,10 @@ function BandRow({ band, onChange, onRemove }) {
         onChange={e => onChange({ ...band, label: e.target.value })}
         placeholder="e.g. Excellent"
         maxLength={60}
-        className="text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+        title={labelEmpty ? 'Required — every band needs a label' : undefined}
+        className={`text-sm border rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 ${
+          labelEmpty ? 'border-red-300 focus:ring-red-400/40 bg-red-50/40' : 'border-slate-200 focus:ring-indigo-400/40'
+        }`}
       />
       <div className="relative">
         <input
@@ -160,7 +182,10 @@ function BandRow({ band, onChange, onRemove }) {
         onChange={e => onChange({ ...band, grade: e.target.value.toUpperCase().slice(0, 6) })}
         placeholder="A"
         maxLength={6}
-        className="text-sm font-bold text-center border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+        title={gradeEmpty ? 'Required — every band needs a grade' : undefined}
+        className={`text-sm font-bold text-center border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 ${
+          gradeEmpty ? 'border-red-300 focus:ring-red-400/40 bg-red-50/40' : 'border-slate-200 focus:ring-indigo-400/40'
+        }`}
       />
       <ColorPicker value={band.color} onChange={color => onChange({ ...band, color })} />
       <button
@@ -175,9 +200,13 @@ function BandRow({ band, onChange, onRemove }) {
 }
 
 /* ── SubjectEditor ───────────────────────────────────────────── */
-function SubjectEditor({ subject, templateBands, subjectOptions, onChange, onRemove }) {
+function SubjectEditor({ subject, templateBands, templateBandOnly, subjectOptions, onChange, onRemove }) {
   const [expanded, setExpanded] = useState(true);
   const hasOverride = Array.isArray(subject.performanceBands);
+  // Band-only override — undefined means "inherit the template's own
+  // bandOnlyScoring," same convention as the bands override above.
+  const bandOnlyHasOverride = subject.bandOnlyScoring != null;
+  const effectiveBandOnly = bandOnlyHasOverride ? subject.bandOnlyScoring : templateBandOnly;
 
   // Linked to a real subjects-collection record (required, 2026-10) —
   // without this there is no teaching_assignments row to check, so
@@ -289,8 +318,39 @@ function SubjectEditor({ subject, templateBands, subjectOptions, onChange, onRem
                 >
                   <Plus size={10} /> Add band for this subject
                 </button>
+                {bandsIncomplete(subject.performanceBands) && (
+                  <p className="text-[11px] text-red-600">Every band needs both a label and a grade (highlighted above) before you can save.</p>
+                )}
               </div>
             )}
+          </div>
+
+          {/* Per-subject band-only override — independent of the bands
+              override above: a subject can use its own band LIST while
+              still typing scores, or use the template's bands while
+              skipping the number entirely. Starts as "inherit the
+              template"; touching it sets an explicit value for this
+              subject from then on, same as every other per-subject
+              override on this screen. */}
+          <div className="mt-3 pt-3 border-t border-slate-100">
+            <label className="flex items-center justify-between cursor-pointer group">
+              <span className="text-xs text-slate-500 group-hover:text-slate-700 transition">
+                Band-only entry for {subject.name || 'this subject'} — no number typed, just the band
+                {!bandOnlyHasOverride && <span className="ml-1 text-slate-400">(following template)</span>}
+              </span>
+              <button
+                type="button"
+                onClick={() => onChange({ ...subject, bandOnlyScoring: !effectiveBandOnly })}
+                className={`relative inline-flex h-4.5 w-8 items-center rounded-full transition-colors shrink-0 ${
+                  effectiveBandOnly ? 'bg-indigo-600' : 'bg-slate-200'
+                }`}
+                title="Toggling sets an explicit value for this subject, independent of the template from then on"
+              >
+                <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${
+                  effectiveBandOnly ? 'translate-x-4' : 'translate-x-0.5'
+                }`} />
+              </button>
+            </label>
           </div>
         </div>
       )}
@@ -492,11 +552,18 @@ function TemplateSlideOver({ initial, classes, subjectOptions, onSave, onClose, 
     setForm(f => ({ ...f, display: { ...f.display, [key]: !f.display[key] } }));
   }
 
+  // Template bands plus every subject's own override bands (if any) —
+  // the server validates both arrays the same way, so Save must gate on
+  // both, not just the template-level list.
+  const bandsAreIncomplete = bandsIncomplete(form.performanceBands)
+    || form.subjects.some(s => s.performanceBands && bandsIncomplete(s.performanceBands));
+
   /* ── Submit ── */
   function handleSubmit(e) {
     e.preventDefault();
     if (!form.name.trim())              return;
     if (form.performanceBands.length === 0) return;
+    if (bandsAreIncomplete)             return; // every band needs a label AND a grade — see bandsIncomplete()
     if (form.isDefault && !form.sectionId) return; // same guard as the server
     if (form.subjects.some(s => !s.subjectId)) return; // every subject must be linked to a real one
 
@@ -675,6 +742,17 @@ function TemplateSlideOver({ initial, classes, subjectOptions, onSave, onClose, 
               When a teacher selects a band, the default score auto-fills. Grade is the letter assigned.
             </p>
 
+            {/* Band-only scoring (2026-10-23, direct request) — off by
+                default. A subject can override this independently
+                (SubjectEditor below), same convention as its own bands. */}
+            <div className="mb-3 pb-3 border-b border-slate-100">
+              <ToggleSwitch
+                label="Band-only entry — teachers pick a band, no score is typed. The subject's grade comes from the band itself, not a numeric percentage."
+                checked={form.bandOnlyScoring}
+                onChange={v => setForm(f => ({ ...f, bandOnlyScoring: v }))}
+              />
+            </div>
+
             {/* Column headers */}
             <div className="grid grid-cols-[1fr_72px_54px_auto_28px] gap-2 px-2 mb-1">
               <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Band label</span>
@@ -697,6 +775,9 @@ function TemplateSlideOver({ initial, classes, subjectOptions, onSave, onClose, 
 
             {form.performanceBands.length === 0 && (
               <p className="text-xs text-slate-400 italic text-center py-2">At least one band is required</p>
+            )}
+            {bandsIncomplete(form.performanceBands) && (
+              <p className="text-xs text-red-600 mt-1.5">Every band needs both a label and a grade (highlighted above) before you can save.</p>
             )}
 
             <button
@@ -744,6 +825,7 @@ function TemplateSlideOver({ initial, classes, subjectOptions, onSave, onClose, 
                   key={subj._uid}
                   subject={subj}
                   templateBands={form.performanceBands}
+                  templateBandOnly={form.bandOnlyScoring}
                   subjectOptions={optionsForRow(subj.subjectId)}
                   onChange={updated => updateSubject(subj._uid, updated)}
                   onRemove={() => removeSubject(subj._uid)}
@@ -809,7 +891,7 @@ function TemplateSlideOver({ initial, classes, subjectOptions, onSave, onClose, 
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={saving || !form.name.trim() || form.performanceBands.length === 0 || (form.isDefault && !form.sectionId) || form.subjects.some(s => !s.subjectId)}
+            disabled={saving || !form.name.trim() || form.performanceBands.length === 0 || bandsAreIncomplete || (form.isDefault && !form.sectionId) || form.subjects.some(s => !s.subjectId)}
             className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-sm font-medium px-5 py-2 rounded-lg transition"
           >
             {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
@@ -845,6 +927,11 @@ function TemplateCard({ template, sectionMap, onEdit, onDelete, deleting }) {
             {template.isDefault && sectionName && (
               <span className="inline-flex items-center text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded border text-indigo-700 bg-indigo-50 border-indigo-200">
                 Default for {sectionName}
+              </span>
+            )}
+            {template.bandOnlyScoring && (
+              <span className="inline-flex items-center text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded border text-purple-700 bg-purple-50 border-purple-200">
+                Band-only
               </span>
             )}
           </div>

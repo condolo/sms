@@ -26,4 +26,4 @@ Before creating a student, search by name/admission number and review duplicates
 
 **Sources:** `client/src/pages/students/StudentList.jsx`, `StudentProfile.jsx`; `server/routes/students.js`, `import-export.js`; [School Administrator Guide](../SCHOOL_ADMIN_GUIDE.md#7-student-enrollment).
 
-**Recent change notes:** see [CHANGELOG.md](../../CHANGELOG.md), especially v5.115.0–v5.115.1 for grant-controlled student actions and v5.76.0–v5.79.0 for duplicate resolution.
+**Recent change notes:** always check [CHANGELOG.md](../../CHANGELOG.md) before changing enrollment or placement records. Recent changes include v5.176.0 (guardian-name synchronization and profile navigation), v5.190.0 (an unrelated student-profile edit can no longer silently clear an existing stream), and v5.194.0 (class/stream shown in the student overview). Earlier permission and duplicate-resolution changes include v5.115.0–v5.115.1 and v5.76.0–v5.79.0.

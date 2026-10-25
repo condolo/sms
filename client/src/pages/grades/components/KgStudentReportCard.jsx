@@ -8,7 +8,8 @@
    one component on class type.
    ============================================================ */
 import { useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
-import { CheckCircle } from 'lucide-react';
+import { CheckCircle, Printer, Download, Loader2 } from 'lucide-react';
+import { reportCards as reportCardsApi } from '@/api/client.js';
 
 // Platform audit (2026-10-18): no client-side maxLength existed here —
 // 1000 matches the server's DraftCommentBodySchema cap (report-cards.js).
@@ -37,7 +38,7 @@ function gradeColor(grade) {
 }
 
 const KgStudentReportCard = forwardRef(function KgStudentReportCard({
-  student, className, termNum, academicYear,
+  student, classId, academicYearId, className, termNum, academicYear,
   draftComment, onSaveComment, snapshot,
 }, ref) {
   const display = student.display ?? {};
@@ -84,6 +85,59 @@ const KgStudentReportCard = forwardRef(function KgStudentReportCard({
   }, [draftComment]);
 
   const set = (field) => (value) => setComment(c => ({ ...c, [field]: value }));
+
+  /* ── Print / Download PDF (2026-10) — reported directly, with a
+     screenshot: this screen had neither button at all, unlike
+     StudentReportCard.jsx's equivalent. A published snapshot uses the
+     same generic GET /:id/html and /:id/pdf routes the numeric path
+     uses (they dispatch on the snapshot's own frozen layoutKey, which
+     /kg/publish sets to 'kindergarten'); a draft uses the new
+     kg/preview-html and kg/preview-pdf routes — this screen's own
+     "Save remarks" button is what persists classTeacherRemark/
+     principalRemark first, so Print/Download always reflect exactly
+     what was last saved, not an unsaved edit still sitting in the box. ── */
+  const [printing, setPrinting] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
+
+  async function printCard() {
+    setPrinting(true);
+    try {
+      const { data } = snapshot?.id
+        ? await reportCardsApi.html(snapshot.id)
+        : await reportCardsApi.kg.previewHtml({
+            classId, studentId: student.studentId, termNumber: termNum, academicYearId,
+          });
+      const w = window.open('', '_blank', 'width=1200,height=900');
+      if (!w) return;
+      w.document.write(data.html);
+      w.document.close();
+      w.focus();
+      setTimeout(() => w.print(), 600);
+    } catch (err) {
+      console.error('[KgStudentReportCard] print failed', err);
+      window.alert('Failed to generate the report card for printing. Please try again.');
+    } finally {
+      setPrinting(false);
+    }
+  }
+
+  async function downloadPdf() {
+    setDownloadingPdf(true);
+    try {
+      if (snapshot?.id) {
+        await reportCardsApi.pdf(snapshot.id);
+      } else {
+        await reportCardsApi.kg.previewPdf({
+          classId, studentId: student.studentId, termNumber: termNum, academicYearId,
+        });
+      }
+    } catch (err) {
+      console.error('[KgStudentReportCard] PDF download failed', err);
+      window.alert('Failed to generate the PDF. Please try again.');
+    } finally {
+      setDownloadingPdf(false);
+    }
+  }
 
   const saveNow = useCallback(async () => {
     if (!onSaveComment) return;
@@ -141,6 +195,14 @@ const KgStudentReportCard = forwardRef(function KgStudentReportCard({
               <CheckCircle size={10} /> {snapshot.reportId}
             </span>
           )}
+          <button onClick={downloadPdf} disabled={downloadingPdf} title="Download PDF directly"
+            className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition">
+            {downloadingPdf ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} Download PDF
+          </button>
+          <button onClick={printCard} disabled={printing} title="Print / Save PDF"
+            className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition">
+            {printing ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />} Print
+          </button>
         </div>
       </div>
 
@@ -151,18 +213,26 @@ const KgStudentReportCard = forwardRef(function KgStudentReportCard({
             <div className="flex items-center justify-between mb-2">
               <p className="text-xs font-bold text-slate-700">{subj.name}</p>
               <p className="text-xs">
-                <span className="text-slate-400">
-                  {subj.possible > 0 ? `${subj.earned}/${subj.possible} · ` : ''}
-                </span>
-                <span className="font-semibold text-slate-700">
-                  {/* 1 decimal, not rounded to a whole number — the grade
-                      beside it is banded off this same precise value (see
-                      kg-report.js), so rounding here alone made two
-                      subjects with identical displayed %s show different
-                      grades with nothing visible to explain why. Matches
-                      the precision the printed report card already uses. */}
-                  {subj.subjectAvgPct != null ? `${subj.subjectAvgPct.toFixed(1)}%` : '—'}
-                </span>
+                {/* Band-only: no number was ever typed for this subject —
+                    the band itself (e.g. "Secure") is the whole story. */}
+                {subj.bandOnly ? (
+                  <span className="font-semibold text-slate-700">{subj.subjectBandLabel || '—'}</span>
+                ) : (
+                  <>
+                    <span className="text-slate-400">
+                      {subj.possible > 0 ? `${subj.earned}/${subj.possible} · ` : ''}
+                    </span>
+                    <span className="font-semibold text-slate-700">
+                      {/* 1 decimal, not rounded to a whole number — the grade
+                          beside it is banded off this same precise value (see
+                          kg-report.js), so rounding here alone made two
+                          subjects with identical displayed %s show different
+                          grades with nothing visible to explain why. Matches
+                          the precision the printed report card already uses. */}
+                      {subj.subjectAvgPct != null ? `${subj.subjectAvgPct.toFixed(1)}%` : '—'}
+                    </span>
+                  </>
+                )}
                 {showGrade && subj.subjectGrade && (
                   <span className={`ml-1.5 font-bold ${gradeColor(subj.subjectGrade)}`}>{subj.subjectGrade}</span>
                 )}
@@ -173,7 +243,7 @@ const KgStudentReportCard = forwardRef(function KgStudentReportCard({
                 <tr className="text-slate-400 text-left">
                   <th className="font-medium pb-1">Indicator</th>
                   <th className="font-medium pb-1 w-32">Band</th>
-                  {showScore && <th className="font-medium pb-1 w-20 text-right">Score</th>}
+                  {showScore && !subj.bandOnly && <th className="font-medium pb-1 w-20 text-right">Score</th>}
                 </tr>
               </thead>
               <tbody>
@@ -187,7 +257,7 @@ const KgStudentReportCard = forwardRef(function KgStudentReportCard({
                         <span className="text-slate-300 italic">Not scored</span>
                       )}
                     </td>
-                    {showScore && (
+                    {showScore && !subj.bandOnly && (
                       <td className="py-1.5 text-right text-slate-600">
                         {ind.score != null ? `${ind.score}/${ind.maxScore}` : '—'}
                       </td>
@@ -204,7 +274,9 @@ const KgStudentReportCard = forwardRef(function KgStudentReportCard({
       <div className="px-5 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
         <p className="text-xs font-semibold text-slate-600">Overall Average</p>
         <p className="text-sm font-bold text-slate-800">
-          {student.overallAvgPct != null ? `${student.overallAvgPct.toFixed(1)}%` : '—'}
+          {student.overallBandOnly
+            ? (student.overallBandLabel || '—')
+            : (student.overallAvgPct != null ? `${student.overallAvgPct.toFixed(1)}%` : '—')}
           {showGrade && student.overallGrade && (
             <span className={`ml-2 ${gradeColor(student.overallGrade)}`}>{student.overallGrade}</span>
           )}

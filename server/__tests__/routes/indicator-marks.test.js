@@ -206,3 +206,62 @@ describe('year-archival guard', () => {
     expect(mockIndicatorMarks).toHaveLength(0);
   });
 });
+
+describe('band-only scoring (2026-10-23) — this subject opts in', () => {
+  beforeEach(() => {
+    // Subject-level override: band-only for THIS subject specifically,
+    // template default stays off — proves the override, not just the
+    // template-wide flag, is what the route actually checks.
+    mockRcTemplates = [{
+      ...TEMPLATE_A,
+      bandOnlyScoring: false,
+      subjects: [{ ...TEMPLATE_A.subjects[0], bandOnlyScoring: true }],
+    }];
+  });
+
+  test('score is ignored from the client and derived server-side from the picked band', async () => {
+    // Client sends a score of 2 alongside bandGood (defaultScore: 8) —
+    // the two disagreeing is exactly the pre-existing gap this closes.
+    const res = await supertest(buildApp(TEACHER_ASSIGNED)).post('/api/indicator-marks/bulk').send({
+      marks: [validMark({ bandId: 'bandGood', score: 2 })],
+    });
+    expect(res.status).toBe(200);
+    expect(mockIndicatorMarks[0].score).toBe(8); // the band's own points, not the client's 2
+  });
+
+  test('no score sent at all (the real client shape for band-only) still saves correctly', async () => {
+    const mark = validMark({ bandId: 'bandGood' });
+    delete mark.score;
+    const res = await supertest(buildApp(TEACHER_ASSIGNED)).post('/api/indicator-marks/bulk').send({ marks: [mark] });
+    expect(res.status).toBe(200);
+    expect(mockIndicatorMarks[0].score).toBe(8);
+  });
+
+  test('no band selected is rejected', async () => {
+    const mark = validMark({ bandId: null });
+    delete mark.score;
+    const res = await supertest(buildApp(TEACHER_ASSIGNED)).post('/api/indicator-marks/bulk').send({ marks: [mark] });
+    expect(res.status).toBe(400);
+    expect(mockIndicatorMarks).toHaveLength(0);
+  });
+
+  test('a bandId that doesn\'t belong to this subject\'s performance bands is rejected', async () => {
+    const res = await supertest(buildApp(TEACHER_ASSIGNED)).post('/api/indicator-marks/bulk').send({
+      marks: [validMark({ bandId: 'bandFromSomewhereElse' })],
+    });
+    expect(res.status).toBe(400);
+    expect(mockIndicatorMarks).toHaveLength(0);
+  });
+
+  test('the indicator\'s own maxScore is never checked — a band-derived score bypasses it entirely', async () => {
+    // bandGood is worth 8 points; the indicator's own maxScore is 10 —
+    // within range here, but the point is that THIS check path (bandId
+    // resolution) never even looks at maxScore, unlike numeric mode.
+    mockIndicatorDefinitions[0].maxScore = 1; // would reject score:8 in numeric mode
+    const res = await supertest(buildApp(TEACHER_ASSIGNED)).post('/api/indicator-marks/bulk').send({
+      marks: [validMark({ bandId: 'bandGood' })],
+    });
+    expect(res.status).toBe(200);
+    expect(mockIndicatorMarks[0].score).toBe(8);
+  });
+});

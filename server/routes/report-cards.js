@@ -192,6 +192,8 @@ function _hashSnapshot(snap) {
         kgSubjects:    snap.kgSubjects,
         overallAvgPct: snap.overallAvgPct,
         overallGrade:  snap.overallGrade,
+        overallBandOnly:  snap.overallBandOnly,
+        overallBandLabel: snap.overallBandLabel,
         publishedAt:   snap.publishedAt,
       })
     : JSON.stringify({
@@ -590,8 +592,23 @@ async function _resolveTermScope(schoolId, ctx, { academicYearId, termId, termNu
    same posture as streamName/houseName just below, which were never
    client-trusted to begin with. */
 async function _resolveDisplayNames(schoolId, ctx, { classId, academicYearId, termId }) {
+  // Dual-ID safe — reported directly, live: a class that predates the
+  // UUID-`id` migration (e.g. MLA's "Year 10") has no `id` field, only
+  // its Mongo `_id`. `classId` arrives here as whichever form the rest
+  // of the app already resolved to (the canonical `doc.id || String(doc._id)`
+  // convention), so a lookup that only ever matches `id` silently found
+  // nothing for that class and published a report with a BLANK Class
+  // field — confirmed directly against a real MLA report card (Stream
+  // "10A" correct, Class empty). Same `$or`/ObjectId-validity guard
+  // students.js's own `_entityIdForms` uses, so an `id` that happens not
+  // to be a valid ObjectId (the normal, post-migration case) never
+  // throws a cast error by being probed against `_id` anyway.
+  const classIdOr = [{ id: classId }];
+  if (classId && mongoose.Types.ObjectId.isValid(classId) && String(classId).length === 24) {
+    classIdOr.push({ _id: classId });
+  }
   const [cls, year] = await Promise.all([
-    tenantModel('classes', ctx).findOne({ schoolId, id: classId }).select('name').lean().catch(() => null),
+    tenantModel('classes', ctx).findOne({ schoolId, $or: classIdOr }).select('name').lean().catch(() => null),
     academicYearId
       ? tenantModel('academic_years', ctx).findOne({ schoolId, id: academicYearId }).select('name terms').lean().catch(() => null)
       : Promise.resolve(null),
@@ -1369,6 +1386,8 @@ router.post('/kg/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'
         subjects:          kg?.subjects ?? [],
         overallAvgPct:     kg?.overallAvgPct ?? null,
         overallGrade:      kg?.overallGrade ?? null,
+        overallBandOnly:   kg?.overallBandOnly ?? false,
+        overallBandLabel:  kg?.overallBandLabel ?? null,
         display:           kg?.display ?? template.display ?? {},
       };
     }));
@@ -1376,6 +1395,148 @@ router.post('/kg/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'
     return ok(res, { generated: reports.length, templateId: template.id, templateName: template.name, students: reports });
   } catch (err) {
     console.error('[report-cards/kg/generate]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   POST /kg/preview-html, POST /kg/preview-pdf — the Kindergarten
+   counterparts to the numeric path's own preview-html/preview-pdf.
+   Reported directly, with a screenshot: the KG report preview had no
+   Print or Download button at all — KgStudentReportCard.jsx never had
+   one, unlike StudentReportCard.jsx's equivalent.
+
+   Unlike the numeric preview routes, this one DOES re-run the
+   aggregation (computeKgReport) instead of trusting client-sent data —
+   safe here specifically because a KG report has no ranking/GPA
+   concept to lose by re-deriving it (see kg-report.js's own header:
+   "no rank/GPA concept for a competency-band report"), so there is no
+   single-student-can't-reproduce-the-real-rank problem the numeric
+   route's own header explains. Re-deriving also means this always
+   reflects the current Markbook, the same guarantee /kg/generate
+   already gives the on-screen preview.
+
+   Shares its snap-construction with /kg/publish's own shape (same
+   field set, status:'draft' instead of 'published') rather than a
+   third, drifting copy — draft comments are read live from
+   report_card_draft_comments, same source /kg/publish itself reads at
+   publish time, so Print/Download show the actually-saved remarks.
+   ══════════════════════════════════════════════════════════════ */
+const KgPreviewSchema = GenerateSchema.extend({ studentId: z.string().min(1) });
+
+async function _resolveKgPreview(req, data) {
+  const { schoolId } = req.jwtUser;
+  const { classId, termId, termNumber: termNum, academicYearId, studentId } = data;
+  const ctx = tenantContext(req);
+  const scope = await _resolveTermScope(schoolId, ctx, { academicYearId, termId, termNumber: termNum });
+
+  const template = await resolveRcTemplate(schoolId, classId);
+  if (!template) return { errorStatus: 400, errorMessage: 'This class has no Kindergarten template assigned — use the ordinary Generate & Publish instead.' };
+  if (!termNum) return { errorStatus: 400, errorMessage: 'termNumber is required.' };
+
+  const reportSectionId = await sectionIdForClass(schoolId, classId);
+  const scale = await resolveGradeScale(schoolId, reportSectionId, null);
+  if (!scale) return { errorStatus: 400, errorMessage: _noScaleMessage(classId) };
+
+  const { students, streamNameById, houseNameById, classTeacherByStream } = await _loadKgRoster(req, schoolId, classId);
+  const stu = students.find(s => s.id === studentId);
+  if (!stu) return { errorStatus: 404, errorMessage: 'Student not found in this class, or not currently active.' };
+
+  const kg = await computeKgReport(ctx, schoolId, classId, stu.id, termNum, scope.academicYearId, scale);
+
+  const draft = await tenantModel('report_card_draft_comments', ctx)
+    .findOne({ schoolId, studentId: stu.id, termNumber: termNum }).lean();
+
+  const { className, academicYear } = await _resolveDisplayNames(schoolId, ctx, { classId, academicYearId: scope.academicYearId, termId: scope.termId });
+
+  const school = await _model('schools').findOne({ id: schoolId })
+    .select('name logoUrl tagline address phone email website country principalSignatureUrl schoolStampUrl principalName timezone showStudentPhoto')
+    .lean();
+
+  const config = await _loadConfig(schoolId);
+
+  const snap = {
+    status: 'draft', superseded: false, version: 1,
+    studentId: stu.id,
+    studentName: `${stu.firstName} ${stu.lastName}`.trim() || stu.id,
+    admissionNo: stu.admissionNumber || '',
+    studentPhotoUrl: stu.photo || null,
+    streamName: stu.streamId ? (streamNameById[stu.streamId] || '') : '',
+    houseName:  stu.houseId  ? (houseNameById[stu.houseId]   || '') : '',
+    classId, className: className || '',
+    termNumber: termNum, academicYear: academicYear || '',
+    schoolName: school?.name || '',
+    gradingSchema: scale.bands,
+    templateId: template.id, templateName: template.name,
+    kgSubjects: kg?.subjects ?? [],
+    overallAvgPct:    kg?.overallAvgPct ?? null,
+    overallGrade:     kg?.overallGrade ?? null,
+    overallBandOnly:  kg?.overallBandOnly ?? false,
+    overallBandLabel: kg?.overallBandLabel ?? null,
+    kgDisplay: template.display ?? {},
+    comments: _resolveSnapComments(null, {
+      ...draft,
+      classTeacherName: draft?.classTeacherName || (stu.streamId ? classTeacherByStream[stu.streamId] : '') || '',
+    }),
+    principalSignatureUrl: school?.principalSignatureUrl || null,
+    schoolStampUrl:        school?.schoolStampUrl        || null,
+    schoolPrincipalName:   school?.principalName          || null,
+  };
+
+  return { snap, school, config, sections: _computeKgReportSections(snap, config, { school }) };
+}
+
+router.post('/kg/preview-html', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), async (req, res) => {
+  try {
+    const { data, error } = _validate(KgPreviewSchema, req.body);
+    if (error) return E.validation(res, error);
+    const resolved = await _resolveKgPreview(req, data);
+    if (resolved.errorStatus) {
+      return resolved.errorStatus === 404 ? E.notFound(res, resolved.errorMessage) : E.badRequest(res, resolved.errorMessage);
+    }
+    const html = getLayout('kindergarten').renderHtml(resolved.sections);
+    return ok(res, { html });
+  } catch (err) {
+    console.error('[report-cards/kg/preview-html]', err);
+    return E.serverError(res);
+  }
+});
+
+router.post('/kg/preview-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), async (req, res) => {
+  try {
+    const { data, error } = _validate(KgPreviewSchema, req.body);
+    if (error) return E.validation(res, error);
+    const resolved = await _resolveKgPreview(req, data);
+    if (resolved.errorStatus) {
+      return resolved.errorStatus === 404 ? E.notFound(res, resolved.errorMessage) : E.badRequest(res, resolved.errorMessage);
+    }
+    const { sections, snap, school, config } = resolved;
+
+    let PDFDocument;
+    try { PDFDocument = require('pdfkit'); }
+    catch { return res.status(501).json({ error: 'pdfkit not installed. Run: npm install pdfkit' }); }
+
+    const doc     = new PDFDocument({ margin: 40, size: 'A4' });
+    const buffers = [];
+    doc.on('data', chunk => buffers.push(chunk));
+    doc.on('end', () => {
+      const pdf = Buffer.concat(buffers);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="kg-report-${snap.studentId}-draft.pdf"`);
+      res.setHeader('Content-Length', pdf.length);
+      res.send(pdf);
+    });
+
+    const pdfImages = await _fetchSignatureImages(snap);
+    pdfImages.studentPhoto = config.showStudentPhoto !== false
+      ? await _fetchImageBuf(snap.studentPhotoUrl).catch(() => null)
+      : null;
+    pdfImages.schoolLogo = await _fetchImageBuf(school?.logoUrl).catch(() => null);
+
+    getLayout('kindergarten').renderPdf(doc, sections, pdfImages, true);
+    doc.end();
+  } catch (err) {
+    console.error('[report-cards/kg/preview-pdf]', err);
     return E.serverError(res);
   }
 });
@@ -1515,6 +1676,8 @@ router.post('/kg/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
           kgSubjects:   kg?.subjects ?? [],
           overallAvgPct: kg?.overallAvgPct ?? null,
           overallGrade:  kg?.overallGrade ?? null,
+          overallBandOnly:  kg?.overallBandOnly ?? false,
+          overallBandLabel: kg?.overallBandLabel ?? null,
           kgDisplay:     template.display ?? {},
 
           comments: _resolveSnapComments(prev, draft),
@@ -2701,8 +2864,10 @@ function _computeKgReportSections(snap, config, extra = {}) {
     },
     kgSubjects: snap.kgSubjects || [],
     overall: {
-      avgPct: snap.overallAvgPct,
-      grade:  snap.overallGrade,
+      avgPct:    snap.overallAvgPct,
+      grade:     snap.overallGrade,
+      bandOnly:  snap.overallBandOnly || false,
+      bandLabel: snap.overallBandLabel || null,
     },
     gradingKey: gradeBands.map((b, i) => ({
       grade:  b.grade,
@@ -3202,6 +3367,130 @@ router.post('/preview-html', authMiddleware, PLAN, MODGATE, rbac('grades', 'read
     const html = getLayout(layoutKey).renderHtml(sections);
     return ok(res, { html });
   } catch (err) { console.error('[report-cards/preview-html]', err); return E.serverError(res); }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   POST /preview-pdf  — direct-download PDF counterpart to POST
+   /preview-html, for a live, unpublished draft. Until this route
+   existed, the only way to get a PDF of a report card before it was
+   published was the browser's own Print → Save as PDF dialog over
+   the HTML preview — workable, but not a one-click download (raised
+   directly). Published snapshots already have this via GET /:id/pdf;
+   this is its pre-publish twin, sharing the exact same snap/sections
+   construction as /preview-html (see that route's own header for why
+   it doesn't re-run /generate's aggregation) and the exact same
+   PDFKit rendering GET /:id/pdf uses — only the image-URL source
+   differs, since a draft has no persisted snapshot to read
+   principalSignatureUrl/schoolStampUrl off: those come from the same
+   live school lookup (schoolWithSignOff) /preview-html already does.
+   ══════════════════════════════════════════════════════════════ */
+router.post('/preview-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), async (req, res) => {
+  try {
+    const { data, error } = _validate(PreviewHtmlSchema, req.body);
+    if (error) return E.validation(res, error);
+    const { student, studentInfo, classId, className, termNum, academicYear, school, draftComment, studentDeviations, behaviourSummary: beh, config: clientConfig } = data;
+    const { schoolId } = req.jwtUser;
+
+    const previewStudentDoc = await tenantModel('students', tenantContext(req))
+      .findOne({ schoolId, id: student.studentId }).select('streamId').lean().catch(() => null);
+    let previewStreamName = '';
+    if (previewStudentDoc?.streamId) {
+      const strm = await tenantModel('streams', tenantContext(req))
+        .findOne({ schoolId, id: previewStudentDoc.streamId }).select('name').lean().catch(() => null);
+      previewStreamName = strm?.name || '';
+    }
+
+    const gradingSchema = clientConfig?.gradeScale?.bands ?? [];
+
+    const snap = {
+      status: 'draft', superseded: false, version: 1,
+      studentId: student.studentId,
+      studentName: [studentInfo?.firstName, studentInfo?.lastName].filter(Boolean).join(' ') || student.studentId,
+      admissionNo: studentInfo?.admissionNumber || '',
+      studentPhotoUrl: studentInfo?.photo || null,
+      className: className || '',
+      streamName: previewStreamName,
+      termNumber: termNum ?? null, academicYear: academicYear || '',
+      schoolName: school?.name || '',
+      reportLabel: clientConfig?.reportLabel || null,
+      gradingSchema,
+      assessmentWeights: _convertCustomTypesToWeights(clientConfig?.customTypes ?? []),
+      passMark: clientConfig?.passMark, rankingSubjectStrategy: null,
+      subjects: student.subjects, totalScore: student.totalScore, averageScore: student.averageScore,
+      gpa: student.gpa, subjectCount: student.subjectCount,
+      rankings: student.rankings ?? {},
+      comments: _resolveSnapComments(null, { ...draftComment, classTeacherName: draftComment?.classTeacherName || student.classTeacherName || '' }),
+    };
+    const config = await _loadConfig(schoolId);
+
+    const subjectDocs = await tenantModel('subjects', tenantContext(req))
+      .find({ schoolId, id: { $in: Object.keys(student.subjects || {}) } })
+      .select('id name').lean().catch(() => []);
+    const subjectNames = Object.fromEntries(subjectDocs.map(s => [s.id, s.name]));
+
+    const assignmentDocs = classId
+      ? await tenantModel('teaching_assignments', tenantContext(req))
+          .find({ schoolId, classId, subjectId: { $in: Object.keys(student.subjects || {}) } })
+          .select('subjectId teacherName').lean().catch(() => [])
+      : [];
+    const subjectTeacherNames = {};
+    for (const a of assignmentDocs) {
+      if (!subjectTeacherNames[a.subjectId]) subjectTeacherNames[a.subjectId] = a.teacherName || '';
+    }
+
+    const signOffDoc = await _model('schools').findOne({ id: schoolId }, { principalSignatureUrl: 1, schoolStampUrl: 1, principalName: 1, timezone: 1, address: 1, tagline: 1, email: 1, phone: 1, website: 1, country: 1 }).lean().catch(() => null);
+    const schoolWithSignOff = {
+      ...school,
+      principalSignatureUrl: signOffDoc?.principalSignatureUrl || null,
+      schoolStampUrl:        signOffDoc?.schoolStampUrl        || null,
+      principalName:         signOffDoc?.principalName         || null,
+      timezone:              signOffDoc?.timezone              || null,
+      address:                signOffDoc?.address  || school?.address  || '',
+      tagline:                signOffDoc?.tagline  || school?.tagline  || '',
+      email:                  signOffDoc?.email    || school?.email    || '',
+      phone:                  signOffDoc?.phone    || school?.phone    || '',
+      website:                signOffDoc?.website  || school?.website  || '',
+      country:                signOffDoc?.country  || '',
+    };
+
+    const subjectTeacherCommentsLive = (await _getAssessmentConfig(schoolId, null).catch(() => null))?.subjectTeacherCommentsEnabled;
+
+    const attData = await attendanceSummary(schoolId, student.studentId, classId).catch(() => null);
+
+    const sections = _buildReportSections(snap, config, attData, {
+      school: schoolWithSignOff, behaviour: beh ?? null, deviations: studentDeviations ?? null,
+      subjectTeacherCommentsEnabled: subjectTeacherCommentsLive !== false,
+      subjectNames, subjectTeacherNames,
+    });
+    const previewSectionId = classId ? await sectionIdForClass(schoolId, classId) : null;
+    const { layoutKey } = await resolveTemplate(tenantContext(req), schoolId, previewSectionId);
+
+    let PDFDocument;
+    try { PDFDocument = require('pdfkit'); }
+    catch { return res.status(501).json({ error: 'pdfkit not installed. Run: npm install pdfkit' }); }
+
+    const doc     = new PDFDocument({ margin: 40, size: 'A4' });
+    const buffers = [];
+    doc.on('data', chunk => buffers.push(chunk));
+    doc.on('end', () => {
+      const pdf = Buffer.concat(buffers);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="report-${student.studentId}-draft.pdf"`);
+      res.setHeader('Content-Length', pdf.length);
+      res.send(pdf);
+    });
+
+    // Same image set GET /:id/pdf fetches — sourced from the live school
+    // lookup above instead of a persisted snapshot, since a draft has none.
+    const pdfImages = await _fetchSignatureImages(schoolWithSignOff);
+    pdfImages.studentPhoto = config.showStudentPhoto !== false
+      ? await _fetchImageBuf(studentInfo?.photo).catch(() => null)
+      : null;
+    pdfImages.schoolLogo = await _fetchImageBuf(schoolWithSignOff.logoUrl).catch(() => null);
+
+    getLayout(layoutKey).renderPdf(doc, sections, pdfImages, true);
+    doc.end();
+  } catch (err) { console.error('[report-cards/preview-pdf]', err); return E.serverError(res); }
 });
 
 /* ── Draft Comments — pre-publish per-student comment store ───

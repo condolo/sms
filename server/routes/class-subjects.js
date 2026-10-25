@@ -19,6 +19,8 @@ const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, E } = require('../utils/response');
+const ScopeEngine         = require('../utils/scopeEngine');
+const { scopeMiddleware } = require('../middleware/scopeMiddleware');
 
 const router = express.Router();
 
@@ -196,6 +198,172 @@ router.get('/enrollment-warnings', authMiddleware, async (req, res) => { // rbac
     return ok(res, { classes: result });
   } catch (err) {
     console.error('[class-subjects GET /enrollment-warnings]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ── GET /api/class-subjects/enrollment-analytics ───────────────
+   Per-class SUBJECT-enrollment coverage — a different axis than
+   enrollment-warnings above (which checks per-STUDENT subject counts
+   against min/max rules). This checks, for every subject on a class's
+   curriculum, how many of that class's active students are actually
+   enrolled in it — and separately flags students with ZERO subject
+   enrollments at all. Direct motivation: this is exactly the shape of
+   gap that hid 6 students missing from a Kiswahili elective roster
+   for weeks with nothing surfacing it (4 had no elective enrollment
+   at all; 2 were enrolled in French instead) — this view is what
+   would have caught that immediately instead of only after a parent
+   complaint.
+   A compulsory subject should cover every active student in the
+   class — any shortfall there is a missed enrollment, not a choice,
+   so it's flagged (`gap`). An elective's shortfall is expected (the
+   roster splits across electives) — no gap is computed for those.
+   Scope: same posture as every other teacher-facing roster view this
+   session touched — unrestricted for management, narrowed to the
+   caller's own assigned classes otherwise (resolveClassPickerScope,
+   same pattern used by assessment.js's analytics `availableClasses`).
+   ?classId=X narrows to one class (still subject to scope above).
+   Exported as _buildEnrollmentAnalytics so assessment.js's PDF export
+   can render the exact same data without a second HTTP round trip. */
+async function _buildEnrollmentAnalytics(req) {
+  const { schoolId } = req.jwtUser;
+  const { classId: qClassId } = req.query;
+
+  // req.scope is null for a school-level role (admin/principal/etc) —
+  // applyToFilter/resolveClassPickerScope both no-op in that case, same
+  // as assessment.js's analytics availableClasses resolution.
+  const originalScope = req.scope;
+  req.scope = await ScopeEngine.resolveClassPickerScope(req);
+  const classesFilter = ScopeEngine.applyToFilter(req, 'classes', { schoolId, status: { $ne: 'inactive' } });
+  req.scope = originalScope;
+
+  // A class may predate the UUID-`id` migration and exist only as a
+  // Mongo _id (live-confirmed: 15 of 40 classes in one real school have
+  // no `id` field at all). The ?classId= filter's value is whatever the
+  // class picker sent — c.id ?? String(c._id) — so a legacy class is
+  // filtered by its _id string; matching only `id` on the classes query
+  // then never finds it, which is exactly what made "selected class"
+  // return "no curriculum/enrollment data" for one of these classes.
+  if (qClassId) {
+    const mongoose = require('mongoose');
+    const idOr = [{ id: qClassId }];
+    if (mongoose.Types.ObjectId.isValid(qClassId) && String(qClassId).length === 24) idOr.push({ _id: qClassId });
+    if (classesFilter.id !== undefined) {
+      // Scope already narrowed by id (e.g. {$in:[...allowed]}, or
+      // {$in:[]} for a strict deny) — AND it with the dual-form match
+      // instead of overwriting either condition.
+      classesFilter.$and = [{ id: classesFilter.id }, { $or: idOr }];
+      delete classesFilter.id;
+    } else {
+      classesFilter.$or = idOr;
+    }
+  }
+
+  const classes = await tenantModel('classes', tenantContext(req))
+    .find(classesFilter).sort({ order: 1 }).select('id name').lean();
+  if (!classes.length) return { classes: [] };
+
+  // Every downstream collection (class_subjects, students,
+  // student_subjects) may reference a class by EITHER form — whichever
+  // was current when that record was written — independent of whether
+  // the class doc itself has since gained an `id`. Resolve the full set
+  // of forms each class is known by once, then canonicalize every
+  // lookup through it rather than trusting a single id field.
+  const classMeta = classes.map(c => ({
+    canonicalId: c.id || String(c._id),
+    name: c.name,
+    forms: [...new Set([c.id, c._id != null ? String(c._id) : null].filter(Boolean))],
+  }));
+  const formToCanonical = {};
+  for (const m of classMeta) for (const f of m.forms) formToCanonical[f] = m.canonicalId;
+  const allClassIdForms = Object.keys(formToCanonical);
+
+  const [links, students, enrollAgg, enrollments] = await Promise.all([
+    tenantModel('class_subjects', tenantContext(req))
+      .find({ schoolId, classId: { $in: allClassIdForms }, isActive: { $ne: false } }).lean(),
+    tenantModel('students', tenantContext(req))
+      .find({ schoolId, classId: { $in: allClassIdForms }, status: { $ne: 'inactive' } })
+      .select('id classId').lean(),
+    tenantModel('student_subjects', tenantContext(req)).aggregate([
+      { $match: { schoolId, classId: { $in: allClassIdForms } } },
+      { $group: { _id: { classId: '$classId', subjectId: '$subjectId' }, count: { $sum: 1 } } },
+    ]),
+    tenantModel('student_subjects', tenantContext(req))
+      .find({ schoolId, classId: { $in: allClassIdForms } }).select('studentId classId').lean(),
+  ]);
+
+  const subjectIds = [...new Set(links.map(l => l.subjectId))];
+  const subjectDocs = subjectIds.length
+    ? await tenantModel('subjects', tenantContext(req)).find({ schoolId, id: { $in: subjectIds } }).select('id name').lean()
+    : [];
+  const subjectNameMap = Object.fromEntries(subjectDocs.map(s => [s.id, s.name]));
+
+  const rosterByClass = {};
+  for (const s of students) {
+    const canonicalId = formToCanonical[s.classId];
+    if (canonicalId) (rosterByClass[canonicalId] ??= []).push(s.id);
+  }
+
+  // De-duped by (class, subject) — the same class referenced via two
+  // different forms in separate class_subjects docs would otherwise
+  // list that subject twice for it.
+  const linkByKey = new Map(); // `${canonicalId}::${subjectId}` -> link
+  for (const l of links) {
+    const canonicalId = formToCanonical[l.classId];
+    if (!canonicalId) continue;
+    const key = `${canonicalId}::${l.subjectId}`;
+    const existing = linkByKey.get(key);
+    if (!existing || (l.isCompulsoryForClass && !existing.isCompulsoryForClass)) {
+      linkByKey.set(key, { classId: canonicalId, subjectId: l.subjectId, isCompulsoryForClass: l.isCompulsoryForClass });
+    }
+  }
+
+  const enrollCountMap = {}; // `${canonicalClassId}::${subjectId}` -> count
+  for (const e of enrollAgg) {
+    const canonicalId = formToCanonical[e._id.classId];
+    if (!canonicalId) continue;
+    const key = `${canonicalId}::${e._id.subjectId}`;
+    enrollCountMap[key] = (enrollCountMap[key] ?? 0) + e.count;
+  }
+
+  const enrolledStudentKeys = new Set();
+  for (const e of enrollments) {
+    const canonicalId = formToCanonical[e.classId];
+    if (canonicalId) enrolledStudentKeys.add(`${canonicalId}::${e.studentId}`);
+  }
+
+  const result = classMeta.map(({ canonicalId, name }) => {
+    const roster = rosterByClass[canonicalId] ?? [];
+    const subjects = [...linkByKey.values()]
+      .filter(l => l.classId === canonicalId)
+      .map(l => {
+        const enrolled = enrollCountMap[`${canonicalId}::${l.subjectId}`] ?? 0;
+        const isCompulsory = !!l.isCompulsoryForClass;
+        return {
+          subjectId:    l.subjectId,
+          subject:      subjectNameMap[l.subjectId] ?? l.subjectId,
+          isCompulsory,
+          enrolled,
+          rosterSize:   roster.length,
+          enrollmentPct: roster.length ? Math.round((enrolled / roster.length) * 1000) / 10 : null,
+          gap: isCompulsory ? Math.max(0, roster.length - enrolled) : null,
+        };
+      })
+      .sort((a, b) => a.subject.localeCompare(b.subject));
+
+    const unenrolledStudents = roster.filter(sid => !enrolledStudentKeys.has(`${canonicalId}::${sid}`)).length;
+
+    return { classId: canonicalId, className: name, rosterSize: roster.length, subjects, unenrolledStudents };
+  });
+
+  return { classes: result };
+}
+
+router.get('/enrollment-analytics', authMiddleware, rbac('subjects', 'read'), scopeMiddleware, async (req, res) => {
+  try {
+    return ok(res, await _buildEnrollmentAnalytics(req));
+  } catch (err) {
+    console.error('[class-subjects GET /enrollment-analytics]', err);
     return E.serverError(res);
   }
 });
@@ -451,3 +619,4 @@ router.delete('/:id', authMiddleware, rbac('subjects', 'update'), async (req, re
 });
 
 module.exports = router;
+module.exports._buildEnrollmentAnalytics = _buildEnrollmentAnalytics;

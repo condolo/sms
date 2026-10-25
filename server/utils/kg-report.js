@@ -8,16 +8,33 @@
    indicator-based marks (explicitly deferred, not built here), so
    this does not reuse or extend that pipeline.
 
-   Subject/overall average grade resolves through the SAME
-   grade_boundaries system every other subject's grade comes from —
-   not a separate, parallel grading concept. Per-indicator grade comes
-   from the performance band itself, a different, qualitative mapping
-   the school defines in the template (see rc-templates.js). Both
-   appear on the report, clearly distinguished — see
-   report-layouts.js's _renderKindergartenPdf/Html. */
+   Two grading mechanisms coexist, per subject (2026-10-23, direct
+   request — see rc-template-scale.js's isBandOnlySubject):
+     - Numeric (the original, still the default): a subject's grade
+       resolves through the SAME grade_boundaries system every other
+       subject's grade comes from, off the earned/possible numeric
+       percentage. Per-indicator bandLabel/bandGrade are a SEPARATE,
+       purely decorative teacher pick in this mode — never what the
+       subject's own grade is computed from.
+     - Band-only (opt-in per template or per subject): the teacher
+       picks a band per indicator, no number typed. The subject's
+       grade is the SNAPPED band nearest the average of the picked
+       bands' own points — never the grade_boundaries scale. The
+       "percentage" is still computed internally (earned/possible,
+       exactly as today) purely as the normalized unit that lets
+       subjects on different band/point scales combine into one
+       overall figure — it is not shown to the teacher or printed.
+   Overall grade follows the TEMPLATE's own default bandOnlyScoring,
+   regardless of what any individual subject overrode — a mixed
+   template (some band-only subjects, some not) still needs ONE
+   unambiguous rule for its single overall grade, and the template's
+   own setting is the natural "whole report" default. */
 
 const { tenantModel } = require('./tenant-model');
-const { resolveRcTemplate } = require('./rc-template-scale');
+const {
+  resolveRcTemplate, effectiveBandsForSubjectId, isBandOnlySubject,
+  maxBandScore, snapToNearestBand,
+} = require('./rc-template-scale');
 const { resolveGrade } = require('../routes/academic-config');
 
 /* A requested academicYearId must also match an indicator_definitions
@@ -56,41 +73,66 @@ async function computeKgReport(ctx, schoolId, classId, studentId, termNumber, ac
 
   let overallEarned = 0, overallPossible = 0;
   const subjects = (template.subjects ?? []).map(subj => {
-    // A subject's own bands override the template's entirely — never
-    // merged (same rule rc-template-scale.js's effectiveBandsForSubject
-    // enforces server-side for the Markbook; duplicated here rather than
-    // imported since the shapes differ slightly — this needs the FULL
-    // band object including color, that util only returns the array).
-    const bands = subj.performanceBands?.length ? subj.performanceBands : (template.performanceBands ?? []);
+    const bands    = effectiveBandsForSubjectId(template, subj.subjectId);
+    const bandOnly = isBandOnlySubject(template, subj.subjectId);
+    const ceiling  = bandOnly ? maxBandScore(bands) : null; // one constant for the whole subject, not per-indicator
     let earned = 0, possible = 0;
     const indicators = [...(defsBySubject[subj.subjectId] ?? [])]
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
       .map(ind => {
         const mark = markByIndicator[`${subj.subjectId}::${ind.id}`];
         const band = mark?.bandId ? bands.find(b => b.id === mark.bandId) : null;
-        if (mark && mark.score != null) { earned += mark.score; possible += ind.maxScore; }
+        if (mark && mark.score != null) { earned += mark.score; possible += bandOnly ? ceiling : ind.maxScore; }
         return {
           indicatorId: ind.id,
           text:        ind.text,
-          maxScore:    ind.maxScore,
-          score:       mark?.score ?? null,
+          // Band-only: no number was ever typed, so none is shown —
+          // the band label/grade below are the whole story for this
+          // indicator. Numeric mode: unchanged, score/maxScore print
+          // alongside the band pick, which stays purely decorative.
+          maxScore:    bandOnly ? null : ind.maxScore,
+          score:       bandOnly ? null : (mark?.score ?? null),
           bandLabel:   band?.label ?? null,
           bandGrade:   band?.grade ?? null,
           bandColor:   band?.color ?? null,
         };
       });
     const subjectAvgPct = possible > 0 ? (earned / possible) * 100 : null;
-    const subjectGrade  = (subjectAvgPct != null && scale) ? (resolveGrade(subjectAvgPct, scale.bands).grade ?? null) : null;
+    // earned/possible is already a plain average when every indicator's
+    // "possible" is the same constant (ceiling) — this just converts
+    // that average back onto the band scale's own points, so snapping
+    // can compare it against each band's defaultScore directly.
+    const subjectAvgPoints = bandOnly && subjectAvgPct != null ? (subjectAvgPct / 100) * ceiling : null;
+    const snappedSubject = bandOnly ? snapToNearestBand(subjectAvgPoints, bands) : null;
+    const subjectGrade = bandOnly
+      ? (snappedSubject?.grade ?? null)
+      : ((subjectAvgPct != null && scale) ? (resolveGrade(subjectAvgPct, scale.bands).grade ?? null) : null);
+    const subjectBandLabel = bandOnly ? (snappedSubject?.label ?? null) : null;
     overallEarned   += earned;
     overallPossible += possible;
     return {
       subjectId: subj.subjectId, name: subj.name, indicators,
       earned, possible, subjectAvgPct, subjectGrade,
+      bandOnly, subjectBandLabel,
     };
   });
 
+  // Overall follows the TEMPLATE's own default, not any one subject's
+  // override — see this file's header for why a mixed template needs
+  // one unambiguous rule for its single overall figure.
+  const overallBandOnly = !!template.bandOnlyScoring;
   const overallAvgPct = overallPossible > 0 ? (overallEarned / overallPossible) * 100 : null;
-  const overallGrade  = (overallAvgPct != null && scale) ? (resolveGrade(overallAvgPct, scale.bands).grade ?? null) : null;
+  let overallGrade = null, overallBandLabel = null;
+  if (overallBandOnly) {
+    const templateBands = template.performanceBands ?? [];
+    const ceiling = maxBandScore(templateBands);
+    const overallAvgPoints = overallAvgPct != null && ceiling > 0 ? (overallAvgPct / 100) * ceiling : null;
+    const snappedOverall = snapToNearestBand(overallAvgPoints, templateBands);
+    overallGrade = snappedOverall?.grade ?? null;
+    overallBandLabel = snappedOverall?.label ?? null;
+  } else {
+    overallGrade = (overallAvgPct != null && scale) ? (resolveGrade(overallAvgPct, scale.bands).grade ?? null) : null;
+  }
 
   return {
     templateId:   template.id,
@@ -99,6 +141,8 @@ async function computeKgReport(ctx, schoolId, classId, studentId, termNumber, ac
     subjects,
     overallAvgPct,
     overallGrade,
+    overallBandOnly,
+    overallBandLabel,
   };
 }
 

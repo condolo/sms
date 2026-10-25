@@ -73,6 +73,15 @@ const SubjectSchema = z.object({
   // bands for this subject" (the common case); set only when a subject
   // genuinely needs its own scale.
   performanceBands: z.array(BandSchema).optional(),
+  // Band-only scoring (2026-10-23, direct request): the teacher picks a
+  // performance band per indicator — no number typed at all — and the
+  // subject's grade is derived from the band itself (snapped from the
+  // average of the picked bands' own points), not from a numeric
+  // percentage run through the school's grade-boundary scale. Same
+  // override convention as performanceBands above: undefined means
+  // "inherit the template's own bandOnlyScoring"; set true/false only
+  // when this subject deliberately diverges.
+  bandOnlyScoring:  z.boolean().optional(),
 });
 
 const DisplaySchema = z.object({
@@ -99,6 +108,12 @@ const TemplateSchema = z.object({
   subjects:         z.array(SubjectSchema).default([]),
   display:          DisplaySchema,
   status:           z.enum(['draft', 'active']).default('draft'),
+  // Template-wide default for band-only scoring — opt-in, off by
+  // default so no existing school's numeric indicator entry changes
+  // under them. A subject can override this individually (see
+  // SubjectSchema.bandOnlyScoring above), same pattern as
+  // performanceBands itself.
+  bandOnlyScoring:  z.boolean().default(false),
 });
 
 /* ── Helpers ─────────────────────────────────────────────────── */

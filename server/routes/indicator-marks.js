@@ -64,7 +64,7 @@ const { isYearArchived } = require('../utils/archival');
 const ScopeEngine         = require('../utils/scopeEngine');
 const { restrictToTaught } = require('../utils/teaching-scope');
 const { scopeMiddleware } = require('../middleware/scopeMiddleware');
-const { resolveRcTemplate } = require('../utils/rc-template-scale');
+const { resolveRcTemplate, effectiveBandsForSubjectId, isBandOnlySubject } = require('../utils/rc-template-scale');
 
 const router  = express.Router();
 const PLAN    = planGate('grades');
@@ -86,7 +86,11 @@ const IndicatorMarkSchema = z.object({
   templateId:     z.string().min(1),
   indicatorId:    z.string().min(1),
   bandId:         z.string().nullish(),
-  score:          z.number().min(0),
+  // Required for ordinary numeric entry; a band-only subject sends no
+  // score at all (the teacher only picks a band) — the server resolves
+  // it from the picked band's own points below, never trusting a
+  // client-supplied number for one of these marks even if it sent one.
+  score:          z.number().min(0).optional(),
   termNumber:     z.number().int().min(1).max(3),
   academicYearId: z.string().nullish(),
   isPublished:    z.boolean().default(true),
@@ -228,6 +232,25 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), as
       const maxScore = maxScoreByIndicator[`${key}::${d.indicatorId}`];
       if (maxScore === undefined) {
         return E.badRequest(res, `Unknown indicator "${d.indicatorId}" — add it in the Markbook first.`);
+      }
+      // Band-only subject: no number is ever typed or trusted from the
+      // client — resolve the mark's score server-side from the band's
+      // own points, the moment the mark is saved, so every existing
+      // reader downstream (kg-report.js, the PDF/portal renderers) keeps
+      // reading a plain `score` number without needing to know where it
+      // came from. The legacy per-indicator maxScore check below simply
+      // doesn't apply here (the ceiling is the band set's own max, a
+      // subject-wide constant kg-report.js already accounts for).
+      if (isBandOnlySubject(template, d.subjectId)) {
+        if (!d.bandId) return E.badRequest(res, 'A band must be selected for this indicator.');
+        const bands = effectiveBandsForSubjectId(template, d.subjectId);
+        const band = bands.find(b => b.id === d.bandId);
+        if (!band) return E.badRequest(res, `Band "${d.bandId}" does not belong to this subject's performance bands.`);
+        d.score = band.defaultScore;
+        continue;
+      }
+      if (d.score == null) {
+        return E.badRequest(res, 'score is required for this indicator.');
       }
       if (d.score > maxScore) {
         return E.badRequest(res, `Score ${d.score} exceeds this indicator's maximum of ${maxScore}.`);
@@ -418,6 +441,114 @@ router.post('/definitions', authMiddleware, PLAN, MODGATE, rbac('grades', 'creat
     return ok(res, doc, null, 201);
   } catch (err) {
     console.error('[indicator-marks POST/definitions]', err);
+    return E.serverError(res);
+  }
+});
+
+const CopyFromSectionSchema = z.object({
+  classId:        z.string().min(1),
+  subjectId:      z.string().min(1),
+  termNumber:     z.number().int().min(1).max(3),
+  academicYearId: z.string().nullish(),
+});
+
+/**
+ * POST /api/indicator-marks/definitions/copy-from-section
+ *
+ * Direct request, 2026-10-24: a school may model its Kindergarten
+ * section as several separate CLASSES (KG1, KG2, KG3, Playgroup — each
+ * with its own streams underneath), not one class with several streams.
+ * Streams of one class already share the same indicator_definitions
+ * rows for free (classId-scoped, never streamId-scoped — see this
+ * file's header), but sibling CLASSES in the same section are genuinely
+ * separate classId's, so a teacher opening KG2's Science got a blank
+ * list even after KG1's Science was already fully typed in.
+ *
+ * Pre-fill, then independent — NOT a live-shared list: this copies the
+ * sibling class's current indicator text into brand-new rows owned by
+ * the destination class. Editing KG2's copy afterward never touches
+ * KG1's originals, since the two age groups may genuinely need to
+ * diverge (confirmed direction — a Playgroup indicator and a KG3
+ * indicator for "Numeracy" are not assumed to always match).
+ *
+ * Deliberately a no-op (200, copied:0), never an error, when the
+ * destination already has indicators (never overwrites real teacher
+ * input) or no sibling class has anything yet to copy — the client
+ * calls this automatically whenever a class/subject/term's indicator
+ * list loads empty, so a plain "first ever indicator for this school"
+ * case must fall through silently to the normal empty state.
+ */
+router.post('/definitions/copy-from-section', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const parsed = CopyFromSectionSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return E.validation(res, parsed.error.issues.map(i => ({ field: i.path.join('.'), message: i.message })));
+    }
+    const { classId, subjectId, termNumber, academicYearId } = parsed.data;
+
+    if (academicYearId && await isYearArchived(schoolId, academicYearId)) {
+      return E.badRequest(res, 'This academic year is locked — indicators cannot be added or modified.');
+    }
+    if (!(await isInCurriculum(req, classId, subjectId))) {
+      return E.badRequest(res, 'This subject is not part of this class\'s curriculum — add it in Curriculum first.');
+    }
+    const denial = await _indicatorManageDenial(req, classId, subjectId);
+    if (denial) return E.forbidden(res, denial);
+
+    // Same guard POST /definitions enforces — the destination class/
+    // subject must actually be on indicator-based entry before anything
+    // is written into indicator_definitions for it. The Markbook never
+    // mounts this route for a non-KG class/subject, but the route itself
+    // must not rely on that; a direct call with an arbitrary classId/
+    // subjectId is the exact case this closes.
+    const template = await resolveRcTemplate(schoolId, classId);
+    if (!template || !(template.subjects ?? []).some(s => s.subjectId === subjectId)) {
+      return E.badRequest(res, 'This class/subject is not assigned a Kindergarten/competency template — add it in Kindergarten Templates first.');
+    }
+
+    if (await _indicatorsLocked(req, schoolId, classId, subjectId, termNumber, academicYearId)) {
+      return E.forbidden(res, 'Indicators are locked — the report card for this term has been published. Ask an administrator to unlock it for a correction.');
+    }
+
+    const Defs = tenantModel('indicator_definitions', tenantContext(req));
+
+    // Never overwrite real input — only ever fills a genuinely blank list.
+    const alreadyHas = await Defs.countDocuments({
+      schoolId, classId, subjectId, termNumber, ..._yearFilterPart(academicYearId || null),
+    });
+    if (alreadyHas > 0) return ok(res, { copied: 0, reason: 'destination already has indicators' });
+
+    const cls = await tenantModel('classes', tenantContext(req)).findOne({ schoolId, id: classId }).select('sectionKey').lean();
+    if (!cls?.sectionKey) return ok(res, { copied: 0, reason: 'class has no section' });
+
+    const siblingClasses = await tenantModel('classes', tenantContext(req))
+      .find({ schoolId, sectionKey: cls.sectionKey, id: { $ne: classId } }).select('id').lean();
+    const siblingIds = siblingClasses.map(c => c.id);
+    if (siblingIds.length === 0) return ok(res, { copied: 0, reason: 'no sibling classes in this section' });
+
+    // Strictly the same subject + term(+year) — never a different subject's
+    // indicators, never a different term's. Earliest-created sibling set
+    // wins as the source, so the first teacher to type these in for the
+    // section becomes the one everyone else's blank list pre-fills from.
+    const candidates = await Defs.find({
+      schoolId, classId: { $in: siblingIds }, subjectId, termNumber, ..._yearFilterPart(academicYearId || null),
+    }).sort({ createdAt: 1 }).lean();
+    if (candidates.length === 0) return ok(res, { copied: 0, reason: 'no sibling indicators yet for this subject/term' });
+
+    const sourceClassId = candidates[0].classId;
+    const sourceDefs = candidates.filter(d => d.classId === sourceClassId);
+
+    const now = new Date().toISOString();
+    const copies = sourceDefs.map((d, i) => ({
+      id: uuidv4(), schoolId, classId, subjectId, termNumber, academicYearId: academicYearId || null,
+      text: d.text, maxScore: d.maxScore, order: d.order ?? i,
+      createdAt: now, updatedAt: now, createdBy: userId, updatedBy: userId,
+    }));
+    await Defs.insertMany(copies);
+    return ok(res, { copied: copies.length, sourceClassId });
+  } catch (err) {
+    console.error('[indicator-marks POST/definitions/copy-from-section]', err);
     return E.serverError(res);
   }
 });

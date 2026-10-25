@@ -140,6 +140,40 @@ describe('per-subject performanceBands override', () => {
   });
 });
 
+describe('bandOnlyScoring (2026-10-23) — opt-in, overridable per subject', () => {
+  test('defaults to false when omitted', async () => {
+    const res = await supertest(app).post('/api/rc-templates').send({
+      name: 'KG Template',
+      performanceBands: [{ label: 'Good', grade: 'B' }],
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.data.bandOnlyScoring).toBe(false);
+  });
+
+  test('can be set true at the template level', async () => {
+    const res = await supertest(app).post('/api/rc-templates').send({
+      name: 'Band-Only Template', bandOnlyScoring: true,
+      performanceBands: [{ label: 'Good', grade: 'B' }],
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.data.bandOnlyScoring).toBe(true);
+  });
+
+  test('a subject can override the template default independently, in either direction', async () => {
+    const res = await supertest(app).post('/api/rc-templates').send({
+      name: 'Mixed Template', bandOnlyScoring: true,
+      performanceBands: [{ label: 'Good', grade: 'B' }],
+      subjects: [
+        { subjectId: 'subj_math', name: 'Maths', bandOnlyScoring: false }, // opts OUT of the template default
+        { subjectId: 'subj_sci',  name: 'Science' }, // no override — inherits true
+      ],
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.data.subjects[0].bandOnlyScoring).toBe(false);
+    expect(res.body.data.subjects[1].bandOnlyScoring).toBeUndefined();
+  });
+});
+
 describe('isDefault — section-scoped, mirrors report-card-templates.js', () => {
   test('isDefault:true without a sectionId is rejected', async () => {
     const res = await supertest(app).post('/api/rc-templates').send({
