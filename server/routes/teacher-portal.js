@@ -59,7 +59,8 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     const Streams            = tenantModel('streams', tenantContext(req));
     const Subjects           = tenantModel('subjects', tenantContext(req));
     const Schools            = _model('schools');
-    const Behaviour          = tenantModel('behaviour', tenantContext(req));
+    // behaviour_incidents, not the empty 'behaviour' — see student-portal.js.
+    const Behaviour          = tenantModel('behaviour_incidents', tenantContext(req));
     const Exams              = tenantModel('exams', tenantContext(req));
     const Announcements      = tenantModel('announcements', tenantContext(req));
     const Events             = tenantModel('events', tenantContext(req));

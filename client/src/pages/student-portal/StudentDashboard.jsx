@@ -13,7 +13,7 @@ import useAuthStore from '@/store/auth.js';
 import { useSchoolTheme } from '@/hooks/useSchoolTheme.js';
 import {
   LayoutDashboard, Calendar, BookCheck, CheckCircle, Clock,
-  Download, FileText, GraduationCap, LogOut, AlertCircle,
+  Download, GraduationCap, LogOut, AlertCircle,
   BookOpen, Lock, Bell, MessageSquare, Activity, Star,
   MapPin, Play, MonitorPlay, CalendarCheck, Menu, X, LifeBuoy,
 } from 'lucide-react';
@@ -103,8 +103,8 @@ const MY_SPACE_NAV = [
   { id: 'section-messages',    label: 'Messages',     Icon: MessageSquare   },
 ];
 const LEARNING_NAV = [
-  { id: 'section-lessons',     label: 'Lesson Notes', Icon: BookOpen  },
-  { id: 'section-assignments', label: 'Assignments',  Icon: FileText  },
+  { id: 'section-lessons',     label: 'Lesson Notes', Icon: BookOpen      },
+  { id: 'section-exams',       label: 'Exams',        Icon: CalendarCheck },
 ];
 
 /* ── Stat card ──────────────────────────────────────────────────── */
@@ -200,6 +200,42 @@ export default function StudentDashboard() {
     const el = document.getElementById(sectionId);
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
+
+  /* ── Scroll-spy — keep the sidebar highlight in sync with the section
+     actually in view. Without this the highlight went stale the moment a
+     student scrolled by hand (it only ever changed on a nav click).
+     The dashboard is a two-column grid, so DOM order ≠ nav order: pick
+     whichever nav-linked section's top edge has passed the scroll
+     container's top edge and sits closest to it, rather than trusting
+     either list's order. Depends on `data` because the section anchors
+     only exist once the dashboard payload has rendered (this component
+     returns a spinner before that, so mainRef is null on first mount). ── */
+  useEffect(() => {
+    const main = mainRef.current;
+    if (!main) return;
+    const ids = [...MY_SPACE_NAV, ...LEARNING_NAV].map(n => n.id);
+
+    function onScroll() {
+      const mainTop = main.getBoundingClientRect().top;
+      let best = null;
+      let bestDelta = -Infinity; // largest delta that has still passed the top edge
+      let closest = ids[0];
+      let closestAbs = Infinity; // fallback: nearest to the top edge either way
+      for (const id of ids) {
+        const el = document.getElementById(id);
+        if (!el) continue;
+        const delta = el.getBoundingClientRect().top - mainTop;
+        const abs = Math.abs(delta);
+        if (abs < closestAbs) { closestAbs = abs; closest = id; }
+        if (delta <= 12 && delta > bestDelta) { bestDelta = delta; best = id; }
+      }
+      const next = best ?? closest;
+      setActiveNav(prev => (prev === next ? prev : next));
+    }
+
+    main.addEventListener('scroll', onScroll, { passive: true });
+    return () => main.removeEventListener('scroll', onScroll);
+  }, [data]);
 
   /* ── Loading state ── */
   if (loading) return (
@@ -786,8 +822,9 @@ export default function StudentDashboard() {
                 </div>
               )}
 
-              {/* Upcoming Exams */}
-              <div id="section-assignments" className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden">
+              {/* Upcoming Exams — id matches the sidebar's "Exams" nav item
+                  (was section-assignments, which mislabelled this card). */}
+              <div id="section-exams" className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden">
                 <div className="px-[18px] py-3.5 border-b border-slate-100 flex items-center justify-between">
                   <h2 className="text-[13px] font-bold text-slate-900">Upcoming Exams</h2>
                   {upcomingExams?.length > 0 && (
@@ -918,13 +955,21 @@ export default function StudentDashboard() {
             </div>
           </div>
 
-          {/* ── Curriculum / Lesson coverage ────────────────────── */}
-          {lessonsCoverage.length > 0 && (
-            <div id="section-lessons" className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden">
-              <div className="px-[18px] py-3.5 border-b border-slate-100 flex items-center gap-2">
-                <BookOpen size={14} className="text-indigo-500" />
-                <h2 className="text-[13px] font-bold text-slate-900">Curriculum Coverage</h2>
-              </div>
+          {/* ── Curriculum / Lesson coverage ──────────────────────
+              Always rendered (never gated on `lessonsCoverage.length`)
+              so the sidebar's "Lesson Notes" item always has a scroll
+              target — an empty section with an empty state is far less
+              confusing than a nav click that silently does nothing. */}
+          <div id="section-lessons" className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden">
+            <div className="px-[18px] py-3.5 border-b border-slate-100 flex items-center gap-2">
+              <BookOpen size={14} className="text-indigo-500" />
+              <h2 className="text-[13px] font-bold text-slate-900">Curriculum Coverage</h2>
+            </div>
+            {lessonsCoverage.length === 0 ? (
+              <p id="coverage-empty" className="text-[12px] text-slate-400 text-center py-6">
+                No curriculum coverage recorded yet
+              </p>
+            ) : (
               <div id="coverage-list" className="px-[18px] py-4 space-y-4">
                 {lessonsCoverage.map((sub, i) => (
                   <div key={`cov-${sub.subjectId ?? i}`} id={`coverage-subject-${sub.subjectId ?? i}`}>
@@ -951,24 +996,33 @@ export default function StudentDashboard() {
                   </div>
                 ))}
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
-          {/* ── Announcements / Messages ─────────────────────────── */}
-          {announcements?.length > 0 && (
-            <div id="section-messages" className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden">
-              <div className="px-[18px] py-3.5 border-b border-slate-100 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Bell size={14} className="text-amber-500" />
-                  <h2 className="text-[13px] font-bold text-slate-900">Announcements</h2>
-                </div>
+          {/* ── Announcements / Messages ───────────────────────────
+              Always rendered (never gated on `announcements.length`) so
+              the sidebar's "Messages" item and the notification bell's
+              onSelect target always resolve. */}
+          <div id="section-messages" className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden">
+            <div className="px-[18px] py-3.5 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Bell size={14} className="text-amber-500" />
+                <h2 className="text-[13px] font-bold text-slate-900">Announcements</h2>
+              </div>
+              {announcements?.length > 0 && (
                 <span
                   id="announcements-count-badge"
                   className="text-[11px] font-semibold text-amber-600 bg-amber-50 px-2.5 py-[5px] rounded-full"
                 >
                   {announcements.length} new
                 </span>
-              </div>
+              )}
+            </div>
+            {!announcements?.length ? (
+              <p id="announcements-empty" className="text-[12px] text-slate-400 text-center py-6">
+                No announcements right now
+              </p>
+            ) : (
               <div id="announcements-list" className="divide-y divide-slate-50">
                 {announcements.map((ann, i) => (
                   <div key={`ann-${ann.id ?? i}`} id={`announcement-${ann.id ?? i}`} className="px-[18px] py-3.5">
@@ -980,8 +1034,8 @@ export default function StudentDashboard() {
                   </div>
                 ))}
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* ── Upcoming school events ───────────────────────────── */}
           {upcomingEvents?.length > 0 && (
