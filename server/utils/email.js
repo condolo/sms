@@ -20,6 +20,7 @@
 const nodemailer  = require('nodemailer');
 const { _model }  = require('./model');
 const { decrypt, smtpEncryptReady } = require('./smtpEncrypt');
+const { resolveMessageTemplate } = require('./notificationTemplates');
 
 /* ── Platform SMTP (fixed) ──────────────────────────────── */
 const SMTP_USER      = process.env.SMTP_USER;
@@ -412,10 +413,10 @@ async function sendAdminApprovalAlert({ schoolName, adminEmail, plan }) {
 
 /* 5b. Security alert — repeated login failures on a school account */
 async function sendSecurityAlert({ adminEmail, adminName, schoolName, schoolEmail, schoolId = null, loginId, count, ip }) {
+  const { subject, bodyHtml } = await resolveMessageTemplate(schoolId, 'security_alert', { name: adminName || 'Administrator', schoolName, count });
   const html = _wrap(`
     <h2>⚠️ Security Alert — Repeated Login Failures</h2>
-    <p>Hi ${adminName || 'Administrator'},</p>
-    <p>Msingi has detected <strong>${count} failed login attempts</strong> for an account on your school portal. The account has been automatically locked for 24 hours.</p>
+    ${bodyHtml}
     <div class="info">
       <p><strong>School:</strong> ${schoolName}</p>
       <p><strong>Account:</strong> ${loginId}</p>
@@ -423,10 +424,9 @@ async function sendSecurityAlert({ adminEmail, adminName, schoolName, schoolEmai
       <p><strong>Source IP:</strong> ${ip}</p>
       <p><strong>Status:</strong> <span style="color:#dc2626;font-weight:600">Locked 24 hours</span></p>
     </div>
-    <p>If this user is legitimate, they can contact you to regain access. If this looks suspicious, investigate the source IP and consider reviewing recent login activity for your school.</p>
     <p style="font-size:13px;color:#6b7280">This is an automated security alert from Msingi. Do not reply.</p>
   `, schoolName);
-  return _sendAsSchool(adminEmail, `[Security Alert] ${count} failed login attempts on ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+  return _sendAsSchool(adminEmail, subject, html, { schoolName, schoolEmail, schoolId });
 }
 
 /* 6. Trial expiry reminder (platform → school admin) */
@@ -531,79 +531,78 @@ async function sendWelcomeCredentials({ name, email, tempPassword, schoolName, s
   const loginUrl  = _buildSchoolLoginUrl(slug);
   const roleLabel = (role || 'staff').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   const support   = schoolEmail || PLATFORM_EMAIL;
+  const { subject, bodyHtml } = await resolveMessageTemplate(schoolId, 'welcome_user', { name, schoolName, role: roleLabel });
   const html = _wrap(`
     <h2>Welcome to ${schoolName}! 🎉</h2>
-    <p>Hi ${name},</p>
-    <p>Your account on <strong>${schoolName}</strong> has been set up. Here are your login credentials.</p>
+    ${bodyHtml}
     <div class="info">
       <p><strong>School:</strong> ${schoolName}</p>
       <p><strong>Role:</strong> ${roleLabel}</p>
       <p><strong>Email:</strong> ${email}</p>
       <p><strong>Password:</strong> <span style="font-family:monospace;font-size:15px;font-weight:700;color:#4f46e5;background:#ede9fe;padding:3px 8px;border-radius:4px">${tempPassword}</span></p>
     </div>
-    <p>You can sign in immediately with these credentials. You may change your password at any time from your account settings.</p>
     <p style="text-align:center">
       <a href="${loginUrl || APP_URL}" class="btn">Sign In Now →</a>
     </p>
     <p style="font-size:13px;color:#6b7280">If you did not expect this email, contact your school administrator at <a href="mailto:${support}">${support}</a>.</p>
     <p style="font-size:12px;color:#9ca3af">⚠️ Never share your password with anyone — Msingi will never ask for it.</p>
   `, schoolName);
-  return _sendAsSchool(email, `Your ${schoolName} account is ready — welcome aboard`, html, { schoolName, schoolEmail, schoolId });
+  return _sendAsSchool(email, subject, html, { schoolName, schoolEmail, schoolId });
 }
 
 /* 9. Password expiry reminder */
 async function sendPasswordExpirySoon({ name, email, schoolName, schoolEmail, schoolId = null, daysLeft }) {
-  const urgency = daysLeft <= 1 ? '🚨 Urgent' : daysLeft <= 3 ? '⚠️ Action needed' : '🔑 Reminder';
+  const urgency      = daysLeft <= 1 ? '🚨 Urgent' : daysLeft <= 3 ? '⚠️ Action needed' : '🔑 Reminder';
+  const expiryWhen   = daysLeft <= 0 ? 'today' : `in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}`;
+  const expiryMessage = daysLeft <= 0 ? 'has expired' : `will expire in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}`;
   const support = schoolEmail || SUPPORT_EMAIL;
+  const { subject, bodyHtml } = await resolveMessageTemplate(schoolId, 'password_expiry', { name, schoolName, expiryMessage, urgency, expiryWhen });
   const html = _wrap(`
-    <h2>${urgency}: Your password expires ${daysLeft <= 0 ? 'today' : `in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}`}</h2>
-    <p>Hi ${name},</p>
-    <p>Your password for <strong>${schoolName}</strong> ${daysLeft <= 0 ? 'has expired' : `will expire in <strong>${daysLeft} day${daysLeft !== 1 ? 's' : ''}</strong>`} as part of our 90-day security policy.</p>
-    <p>Please sign in and update your password now to avoid being locked out.</p>
+    <h2>${urgency}: Your password expires ${expiryWhen}</h2>
+    ${bodyHtml}
     <p style="text-align:center">
       <a href="${APP_URL}" class="btn">Update Password Now →</a>
     </p>
     <p style="font-size:13px;color:#6b7280">Need help? Contact your school administrator at <a href="mailto:${support}">${support}</a>.</p>
   `, schoolName);
-  return _sendAsSchool(email, `${urgency} — password expires ${daysLeft <= 0 ? 'today' : `in ${daysLeft} days`} · ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+  return _sendAsSchool(email, subject, html, { schoolName, schoolEmail, schoolId });
 }
 
 /* 10. Password changed — security confirmation */
 async function sendPasswordChanged({ name, email, schoolName, schoolEmail, schoolId = null }) {
   const support = schoolEmail || SUPPORT_EMAIL;
+  const { subject, bodyHtml } = await resolveMessageTemplate(schoolId, 'password_changed', { name, schoolName });
   const html = _wrap(`
     <h2>✅ Password updated successfully</h2>
-    <p>Hi ${name},</p>
-    <p>Your password for <strong>${schoolName}</strong> was just changed. Your next password change will be due in <strong>90 days</strong>.</p>
+    ${bodyHtml}
     <p style="font-size:13px;color:#6b7280">If you did not make this change, contact your school administrator immediately at <a href="mailto:${support}">${support}</a>.</p>
     <p style="text-align:center">
       <a href="${APP_URL}" class="btn">Sign In →</a>
     </p>
   `, schoolName);
-  return _sendAsSchool(email, `Password changed — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+  return _sendAsSchool(email, subject, html, { schoolName, schoolEmail, schoolId });
 }
 
 /* 11. Role / permission change notification */
 async function sendRoleChanged({ name, email, schoolName, schoolEmail, schoolId = null, oldRole, newRole, changedBy }) {
   const fmt    = r => (r || 'staff').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   const support = schoolEmail || SUPPORT_EMAIL;
+  const { subject, bodyHtml } = await resolveMessageTemplate(schoolId, 'role_changed', { name, schoolName });
   const html = _wrap(`
     <h2>🔄 Your account permissions have changed</h2>
-    <p>Hi ${name},</p>
-    <p>Your role on <strong>${schoolName}</strong> has been updated by an administrator.</p>
+    ${bodyHtml}
     <div class="info">
       <p><strong>School:</strong> ${schoolName}</p>
       <p><strong>Previous role:</strong> ${fmt(oldRole)}</p>
       <p><strong>New role:</strong> <span style="font-weight:700;color:#4f46e5">${fmt(newRole)}</span></p>
       ${changedBy ? `<p><strong>Changed by:</strong> ${changedBy}</p>` : ''}
     </div>
-    <p>Your access level may have changed. Sign in to see your updated dashboard.</p>
     <p style="text-align:center">
       <a href="${APP_URL}" class="btn">Sign In →</a>
     </p>
     <p style="font-size:13px;color:#6b7280">If you believe this change was made in error, contact your school administrator at <a href="mailto:${support}">${support}</a>.</p>
   `, schoolName);
-  return _sendAsSchool(email, `Your role has changed — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+  return _sendAsSchool(email, subject, html, { schoolName, schoolEmail, schoolId });
 }
 
 /* PLAT-01 remediation — impersonation notice, sent to the impersonated
@@ -613,10 +612,10 @@ async function sendRoleChanged({ name, email, schoolName, schoolEmail, schoolId 
    way every other event in this file is triggered. */
 async function sendImpersonationNotice({ name, email, schoolName, schoolEmail, schoolId = null, operatorName, reason, startedAt, expiresAt }) {
   const support = schoolEmail || SUPPORT_EMAIL;
+  const { subject, bodyHtml } = await resolveMessageTemplate(schoolId, 'platform_impersonation', { name, schoolName });
   const html = _wrap(`
     <h2>🔐 Msingi support accessed your account</h2>
-    <p>Hi ${name},</p>
-    <p>A Msingi platform operator signed in as your account on <strong>${schoolName}</strong> to provide support.</p>
+    ${bodyHtml}
     <div class="info">
       <p><strong>Accessed by:</strong> ${operatorName}</p>
       <p><strong>Reason given:</strong> ${reason}</p>
@@ -626,7 +625,7 @@ async function sendImpersonationNotice({ name, email, schoolName, schoolEmail, s
     <p>This access is recorded in your school's Audit Log (Settings → Audit Log) and ends automatically at the time above — sooner if you end it yourself from that same entry.</p>
     <p style="font-size:13px;color:#6b7280">If you did not expect this, contact us immediately at <a href="mailto:${support}">${support}</a>.</p>
   `, schoolName);
-  return _sendAsSchool(email, `Msingi support accessed your account — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+  return _sendAsSchool(email, subject, html, { schoolName, schoolEmail, schoolId });
 }
 
 /* 13. In-app message / announcement notification */
@@ -634,22 +633,22 @@ async function sendMessageNotification({ recipientName, recipientEmail, senderNa
   const url   = appUrl || APP_URL;
   const icon  = isDirect ? '✉️' : '📢';
   const label = isDirect ? 'New Message' : 'School Announcement';
+  const templateKey = isDirect ? 'new_message' : 'announcement';
+  const { subject: emailSubject, bodyHtml } = await resolveMessageTemplate(schoolId, templateKey, { recipientName, senderName, schoolName, subject });
   const html  = _wrap(`
     <h2>${icon} ${label}</h2>
-    <p>Hi ${recipientName},</p>
-    <p>${isDirect ? `<strong>${senderName}</strong> has sent you a message` : `<strong>${senderName}</strong> posted a school announcement`} on <strong>${schoolName}</strong>.</p>
+    ${bodyHtml}
     <div class="info">
       <p><strong>Subject:</strong> ${subject}</p>
       <p><strong>Preview:</strong> ${preview}</p>
       ${!isDirect ? `<p><strong>From:</strong> ${senderName} · ${schoolName}</p>` : ''}
     </div>
-    <p>Log in to read the full message and reply.</p>
     <p style="text-align:center">
       <a href="${url}" class="btn">Open ${schoolName} →</a>
     </p>
     <p style="font-size:12px;color:#9ca3af">You are receiving this because you are a member of <strong>${schoolName}</strong>. Log in to manage your notification preferences.</p>
   `, schoolName);
-  return _sendAsSchool(recipientEmail, `${icon} ${label}: ${subject} — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+  return _sendAsSchool(recipientEmail, emailSubject, html, { schoolName, schoolEmail, schoolId });
 }
 
 /* 13. Assessment reminder — sent to teachers */
@@ -658,29 +657,30 @@ async function sendAssessmentReminder({
   status, schoolName, schoolEmail, schoolId = null,
 }) {
   const statusDetails = {
-    upcoming: { icon: '📅', title: 'Upcoming Assessment', color: '#4f46e5', msg: `opens on <strong>${dateFrom}</strong> and closes on <strong>${dateTo}</strong>` },
-    open:     { icon: '✏️',  title: 'Assessment Open',    color: '#16a34a', msg: `is currently open and closes on <strong>${dateTo}</strong>` },
-    overdue:  { icon: '⚠️',  title: 'Overdue Assessment', color: '#dc2626', msg: `closed on <strong>${dateTo}</strong> — please enter marks as soon as possible` },
+    upcoming: { icon: '📅', title: 'Upcoming Assessment', color: '#4f46e5', msg: `opens on ${dateFrom} and closes on ${dateTo}` },
+    open:     { icon: '✏️',  title: 'Assessment Open',    color: '#16a34a', msg: `is currently open and closes on ${dateTo}` },
+    overdue:  { icon: '⚠️',  title: 'Overdue Assessment', color: '#dc2626', msg: `closed on ${dateTo} — please enter marks as soon as possible` },
   }[status] || { icon: '📋', title: 'Assessment Reminder', color: '#4f46e5', msg: '' };
 
+  const { subject, bodyHtml } = await resolveMessageTemplate(schoolId, 'assessment_reminder', {
+    name, schoolName, assessment, termNumber, status, statusMessage: statusDetails.msg,
+  });
   const html = _wrap(`
     <h2>${statusDetails.icon} ${statusDetails.title}</h2>
-    <p>Hi ${name},</p>
-    <p>This is a reminder from <strong>${schoolName}</strong> about the following assessment:</p>
+    ${bodyHtml}
     <div class="info">
       <p><strong>Assessment:</strong> ${assessment}</p>
       <p><strong>Term:</strong> Term ${termNumber}</p>
       <p><strong>Period:</strong> ${dateFrom} → ${dateTo}</p>
       <p><strong>Status:</strong> <span style="color:${statusDetails.color};font-weight:700">${status.toUpperCase()}</span></p>
     </div>
-    <p>This assessment ${statusDetails.msg}. Please log in to enter or review marks.</p>
     <p style="text-align:center">
       <a href="${APP_URL}/exams" class="btn">Open Gradebook →</a>
     </p>
     <p style="font-size:12px;color:#9ca3af">You are receiving this as a teacher at <strong>${schoolName}</strong>.</p>
   `, schoolName);
 
-  return _sendAsSchool(toEmail, `${statusDetails.icon} ${schoolName} — ${assessment} (Term ${termNumber}) ${status}`, html, { schoolName, schoolEmail, schoolId });
+  return _sendAsSchool(toEmail, subject, html, { schoolName, schoolEmail, schoolId });
 }
 
 /* 13b. Platform invoice — school admin/principal */
@@ -711,34 +711,30 @@ async function sendInvoiceEmail({
 async function sendBirthdayWishToStudent({
   firstName, toEmail, age, schoolName, schoolEmail, schoolId = null,
 }) {
+  const { subject, bodyHtml } = await resolveMessageTemplate(schoolId, 'birthday_student', { firstName, age, schoolName });
   const html = _wrap(`
     <h2>🎂 Happy Birthday, ${firstName}!</h2>
-    <p>Hi ${firstName},</p>
-    <p>Wishing you a <strong>wonderful day</strong> as you turn <strong>${age}</strong> today! 🎉</p>
-    <p>May this year bring you joy, great friendships, and many achievements — inside and outside the classroom.</p>
-    <p>Happy Birthday from everyone at <strong>${schoolName}</strong>!</p>
+    ${bodyHtml}
     <p style="font-size:12px;color:#9ca3af;margin-top:24px">
       Log in to your student portal to see messages from your school community.
     </p>
   `, schoolName);
-  return _sendAsSchool(toEmail, `🎂 Happy Birthday, ${firstName}! — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+  return _sendAsSchool(toEmail, subject, html, { schoolName, schoolEmail, schoolId });
 }
 
 /* 15. Birthday notification — parent */
 async function sendBirthdayWishToParent({
-  parentName, toEmail, studentFirstName, studentGender, age,
+  parentName, toEmail, studentFirstName, age,
   schoolName, schoolEmail, schoolId = null,
 }) {
-  const pronoun = studentGender === 'female' ? 'she' : studentGender === 'male' ? 'he' : 'they';
-  const possessive = studentGender === 'female' ? 'her' : studentGender === 'male' ? 'his' : 'their';
+  const { subject, bodyHtml } = await resolveMessageTemplate(schoolId, 'birthday_parent', {
+    parentName: parentName || 'Parent/Guardian', studentFirstName, age, schoolName,
+  });
   const html = _wrap(`
     <h2>🎂 Happy Birthday to ${studentFirstName}!</h2>
-    <p>Dear ${parentName || 'Parent/Guardian'},</p>
-    <p>Today is <strong>${studentFirstName}'s birthday</strong>! ${pronoun.charAt(0).toUpperCase() + pronoun.slice(1)} turns <strong>${age}</strong> today. 🎉</p>
-    <p>We celebrate ${possessive} special day and wish ${pronoun} a wonderful birthday filled with happiness.</p>
-    <p>With warm wishes from <strong>${schoolName}</strong>.</p>
+    ${bodyHtml}
   `, schoolName);
-  return _sendAsSchool(toEmail, `🎂 Happy Birthday to ${studentFirstName}! — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+  return _sendAsSchool(toEmail, subject, html, { schoolName, schoolEmail, schoolId });
 }
 
 /* 16. Behaviour incident — parent/guardian */
@@ -748,10 +744,12 @@ async function sendBehaviourIncidentAlert({
 }) {
   const url  = appUrl || APP_URL;
   const icon = type === 'merit' ? '⭐' : type === 'demerit' ? '⚠️' : '📋';
+  const { subject, bodyHtml } = await resolveMessageTemplate(schoolId, 'behaviour_incident', {
+    recipientName: recipientName || 'Parent/Guardian', studentName, schoolName,
+  });
   const html = _wrap(`
     <h2>${icon} Behaviour Incident Logged</h2>
-    <p>Dear ${recipientName || 'Parent/Guardian'},</p>
-    <p>A behaviour record was logged for <strong>${studentName}</strong> at <strong>${schoolName}</strong>.</p>
+    ${bodyHtml}
     <div class="info">
       <p><strong>Type:</strong> ${type}</p>
       <p><strong>Title:</strong> ${title}</p>
@@ -763,7 +761,7 @@ async function sendBehaviourIncidentAlert({
     </p>
     <p style="font-size:12px;color:#9ca3af">You are receiving this because you are a parent/guardian at <strong>${schoolName}</strong>. Log in to manage your notification preferences.</p>
   `, schoolName);
-  return _sendAsSchool(recipientEmail, `${icon} Behaviour Incident — ${studentName} — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+  return _sendAsSchool(recipientEmail, subject, html, { schoolName, schoolEmail, schoolId });
 }
 
 async function sendPayrollStatusEmail({
@@ -773,11 +771,12 @@ async function sendPayrollStatusEmail({
   const url   = appUrl || APP_URL;
   const label = status === 'paid' ? 'Payment Processed' : 'Payroll Confirmed';
   const icon  = status === 'paid' ? '💰' : '✅';
+  const { subject, bodyHtml } = await resolveMessageTemplate(schoolId, 'payroll_status_changed', {
+    recipientName: recipientName || 'Colleague', schoolName, payPeriod, status,
+  });
   const html = _wrap(`
     <h2>${icon} ${label}</h2>
-    <p>Dear ${recipientName || 'Colleague'},</p>
-    <p>Your payroll record for <strong>${payPeriod}</strong> at <strong>${schoolName}</strong>
-       has been marked as <strong>${status}</strong>.</p>
+    ${bodyHtml}
     <div class="info">
       <p><strong>Pay period:</strong> ${payPeriod}</p>
       <p><strong>Net pay:</strong> ${currency || 'KES'} ${Number(netSalary || 0).toLocaleString()}</p>
@@ -787,7 +786,7 @@ async function sendPayrollStatusEmail({
     </p>
     <p style="font-size:12px;color:#9ca3af">You are receiving this because you are a staff member at <strong>${schoolName}</strong>. Log in to manage your notification preferences.</p>
   `, schoolName);
-  return _sendAsSchool(recipientEmail, `${icon} ${label} — ${payPeriod} — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+  return _sendAsSchool(recipientEmail, subject, html, { schoolName, schoolEmail, schoolId });
 }
 
 /* 17. Daily digest — batches every queued event for one recipient into one email */
@@ -801,17 +800,19 @@ async function sendDigestSummary({
       <p style="margin:4px 0 0;color:#6b7280;font-size:13px">${it.body}</p>
     </div>
   `).join('');
+  const { subject, bodyHtml } = await resolveMessageTemplate(schoolId, 'daily_digest', {
+    recipientName: recipientName || 'there', schoolName, itemCount: items.length,
+  });
   const html = _wrap(`
     <h2>📬 Your Daily Summary</h2>
-    <p>Hi ${recipientName || 'there'},</p>
-    <p>Here's what happened today at <strong>${schoolName}</strong> (${items.length} update${items.length === 1 ? '' : 's'}):</p>
+    ${bodyHtml}
     ${rows}
     <p style="text-align:center">
       <a href="${url}" class="btn">Open ${schoolName} →</a>
     </p>
     <p style="font-size:12px;color:#9ca3af">You're receiving this as a daily digest instead of individual emails. Change this anytime in your notification preferences.</p>
   `, schoolName);
-  return _sendAsSchool(recipientEmail, `📬 Daily Summary — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+  return _sendAsSchool(recipientEmail, subject, html, { schoolName, schoolEmail, schoolId });
 }
 
 /* 18. Report card published — parent/guardian */
@@ -820,16 +821,20 @@ async function sendReportCardPublishedAlert({
   schoolName, schoolEmail, schoolId = null, appUrl,
 }) {
   const url = appUrl || APP_URL;
+  const { subject, bodyHtml } = await resolveMessageTemplate(schoolId, 'report_published', {
+    recipientName: recipientName || 'Parent/Guardian', schoolName,
+    termName: termName || 'This term',
+    studentName: studentName + (academicYear ? ` (${academicYear})` : ''),
+  });
   const html = _wrap(`
     <h2>📄 Report Card Published</h2>
-    <p>Dear ${recipientName || 'Parent/Guardian'},</p>
-    <p>${termName || 'This term'}'s report card for <strong>${studentName}</strong>${academicYear ? ` (${academicYear})` : ''} is now available on <strong>${schoolName}</strong>.</p>
+    ${bodyHtml}
     <p style="text-align:center">
       <a href="${url}" class="btn">View Report Card →</a>
     </p>
     <p style="font-size:12px;color:#9ca3af">You are receiving this because you are a parent/guardian at <strong>${schoolName}</strong>. Log in to manage your notification preferences.</p>
   `, schoolName);
-  return _sendAsSchool(recipientEmail, `📄 Report Card Published — ${studentName} — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+  return _sendAsSchool(recipientEmail, subject, html, { schoolName, schoolEmail, schoolId });
 }
 
 /* 18b. Weekly Student Snapshot ready — parent/guardian */
@@ -838,16 +843,18 @@ async function sendWeeklySnapshotReady({
   schoolName, schoolEmail, schoolId = null, appUrl,
 }) {
   const url = appUrl || APP_URL;
+  const { subject, bodyHtml } = await resolveMessageTemplate(schoolId, 'weekly_snapshot_ready', {
+    recipientName: recipientName || 'Parent/Guardian', studentName, schoolName, weekStart, weekEnd,
+  });
   const html = _wrap(`
     <h2>📅 Weekly Student Snapshot Ready</h2>
-    <p>Dear ${recipientName || 'Parent/Guardian'},</p>
-    <p>This week's snapshot for <strong>${studentName}</strong> (${weekStart} – ${weekEnd}) is now available on <strong>${schoolName}</strong> — topics covered, assignments, attendance, behaviour, and more.</p>
+    ${bodyHtml}
     <p style="text-align:center">
       <a href="${url}" class="btn">View Snapshot →</a>
     </p>
     <p style="font-size:12px;color:#9ca3af">You are receiving this because you are a parent/guardian at <strong>${schoolName}</strong>. Log in to manage your notification preferences.</p>
   `, schoolName);
-  return _sendAsSchool(recipientEmail, `📅 Weekly Snapshot Ready — ${studentName} — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+  return _sendAsSchool(recipientEmail, subject, html, { schoolName, schoolEmail, schoolId });
 }
 
 /* 19. Exam results published — parent/guardian */
@@ -856,16 +863,18 @@ async function sendExamResultsAlert({
   schoolName, schoolEmail, schoolId = null, appUrl,
 }) {
   const url = appUrl || APP_URL;
+  const { subject, bodyHtml } = await resolveMessageTemplate(schoolId, 'exam_results', {
+    recipientName: recipientName || 'Parent/Guardian', studentName, schoolName, examName,
+  });
   const html = _wrap(`
     <h2>📝 Exam Results Published</h2>
-    <p>Dear ${recipientName || 'Parent/Guardian'},</p>
-    <p>Results for <strong>${examName}</strong> are now available for <strong>${studentName}</strong> on <strong>${schoolName}</strong>.</p>
+    ${bodyHtml}
     <p style="text-align:center">
       <a href="${url}" class="btn">View Results →</a>
     </p>
     <p style="font-size:12px;color:#9ca3af">You are receiving this because you are a parent/guardian at <strong>${schoolName}</strong>. Log in to manage your notification preferences.</p>
   `, schoolName);
-  return _sendAsSchool(recipientEmail, `📝 Exam Results Published — ${studentName} — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+  return _sendAsSchool(recipientEmail, subject, html, { schoolName, schoolEmail, schoolId });
 }
 
 /* 20. Fee invoice created — parent/guardian (distinct from platform billing's sendInvoiceEmail) */
@@ -874,16 +883,19 @@ async function sendFeeInvoiceCreatedAlert({
   schoolName, schoolEmail, schoolId = null, appUrl,
 }) {
   const url = appUrl || APP_URL;
+  const { subject, bodyHtml } = await resolveMessageTemplate(schoolId, 'invoice_created', {
+    recipientName: recipientName || 'Parent/Guardian', studentName, schoolName, invoiceNumber,
+    amountDue: `${currency} ${total}${dueDate ? ` (due ${dueDate})` : ''}`,
+  });
   const html = _wrap(`
     <h2>🧾 New Invoice</h2>
-    <p>Dear ${recipientName || 'Parent/Guardian'},</p>
-    <p>A new invoice <strong>${invoiceNumber}</strong> of <strong>${currency} ${total}</strong> has been issued for <strong>${studentName}</strong> at <strong>${schoolName}</strong>${dueDate ? `, due ${dueDate}` : ''}.</p>
+    ${bodyHtml}
     <p style="text-align:center">
       <a href="${url}" class="btn">View Invoice →</a>
     </p>
     <p style="font-size:12px;color:#9ca3af">You are receiving this because you are a parent/guardian at <strong>${schoolName}</strong>. Log in to manage your notification preferences.</p>
   `, schoolName);
-  return _sendAsSchool(recipientEmail, `🧾 New Invoice — ${studentName} — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+  return _sendAsSchool(recipientEmail, subject, html, { schoolName, schoolEmail, schoolId });
 }
 
 /* 21. Fee payment received — parent/guardian receipt */
@@ -892,17 +904,20 @@ async function sendFeePaymentReceivedAlert({
   schoolName, schoolEmail, schoolId = null, appUrl,
 }) {
   const url = appUrl || APP_URL;
+  const balanceMessage = balance > 0 ? `Remaining balance: ${currency} ${balance}.` : 'This invoice is now fully paid.';
+  const { subject, bodyHtml } = await resolveMessageTemplate(schoolId, 'payment_received', {
+    recipientName: recipientName || 'Parent/Guardian', studentName, schoolName, balanceMessage,
+    receiptNumber: `${receiptNumber} (${currency} ${amount})`,
+  });
   const html = _wrap(`
     <h2>✅ Payment Received</h2>
-    <p>Dear ${recipientName || 'Parent/Guardian'},</p>
-    <p>We've received a payment of <strong>${currency} ${amount}</strong> (receipt <strong>${receiptNumber}</strong>) for <strong>${studentName}</strong> at <strong>${schoolName}</strong>.</p>
-    <p>${balance > 0 ? `Remaining balance: <strong>${currency} ${balance}</strong>.` : 'This invoice is now fully paid.'}</p>
+    ${bodyHtml}
     <p style="text-align:center">
       <a href="${url}" class="btn">View Receipt →</a>
     </p>
     <p style="font-size:12px;color:#9ca3af">You are receiving this because you are a parent/guardian at <strong>${schoolName}</strong>. Log in to manage your notification preferences.</p>
   `, schoolName);
-  return _sendAsSchool(recipientEmail, `✅ Payment Received — ${studentName} — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+  return _sendAsSchool(recipientEmail, subject, html, { schoolName, schoolEmail, schoolId });
 }
 
 /* 22. Absence alert — parent/guardian */
@@ -911,17 +926,18 @@ async function sendAbsenceAlert({
   schoolName, schoolEmail, schoolId = null, appUrl,
 }) {
   const url = appUrl || APP_URL;
+  const { subject, bodyHtml } = await resolveMessageTemplate(schoolId, 'absence_alert', {
+    recipientName: recipientName || 'Parent/Guardian', studentName, schoolName, date,
+  });
   const html = _wrap(`
     <h2>🚸 Absence Alert</h2>
-    <p>Dear ${recipientName || 'Parent/Guardian'},</p>
-    <p><strong>${studentName}</strong> was marked <strong>absent</strong> on <strong>${date}</strong> at <strong>${schoolName}</strong>.</p>
-    <p>If this is unexpected, please contact the school office.</p>
+    ${bodyHtml}
     <p style="text-align:center">
       <a href="${url}" class="btn">View Attendance →</a>
     </p>
     <p style="font-size:12px;color:#9ca3af">You are receiving this because you are a parent/guardian at <strong>${schoolName}</strong>. Log in to manage your notification preferences.</p>
   `, schoolName);
-  return _sendAsSchool(recipientEmail, `🚸 Absence Alert — ${studentName} — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+  return _sendAsSchool(recipientEmail, subject, html, { schoolName, schoolEmail, schoolId });
 }
 
 /* 23. Overdue invoice reminder — parent/guardian */
@@ -930,16 +946,22 @@ async function sendInvoiceOverdueAlert({
   schoolName, schoolEmail, schoolId = null, appUrl,
 }) {
   const url = appUrl || APP_URL;
+  const { subject, bodyHtml } = await resolveMessageTemplate(schoolId, 'invoice_overdue', {
+    recipientName: recipientName || 'Parent/Guardian', studentName, schoolName, invoiceNumber,
+  });
   const html = _wrap(`
     <h2>⏰ Overdue Invoice Reminder</h2>
-    <p>Dear ${recipientName || 'Parent/Guardian'},</p>
-    <p>Invoice <strong>${invoiceNumber}</strong> for <strong>${studentName}</strong> at <strong>${schoolName}</strong> was due on <strong>${dueDate}</strong> and has an outstanding balance of <strong>${currency} ${balance}</strong>.</p>
+    ${bodyHtml}
+    <div class="info">
+      <p><strong>Due date:</strong> ${dueDate}</p>
+      <p><strong>Outstanding balance:</strong> ${currency} ${balance}</p>
+    </div>
     <p style="text-align:center">
       <a href="${url}" class="btn">Pay Now →</a>
     </p>
     <p style="font-size:12px;color:#9ca3af">You are receiving this because you are a parent/guardian at <strong>${schoolName}</strong>. Log in to manage your notification preferences.</p>
   `, schoolName);
-  return _sendAsSchool(recipientEmail, `⏰ Overdue Invoice — ${studentName} — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+  return _sendAsSchool(recipientEmail, subject, html, { schoolName, schoolEmail, schoolId });
 }
 
 /* 23b. Fee due soon reminder — parent/guardian, before the due date */
@@ -948,16 +970,23 @@ async function sendInvoiceDueSoonAlert({
   schoolName, schoolEmail, schoolId = null, appUrl,
 }) {
   const url = appUrl || APP_URL;
+  const { subject, bodyHtml } = await resolveMessageTemplate(schoolId, 'invoice_due_soon', {
+    recipientName: recipientName || 'Parent/Guardian', studentName, schoolName, invoiceNumber,
+    daysRemaining: `${daysRemaining} day${daysRemaining === 1 ? '' : 's'}`,
+  });
   const html = _wrap(`
     <h2>📅 Fee Due Soon</h2>
-    <p>Dear ${recipientName || 'Parent/Guardian'},</p>
-    <p>Invoice <strong>${invoiceNumber}</strong> for <strong>${studentName}</strong> at <strong>${schoolName}</strong> is due in <strong>${daysRemaining} day${daysRemaining === 1 ? '' : 's'}</strong> (${dueDate}), with an outstanding balance of <strong>${currency} ${balance}</strong>.</p>
+    ${bodyHtml}
+    <div class="info">
+      <p><strong>Due date:</strong> ${dueDate}</p>
+      <p><strong>Outstanding balance:</strong> ${currency} ${balance}</p>
+    </div>
     <p style="text-align:center">
       <a href="${url}" class="btn">Pay Now →</a>
     </p>
     <p style="font-size:12px;color:#9ca3af">You are receiving this because you are a parent/guardian at <strong>${schoolName}</strong>. Log in to manage your notification preferences.</p>
   `, schoolName);
-  return _sendAsSchool(recipientEmail, `📅 Fee Due Soon — ${studentName} — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+  return _sendAsSchool(recipientEmail, subject, html, { schoolName, schoolEmail, schoolId });
 }
 
 /* 24. Daily attendance summary — admin/principal staff */
@@ -966,10 +995,12 @@ async function sendAttendanceSummaryAlert({
   schoolName, schoolEmail, schoolId = null, appUrl,
 }) {
   const url = appUrl || APP_URL;
+  const { subject, bodyHtml } = await resolveMessageTemplate(schoolId, 'attendance_summary', {
+    recipientName: recipientName || 'there', schoolName, date,
+  });
   const html = _wrap(`
     <h2>📊 Daily Attendance Summary</h2>
-    <p>Hi ${recipientName || 'there'},</p>
-    <p>Attendance summary for <strong>${schoolName}</strong> on <strong>${date}</strong>:</p>
+    ${bodyHtml}
     <div class="info" style="margin:12px 0">
       <p style="margin:0">✅ Present: <strong>${present}</strong></p>
       <p style="margin:4px 0 0">🚸 Absent: <strong>${absent}</strong></p>
@@ -980,7 +1011,7 @@ async function sendAttendanceSummaryAlert({
       <a href="${url}" class="btn">View Attendance →</a>
     </p>
   `, schoolName);
-  return _sendAsSchool(recipientEmail, `📊 Daily Attendance Summary — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+  return _sendAsSchool(recipientEmail, subject, html, { schoolName, schoolEmail, schoolId });
 }
 
 /* 25. Real-time absentee alert — one email per marking action (not per
@@ -995,17 +1026,19 @@ async function sendAbsenteeStaffAlert({
   schoolName, schoolEmail, schoolId = null, appUrl,
 }) {
   const url = appUrl || APP_URL;
-  const subject = studentNames.length === 1 ? `${studentNames[0]} marked absent` : `${studentNames.length} students marked absent`;
+  const summaryPhrase = studentNames.length === 1 ? `${studentNames[0]} marked absent` : `${studentNames.length} students marked absent`;
+  const { subject: emailSubject, bodyHtml } = await resolveMessageTemplate(schoolId, 'attendance_absentee_alert', {
+    recipientName: recipientName || 'there', schoolName, date, subject: summaryPhrase,
+  });
   const html = _wrap(`
     <h2>🚸 Student${studentNames.length === 1 ? '' : 's'} Marked Absent</h2>
-    <p>Hi ${recipientName || 'there'},</p>
-    <p>At <strong>${schoolName}</strong> on <strong>${date}</strong>:</p>
+    ${bodyHtml}
     <ul>${studentNames.map(n => `<li>${n}</li>`).join('')}</ul>
     <p style="text-align:center">
       <a href="${url}" class="btn">View Absentees →</a>
     </p>
   `, schoolName);
-  return _sendAsSchool(recipientEmail, `🚸 ${subject} — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+  return _sendAsSchool(recipientEmail, emailSubject, html, { schoolName, schoolEmail, schoolId });
 }
 
 /* 26. Marketing-site contact form — public enquiry, no school/user context.

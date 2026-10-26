@@ -26,6 +26,8 @@ const { revokeUserTokens, revokeIdentityTokens } = require('../utils/token-versi
 const emailUtil             = require('../utils/email');
 const { encrypt, smtpEncryptReady } = require('../utils/smtpEncrypt');
 const { DEFAULTS: NOTIF_DEFAULTS, EVENT_REGISTRY, GROUPS: NOTIF_GROUPS } = require('../utils/notif-settings');
+const { listTemplatesForSchool, setTemplateOverride, resetTemplateOverride } = require('../utils/notificationTemplates');
+const { CATEGORIES: MESSAGE_TEMPLATE_CATEGORIES, CATEGORY_ORDER: MESSAGE_TEMPLATE_CATEGORY_ORDER } = require('../config/notificationTemplates');
 const { rbac, invalidatePermCache, hasExplicitSubGrant, _mergeUserOverrides, _loadPerms, _loadUserPerms } = require('../middleware/rbac');
 const { EXPLICIT_SUB_KEYS, FINANCE_SUB_GRANTS } = require('../middleware/explicit-sub');
 const { invalidateModuleConfigCache } = require('../middleware/module-gate');
@@ -1682,6 +1684,58 @@ router.put('/notifications', authMiddleware, rbac('settings', 'update'), async (
   } catch (err) {
     console.error('[settings] PUT /notifications error:', err);
     res.status(500).json({ error: 'Failed to save notification settings' });
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   NOTIFICATION MESSAGE TEMPLATES
+   GET    /api/settings/notification-templates      — every template, this school's
+                                                        current effective + default text
+   PUT    /api/settings/notification-templates/:key — save this school's own wording
+   DELETE /api/settings/notification-templates/:key — reset to the built-in default
+
+   Reported directly: "the school wants to own the message, not sent
+   by system 'from hidden' somewhere" — distinct from GET/PUT
+   /notifications above, which only toggles whether an event fires at
+   all. This is about the WORDING of the ones that do.
+   ══════════════════════════════════════════════════════════════ */
+router.get('/notification-templates', authMiddleware, rbac('settings', 'read'), async (req, res) => {
+  try {
+    const templates = await listTemplatesForSchool(req.jwtUser.schoolId);
+    res.json({ data: templates, categories: MESSAGE_TEMPLATE_CATEGORIES, categoryOrder: MESSAGE_TEMPLATE_CATEGORY_ORDER });
+  } catch (err) {
+    console.error('[settings] GET /notification-templates error:', err);
+    res.status(500).json({ error: 'Failed to load notification templates' });
+  }
+});
+
+router.put('/notification-templates/:key', authMiddleware, rbac('settings', 'update'), async (req, res) => {
+  try {
+    const { subject, body } = req.body || {};
+    await setTemplateOverride(req.jwtUser.schoolId, req.params.key, { subject, body }, req.jwtUser.userId);
+    res.json({ success: true });
+  } catch (err) {
+    if (/^Unknown notification template key/.test(err.message)) {
+      return res.status(404).json({ error: err.message });
+    }
+    if (/is required|characters or fewer/.test(err.message)) {
+      return res.status(400).json({ error: err.message });
+    }
+    console.error('[settings] PUT /notification-templates/:key error:', err);
+    res.status(500).json({ error: 'Failed to save notification template' });
+  }
+});
+
+router.delete('/notification-templates/:key', authMiddleware, rbac('settings', 'update'), async (req, res) => {
+  try {
+    await resetTemplateOverride(req.jwtUser.schoolId, req.params.key);
+    res.json({ success: true });
+  } catch (err) {
+    if (/^Unknown notification template key/.test(err.message)) {
+      return res.status(404).json({ error: err.message });
+    }
+    console.error('[settings] DELETE /notification-templates/:key error:', err);
+    res.status(500).json({ error: 'Failed to reset notification template' });
   }
 });
 

@@ -652,6 +652,11 @@ export const settings = {
     get:    ()       => _get('/settings/notifications'),
     update: (data)   => _put('/settings/notifications', data),
   },
+  notificationTemplates: {
+    list:   ()              => _get('/settings/notification-templates'),
+    update: (key, data)     => _put(`/settings/notification-templates/${key}`, data),
+    reset:  (key)            => _delete(`/settings/notification-templates/${key}`),
+  },
   customRoles: {
     list:   ()           => _get('/settings/custom-roles'),
     create: (data)       => _post('/settings/custom-roles', data),

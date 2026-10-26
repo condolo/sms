@@ -40,6 +40,7 @@ import { resizeImageToDataUrl } from '@/utils/imageResize.js';
 import { FField, Toast, iCls, RolePill, SYSTEM_ROLE_COLORS, SYSTEM_ROLES, PROTECTED_ROLES } from './components/SettingsPrimitives.jsx';
 import UsersTab from './components/UsersTab.jsx';
 import AuditLogTab from './components/AuditLogTab.jsx';
+import MessageTemplatesTab from './components/MessageTemplatesTab.jsx';
 
 /* ── Tab config ─────────────────────────────────────────────── */
 const TABS = [
@@ -49,6 +50,7 @@ const TABS = [
   { id: 'roles',          label: 'Roles & Permissions', Icon: ShieldCheck,    adminOnly: true  },
   { id: 'modules',        label: 'Modules',             Icon: Layers,         adminOnly: true  },
   { id: 'notifications',  label: 'Notifications',       Icon: Bell,           adminOnly: true  },
+  { id: 'message_templates', label: 'Message Templates', Icon: MessageSquare, adminOnly: true  },
   { id: 'system',         label: 'System',              Icon: Database,       adminOnly: true  },
   { id: 'audit_log',      label: 'Audit Log',           Icon: ClipboardList,  adminOnly: true  },
   { id: 'account',        label: 'Account',             Icon: User,           adminOnly: false },
@@ -4945,6 +4947,7 @@ export default function SettingsPage() {
             {tab === 'roles'          && <RolesTab />}
             {tab === 'modules'        && <ModulesTab />}
             {tab === 'notifications'  && <NotificationsTab />}
+            {tab === 'message_templates' && <MessageTemplatesTab />}
             {tab === 'system'         && <SystemTab />}
             {tab === 'audit_log'      && <AuditLogTab />}
             {tab === 'account'        && <AccountTab />}

@@ -6,6 +6,22 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.215.0] - 2026-10-26 - feat(settings): schools can now edit the wording of their own automated emails
+
+Reported directly: "the school wants to own the message, not sent by system 'from hidden' somewhere" — every automated email (welcome credentials, password reset, behaviour alerts, fee reminders, etc.) had its subject + narrative hardcoded in `server/utils/email.js`, with no way for a school to put it in their own words, even though the From/Reply-To already carry the school's own identity (v5.212.0).
+
+New: **Settings → Message Templates**, listing 24 editable templates grouped into the same categories as the existing event-toggle registry (`server/utils/notif-settings.js`) plus a few new ones (password-changed confirmation, security alerts, birthday wishes, daily digest) that didn't already have an equivalent there. A school edits the subject line and the plain-text narrative (greeting + explanation); everything else in the email — credential boxes, buttons, security disclosures ("never share your password", lock status, audit-trail details), the "do not reply" footer — stays fixed in code, so wording changes can never break a placeholder, hide a security disclosure, or corrupt the layout.
+
+**Architecture:**
+- `server/config/notificationTemplates.js` — the registry: 24 keys, each with category, label, description, `{{placeholder}}` list, and default subject/body (the exact wording each email already had).
+- `server/utils/notificationTemplates.js` — `resolveMessageTemplate(schoolId, key, vars)` loads the school's own override from `schools.notificationTemplateOverrides.<key>` (sparse — only edited keys are stored), falls back to the registry default, substitutes `{{placeholders}}`, and HTML-escapes + paragraphs the result (plain text in, safe HTML out — a school typing `<script>` or `&` can't inject markup). `listTemplatesForSchool`, `setTemplateOverride`, `resetTemplateOverride` back the Settings UI.
+- `server/utils/email.js` — all 22 eligible send functions (every one with a real `schoolId` at its call site, sending to that school's own users) now call `resolveMessageTemplate` instead of hardcoding their subject + narrative paragraphs.
+- New routes: `GET/PUT/DELETE /api/settings/notification-templates[/:key]`, gated by the existing `rbac('settings','read'/'update')` — same permission as every other Settings sub-resource.
+
+**Deliberately excluded** (not a scope choice — a structural fact about these emails): `sendInvoiceEmail` (Msingi's own platform billing invoice *to* the school, not the school's message to word), `sendTrialReminder` and `sendSystemUpdateNotice` (no `schoolId` reaches either call site today — there's no per-school doc to attach an override to without first threading `schoolId` through, out of scope here), and every pre-onboarding / platform-operator-facing / public-contact-form email (`sendRegistrationPending`, `sendApprovalWelcome`, `sendRejectionEmail`, `sendAdminNewSchoolAlert`, `sendAdminApprovalAlert`, `sendPlatformOperatorInvite`, `sendContactEnquiry/Confirmation`, `sendDemo*`, `sendSupportReply`, `sendTicketNotice`) — there is no existing school tenant to own the wording for any of these.
+
+Tests: `server/__tests__/notification-templates.test.js` — 19 cases covering `{{placeholder}}` substitution (including graceful handling of an unknown token), HTML-escaping of school-authored text, paragraph/line-break conversion, override-wins-over-default, partial overrides, no-schoolId (platform sends) always using the default, an unknown template key throwing rather than silently sending broken mail, fail-open-to-default on a DB error, and the save/reset routes' validation (empty/oversized subject or body, unknown key) and exact DB writes. All pre-existing email/settings tests still pass unchanged — this is purely additive, no existing call site's parameters or return shape changed.
+
 ## [v5.214.0] - 2026-10-26 - fix(report-cards): Publish button itself was hardcoded to admin/superadmin only, independent of any Settings grant
 
 Follow-up to v5.213.0, same day, same reporter: after moving the `report_generate` permission to Report Card Settings, the principal reported the button still didn't appear — "even in other classes." Direct DB check showed his role already held the permission at **both** his schools, under both the new and legacy keys, and had held it all along — v5.213.0's server-side fix was correct but could never have mattered for him, because the client never called it.
