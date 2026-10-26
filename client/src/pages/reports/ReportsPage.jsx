@@ -2,7 +2,7 @@
    Reports & Analytics — aggregated school-wide insights
    Uses existing attendance, finance, behaviour, grades APIs.
    ============================================================ */
-import { useState } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -26,13 +26,20 @@ import { Stat, Card, ChartTip, COLORS } from './ReportsPrimitives.jsx';
 const MONTHS  = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 /* ── Tabs ─────────────────────────────────────────────────── */
+// Each tab (besides 'overview', which rides on the base 'reports:view'
+// grant, and 'academic', which navigates to its own separately-gated
+// page) now maps to its own moduleRegistry.js sub-permission
+// (reports__<key>) — see that file's 2026-10-25 comment. A role/user
+// not explicitly granted a tab simply doesn't see its button, so
+// Settings can hand out e.g. Finance analytics without Behaviour or
+// Attendance coming along for free.
 const TABS = [
-  { id: 'overview',    label: 'Overview',    Icon: BarChart3  },
-  { id: 'attendance',  label: 'Attendance',  Icon: Calendar   },
-  { id: 'finance',     label: 'Finance',     Icon: Wallet     },
-  { id: 'behaviour',   label: 'Behaviour',   Icon: Scale      },
-  { id: 'academic',    label: 'Academic',    Icon: BookOpen   },
-  { id: 'enrollment',  label: 'Enrollment',  Icon: UserCheck  },
+  { id: 'overview',    label: 'Overview',    Icon: BarChart3,  subKey: null                   },
+  { id: 'attendance',  label: 'Attendance',  Icon: Calendar,   subKey: 'attendance_analytics' },
+  { id: 'finance',     label: 'Finance',     Icon: Wallet,     subKey: 'finance_analytics'    },
+  { id: 'behaviour',   label: 'Behaviour',   Icon: Scale,      subKey: 'behaviour_analytics'  },
+  { id: 'academic',    label: 'Academic',    Icon: BookOpen,   subKey: null                   },
+  { id: 'enrollment',  label: 'Enrollment',  Icon: UserCheck,  subKey: 'enrollment_analytics' },
 ];
 
 /* ══════════════════════════════════════════════════════════
@@ -40,15 +47,35 @@ const TABS = [
    ══════════════════════════════════════════════════════════ */
 export default function ReportsPage() {
   const navigate = useNavigate();
-  const [tab, setTab]       = useState('overview');
+  const can  = useAuthStore(s => s.can.bind(s));
   const school         = useAuthStore(s => s.session?.school);
   const sym            = school?.currencySymbol ?? 'KSh';
 
+  const canOverview   = can('reports', 'read', 'view');
+  const canAttendance = can('reports', 'read', 'attendance_analytics');
+  const canFinance    = can('reports', 'read', 'finance_analytics');
+  const canBehaviour  = can('reports', 'read', 'behaviour_analytics');
+  const canEnrollment = can('reports', 'read', 'enrollment_analytics');
+
+  const tabAllowed = {
+    overview: canOverview, attendance: canAttendance, finance: canFinance,
+    behaviour: canBehaviour, academic: true, enrollment: canEnrollment,
+  };
+  const visibleTabs = useMemo(() => TABS.filter(t => tabAllowed[t.id]), [canOverview, canAttendance, canFinance, canBehaviour, canEnrollment]);
+
+  const [tab, setTab] = useState(() => (canOverview ? 'overview' : (visibleTabs[0]?.id ?? 'overview')));
+  // If the active tab's own grant is revoked (or the role changes) out from
+  // under an already-open page, fall back to the first tab still visible
+  // instead of silently rendering a panel the user shouldn't see.
+  useEffect(() => {
+    if (!tabAllowed[tab] && visibleTabs.length) setTab(visibleTabs[0].id);
+  }, [tab, visibleTabs]);
+
   /* ── Data fetches ── */
-  const { data: studStats }  = useQuery({ queryKey: ['students','stats'],    queryFn: () => studentsApi.stats(),                select: r => r?.data ?? r });
-  const { data: finSummary } = useQuery({ queryKey: ['finance','summary'],   queryFn: () => financeApi.summary({}),             select: r => r?.data ?? r });
-  const { data: attSummary } = useQuery({ queryKey: ['attendance','summary'],queryFn: () => attendanceApi.summary({}),          select: r => r?.data ?? r });
-  const { data: behSummary } = useQuery({ queryKey: ['behaviour','summary'], queryFn: () => behaviourApi.incidents.summary({}), select: r => r?.data ?? r });
+  const { data: studStats }  = useQuery({ queryKey: ['students','stats'],    queryFn: () => studentsApi.stats(),                select: r => r?.data ?? r, enabled: canOverview || canEnrollment });
+  const { data: finSummary } = useQuery({ queryKey: ['finance','summary'],   queryFn: () => financeApi.summary({}),             select: r => r?.data ?? r, enabled: canFinance });
+  const { data: attSummary } = useQuery({ queryKey: ['attendance','summary'],queryFn: () => attendanceApi.summary({}),          select: r => r?.data ?? r, enabled: canAttendance });
+  const { data: behSummary } = useQuery({ queryKey: ['behaviour','summary'], queryFn: () => behaviourApi.incidents.summary({}), select: r => r?.data ?? r, enabled: canBehaviour });
 
   const { data: recentStudents, isLoading: recentLoading } = useQuery({
     queryKey: ['students', 'recent-enrollments'],
@@ -181,7 +208,7 @@ export default function ReportsPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 bg-slate-100 rounded-lg p-1 w-fit">
-        {TABS.map(t => (
+        {visibleTabs.map(t => (
           <button
             key={t.id}
             // Academic was promoted to its own page (AssessmentAnalyticsPage) —
@@ -202,12 +229,20 @@ export default function ReportsPage() {
       {/* ── OVERVIEW TAB ── */}
       {tab === 'overview' && (
         <div className="space-y-6">
-          {/* KPI row */}
+          {/* KPI row — Finance/Behaviour tiles only render for a role actually
+              granted that tab, so Overview can't be used to see those
+              domains' figures around the tab gate above (see TABS comment). */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <Stat label="Total Students"     value={totalStudents.toLocaleString()} sub={`${activeStudents} active`} Icon={Users}    colorIndex={0} />
-            <Stat label="Fee Collection"     value={`${collectionRate}%`}           sub={`${sym} ${totalCollected.toLocaleString()} collected`} Icon={Wallet}   colorIndex={1}  />
-            <Stat label="Outstanding Fees"   value={`${sym} ${outstanding.toLocaleString()}`} sub="current term" Icon={AlertCircle} colorIndex={3}  />
-            <Stat label="Behaviour Merits"   value={totalMerits.toLocaleString()}   sub={`${totalDemerits} demerits`} Icon={Scale}    colorIndex={2}   />
+            {canFinance && (
+              <>
+                <Stat label="Fee Collection"     value={`${collectionRate}%`}           sub={`${sym} ${totalCollected.toLocaleString()} collected`} Icon={Wallet}   colorIndex={1}  />
+                <Stat label="Outstanding Fees"   value={`${sym} ${outstanding.toLocaleString()}`} sub="current term" Icon={AlertCircle} colorIndex={3}  />
+              </>
+            )}
+            {canBehaviour && (
+              <Stat label="Behaviour Merits"   value={totalMerits.toLocaleString()}   sub={`${totalDemerits} demerits`} Icon={Scale}    colorIndex={2}   />
+            )}
           </div>
 
           {/* Charts row */}

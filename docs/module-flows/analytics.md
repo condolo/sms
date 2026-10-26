@@ -9,6 +9,8 @@ Analytics is a permission key that may appear as dashboard cards or embedded ana
 
 Some analytics are role-scoped and some use separate group-analytics access. If a panel is missing, check role permissions and the reporting scope; do not broaden a role solely to make one chart appear without reviewing its data exposure.
 
+As of v5.211.0, the Reports & Analytics dashboard's own tabs (Attendance, Finance, Behaviour, Enrollment — not Overview or Academic) are each independently grantable in Settings → Roles & Permissions, under the "Reports & Analytics" module. A role missing one of these simply doesn't see that tab's button, and Overview's own Finance/Behaviour KPI tiles follow the same grants. Granting a role "Reports & Analytics" alone no longer hands it every tab — each one needs its own checkbox.
+
 
 ## Setup, updates, and verification
 

@@ -2826,8 +2826,15 @@ const PERM_MODULES = [
     { key: 'workflow',      label: 'Configure Leave/Payroll Approval Workflow' }, // mirrors moduleRegistry.js — see its own comment
   ]},
   { key: 'reports',    label: 'Reports & Analytics', subs: [
-    { key: 'view',   label: 'View Reports' },
+    { key: 'view',   label: 'View Reports (Overview Tab)' },
     { key: 'export', label: 'Export Reports (CSV)' },
+    // mirrors moduleRegistry.js's own comment (2026-10-25) — splits the
+    // dashboard's tabs apart so each domain's analytics is independently
+    // grantable instead of bundled behind one 'reports' grant.
+    { key: 'attendance_analytics', label: 'View Attendance Analytics Tab' },
+    { key: 'finance_analytics',    label: 'View Finance Analytics Tab' },
+    { key: 'behaviour_analytics',  label: 'View Behaviour Analytics Tab' },
+    { key: 'enrollment_analytics', label: 'View Enrollment Analytics Tab' },
     // hasExplicitSubGrant-gated (no coarse-grant fallback) — mirrors
     // moduleRegistry.js's own comment. A role/person already scoped to
     // their own section/classes for Assessment Analytics (e.g. a section

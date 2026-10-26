@@ -154,3 +154,55 @@ describe('_deriveApiPerms — explicit finance sub-permissions clamped to their 
     expect(derived['finance__void_invoice'].sort()).toEqual(['create', 'delete', 'read', 'update']);
   });
 });
+
+describe('_deriveApiPerms — Reports & Analytics tab split (2026-10-25)', () => {
+  // Granting one dashboard tab (e.g. Finance analytics) must not silently
+  // hand over the sibling tabs (Attendance/Behaviour/Enrollment) — the
+  // exact bug reported: assigning a role the Reports & Analytics module
+  // showed it every tab at once with no way to scope down.
+  test('checking only Finance analytics does not imply Attendance/Behaviour/Enrollment', () => {
+    const derived = _deriveApiPerms({
+      'reports__finance_analytics':    { v: true,  e: false, d: false },
+      'reports__attendance_analytics': { v: false, e: false, d: false },
+      'reports__behaviour_analytics':  { v: false, e: false, d: false },
+      'reports__enrollment_analytics': { v: false, e: false, d: false },
+    });
+    expect(derived['reports__finance_analytics']).toEqual(['read']);
+    expect(derived['reports__attendance_analytics']).toEqual([]);
+    expect(derived['reports__behaviour_analytics']).toEqual([]);
+    expect(derived['reports__enrollment_analytics']).toEqual([]);
+  });
+
+  test('each of the 4 new tabs captures its own grant independently', () => {
+    const derived = _deriveApiPerms({
+      'reports__attendance_analytics': { v: true, e: false, d: false },
+      'reports__finance_analytics':    { v: false, e: false, d: false },
+      'reports__behaviour_analytics':  { v: true, e: false, d: false },
+      'reports__enrollment_analytics': { v: false, e: false, d: false },
+    });
+    expect(derived['reports__attendance_analytics']).toEqual(['read']);
+    expect(derived['reports__finance_analytics']).toEqual([]);
+    expect(derived['reports__behaviour_analytics']).toEqual(['read']);
+    expect(derived['reports__enrollment_analytics']).toEqual([]);
+  });
+
+  test('the coarse reports array still unions across tabs (unchanged pre-existing behavior)', () => {
+    const derived = _deriveApiPerms({ 'reports__attendance_analytics': { v: true, e: false, d: false } });
+    expect(derived.reports).toEqual(['read']);
+  });
+
+  test('all 4 new sub-keys resolve to an explicit empty array when sent unchecked (the real Settings UI always sends every registered sub row)', () => {
+    const derived = _deriveApiPerms({
+      'reports__view':               { v: false, e: false, d: false },
+      'reports__attendance_analytics': { v: false, e: false, d: false },
+      'reports__finance_analytics':    { v: false, e: false, d: false },
+      'reports__behaviour_analytics':  { v: false, e: false, d: false },
+      'reports__enrollment_analytics': { v: false, e: false, d: false },
+    });
+    expect(derived['reports__attendance_analytics']).toEqual([]);
+    expect(derived['reports__finance_analytics']).toEqual([]);
+    expect(derived['reports__behaviour_analytics']).toEqual([]);
+    expect(derived['reports__enrollment_analytics']).toEqual([]);
+    expect(derived.reports).toEqual([]);
+  });
+});

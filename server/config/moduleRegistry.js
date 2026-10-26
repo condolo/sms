@@ -356,8 +356,27 @@ const MODULE_REGISTRY = [
     { key: 'manage', label: 'Manage Weekly Snapshot Settings' },
   ]},
   { key: 'reports', label: 'Reports & Analytics', section: 'Analytics', icon: 'TrendingUp', navRoute: '/reports', navOrder: 22, subs: [
-    { key: 'view',   label: 'View Reports' },
+    { key: 'view',   label: 'View Reports (Overview Tab)' },
     { key: 'export', label: 'Export Reports (CSV)' },
+    // New 2026-10-25 — split the dashboard's own tabs apart so granting
+    // a role the Reports & Analytics module doesn't silently hand it
+    // every domain's analytics at once (raised directly: a role should
+    // be grantable e.g. Finance analytics without also exposing
+    // Behaviour/Attendance data in the same dashboard). Checked with
+    // ReportsPage.jsx's own useAuthStore.can('reports','read','<key>'),
+    // which falls back to the coarse 'reports' grant only for a role
+    // never re-saved since these keys were added — see auth.js's can()
+    // comment — so no existing role loses a tab it already had until an
+    // admin actually dials it down here. Each tab's underlying DATA is
+    // still fetched from, and independently gated by, that domain's own
+    // existing endpoint (attendance/finance/behaviour/students) — these
+    // rows only control whether the tab appears in THIS dashboard, not a
+    // new data boundary; that domain's own rbac('<mod>','read') remains
+    // the real backstop.
+    { key: 'attendance_analytics', label: 'View Attendance Analytics Tab' },
+    { key: 'finance_analytics',    label: 'View Finance Analytics Tab' },
+    { key: 'behaviour_analytics',  label: 'View Behaviour Analytics Tab' },
+    { key: 'enrollment_analytics', label: 'View Enrollment Analytics Tab' },
     // hasExplicitSubGrant-gated (no coarse-grant fallback) — a role or
     // person who already sees Assessment Analytics scoped to their own
     // section/assigned classes (via grades:read + their normal scope
