@@ -7084,3 +7084,19 @@ Reported directly: a school wants Indicators, Performance Band, and Score kept o
 Fixed by wrapping both Grade suffixes in `showGrade &&` in both renderers (4 call sites: PDF subject-average `gradeText`, PDF overall-average headline, HTML subject-average span, HTML overall-average div). `KgStudentReportCard.jsx` (the client-side on-screen draft preview) already gated both correctly — only the two server-side renderers that produce the actual published PDF/HTML had the gap, which is also why the published report still showed Grade even when a school believed they'd turned it off at the per-indicator level.
 
 To use: Exams → Kindergarten Templates → edit the template → "Show grade column" off. This is a per-template setting (`rc_templates.kgDisplay`), so it only affects classes using that template.
+
+## Attendance "Unknown class" at Mascit Lab Academy — a Dual ID Forms violation, not a global data problem (v5.220.0, 2026-10-26)
+
+Reported directly: the whole-school Attendance report showed "Unknown class" for every row, Present/Rate both 0, specifically at Mascit Lab Academy.
+
+**Root cause, confirmed live:** all 15 of Mascit's class documents have no `id` string field — the only school in the platform in that state (database-wide scan: 40 total class docs, 15 missing `id`, all 15 Mascit's). Both `POST /classes` and the CSV class importer always set `id: uuidv4()`, so these were created through some other path, predating the id-field migration. All 44 of Mascit's active students reference their class by the Mongo `_id` string instead (0/11 distinct values matched `classes.id`; 11/11 matched `classes._id.toString()`).
+
+`server/routes/attendance.js` had 4 independent `classNameById = Object.fromEntries(classDocs.map(c => [c.id, c.name]))` builders (school-wide report, trends/analytics, absentees list, attendance-conflict detection), each keyed only by `c.id`. For Mascit, every entry's key collapses to `undefined`, so the whole map is useless and every real `classId` lookup misses — "Unknown class" everywhere. Same class of bug the Dual ID Forms Constraint exists to prevent (see `students.js`/`report-cards.js`/`teaching-assignments.js`'s own `_entityIdForms` helper, which solves the inverse direction — resolving one id to its other forms); `attendance.js` never got the equivalent treatment for building a *name lookup map* from a batch of docs.
+
+**Fix:** a shared `_classNameMap(classDocs)` helper keyed by both `c.id` and `String(c._id)`, swapped into all 4 call sites. No behavior change for schools whose classes already have `id` (the overwhelming majority); for a school like Mascit, the `_id`-keyed entry now resolves correctly.
+
+**Scope:** the code pattern was identical everywhere, but it only misbehaves for a school whose class documents are missing `id` — confirmed Mascit is currently the *only* one. If another school onboarded through a similarly irregular path in the future, this fix already covers it; no further action needed per-school.
+
+**Separate, unrelated finding, not fixed (nothing to fix):** Mascit's attendance collection has zero records since 2026-06-23 — the dashboard's "Present: 0" is accurate, not a symptom of the class-name bug. Worth a direct follow-up with the school, not a code change.
+
+**Not done:** backfilling the missing `id` field onto Mascit's 15 class documents directly. The code fix resolves the reported symptom without it; doing so would be a direct production-data write outside the normal app flow, offered as optional follow-up data hygiene rather than assumed.

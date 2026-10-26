@@ -151,4 +151,26 @@ describe('GET /api/attendance/school-report — aggregation', () => {
       .get('/api/attendance/school-report?date=not-a-date');
     expect(res.status).toBe(400);
   });
+
+  // Reported directly 2026-10-26: Mascit Lab Academy's whole-school
+  // report showed "Unknown class" for every single row. Root cause,
+  // confirmed live: all 15 of that school's class documents have no
+  // `id` field at all (created outside POST /classes and the CSV
+  // importer, both of which always set one) — students reference them
+  // by the Mongo `_id` string instead, and every classNameById map in
+  // this file was keyed only by `c.id`.
+  test('a class document with no `id` field (only Mongo _id) still resolves by name, not "Unknown class"', async () => {
+    mockClasses = [{ _id: '6a32d92e4551eb4cbd47d1f7', name: 'Year 11' }]; // no `id` at all
+    mockStreams = [];
+    mockStudentsRoster = [{ _id: { classId: '6a32d92e4551eb4cbd47d1f7', streamId: null }, roster: 10 }];
+    mockAttendanceDay = [{ _id: { classId: '6a32d92e4551eb4cbd47d1f7', streamId: null, status: 'present' }, count: 9 }];
+
+    const res = await supertest(buildApp({ userId: 'u_admin', schoolId: SCHOOL_A, role: 'admin', roles: ['admin'] }))
+      .get('/api/attendance/school-report');
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.classes).toHaveLength(1);
+    expect(res.body.data.classes[0].className).toBe('Year 11');
+    expect(res.body.data.classes[0].className).not.toBe('Unknown class');
+  });
 });

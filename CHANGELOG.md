@@ -6,6 +6,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.220.0] - 2026-10-26 - fix(attendance): whole-school report showed "Unknown class" for every row at Mascit Lab Academy
+
+Reported directly: students re-enrolling bug investigation at Mascit Lab Academy surfaced a second, unrelated issue on the same visit — the school-wide Attendance report showed "Unknown class" for every single row, with Present/Rate both reading 0.
+
+Root-caused directly against live data: **all 15 of Mascit Lab Academy's class documents have no `id` string field at all** — the only school in the platform in this state. Both `POST /classes` and the CSV class importer always set `id: uuidv4()` on creation, so these 15 were created through some other path (predating the id-field migration, likely an early onboarding script) and never got one. Every one of Mascit's 44 active students references their class by the Mongo `_id` string instead (confirmed: 0 matches against `classes.id`, 11/11 distinct values matched `classes._id.toString()`).
+
+`server/routes/attendance.js` had 4 separate `classNameById = Object.fromEntries(classDocs.map(c => [c.id, c.name]))` builders (school-wide report, attendance trends/analytics, absentees list, attendance-conflict detection) — each keyed ONLY by `c.id`. For Mascit, every class's `c.id` is `undefined`, so the whole map collapsed to one bogus `{undefined: <last class's name>}` entry, and every real lookup by a live `classId` (the `_id` string form) missed — hence "Unknown class" everywhere. This is the same Dual ID Forms violation already guarded against elsewhere (`students.js`/`report-cards.js`/`teaching-assignments.js`'s own `_entityIdForms` helper) — this file never got the same treatment.
+
+**Is it global?** The code pattern is the same everywhere (same 4 call sites run for every school), but the only way to trigger the symptom is for a school's class documents to be missing `id` — and Mascit Lab Academy is the only one in the platform with that condition (confirmed via a database-wide scan: 40 total class documents, 15 missing `id`, all 15 belonging to Mascit).
+
+**Fixed**: added a shared `_classNameMap(classDocs)` helper that keys the map by BOTH `c.id` (when present) and `String(c._id)`, and replaced all 4 builders with it — works correctly for any school regardless of whether its class documents have the `id` field, with zero behavior change for the (vast majority of) schools that already do.
+
+**Separately noted, not a bug**: Mascit's attendance records stop at 2026-06-23 — zero records since, including today. "Present: 0" on the dashboard is a real, accurate reflection of the school not having marked attendance in over 4 months, not a symptom of this bug. Worth the product owner following up with the school directly; nothing to fix in code.
+
+**Not done without confirmation**: backfilling an `id` field onto Mascit's 15 existing class documents (would make their data consistent with every other school, as a defensive measure beyond just this bug) — the code fix above already resolves the reported symptom on its own, so this is optional data hygiene, not required, and touches live production documents directly rather than through the normal app flow.
+
+Tests: new regression cases in `attendance-school-report.test.js` and `attendance-summary-schoolwide.test.js` — a class document with no `id` field (Mongo `_id` only) still resolves by name instead of "Unknown class". All pre-existing attendance tests (130 tests across 19 suites) pass unchanged.
+
 ## [v5.219.0] - 2026-10-26 - fix(report-cards): KG "Show grade column" toggle didn't hide Grade from the Subject/Overall Average lines
 
 Reported directly: a school wants their KG competency report to keep Indicators, Performance Band, and Score, but drop Grade entirely. The existing `rc_templates` "Show grade column" toggle (`kgDisplay.showGrade`) already correctly hid the per-indicator GRADE column — but `server/utils/report-layouts.js`'s kindergarten renderer printed `"— Grade A"` on the SUBJECT AVERAGE and OVERALL AVERAGE lines unconditionally, in both the PDF and HTML renderers, regardless of the toggle. Turning the toggle off would have hidden the column but left the same information leaking back in at the bottom of each subject and the report as a whole.

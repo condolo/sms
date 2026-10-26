@@ -104,4 +104,23 @@ describe('GET /api/attendance/summary — school-wide, no classId/studentId', ()
     expect(res.status).toBe(200);
     expect(res.body.data).toMatchObject({ total: 0, present: 0, avgRate: null, daysRecorded: 0, chronicAbsent: 0, byClass: {} });
   });
+
+  // Reported directly 2026-10-26: Mascit Lab Academy's school-wide
+  // attendance report showed "Unknown class" for every row. Root cause:
+  // their class documents (created outside POST /classes and the CSV
+  // importer, both of which always set `id`) have no `id` field at
+  // all — students reference them by the Mongo `_id` string instead,
+  // and classNameById was built keyed only by `c.id`.
+  test('a class document with no `id` field (only Mongo _id) still resolves by name, not "Unknown class"', async () => {
+    mockClasses = [{ _id: '6a32d92e4551eb4cbd47d1f7', name: 'Year 11' }]; // no `id` at all
+    mockFacetResult = [{
+      overall: [{ total: 10, present: 9, absent: 1, late: 0, authorised: 0 }],
+      byClass: [{ _id: '6a32d92e4551eb4cbd47d1f7', total: 10, present: 9 }],
+      byStudent: [],
+      days: [{ _id: '2026-10-26' }],
+    }];
+    const res = await supertest(buildApp()).get('/api/attendance/summary');
+    expect(res.body.data.byClass).not.toHaveProperty('Unknown class');
+    expect(res.body.data.byClass['Year 11']).toBeCloseTo(0.9);
+  });
 });

@@ -38,6 +38,30 @@ const router = express.Router();
 const PLAN   = planGate('attendance');
 const MODGATE = moduleGate('attendance');
 
+/* Reported directly 2026-10-26: Mascit Lab Academy's whole-school
+   attendance report showed "Unknown class" for every row. Root cause —
+   confirmed live: all 15 of that school's class documents have no `id`
+   string field at all (they predate the id-field migration and were
+   never created through POST /classes or the CSV importer, both of
+   which always set one); every student's own `classId` reference uses
+   the Mongo `_id` string instead. Every classNameById map in this file
+   was built keyed ONLY by `c.id` — for Mascit that key is `undefined`
+   on every entry, so the whole map collapses to one bogus key and every
+   real classId lookup misses. Dual ID Forms Constraint violation (see
+   memory/the same pattern students.js/report-cards.js/teaching-
+   assignments.js already apply via their own _entityIdForms) — this
+   builds the map keyed by BOTH forms so a lookup works whichever form
+   the caller's classId happens to be in, for any school, not just ones
+   with a complete `id` field. */
+function _classNameMap(classDocs) {
+  const map = {};
+  for (const c of classDocs) {
+    if (c.id) map[c.id] = c.name;
+    if (c._id) map[String(c._id)] = c.name;
+  }
+  return map;
+}
+
 /* Is this user the currently-assigned Attendance Conflict Resolver? Reuses
    the same {assigneeType:'role'|'user', assigneeValue} + resolveStep()
    primitive behaviour.js's Behaviour Officer already uses (workflow-config.js)
@@ -264,7 +288,7 @@ router.get('/summary', authMiddleware, PLAN, MODGATE, rbac('attendance', 'read')
         ]),
       ]);
 
-      const classNameById = Object.fromEntries(classDocs.map(c => [c.id, c.name]));
+      const classNameById = _classNameMap(classDocs);
       const facet   = facetResult[0] ?? { overall: [], byClass: [], byStudent: [], days: [] };
       const overall = facet.overall[0] ?? { total: 0, present: 0, absent: 0, late: 0, authorised: 0 };
       const attendanceRate = Math.round((overall.present / Math.max(overall.total, 1)) * 1000) / 10;
@@ -387,7 +411,7 @@ router.get('/school-report', authMiddleware, PLAN, MODGATE, rbac('attendance', '
       if (b[row._id.status] !== undefined) b[row._id.status] += row.count;
     }
 
-    const classNameById  = Object.fromEntries(classDocs.map(c => [c.id, c.name]));
+    const classNameById  = _classNameMap(classDocs);
     const streamNameById = Object.fromEntries(streamDocs.map(s => [s.id, s.name]));
 
     function finalizeRow(b, streamName) {
@@ -474,7 +498,7 @@ router.get('/absentees', authMiddleware, PLAN, MODGATE, rbac('attendance', 'read
       tenantModel('streams', ctx).find({ schoolId }).select('id name').lean(),
     ]);
     const studentById    = Object.fromEntries(students.map(s => [s.id, s]));
-    const classNameById  = Object.fromEntries(classDocs.map(c => [c.id, c.name]));
+    const classNameById  = _classNameMap(classDocs);
     const streamNameById = Object.fromEntries(streamDocs.map(s => [s.id, s.name]));
 
     const absentees = records.map(r => {
@@ -1036,7 +1060,7 @@ async function _checkAttendanceConflict(req, studentId, date) {
     tenantModel('students', ctx).findOne({ schoolId, id: studentId }).select('id firstName lastName admissionNumber').lean(),
     Conflicts.findOne({ schoolId, studentId, date, status: 'open' }).lean(),
   ]);
-  const classNameById = Object.fromEntries(classDocs.map(c => [c.id, c.name]));
+  const classNameById = _classNameMap(classDocs);
   const entries = records
     .filter(r => r.status === 'absent' || r.status === 'present')
     .map(r => ({
