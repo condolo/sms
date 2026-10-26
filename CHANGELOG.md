@@ -6,6 +6,16 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.211.1] - 2026-10-26 - fix(parent-portal): Message compose textbox lost focus after every keystroke
+
+Direct report: "You have to type one word at a time while clicking on the text box after every word... type one letter and the cursor is disabled then you try again." Root cause: `ComposeMessageModal` was defined as a function nested inside `ParentDashboard`'s own render body, not a standalone component. Every keystroke in the Subject/Message field called `setComposeForm` — state that lives in `ParentDashboard` — which re-rendered `ParentDashboard`, which redefined `ComposeMessageModal` as a brand-new function reference. React treats a new function identity as a different component type, so it unmounted and remounted the entire modal on every single character, destroying and recreating the `<input>`/`<textarea>` DOM nodes — which is what dropped focus.
+
+Fixed by hoisting `ComposeMessageModal` out to a true top-level component (module scope, outside `ParentDashboard`), taking `composeOpen`/`composeForm`/etc. as explicit props instead of closing over them — the same shape `MessagesPanel` already uses. Confirmed these two fields (Subject, Message) were the only live-typed `<input>`/`<textarea>` elements anywhere in this 1,400-line file, so the fix is fully scoped to the reported bug; no other nested "page" function in `ParentDashboard.jsx` has this same latent issue surface visibly (they hold no live-typed fields), though the underlying anti-pattern — a component defined inside another component's render — exists elsewhere in the file and should be kept in mind if a future nested page gains a text input.
+
+Also fixed, found in passing while verifying in the browser: the compose modal's two `<motion.div>` siblings under one `<AnimatePresence>` had no `key` prop, firing a React "two children with the same key" console warning (harmless here since both always render together, but worth closing since it was right in the code being touched).
+
+No automated test added — this repo has no client-side component test harness (confirmed: zero `*.test.jsx` files exist under `client/src`); verified live in a browser instead against the demo parent account (`parent@demo.msingi.io`), typing two full multi-word sentences into Subject and Message in single continuous keystroke bursts (previously only the first character would have landed), then sending a real message end-to-end (`POST /api/parent-portal/messages` → 201).
+
 ## [v5.211.0] - 2026-10-26 - feat(reports): independently grantable Reports & Analytics tabs
 
 Direct report: "under analytics, we have some sub modules which needs to be under settings role and permissions to be able to assign different users and roles as per rbac in the system, right now assigning a user or role this module they see all analytics." Confirmed: `reports` had only `view`/`export` plus two unrelated academic-analytics widening subs — granting a role the Reports & Analytics module handed it every dashboard tab (Overview, Attendance, Finance, Behaviour, Enrollment) at once, with no way to, say, give a bursar role Finance analytics without Behaviour/Attendance coming along for free.

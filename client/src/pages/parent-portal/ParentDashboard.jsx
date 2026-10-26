@@ -208,6 +208,110 @@ function QuickStat({ icon: Icon, label, value, valueColor, onClick, iconBg, icon
   );
 }
 
+/* ── Compose modal — recipients are a server-resolved category list,
+   never a free-text address. The category options never include
+   another parent, guardian, or student — see
+   server/utils/parent-message-recipients.js for how each option is
+   actually resolved.
+
+   Hoisted to a top-level component (was a function nested inside
+   ParentDashboard's own body) — reported directly: typing in the
+   Subject/Message fields lost focus after every character, forcing a
+   re-click before the next one. A function component defined inside
+   another component's render gets a brand-new identity on every
+   render; since every keystroke here called setComposeForm (state
+   that lives in ParentDashboard), each keystroke re-rendered
+   ParentDashboard, which redefined this function fresh, so React saw
+   a different component type and unmounted+remounted the whole modal
+   — destroying and recreating the <input>/<textarea> DOM nodes, which
+   is what drops focus. Same fix already applied to MessagesPanel. ── */
+function ComposeMessageModal({ open, mode, sent, recipientOptions, form, onFormChange, error, sending, onClose, onSend, primary }) {
+  if (!open) return null;
+  return (
+    <AnimatePresence>
+      <motion.div key="compose-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        className="fixed inset-0 bg-black/30 z-40" onClick={onClose} />
+      <motion.div key="compose-dialog" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }}
+        className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md" onClick={e => e.stopPropagation()}>
+          <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+            <h3 className="text-sm font-semibold text-slate-900">{mode === 'reply' ? 'Reply' : 'New Message'}</h3>
+            <button onClick={onClose} className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100">
+              <X size={16} />
+            </button>
+          </div>
+
+          {sent ? (
+            <div className="px-5 py-8 text-center">
+              <CheckCircle size={28} className="text-emerald-500 mx-auto mb-2" />
+              <p className="text-sm font-medium text-slate-800">Message sent</p>
+              <button onClick={onClose} className="mt-4 text-[12px] font-semibold px-4 py-2 rounded-lg text-white" style={{ background: primary }}>
+                Done
+              </button>
+            </div>
+          ) : (
+            <div className="px-5 py-4 space-y-3">
+              <div>
+                <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">To</label>
+                {mode === 'reply' && (
+                  <p className="text-[11px] text-slate-400 mt-0.5">Choose who should receive your reply — the school decides who is reachable for your child.</p>
+                )}
+                {recipientOptions === null ? (
+                  <div className="h-9 rounded-lg bg-slate-100 animate-pulse mt-1" />
+                ) : recipientOptions.length === 0 ? (
+                  <p className="text-[12px] text-slate-400 mt-1">No one is set up to receive messages for this child yet — contact the school office directly.</p>
+                ) : (
+                  <select
+                    className="w-full mt-1 text-[13px] border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1"
+                    value={form.category}
+                    onChange={e => onFormChange(f => ({ ...f, category: e.target.value }))}
+                  >
+                    <option value="">Select who to message…</option>
+                    {recipientOptions.map(opt => (
+                      <option key={opt.key} value={opt.key}>{opt.label}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Subject</label>
+                <input
+                  className="w-full mt-1 text-[13px] border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1"
+                  value={form.subject}
+                  onChange={e => onFormChange(f => ({ ...f, subject: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Message</label>
+                <textarea
+                  rows={4}
+                  className="w-full mt-1 text-[13px] border border-slate-200 rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-1"
+                  value={form.body}
+                  onChange={e => onFormChange(f => ({ ...f, body: e.target.value }))}
+                />
+              </div>
+              {error && <p className="text-[12px] text-red-600">{error}</p>}
+              <div className="flex justify-end gap-2 pt-1">
+                <button onClick={onClose} className="text-[12px] font-medium text-slate-500 px-3 py-2 rounded-lg hover:bg-slate-50">
+                  Cancel
+                </button>
+                <button
+                  onClick={onSend}
+                  disabled={sending || recipientOptions === null || recipientOptions.length === 0}
+                  className="flex items-center gap-1.5 text-[12px] font-semibold text-white px-4 py-2 rounded-lg disabled:opacity-50"
+                  style={{ background: primary }}
+                >
+                  <Send size={12} /> {sending ? 'Sending…' : 'Send'}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
 /* ══════════════════════════════════════════════════════════════════
    MAIN COMPONENT
    ══════════════════════════════════════════════════════════════════ */
@@ -1023,100 +1127,20 @@ export default function ParentDashboard() {
         onUnreadOnlyChange={setMsgUnreadOnly}
         unreadCount={unreadCount}
       />
-      <ComposeMessageModal />
+      <ComposeMessageModal
+        open={composeOpen}
+        mode={composeMode}
+        sent={composeSent}
+        recipientOptions={recipientOptions}
+        form={composeForm}
+        onFormChange={setComposeForm}
+        error={composeError}
+        sending={composeSending}
+        onClose={() => setComposeOpen(false)}
+        onSend={sendCompose}
+        primary={primary}
+      />
       </>
-    );
-  }
-
-  /* ── Compose modal — recipients are a server-resolved category list,
-     never a free-text address. The category options never include
-     another parent, guardian, or student — see
-     server/utils/parent-message-recipients.js for how each option is
-     actually resolved. ── */
-  function ComposeMessageModal() {
-    if (!composeOpen) return null;
-    return (
-      <AnimatePresence>
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-          className="fixed inset-0 bg-black/30 z-40" onClick={() => setComposeOpen(false)} />
-        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }}
-          className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-              <h3 className="text-sm font-semibold text-slate-900">{composeMode === 'reply' ? 'Reply' : 'New Message'}</h3>
-              <button onClick={() => setComposeOpen(false)} className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100">
-                <X size={16} />
-              </button>
-            </div>
-
-            {composeSent ? (
-              <div className="px-5 py-8 text-center">
-                <CheckCircle size={28} className="text-emerald-500 mx-auto mb-2" />
-                <p className="text-sm font-medium text-slate-800">Message sent</p>
-                <button onClick={() => setComposeOpen(false)} className="mt-4 text-[12px] font-semibold px-4 py-2 rounded-lg text-white" style={{ background: primary }}>
-                  Done
-                </button>
-              </div>
-            ) : (
-              <div className="px-5 py-4 space-y-3">
-                <div>
-                  <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">To</label>
-                  {composeMode === 'reply' && (
-                    <p className="text-[11px] text-slate-400 mt-0.5">Choose who should receive your reply — the school decides who is reachable for your child.</p>
-                  )}
-                  {recipientOptions === null ? (
-                    <div className="h-9 rounded-lg bg-slate-100 animate-pulse mt-1" />
-                  ) : recipientOptions.length === 0 ? (
-                    <p className="text-[12px] text-slate-400 mt-1">No one is set up to receive messages for this child yet — contact the school office directly.</p>
-                  ) : (
-                    <select
-                      className="w-full mt-1 text-[13px] border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1"
-                      value={composeForm.category}
-                      onChange={e => setComposeForm(f => ({ ...f, category: e.target.value }))}
-                    >
-                      <option value="">Select who to message…</option>
-                      {recipientOptions.map(opt => (
-                        <option key={opt.key} value={opt.key}>{opt.label}</option>
-                      ))}
-                    </select>
-                  )}
-                </div>
-                <div>
-                  <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Subject</label>
-                  <input
-                    className="w-full mt-1 text-[13px] border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1"
-                    value={composeForm.subject}
-                    onChange={e => setComposeForm(f => ({ ...f, subject: e.target.value }))}
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Message</label>
-                  <textarea
-                    rows={4}
-                    className="w-full mt-1 text-[13px] border border-slate-200 rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-1"
-                    value={composeForm.body}
-                    onChange={e => setComposeForm(f => ({ ...f, body: e.target.value }))}
-                  />
-                </div>
-                {composeError && <p className="text-[12px] text-red-600">{composeError}</p>}
-                <div className="flex justify-end gap-2 pt-1">
-                  <button onClick={() => setComposeOpen(false)} className="text-[12px] font-medium text-slate-500 px-3 py-2 rounded-lg hover:bg-slate-50">
-                    Cancel
-                  </button>
-                  <button
-                    onClick={sendCompose}
-                    disabled={composeSending || recipientOptions === null || recipientOptions.length === 0}
-                    className="flex items-center gap-1.5 text-[12px] font-semibold text-white px-4 py-2 rounded-lg disabled:opacity-50"
-                    style={{ background: primary }}
-                  >
-                    <Send size={12} /> {composeSending ? 'Sending…' : 'Send'}
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </motion.div>
-      </AnimatePresence>
     );
   }
 
