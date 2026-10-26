@@ -16,7 +16,7 @@
    • Sidebar reads from auth session (reactive via patchSchool)
    • Default: all 17 configurable modules shown, original order
    ============================================================ */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Settings, LogOut, Tag, HelpCircle,
@@ -168,9 +168,9 @@ export default function Sidebar({ collapsed = false, onToggle, onClose }) {
 
   // Section accordion — collapsed by default, except whichever section
   // contains the current route (same auto-open precedent as eLearning
-  // above), so navigating straight to a page never hides its own
-  // highlighted nav item behind a closed section. Computed once on mount,
-  // same as eLearningOpen — purely user-toggled after that.
+  // above), so navigating to a page never hides its own highlighted nav
+  // item behind a closed section. This initialiser covers mount /
+  // deep-link; the useEffect below re-opens on every in-app route change.
   const [openSections, setOpenSections] = useState(() => {
     const active = navSections.find(s => s.label && s.items.some(
       it => it.to && (location.pathname === it.to || location.pathname.startsWith(it.to + '/'))
@@ -184,6 +184,26 @@ export default function Sidebar({ collapsed = false, onToggle, onClose }) {
       return next;
     });
   }
+
+  /* Re-open the section (and the eLearning group) that contains the
+     CURRENT route whenever the route changes in-app. The useState
+     initialisers above only cover mount / deep-link — without this, an
+     in-app navigation (a dashboard Quick Action, a breadcrumb, a
+     notification) to a page sitting in a collapsed section left its nav
+     item hidden and NOTHING highlighted, so the sidebar gave no
+     indication of where you were — the exact case the comment above
+     claims to prevent. Additive only: never closes a section the user
+     opened themselves. */
+  useEffect(() => {
+    const active = navSections.find(s => s.label && s.items.some(
+      it => it.to && (location.pathname === it.to || location.pathname.startsWith(it.to + '/'))
+    ));
+    if (active) {
+      setOpenSections(prev => (prev.has(active.label) ? prev : new Set([...prev, active.label])));
+    }
+    if (location.pathname.startsWith('/elearning')) setELearningOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname]);
 
   const schoolName     = school?.name ?? user?.schoolName ?? 'My School';
   const schoolInitials = schoolName

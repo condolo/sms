@@ -59,6 +59,14 @@ npm run build:react  # or: cd client && npm run build
 Password for all: `Demo2025!`. The demo school and users are re-seeded on every
 server start (note: this also resets any password you changed on a demo user).
 
+Those six are the role entry points. **[DEMO-SCENARIOS.md](DEMO-SCENARIOS.md)**
+is the persona sheet: nine student logins and nine parent logins — a parent with
+two children in different classes, one with no child linked, profiles walking
+attendance, fees, sections and coverage, plus the teacher accounts — each one
+there to prove a state the screens branch on. `npm run seed:scenarios` builds the
+whole thing, and that file's last section lists the read-path defects found while
+verifying it.
+
 ## Platform console (`/platform`)
 
 A named owner-tier operator is provisioned in MongoDB:

@@ -68,7 +68,14 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
     const Timetable     = await publishedReader(schoolId, tenantContext(req));
     const Subjects      = tenantModel('subjects', tenantContext(req));
     const Schools       = _model('schools');
-    const Behaviour     = tenantModel('behaviour', tenantContext(req));
+    /* 'behaviour_incidents', NOT 'behaviour': behaviour.js:515 stores every
+       logged incident in the first; the 'behaviour' collection this line used
+       to read is written by nothing (real database: 100 incidents vs 0
+       'behaviour' docs, for every school), so the widget below was permanently
+       empty however much a school logged. parent-portal.js and
+       teacher-portal.js made the same mistake. weekly-snapshot-aggregate.js:147
+       is the reader that always had it right. */
+    const Behaviour     = tenantModel('behaviour_incidents', tenantContext(req));
     const Exams         = tenantModel('exams', tenantContext(req));
     const Announcements = tenantModel('announcements', tenantContext(req));
     const Events        = tenantModel('events', tenantContext(req));

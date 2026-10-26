@@ -1072,9 +1072,14 @@ router.get('/google/callback', async (req, res) => {
     }
 
     const token = sign(await _buildTokenPayload(user, school.id, school));
-    // Issue a short-lived exchange code — JWT never appears in the URL or logs
-    const code = _issueExchangeCode(token);
-    res.redirect(`${publicUrl}/login?code=${code}&school=${encodeURIComponent(school.slug)}&provider=google`);
+    // Issue a short-lived exchange code — JWT never appears in the URL or logs.
+    // Named exchangeCode (not `code`) to avoid shadowing the `code` from
+    // req.query destructured at the top of this handler (line ~1303) — a
+    // same-block const redeclaration would throw a TDZ ReferenceError at
+    // runtime, silently routing every successful Google sign-in to
+    // google_failed.
+    const exchangeCode = _issueExchangeCode(token);
+    res.redirect(`${publicUrl}/login?code=${exchangeCode}&school=${encodeURIComponent(school.slug)}&provider=google`);
   } catch (err) {
     console.error('[auth/google/callback]', err);
     res.redirect(`${publicUrl}/login?error=google_failed`);
@@ -1185,8 +1190,10 @@ router.get('/microsoft/callback', async (req, res) => {
     if (!user.isActive) return res.redirect(`${publicUrl}/login?error=account_inactive`);
 
     const token = sign(await _buildTokenPayload(user, school.id, school));
-    const code  = _issueExchangeCode(token);
-    res.redirect(`${publicUrl}/login?code=${code}&school=${encodeURIComponent(school.slug)}&provider=microsoft`);
+    // Same rename as the Google callback above — avoid shadowing the `code`
+    // from `req.query` destructured at the top of this handler (TDZ bug).
+    const exchangeCode = _issueExchangeCode(token);
+    res.redirect(`${publicUrl}/login?code=${exchangeCode}&school=${encodeURIComponent(school.slug)}&provider=microsoft`);
   } catch (err) {
     console.error('[auth/microsoft/callback]', err);
     res.redirect(`${publicUrl}/login?error=microsoft_failed`);
@@ -1476,7 +1483,7 @@ router.post('/switch-school', authMiddleware, switchSchoolLimiter, async (req, r
     );
 
     const token = sign({ ...(await _buildTokenPayload(targetUser, targetSchoolId)), sessionId, absoluteExpiry });
-    const code  = _issueExchangeCode(token);
+    const exchangeCode = _issueExchangeCode(token);
 
     // NOTE: AuditService.log()'s internal org/membership enrichment looks
     // up memberships.findOne({userId: actor.userId, schoolId}) — using
@@ -1497,7 +1504,7 @@ router.post('/switch-school', authMiddleware, switchSchoolLimiter, async (req, r
       req,
     });
 
-    res.json({ code });
+    res.json({ code: exchangeCode });
   } catch (err) {
     console.error('[auth/switch-school]', err);
     res.status(500).json({ error: 'School switch failed' });
