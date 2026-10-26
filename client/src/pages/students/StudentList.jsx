@@ -104,6 +104,17 @@ export default function StudentList() {
   const canManagePortals = isPortalFloor || can('students__portal_accounts', 'update');
   const canDuplicates    = isFloor || can('students__duplicates', 'delete');
   const canPurge         = isFloor || can('students__purge', 'delete');
+  // Reported directly 2026-10-26 (same audit that found the Report
+  // Cards publish-button bug): this button was checking canManagePortals
+  // (students__portal_accounts) — the wrong permission entirely. The
+  // server route (POST /students/bulk-reset-portal-passwords) enforces
+  // SENSITIVE_FLOOR (admin/superadmin only, narrower than portal
+  // accounts' principal/deputy_principal floor) + students__reset_passwords,
+  // not students__portal_accounts — a principal with portal-account
+  // access but no reset_passwords grant would see this button and get a
+  // 403 on click, while someone granted reset_passwords specifically
+  // would never see it at all.
+  const canResetPasswords = isFloor || can('students__reset_passwords', 'update');
 
   /* Houses — for resolving a student's houseId to a display name in the table */
   const { data: settingsData } = useQuery({
@@ -564,7 +575,7 @@ export default function StudentList() {
                 Activate All Portals
               </button>
             )}
-            {canManagePortals && (
+            {canResetPasswords && (
               <button
                 onClick={() => setShowResetPanel(true)}
                 disabled={resetLoading}

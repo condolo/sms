@@ -46,17 +46,30 @@ const LIMIT = 20;
 export default function ExamsPage() {
   const [tab, setTab] = useState('exams');
   const role = useAuthStore(s => s.session?.user?.role ?? '');
+  const can  = useAuthStore(s => s.can);
   const canCreate = ['admin', 'superadmin', 'deputy_principal', 'exams_officer'].includes(role);
+  // Reported directly 2026-10-26 (same audit that found the Report Cards
+  // publish-button bug): the Review tab (mark_submissions moderation
+  // queue) was gated by canCreate — a hardcoded role list for EXAM
+  // creation, unrelated to review rights, whose roles don't even match
+  // the server's own floor. server/routes/mark-submissions.js enforces
+  // ['admin','principal','section_head'] + hasExplicitSubGrant(req,
+  // 'grades','mark_submissions','update') — mirrored here exactly, so a
+  // role granted this specific permission in Settings actually sees the
+  // tab, instead of only admin/superadmin/deputy_principal/exams_officer
+  // ever being able to reach it.
+  const canReviewSubmissions = ['admin', 'principal', 'section_head'].includes(role)
+    || can('grades', 'update', 'mark_submissions');
 
   const TABS = [
     { id: 'exams',        label: 'Exams',                  icon: FileText,    adminOnly: false },
     { id: 'markbook',     label: 'Markbook',                icon: BookMarked,  adminOnly: false },
     { id: 'marklist',     label: 'Mark List',               icon: ListChecks,  adminOnly: false },
-    { id: 'review',       label: 'Review',                  icon: Send,        adminOnly: true  },
+    { id: 'review',       label: 'Review',                  icon: Send,        adminOnly: true, visible: canReviewSubmissions },
     { id: 'reminders',    label: 'Reminders',                icon: Bell,        adminOnly: false },
     { id: 'kg-templates', label: 'Kindergarten Templates',  icon: Baby,        adminOnly: true  },
     { id: 'config',       label: 'Configuration',           icon: Settings,    adminOnly: true  },
-  ].filter(t => !t.adminOnly || canCreate);
+  ].filter(t => t.visible !== undefined ? t.visible : (!t.adminOnly || canCreate));
 
   /* ── Shared data loaded once at page level ── */
   const { data: yearsRaw } = useQuery({
