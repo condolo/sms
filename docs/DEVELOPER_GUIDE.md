@@ -7045,3 +7045,10 @@ Reported directly: "the school wants to own the message, not sent by system 'fro
 
 Tests: `server/__tests__/notification-templates.test.js`, 19 cases — substitution (including the unknown-placeholder-degrades-gracefully case), HTML-escaping of school-authored text, paragraph/`<br>` conversion, override-wins-over-default, a partial override (subject only / body only), no-`schoolId` always using the default with no DB hit, an unknown key throwing rather than sending broken mail, fail-open-to-default on a DB error, and the save/reset routes' exact validation and DB writes. Every pre-existing email/settings test still passes unchanged — purely additive, no existing call site's parameters or return shape changed.
 
+## KG band-only report: Score column showed "—" instead of the band's own scale point (v5.216.0, 2026-10-26)
+
+Reported directly from a live report card screenshot: every row in a KG subject's indicator table showed a Performance Band and a Grade, but Score was blank for every row — "the score is supposed to be the scale we set 1 to 5, right?"
+
+`server/utils/kg-report.js`'s band-only mode (2026-10-23) nulled `score`/`maxScore` on every indicator on the reasoning that no number was typed. That premise doesn't match what `server/routes/indicator-marks.js` actually does on a band-only save — it resolves `d.score = band.defaultScore` (the picked band's own point on the school's configured scale) and stores it on the mark exactly like a numeric entry. The report was discarding a real, already-captured number.
+
+Fix: `score` is now always `mark?.score ?? null`; `maxScore` is `maxBandScore(bands)` (the band scale's own ceiling) instead of `null` for band-only subjects. Subject/overall averages are unchanged — they still correctly show the band label, never a percentage. See `server/__tests__/kg-report-indicator-definitions.test.js`'s band-only describe block for the two tests pinning the new behavior (top band shows score == maxScore; a lower band shows its own lower point against the same ceiling).

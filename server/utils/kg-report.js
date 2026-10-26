@@ -86,12 +86,17 @@ async function computeKgReport(ctx, schoolId, classId, studentId, termNumber, ac
         return {
           indicatorId: ind.id,
           text:        ind.text,
-          // Band-only: no number was ever typed, so none is shown —
-          // the band label/grade below are the whole story for this
-          // indicator. Numeric mode: unchanged, score/maxScore print
-          // alongside the band pick, which stays purely decorative.
-          maxScore:    bandOnly ? null : ind.maxScore,
-          score:       bandOnly ? null : (mark?.score ?? null),
+          // Band-only (reported directly, 2026-10-26): no number was
+          // TYPED by the teacher, but one WAS captured — indicator-
+          // marks.js resolves it server-side as the picked band's own
+          // `defaultScore` (the school's own 1–5-style scale), stored
+          // on the mark exactly like a numeric entry. Previously nulled
+          // out here on the reasoning that nothing was typed, which
+          // hid that already-captured number from the report for no
+          // reason — the school wants to see where each band actually
+          // sits on the scale they configured, not just its label.
+          maxScore:    bandOnly ? ceiling : ind.maxScore,
+          score:       mark?.score ?? null,
           bandLabel:   band?.label ?? null,
           bandGrade:   band?.grade ?? null,
           bandColor:   band?.color ?? null,

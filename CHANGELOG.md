@@ -6,6 +6,16 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.216.0] - 2026-10-26 - fix(report-cards): KG band-only report showed "—" in the Score column instead of the band's own scale point
+
+Reported directly, from a live KG English report card screenshot: every indicator row showed a Performance Band ("Excellent"/"Good") and a Grade (A/B), but the Score column was blank ("–") for every row — "the score is supposed to be the scale we set 1 to 5, right?"
+
+Root cause: `server/utils/kg-report.js`'s band-only scoring mode (shipped 2026-10-23) deliberately nulled out `score`/`maxScore` on every indicator, on the reasoning "no number was ever typed, so none is shown." That reasoning doesn't hold — `server/routes/indicator-marks.js` already resolves and stores a real number for a band-only pick (`d.score = band.defaultScore`, the exact point on the school's own performance-band scale, e.g. Excellent = 5), the same way numeric entry stores a typed score. The report was simply discarding a number that was already captured, not working around a genuine absence of one.
+
+Fixed: `score` is now always `mark?.score ?? null` (the band's resolved point value), and `maxScore` is the band scale's own ceiling (`maxBandScore(bands)`) rather than `null`, for band-only subjects too — identical to how numeric-mode indicators already print `score/maxScore` side-by-side with their band pick. Subject/overall averages are unaffected — they already correctly show the band label, never a percentage (v2026-10-23, unchanged).
+
+Tests: `server/__tests__/kg-report-indicator-definitions.test.js`'s band-only describe block — replaced the one test that pinned the old "score/maxScore are null" behavior with two that pin the new one (a top band shows `score == maxScore`, e.g. 9/9; a lower band shows its own lower point against the same ceiling, e.g. 3/9). `report-layouts-kindergarten.test.js`'s band-only tests are about the subject/overall band-vs-percentage display, not the per-indicator score cell, so none needed to change. Full suite green (354 suites / 3727 tests) before this fix; the touched suites (kg-report-indicator-definitions, report-layouts-kindergarten, report-cards-kg-preview, indicator-marks, rc-template-scale) all still pass after it.
+
 ## [v5.215.0] - 2026-10-26 - feat(settings): schools can now edit the wording of their own automated emails
 
 Reported directly: "the school wants to own the message, not sent by system 'from hidden' somewhere" — every automated email (welcome credentials, password reset, behaviour alerts, fee reminders, etc.) had its subject + narrative hardcoded in `server/utils/email.js`, with no way for a school to put it in their own words, even though the From/Reply-To already carry the school's own identity (v5.212.0).

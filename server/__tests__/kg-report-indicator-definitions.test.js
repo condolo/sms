@@ -94,16 +94,27 @@ describe('computeKgReport — band-only scoring (2026-10-23)', () => {
     };
   });
 
-  test('no number is shown — score/maxScore are null even though a mark exists', async () => {
+  test("the band's own scale point is shown (2026-10-26, reported directly) — score is the picked band's defaultScore, maxScore is the band scale's own ceiling", async () => {
     mockIndicatorDefinitions = [{ id: 'ind1', subjectId: 'subj_sci', text: 'Names colours', maxScore: 10, order: 0 }];
     mockIndicatorMarks = [{ subjectId: 'subj_sci', indicatorId: 'ind1', bandId: 'bandSecure', score: 9 }];
 
     const result = await computeKgReport({}, 'sch_1', 'cls_1', 'stu_1', 2, null, null);
     const ind = result.subjects[0].indicators[0];
-    expect(ind.score).toBeNull();
-    expect(ind.maxScore).toBeNull();
+    expect(ind.score).toBe(9);
+    expect(ind.maxScore).toBe(9); // ceiling = max(BANDS.defaultScore) = Secure's own 9
     expect(ind.bandLabel).toBe('Secure');
     expect(ind.bandGrade).toBe('A');
+  });
+
+  test("a lower band shows its own lower point against the same ceiling, e.g. Emerging(3)/9", async () => {
+    mockIndicatorDefinitions = [{ id: 'ind1', subjectId: 'subj_sci', text: 'Names colours', maxScore: 10, order: 0 }];
+    mockIndicatorMarks = [{ subjectId: 'subj_sci', indicatorId: 'ind1', bandId: 'bandEmerging', score: 3 }];
+
+    const result = await computeKgReport({}, 'sch_1', 'cls_1', 'stu_1', 2, null, null);
+    const ind = result.subjects[0].indicators[0];
+    expect(ind.score).toBe(3);
+    expect(ind.maxScore).toBe(9);
+    expect(ind.bandLabel).toBe('Emerging');
   });
 
   test('subject grade is the SNAPPED band nearest the average of the picked bands\' points, not a numeric-scale lookup', async () => {
