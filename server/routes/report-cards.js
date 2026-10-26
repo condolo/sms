@@ -117,6 +117,32 @@ async function _loadPublicationPolicy(schoolId) {
   return { ...PUBLICATION_POLICY_DEFAULTS, ...(saved?.publicationPolicy || {}) };
 }
 
+/* Who can click Publish — Permission Granularity Plan 2026-09, Priority 0,
+   relocated 2026-10-26. admin/superadmin remain an unconditional floor,
+   never weakened. Everyone else needs this ONE specific grant — deliberately
+   hasExplicitSubGrant, not the ordinary subKey-with-coarse-fallback rbac()
+   behavior, so merely holding grades:create (most teaching/exam roles, for
+   entering marks) never silently includes publish rights.
+
+   Checked under TWO keys: reported directly — a principal given "full
+   access" under the Report Cards module in Settings still couldn't
+   publish, because this row actually lived under the separate Grades &
+   Marks module (Settings → Roles & Permissions → Grades → "Generate /
+   Publish Report Cards"), invisible to anyone granting access from the
+   Report Cards side. Moved to report_cards.report_generate, but several
+   real roles across real schools already hold grades.report_generate —
+   checking both (OR, not AND) means moving the row's home in Settings
+   never silently revokes an existing grant. New grants should use the
+   report_cards key; the grades key is legacy-only going forward. */
+async function _canPublishReportCards(req, role) {
+  if (['admin', 'superadmin'].includes(role)) return true;
+  const [viaReportCards, viaLegacyGrades] = await Promise.all([
+    hasExplicitSubGrant(req, 'report_cards', 'report_generate', 'create'),
+    hasExplicitSubGrant(req, 'grades', 'report_generate', 'create'),
+  ]);
+  return viaReportCards || viaLegacyGrades;
+}
+
 /* RC9 — pure decision functions, exported (like _resolveSnapComments) for
    direct unit testing without exercising the transaction-wrapped full
    /publish route. */
@@ -783,22 +809,8 @@ router.post('/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
    ══════════════════════════════════════════════════════════════ */
 router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), async (req, res) => {
   const { schoolId, userId, role } = req.jwtUser;
-  // Permission Granularity Plan 2026-09, Priority 0 — this used to be an
-  // unconditional `if (!['admin','superadmin'].includes(role))`, completely
-  // invisible to and unconfigurable from Settings (the exact BYPASS finding
-  // the Plan documents). admin/superadmin remain an unconditional floor —
-  // never removed, never weakened — but a school can now additionally grant
-  // this specific ability (e.g. to a Deputy Principal) via Settings → Roles
-  // & Permissions → Grades → "Generate / Publish Report Cards", WITHOUT
-  // that grant also reaching every other 'grades' create-shaped action.
-  // Deliberately uses hasExplicitSubGrant, not the ordinary subKey-with-
-  // coarse-fallback rbac() behavior — falling back to the coarse 'grades'
-  // create grant here would hand publish rights to any role that merely
-  // has grades:create (most teaching/exam roles, for entering marks) the
-  // moment the hardcoded floor loosens at all, reintroducing the exact
-  // class of regression this fix exists to avoid.
-  const isAdminLevel = ['admin', 'superadmin'].includes(role);
-  if (!isAdminLevel && !(await hasExplicitSubGrant(req, 'grades', 'report_generate', 'create'))) {
+  // See _canPublishReportCards' own comment for the full history/reasoning.
+  if (!(await _canPublishReportCards(req, role))) {
     return E.forbidden(res, 'You do not have permission to publish report cards.');
   }
 
@@ -1544,12 +1556,11 @@ router.post('/kg/preview-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 're
 /* ── POST /report-cards/kg/publish — versioned batch snapshot ─────── */
 router.post('/kg/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), async (req, res) => {
   const { schoolId, userId, role } = req.jwtUser;
-  // Same floor as the numeric /publish — admin/superadmin unconditional,
-  // or an explicit students-style sub-grant. Reuses the SAME grant key
+  // Same gate as the numeric /publish — reuses the SAME grant key
   // (report_generate) rather than inventing a second one for a second
-  // kind of report card — publishing is publishing.
-  const isAdminLevel = ['admin', 'superadmin'].includes(role);
-  if (!isAdminLevel && !(await hasExplicitSubGrant(req, 'grades', 'report_generate', 'create'))) {
+  // kind of report card — publishing is publishing. See
+  // _canPublishReportCards' own comment for the full history/reasoning.
+  if (!(await _canPublishReportCards(req, role))) {
     return E.forbidden(res, 'You do not have permission to publish report cards.');
   }
 

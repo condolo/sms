@@ -6987,3 +6987,26 @@ This one change improves every notification type that routes through `_sendAsSch
 **Does not retroactively fix already-failed sends.** The ~344 Trinitas parents whose welcome email never arrived under the old code path are unaffected by this fix on their own — an admin needs to re-run `POST /bulk-reset-portal-passwords` for the affected classes (or `POST /:id/parent-account` for an individual parent, like the one who reported this) so the resend actually goes out correctly this time.
 
 Tests: `server/__tests__/routes/students-bulk-welcome-email-fix.test.js` (new, 3 cases — both bulk routes queue through `enqueueBatch` rather than firing concurrently, and every queued thunk's `sendWelcomeCredentials` call carries `schoolId`); `students-parent-account.test.js` (1 new case, the single-account route); `server/__tests__/email-resolve-transporter.test.js` (new, 7 cases — the full fallback chain including the cache-override behavior and fail-open-on-DB-error). Root cause confirmed by direct, read-only queries against the live production database before any code was written, not inferred from the code alone — per this project's standing investigation practice.
+
+## Report Cards: "Generate / Publish" permission relocated from Grades & Marks to Report Card Settings (v5.213.0, 2026-10-26)
+
+Reported directly: a principal ("given all access as per role to access the full report card module") couldn't publish report cards. Traced to where the permission actually lives, not whether it was granted: `moduleRegistry.js`'s `report_generate` row ("Generate / Publish Report Cards") was filed under the **`grades`** module (labeled "Grades & Marks," shown in nav as "Exams") the whole time — never under **`report_cards`** ("Report Card Settings"), which is where any admin granting report-card access would look. Checked directly against `report-cards.js`'s own permission gate (`hasExplicitSubGrant(req, 'grades', 'report_generate', 'create')`, from the 2026-09-03 Permission Granularity Plan fix) — the key genuinely was `grades.report_generate`, confirming the mislabeling rather than assuming it.
+
+**The row moved, the key check didn't drop the old one.** `moduleRegistry.js` (and `SettingsPage.jsx`'s fallback `PERM_MODULES` mirror) now define `report_generate` under `report_cards`'s `subs`, not `grades`'s. Server-side, both `POST /publish` and `POST /kg/publish` in `report-cards.js` now call a new shared helper:
+
+```js
+async function _canPublishReportCards(req, role) {
+  if (['admin', 'superadmin'].includes(role)) return true;
+  const [viaReportCards, viaLegacyGrades] = await Promise.all([
+    hasExplicitSubGrant(req, 'report_cards', 'report_generate', 'create'),
+    hasExplicitSubGrant(req, 'grades', 'report_generate', 'create'),
+  ]);
+  return viaReportCards || viaLegacyGrades;
+}
+```
+
+**Why OR, not a straight rename — a mandatory legacy-data audit ran before any code changed**, same discipline as the exams.lock precedent (§ earlier in this file) whenever a fix changes the MEANING of an already-populated key. Query result: **43 role/user `role_permissions` documents across every real school** have a non-empty `grades__report_generate` array, including real publish-capable grants (`['...,'create',...]`) for `admin`, `deputy_principal`, `principal`, `exams_officer`, and `deputy` roles at multiple schools, plus 2 per-user overrides. A straight rename (checking only the new key) would have silently revoked every one of those the moment this shipped. The OR-combination means moving the row's home in Settings is purely additive — nothing anyone already granted stops working — while the Settings UI itself only shows the new location going forward, so new grants naturally land on `report_cards.report_generate`. The legacy `grades.report_generate` key is never written to again by the UI (it's no longer rendered anywhere) but keeps being honored indefinitely if already set; it was deliberately left in place rather than migrated/cleared, since clearing it would be the exact "silently revoke on deploy" risk this whole check exists to avoid.
+
+**Resolves the reported case directly:** the principal in question already held `grades__report_generate` with `create` at both of his schools (confirmed via direct DB query — he has two accounts, same person, two schools) — his access was blocked purely by which Settings tab anyone would think to look in, not by a missing grant. With this fix, his existing grant works regardless of which tab (Grades or Report Cards) an admin uses from now on.
+
+Tests: `report-cards-publish-permission.test.js` gained 4 new cases (new key alone passes; legacy key alone still passes; both keys present-but-empty still rejects; the same OR-gate applies to `/kg/publish`) — all 7 pre-existing cases in that file pass unchanged, pinning that the legacy path's behavior is byte-for-byte preserved. No migration script needed or run — this is a pure additive/OR change, nothing to backfill.

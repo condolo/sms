@@ -2779,7 +2779,6 @@ const PERM_MODULES = [
     { key: 'enter_marks',      label: 'Enter / Edit Marks' },
     { key: 'mark_submissions', label: 'Review / Approve Mark Submissions' },
     { key: 'comment_banks',    label: 'Manage Comment Banks' },
-    { key: 'report_generate',  label: 'Generate / Publish Report Cards' },
     { key: 'export',           label: 'Export Grades (CSV)' },
   ]},
   { key: 'exams', label: 'Exams', subs: [
@@ -2791,6 +2790,8 @@ const PERM_MODULES = [
     { key: 'lock', label: 'Lock / Unlock Assessment Schedule' },
   ]},
   { key: 'report_cards', label: 'Report Card Settings', subs: [
+    // moved from 'grades' (2026-10-26) — see moduleRegistry.js's own comment
+    { key: 'report_generate',    label: 'Generate / Publish Report Cards' },
     { key: 'draft_comments',     label: 'Manage Draft Comments' },
     { key: 'workflow',           label: 'Configure Approval Workflow' },
     { key: 'publication_policy', label: 'Configure Publication Policy' },

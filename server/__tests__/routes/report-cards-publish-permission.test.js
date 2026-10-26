@@ -14,6 +14,17 @@
    exam roles, for entering marks) does not silently grant publish
    rights the moment the hardcoded floor loosens.
 
+   2026-10-26: this row's HOME moved from the 'grades' module to
+   'report_cards' (reported directly — a principal given "full access"
+   under Report Cards still couldn't publish, since the row actually
+   lived under the separate Grades & Marks module). _canPublishReportCards
+   now checks BOTH 'report_cards.report_generate' (new) and
+   'grades.report_generate' (legacy) — OR, not AND — so every
+   already-granted role across every real school keeps working. The
+   tests below that predate this change (under "legacy grades key")
+   pin that the old key still works unchanged; the new describe block
+   pins the new key and the OR-combination.
+
    These tests exercise the REAL rbac.js (hasExplicitSubGrant, and the
    router-level `rbac('grades','create')` gate) against fake
    role_permissions data — no MongoDB required. The route's full
@@ -144,5 +155,43 @@ describe('POST /api/report-cards/publish — permission gate', () => {
     expect(res.status).toBe(403);
     // The EARLIER, generic rbac() middleware message — not the publish-specific one — proving this never reached the new check at all.
     expect(res.body.error.message).toMatch(/does not have 'create' permission on 'grades'/i);
+  });
+});
+
+describe('POST /api/report-cards/publish — permission gate, new report_cards.report_generate key (2026-10-26)', () => {
+  test('a role granted report_cards.report_generate:create (the NEW location) passes, with no grades.report_generate grant at all', async () => {
+    mockJwtUser = { userId: 'u_principal', schoolId: SCHOOL, role: 'principal', roles: ['principal'] };
+    mockRolePermsDocs = [
+      { schoolId: SCHOOL, roleKey: 'principal', permissions: { grades: ['read', 'create'], report_cards__report_generate: ['create'] } },
+    ];
+    const res = await supertest(buildApp()).post('/api/report-cards/publish').send({});
+    expect(res.status).not.toBe(403);
+  });
+
+  test('a role granted ONLY the legacy grades.report_generate key still passes — moving the row never silently revokes an existing grant', async () => {
+    mockJwtUser = { userId: 'u_legacy', schoolId: SCHOOL, role: 'deputy_principal', roles: ['deputy_principal'] };
+    mockRolePermsDocs = [
+      { schoolId: SCHOOL, roleKey: 'deputy_principal', permissions: { grades: ['read', 'create'], grades__report_generate: ['create'] } },
+    ];
+    const res = await supertest(buildApp()).post('/api/report-cards/publish').send({});
+    expect(res.status).not.toBe(403);
+  });
+
+  test('a role with NEITHER key granted (both present but empty) is still rejected — no accidental pass-through from either side', async () => {
+    mockJwtUser = { userId: 'u_neither', schoolId: SCHOOL, role: 'hod_science', roles: ['hod_science'] };
+    mockRolePermsDocs = [
+      { schoolId: SCHOOL, roleKey: 'hod_science', permissions: { grades: ['read', 'create'], grades__report_generate: [], report_cards__report_generate: [] } },
+    ];
+    const res = await supertest(buildApp()).post('/api/report-cards/publish').send({});
+    expect(res.status).toBe(403);
+  });
+
+  test('the same OR-combination gate also applies to /kg/publish', async () => {
+    mockJwtUser = { userId: 'u_principal_kg', schoolId: SCHOOL, role: 'principal', roles: ['principal'] };
+    mockRolePermsDocs = [
+      { schoolId: SCHOOL, roleKey: 'principal', permissions: { grades: ['read', 'create'], report_cards__report_generate: ['create'] } },
+    ];
+    const res = await supertest(buildApp()).post('/api/report-cards/kg/publish').send({});
+    expect(res.status).not.toBe(403);
   });
 });

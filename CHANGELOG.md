@@ -6,6 +6,16 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.213.0] - 2026-10-26 - fix(report-cards): "Generate / Publish Report Cards" permission moved from Grades & Marks to Report Card Settings
+
+Reported directly: a principal "given all access as per role to access the full report card module" still couldn't publish. Root cause traced to the permission's actual location: `report_generate` ("Generate / Publish Report Cards") lived under the **Grades & Marks** module in Settings → Roles & Permissions the whole time — not under **Report Card Settings**, where any admin granting "report card access" would naturally look. An admin who ticked every box under Report Cards would never see it, and never grant it.
+
+Moved the row to `report_cards` in `server/config/moduleRegistry.js` (and its `SettingsPage.jsx` fallback mirror). The server-side check (`server/routes/report-cards.js`'s `POST /publish` and `POST /kg/publish`) now reads a new `_canPublishReportCards(req, role)` helper that checks the new `report_cards.report_generate` key **OR** the legacy `grades.report_generate` key — admin/superadmin remain an unconditional floor either way. A direct DB audit before this shipped found 43 role/user documents across every real school with a non-empty `grades__report_generate` grant (several with real publish rights: admin, deputy_principal, principal, exams_officer, deputy, plus 2 per-user overrides) — the OR-combination means none of them lose access when the row moves; new grants going forward should use the Report Cards location, the Grades one is legacy-only now.
+
+This also resolves the specific report: the principal in question (two accounts, two schools) already had `grades__report_generate` granted (confirmed via direct DB query) — his access was blocked by the hardcoded admin/superadmin-only floor that existed before the 2026-09-03 Permission Granularity Plan fix, or simply never attempted successfully since (zero `publish_batches` records exist for him at either school). With this fix, his existing grant is honored regardless of which Settings tab an admin uses going forward.
+
+Tests: 4 new cases in `report-cards-publish-permission.test.js` (the new key alone passes, the legacy key alone still passes, neither key passes nothing, and the same gate applies to `/kg/publish` too) — all 7 pre-existing cases in that file still pass unchanged, confirming the legacy key's behavior is preserved exactly.
+
 ## [v5.212.0] - 2026-10-26 - fix(students, email): bulk welcome-credential emails bypassed each school's own SMTP and reply-to silently fell to the platform owner
 
 Direct report: "I received the email with the link to msingi and I was able to log in, but since yesterday I am not able to log in anymore" (a Trinitas parent), followed by a screenshot of several other parents separately saying they never received the email at all. Investigated against the live production DB rather than assumed: at Trinitas, 348 of 393 parent accounts (88.5%) have **never** had a single successful login, and every bulk-created batch (Oct 12, 16, 19) shows the same 62–94% never-logged-in rate — not an isolated incident.

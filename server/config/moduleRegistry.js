@@ -199,7 +199,6 @@ const MODULE_REGISTRY = [
     { key: 'enter_marks',      label: 'Enter / Edit Marks' },
     { key: 'mark_submissions', label: 'Review / Approve Mark Submissions' },
     { key: 'comment_banks',    label: 'Manage Comment Banks' },
-    { key: 'report_generate',  label: 'Generate / Publish Report Cards' },
     { key: 'export',           label: 'Export Grades (CSV)' },
   ]},
   { key: 'exams', label: 'Exams', section: 'Academic Management', navGroupKey: 'grades', subs: [
@@ -211,6 +210,19 @@ const MODULE_REGISTRY = [
     { key: 'lock', label: 'Lock / Unlock Assessment Schedule' },
   ]},
   { key: 'report_cards', label: 'Report Card Settings', section: 'Academic Management', icon: 'FileBarChart2', navRoute: '/report-cards', navLabel: 'Report Cards', navOrder: 6, subs: [
+    // Moved here from 'grades' (2026-10-26) — reported directly: a
+    // principal given "full access" under Report Cards still couldn't
+    // publish, because this row actually lived under the separate
+    // Grades & Marks module the whole time, invisible to anyone granting
+    // access from the Report Cards side. hasExplicitSubGrant-gated (no
+    // coarse-grant fallback) — same posture as every other row that uses
+    // this check — so granting broad report_cards access alone still
+    // never silently includes this. server/routes/report-cards.js's
+    // /publish and /kg/publish now check THIS key, falling back to the
+    // legacy 'grades__report_generate' key so no already-granted role
+    // (several real ones, across real schools) silently loses publish
+    // rights — see that file's own comment for the fallback.
+    { key: 'report_generate',    label: 'Generate / Publish Report Cards' },
     { key: 'draft_comments',      label: 'Manage Draft Comments' },
     { key: 'workflow',            label: 'Configure Approval Workflow' },
     { key: 'publication_policy',  label: 'Configure Publication Policy' },
