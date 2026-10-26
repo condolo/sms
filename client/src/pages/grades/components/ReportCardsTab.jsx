@@ -107,12 +107,26 @@ export default function ReportCardsTab() {
   const school      = useAuthStore(s => s.session?.school);
   const academicYear = school?.academicYear ?? '';
   const role        = useAuthStore(s => s.session?.user?.role ?? '');
+  const can         = useAuthStore(s => s.can);
   // Same floor GET /bulk-pdf itself enforces (subject-scope.js's
   // isManagement) — showing the button to a role the server would just
   // 403 isn't useful, and this is deliberately broader than Publish's own
-  // admin/superadmin-only gate (deputy/principal/hod can legitimately
-  // want a printable batch without also holding publish rights).
+  // gate below (deputy/principal/hod can legitimately want a printable
+  // batch without also holding publish rights).
   const isManagementRole = ['admin', 'superadmin', 'deputy_principal', 'deputy', 'principal', 'hod'].includes(role);
+  // Reported directly 2026-10-26: a principal (Collins Ochoo) was granted
+  // "Generate / Publish Report Cards" via Settings — the exact sub-grant
+  // report-cards.js's _canPublishReportCards checks — but the button never
+  // appeared for him on ANY class, at either of his schools, because this
+  // used to be hardcoded to ['admin','superadmin'].includes(role) and was
+  // never updated when the Permission Granularity Plan loosened the SERVER
+  // side to also honor an explicit grant. Mirrors _canPublishReportCards
+  // exactly (admin/superadmin floor OR either key, new or legacy) so the
+  // button's visibility finally matches what the server will actually let
+  // the click through to do.
+  const canPublishReportCards = ['admin', 'superadmin'].includes(role)
+    || can('report_cards', 'create', 'report_generate')
+    || can('grades', 'create', 'report_generate');
 
   /* ── Data queries ─────────────────────────────────────── */
 
@@ -706,7 +720,7 @@ ${docs.map(h => `<div>${_bodyOf(h)}</div>`).join('\n')}
               {printClassError && <p className="text-xs text-red-500">{printClassError}</p>}
             </div>
           )}
-          {canQuery && ['admin', 'superadmin'].includes(role) && (
+          {canQuery && canPublishReportCards && (
             <div className="flex flex-col gap-1 ml-auto">
               <button
                 onClick={() => { setPublishError(''); setConfirmingPublish(true); }}

@@ -6,6 +6,16 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.214.0] - 2026-10-26 - fix(report-cards): Publish button itself was hardcoded to admin/superadmin only, independent of any Settings grant
+
+Follow-up to v5.213.0, same day, same reporter: after moving the `report_generate` permission to Report Card Settings, the principal reported the button still didn't appear — "even in other classes." Direct DB check showed his role already held the permission at **both** his schools, under both the new and legacy keys, and had held it all along — v5.213.0's server-side fix was correct but could never have mattered for him, because the client never called it.
+
+Root cause was purely client-side: `client/src/pages/grades/components/ReportCardsTab.jsx`'s Publish button was gated by a hardcoded `['admin', 'superadmin'].includes(role)` — a leftover from before the 2026-09-03 Permission Granularity Plan loosened the *server* to also honor an explicit grant. Nobody updated the *button's visibility* to match, so a role granted publish rights via Settings (deputy principal, principal, exams officer, etc.) would never even see the button, on any class, at any school — a 403 was never reached because the request was never sent.
+
+Fixed by replacing the hardcoded array with `canPublishReportCards`, mirroring `_canPublishReportCards` exactly: `['admin','superadmin'].includes(role) || can('report_cards','create','report_generate') || can('grades','create','report_generate')`, using the existing `useAuthStore().can()` helper (same pattern already used in HR, Inventory, Medical, Lessons). The server-side gate is unchanged and still has the final word — this only fixes whether the button is offered in the first place.
+
+No test coverage added — this codebase has no client-side component test harness yet (confirmed: no existing tests reference `ReportCardsTab`). Verified by reading `useAuthStore.can()`'s existing, already-tested server-mirroring logic and by a clean production build (`vite build`); full browser E2E was attempted but blocked by an unrelated pre-existing local-dev quirk (the demo login's school-slug resolution 500s when driven through the Vite dev proxy on `localhost:5173`, though it works directly against the API) — flagged separately, not fixed here as out of scope for this report.
+
 ## [v5.213.0] - 2026-10-26 - fix(report-cards): "Generate / Publish Report Cards" permission moved from Grades & Marks to Report Card Settings
 
 Reported directly: a principal "given all access as per role to access the full report card module" still couldn't publish. Root cause traced to the permission's actual location: `report_generate` ("Generate / Publish Report Cards") lived under the **Grades & Marks** module in Settings → Roles & Permissions the whole time — not under **Report Card Settings**, where any admin granting "report card access" would naturally look. An admin who ticked every box under Report Cards would never see it, and never grant it.

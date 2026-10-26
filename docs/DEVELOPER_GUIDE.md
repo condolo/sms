@@ -7010,3 +7010,16 @@ async function _canPublishReportCards(req, role) {
 **Resolves the reported case directly:** the principal in question already held `grades__report_generate` with `create` at both of his schools (confirmed via direct DB query — he has two accounts, same person, two schools) — his access was blocked purely by which Settings tab anyone would think to look in, not by a missing grant. With this fix, his existing grant works regardless of which tab (Grades or Report Cards) an admin uses from now on.
 
 Tests: `report-cards-publish-permission.test.js` gained 4 new cases (new key alone passes; legacy key alone still passes; both keys present-but-empty still rejects; the same OR-gate applies to `/kg/publish`) — all 7 pre-existing cases in that file pass unchanged, pinning that the legacy path's behavior is byte-for-byte preserved. No migration script needed or run — this is a pure additive/OR change, nothing to backfill.
+
+**Same-day follow-up (v5.214.0) — the server-side fix above could never have helped him.** The same principal reported the Publish button still didn't appear, "even in other classes." Re-checking the DB showed his role already held `grades__report_generate: create` at **both** schools before v5.213.0 shipped — the permission was never actually missing for him. The real bug was purely client-side: `client/src/pages/grades/components/ReportCardsTab.jsx`'s Publish button was wrapped in a hardcoded `{canQuery && ['admin', 'superadmin'].includes(role) && (...)}` — a leftover from before the 2026-09-03 Permission Granularity Plan loosened the *server-side* check to also honor an explicit grant. Whoever shipped that plan never updated the button's own visibility condition to match, so any role granted publish rights via Settings (deputy principal, principal, exams officer, …) would never see the button at all, on any class, at any school — the request was never even sent, so there was no 403 to diagnose.
+
+Fixed by adding a `canPublishReportCards` flag that mirrors `_canPublishReportCards` exactly:
+```js
+const can = useAuthStore(s => s.can);
+const canPublishReportCards = ['admin', 'superadmin'].includes(role)
+  || can('report_cards', 'create', 'report_generate')
+  || can('grades', 'create', 'report_generate');
+```
+using `useAuthStore`'s existing `can(feature, action, subKey)` helper (already used the same way in HRPage, InventoryPage, MedicalPage, LessonsPage) — no new client-side permission plumbing needed. The gate that was previously `['admin', 'superadmin'].includes(role)` at the button's render condition is now `canPublishReportCards`. The server-side check is completely unchanged; this only decides whether the button is offered.
+
+Takeaway for future permission-granularity work: when a server-side check is loosened from a hardcoded role list to an explicit grant, grep the client for the SAME hardcoded list gating the feature's entry point (button/menu item/tab) — the Permission Granularity Plan's original 2026-09 rollout fixed several server routes this way without this check, and this is the first time it was caught, by a real user hitting it in production, not by any test.
