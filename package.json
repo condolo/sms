@@ -13,6 +13,7 @@
     "build": "npm run build:react",
     "seed": "node server/scripts/seed-demo.js",
     "seed:data": "node server/scripts/seed-demo-data.js",
+    "seed:scenarios": "node server/scripts/seed-demo-scenarios.js",
     "test": "jest --runInBand --forceExit",
     "test:watch": "jest --watch --runInBand",
     "platform:health": "node scripts/platform-health.js",

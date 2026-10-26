@@ -20,6 +20,7 @@ const bcrypt   = require('bcryptjs');
 const DEMO_SLUG     = 'demo';
 const DEMO_PASSWORD = 'Demo2025!';
 const { seedDemoData } = require('./seed-demo-data');
+const { seedMobileScenarios } = require('./seed-demo-scenarios');
 
 // Was a locally duplicated copy of this factory, missing the `id: false`
 // schema option the canonical one (server/utils/model.js) carries. Found
@@ -247,6 +248,13 @@ async function seedDemo() {
   } catch (err) {
     console.warn('[seed-demo] Portal account linking failed:', err.message);
   }
+
+  /* ── Mobile test scenarios — MUST run last ──
+     Overwrites which student `demo-student` / `parent@demo.msingi.io` point
+     at, so it has to land after the dynamic link above. Adds the accounts
+     and the weekly-snapshot / messages / lesson-coverage rows the mobile app
+     branches on. See DEMO-SCENARIOS.md for the persona login sheet. */
+  await seedMobileScenarios();
 }
 
 module.exports = { seedDemo };
