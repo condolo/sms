@@ -6,6 +6,16 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.219.0] - 2026-10-26 - fix(report-cards): KG "Show grade column" toggle didn't hide Grade from the Subject/Overall Average lines
+
+Reported directly: a school wants their KG competency report to keep Indicators, Performance Band, and Score, but drop Grade entirely. The existing `rc_templates` "Show grade column" toggle (`kgDisplay.showGrade`) already correctly hid the per-indicator GRADE column — but `server/utils/report-layouts.js`'s kindergarten renderer printed `"— Grade A"` on the SUBJECT AVERAGE and OVERALL AVERAGE lines unconditionally, in both the PDF and HTML renderers, regardless of the toggle. Turning the toggle off would have hidden the column but left the same information leaking back in at the bottom of each subject and the report as a whole.
+
+Fixed by gating both Grade suffixes — `subj.subjectGrade` on the Subject Average line and `s.overall.grade` on the Overall Average line, in both `_drawKindergartenPdf` and `_renderKindergartenHtml` — behind the same `showGrade` flag the per-indicator column already uses. The client-side on-screen preview (`KgStudentReportCard.jsx`) already did this correctly; only the two server-side renderers (the ones that actually produce the published PDF/HTML) had the gap.
+
+Tests: new describe block in `report-layouts-kindergarten.test.js` — `showGrade: false` drops "Grade" from both average lines and the column header, in both renderers; `showGrade: true` (default) still shows it. All pre-existing kindergarten/report-layouts tests pass unchanged.
+
+To use: Exams → Kindergarten Templates → edit the template → turn off "Show grade column". Indicator, Performance Band, and Score all remain; Grade disappears everywhere on the report, not just the per-row column.
+
 ## [v5.218.0] - 2026-10-26 - fix(settings): Settings tabs were gated purely on literal admin/superadmin role, no fallback to an explicit grant
 
 Closes the one item v5.217.0's audit flagged but deliberately left unfixed pending an explicit ask: `client/src/pages/settings/SettingsPage.jsx`'s entire tab list (School, Subscription, Users, Roles & Permissions, Modules, Notifications, Message Templates, System, Audit Log) — both which tabs render in the sidebar and which `?tab=` deep-link is honored — was gated by `isAdmin = ['admin','superadmin'].includes(role)` alone. A role explicitly granted `settings` access via Roles & Permissions could never reach any of these tabs through the UI, even though the server-side routes behind them (`rbac('settings', action)`, no subKey) already honor that grant.

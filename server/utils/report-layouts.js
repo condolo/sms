@@ -2069,7 +2069,7 @@ function _renderKindergartenPdf(doc, s, images, isFirstPage) {
       const avgText = subj.bandOnly
         ? (subj.subjectBandLabel || '—')
         : (subj.subjectAvgPct != null ? `${subj.subjectAvgPct.toFixed(1)}%` : '—');
-      const gradeText = subj.subjectGrade ? `   —   Grade ${subj.subjectGrade}` : '';
+      const gradeText = (showGrade && subj.subjectGrade) ? `   —   Grade ${subj.subjectGrade}` : '';
       doc.fillColor(BRAND).font(FONTS.sansBold).fontSize(8.5).text('SUBJECT AVERAGE', X + 8, rowY + 6, { width: PAGE_WIDTH / 2 });
       doc.fillColor(ACCENT).font(FONTS.serifBold).fontSize(10).text(avgText + gradeText, X, rowY + 5, { width: PAGE_WIDTH - 8, align: 'right' });
       rowY += 20;
@@ -2110,7 +2110,7 @@ function _renderKindergartenPdf(doc, s, images, isFirstPage) {
       ? (s.overall.bandLabel || '—')
       : (s.overall.avgPct != null ? `${s.overall.avgPct.toFixed(1)}%` : '—');
     doc.fillColor(INK).font(FONTS.serifBold).fontSize(26)
-       .text(headline + (s.overall.grade ? `  ${s.overall.grade}` : ''), X + 18, rowY + 24);
+       .text(headline + ((showGrade && s.overall.grade) ? `  ${s.overall.grade}` : ''), X + 18, rowY + 24);
     rowY += BOX_H + 14;
     if (showGradingKey) {
       doc.fillColor(INK_SOFT).font(FONTS.sansSemibold).fontSize(8).text('GRADING SCALE', X, rowY);
@@ -2186,7 +2186,7 @@ function _renderKindergartenHtml(s) {
       ${s.display.showSubjectAvg ? `
         <div style="background:#eef1f4;display:flex;justify-content:space-between;padding:7px 10px;font-size:11px">
           <span style="font-weight:700;color:#1f2d3d">SUBJECT AVERAGE</span>
-          <span style="font-weight:700;color:#8a5a2b">${subj.bandOnly ? _esc(subj.subjectBandLabel || '—') : (subj.subjectAvgPct != null ? _esc(subj.subjectAvgPct.toFixed(1)) + '%' : '—')}${subj.subjectGrade ? ` — Grade ${_esc(subj.subjectGrade)}` : ''}</span>
+          <span style="font-weight:700;color:#8a5a2b">${subj.bandOnly ? _esc(subj.subjectBandLabel || '—') : (subj.subjectAvgPct != null ? _esc(subj.subjectAvgPct.toFixed(1)) + '%' : '—')}${(showGrade && subj.subjectGrade) ? ` — Grade ${_esc(subj.subjectGrade)}` : ''}</span>
         </div>` : ''}
     </div>`).join('');
 
@@ -2197,7 +2197,7 @@ function _renderKindergartenHtml(s) {
     <div style="background:#eef1f4;border-radius:6px;padding:16px 18px;margin-bottom:14px">
       <div style="color:#8a5a2b;font-weight:700;font-size:10px;letter-spacing:0.05em">OVERALL AVERAGE</div>
       <div style="font-size:26px;font-weight:700;color:#15171c;margin-top:4px">
-        ${s.overall.bandOnly ? _esc(s.overall.bandLabel || '—') : (s.overall.avgPct != null ? _esc(s.overall.avgPct.toFixed(1)) + '%' : '—')}${s.overall.grade ? `  ${_esc(s.overall.grade)}` : ''}
+        ${s.overall.bandOnly ? _esc(s.overall.bandLabel || '—') : (s.overall.avgPct != null ? _esc(s.overall.avgPct.toFixed(1)) + '%' : '—')}${(showGrade && s.overall.grade) ? `  ${_esc(s.overall.grade)}` : ''}
       </div>
       ${showOverallGradingKey ? `
         <div style="margin-top:10px;font-size:9px;color:#5b5f68;text-transform:uppercase;letter-spacing:0.05em">Grading Scale</div>

@@ -214,3 +214,45 @@ describe('kindergarten — band-only scoring (2026-10-23): subject/overall show 
     expect(texts.some(t => typeof t === 'string' && t.includes('71.4%'))).toBe(false);
   });
 });
+
+describe('kindergarten — "Show grade column" (kgDisplay.showGrade) also hides the Subject/Overall Average Grade suffix (2026-10-26)', () => {
+  // Reported directly: a school wants Indicator/Performance Band/Score
+  // kept but Grade dropped entirely from a KG competency report. The
+  // existing toggle only ever hid the per-indicator GRADE column —
+  // the Subject Average and Overall Average rows printed "— Grade A"
+  // unconditionally, independent of the toggle, in both renderers.
+  function bandOnlySnap(overrides = {}) {
+    return baseSnap({
+      kgSubjects: [{
+        name: 'Literacy',
+        indicators: [{ text: 'Recognises letters', bandLabel: 'Secure', bandGrade: 'A', score: 9, maxScore: 9 }],
+        bandOnly: true, subjectBandLabel: 'Secure', subjectGrade: 'A', subjectAvgPct: 71.4,
+      }],
+      overallBandOnly: true, overallBandLabel: 'Secure', overallGrade: 'A', overallAvgPct: 71.4,
+      kgDisplay: { showGrade: false },
+      ...overrides,
+    });
+  }
+
+  test('HTML: showGrade=false drops "Grade" from both Subject Average and Overall Average, and the per-indicator GRADE column', () => {
+    const html = LAYOUTS.kindergarten.renderHtml(computeSections(bandOnlySnap()));
+    expect(html).toContain('SUBJECT AVERAGE');
+    expect(html).toContain('Secure');
+    expect(html).not.toContain('Grade A');
+    expect(html).not.toContain('>GRADE<');
+  });
+
+  test('HTML: showGrade=true (default) still shows "Grade" on both Subject Average and Overall Average', () => {
+    const html = LAYOUTS.kindergarten.renderHtml(computeSections(bandOnlySnap({ kgDisplay: { showGrade: true } })));
+    expect(html).toMatch(/Secure[^%]*— Grade A/);
+    expect(html).toContain('>GRADE<');
+  });
+
+  test('PDF: showGrade=false drops the Grade suffix from the Overall Average headline text', () => {
+    const { spy, calls } = makeSpyDoc();
+    LAYOUTS.kindergarten.renderPdf(spy, computeSections(bandOnlySnap()), {}, true);
+    const texts = calls.filter(c => c.method === 'text').map(c => c.args[0]);
+    expect(texts.some(t => typeof t === 'string' && t === 'Secure')).toBe(true);
+    expect(texts.some(t => typeof t === 'string' && /Secure\s+A/.test(t))).toBe(false);
+  });
+});
