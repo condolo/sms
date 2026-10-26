@@ -3330,7 +3330,14 @@ function PChk({ checked, onChange, color }) {
 function RolesTab() {
   const qc       = useQueryClient();
   const userRole = useAuthStore(s => s.session?.user?.role ?? '');
+  const can      = useAuthStore(s => s.can);
   const isAdmin  = ['admin','superadmin'].includes(userRole);
+  // Mirrors settings.js's _canManagePermissions exactly (strict — no
+  // coarse 'settings' fallback, same reasoning as hasExplicitSubGrant
+  // elsewhere: holding plain settings:read/update must never silently
+  // double as "can edit other roles' permissions," which is the exact
+  // self-escalation risk the Security Audit already closed server-side.
+  const canEditPermissions = isAdmin || can('settings', 'update', 'permissions');
 
   const [mode,           setMode]           = useState('role');   // 'role' | 'user'
   const [selRole,        setSelRole]        = useState('admin');
@@ -3497,7 +3504,7 @@ function RolesTab() {
 
   /* Toggle a single V/E/D cell */
   function toggle(permKey, type) {
-    if (!isAdmin) return;
+    if (!canEditPermissions) return;
     setPerms(prev => {
       const next = JSON.parse(JSON.stringify(prev));
       if (mode === 'role') {
@@ -3557,7 +3564,7 @@ function RolesTab() {
             >{label}</button>
           ))}
         </div>
-        {isAdmin && (
+        {canEditPermissions && (
           <button onClick={() => savePerms()} disabled={saving}
             className={`flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg transition disabled:opacity-50 ${
               dirty
@@ -3572,7 +3579,7 @@ function RolesTab() {
       </div>
 
       {/* New-module banner — shown when modules were added to the registry after last Save */}
-      {hasNewModules && isAdmin && (
+      {hasNewModules && canEditPermissions && (
         <div className="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm">
           <span className="text-amber-800 font-medium">New modules added to the platform — default permissions have been set. Save to write them to the database.</span>
           <button
@@ -3598,12 +3605,12 @@ function RolesTab() {
                     <button onClick={() => setSelRole(r)}
                       className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs font-semibold text-left transition ring-1 ${
                         selRole===r ? c.sel : c.idle
-                      } ${isAdmin ? (isProtect ? 'pr-7' : 'pr-12') : ''}`}
+                      } ${canEditPermissions ? (isProtect ? 'pr-7' : 'pr-12') : ''}`}
                     >
                       <ShieldCheck size={12} className="shrink-0" />
                       <span className="flex-1 truncate">{roleLabel(r, roleLabels)}</span>
                     </button>
-                    {isAdmin && (
+                    {canEditPermissions && (
                       <div className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 flex items-center gap-0.5">
                         <button
                           onClick={e => { e.stopPropagation(); setRenamingRole(r); }}
@@ -3628,7 +3635,7 @@ function RolesTab() {
               })}
 
               {/* Hidden roles restore strip */}
-              {hiddenSystemRoles.length > 0 && isAdmin && (
+              {hiddenSystemRoles.length > 0 && canEditPermissions && (
                 <div className="mt-2 pt-2 border-t border-slate-100">
                   <p className="text-[10px] font-medium text-slate-400 uppercase tracking-wide px-1 mb-1">Hidden</p>
                   {hiddenSystemRoles.map(r => (
@@ -3660,7 +3667,7 @@ function RolesTab() {
                       <ShieldCheck size={12} className="shrink-0" style={!isSel ? { color: cr.color } : {}} />
                       <span className="flex-1 truncate" style={!isSel ? { color: cr.color } : {}}>{cr.label}</span>
                     </button>
-                    {isAdmin && (
+                    {canEditPermissions && (
                       <div className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 flex items-center gap-0.5">
                         <button
                           onClick={e => { e.stopPropagation(); setEditingRole(cr); }}
@@ -3683,7 +3690,7 @@ function RolesTab() {
               })}
 
               {/* New Role button */}
-              {isAdmin && (
+              {canEditPermissions && (
                 <button onClick={() => setShowCreateRole(true)}
                   className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs font-medium text-slate-500 hover:text-slate-700 hover:bg-slate-50 ring-1 ring-dashed ring-slate-200 transition"
                 >
@@ -3726,7 +3733,7 @@ function RolesTab() {
                 <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-violet-600 inline-block" /><span className="text-slate-500">V = Visible</span></span>
                 <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-amber-500 inline-block" /><span className="text-slate-500">E = Editable</span></span>
                 <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-red-500 inline-block" /><span className="text-slate-500">D = Deletable</span></span>
-                {!isAdmin && <span className="ml-auto font-medium text-amber-600">Read-only — admin required to edit</span>}
+                {!canEditPermissions && <span className="ml-auto font-medium text-amber-600">Read-only — you don't have permission to edit roles</span>}
                 {mode === 'user' && selUser && (
                   <span className="ml-auto text-slate-400">Showing inherited role defaults + any user overrides</span>
                 )}
@@ -3770,9 +3777,9 @@ function RolesTab() {
                             <div key={sub.key} className="flex items-center px-4 py-2.5 border-b border-slate-50 last:border-0 hover:bg-slate-50/50 transition">
                               <span className="flex-1 text-sm text-slate-700">{sub.label}</span>
                               <div className="flex items-center gap-1.5 shrink-0">
-                                <PChk checked={!!cell.v} color="violet" onChange={isAdmin ? () => toggle(pk,'v') : undefined} />
-                                <PChk checked={!!cell.e} color="amber"  onChange={isAdmin ? () => toggle(pk,'e') : undefined} />
-                                <PChk checked={!!cell.d} color="red"    onChange={isAdmin ? () => toggle(pk,'d') : undefined} />
+                                <PChk checked={!!cell.v} color="violet" onChange={canEditPermissions ? () => toggle(pk,'v') : undefined} />
+                                <PChk checked={!!cell.e} color="amber"  onChange={canEditPermissions ? () => toggle(pk,'e') : undefined} />
+                                <PChk checked={!!cell.d} color="red"    onChange={canEditPermissions ? () => toggle(pk,'d') : undefined} />
                               </div>
                             </div>
                           );
@@ -4887,18 +4894,31 @@ function ModulesTab() {
    ══════════════════════════════════════════════════════════════ */
 export default function SettingsPage() {
   const role = useAuthStore(s => s.session?.user?.role ?? '');
+  const can  = useAuthStore(s => s.can);
   const isAdmin = ['admin', 'superadmin'].includes(role);
+  // Reported directly 2026-10-26 (same audit that found the Report Cards
+  // publish-button and Exams Review-tab bugs): every "adminOnly" tab here
+  // was gated purely on literal role, with no fallback to an explicit
+  // 'settings' grant — so a role given Settings access via Roles &
+  // Permissions could never actually reach any of these tabs, including
+  // via a direct ?tab= link. Every route behind these tabs (school,
+  // subscription, users, modules, notifications, message templates,
+  // system, audit log) is gated server-side by the COARSE rbac('settings',
+  // action) check (no subKey), so the matching client check is the same
+  // coarse grant — RolesTab's own canEditPermissions above stays the
+  // stricter, separate check for actually editing permissions.
+  const canSettingsRead = isAdmin || can('settings', 'read');
   const [searchParams] = useSearchParams();
   // Deep-linkable tabs (/settings?tab=subscription) — the expiry banner's
   // "Renew" link depends on this landing directly on Subscription.
   const [tab, setTab] = useState(() => {
     const requested = searchParams.get('tab');
     const def = TABS.find(t => t.id === requested);
-    if (def && (isAdmin || !def.adminOnly)) return requested;
-    return isAdmin ? 'school' : 'account';
+    if (def && (canSettingsRead || !def.adminOnly)) return requested;
+    return canSettingsRead ? 'school' : 'account';
   });
 
-  const visibleTabs = TABS.filter(t => !t.adminOnly || isAdmin);
+  const visibleTabs = TABS.filter(t => !t.adminOnly || canSettingsRead);
 
   return (
     <div className="min-h-screen bg-slate-50">
