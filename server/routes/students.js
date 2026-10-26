@@ -24,6 +24,7 @@ const { applyOptimisticLock } = require('../utils/optimistic-lock');
 const AuditService            = require('../services/audit');
 const { provisionIdentityForUser } = require('../utils/provision-identities');
 const { revokeUserTokens, revokeIdentityTokens } = require('../utils/token-version');
+const { enqueueBatch } = require('../utils/email-queue');
 
 const router = express.Router();
 const PLAN   = planGate('students');
@@ -1503,6 +1504,7 @@ router.post('/bulk-portal-accounts', authMiddleware, PLAN, MODGATE, rbac('studen
     let parentsCreated = 0, parentsSkipped = 0;
     const parentErrors = [];
     const parentCredentials = []; // one row per (student, guardian account) — see grouping below
+    const parentEmailJobs = []; // welcome-email thunks — sent via enqueueBatch AFTER this loop, not fired inline per entry (see below)
     const parentPortalAllowed = _portalAllowed(school, 'parent');
 
     if (parentPortalAllowed) {
@@ -1569,10 +1571,19 @@ router.post('/bulk-portal-accounts', authMiddleware, PLAN, MODGATE, rbac('studen
             Students.updateOne({ _id: e.student._id }, { $set: { [e.flagField]: true, updatedAt: now } })
           ));
 
-          emailUtil.sendWelcomeCredentials({
-            name: parentName, email: parentEmail, tempPassword,
+          // Queued, not sent inline — a class/"all" batch can be hundreds of
+          // guardians; firing sendWelcomeCredentials directly inside this
+          // Promise.all (as this route used to) opened as many concurrent
+          // SMTP connections as there were guardians, every one of them
+          // missing schoolId too (fixed below), so every bulk send landed on
+          // the single shared platform mailbox at once — exactly the
+          // combination that gets silently throttled by Gmail. enqueueBatch
+          // (already used by import-export.js for this same reason) sends
+          // these in small throttled batches after the loop below finishes.
+          parentEmailJobs.push(() => emailUtil.sendWelcomeCredentials({
+            name: parentName, email: parentEmail, tempPassword, schoolId,
             schoolName: school.name, schoolEmail: school.systemEmail || '', role: 'Parent', slug: school.slug,
-          }).catch(err => console.error('[bulk-portal-accounts] parent email send failed:', err.message));
+          }));
 
           for (const e of entries) {
             parentCredentials.push({
@@ -1590,6 +1601,10 @@ router.post('/bulk-portal-accounts', authMiddleware, PLAN, MODGATE, rbac('studen
           parentsSkipped += entries.length;
         }
       }));
+
+      if (parentEmailJobs.length) {
+        enqueueBatch(parentEmailJobs).catch(err => console.error('[bulk-portal-accounts] parent welcome-email batch error:', err.message));
+      }
     }
 
     // Merge into one row per student — every student in this batch who got
@@ -1741,6 +1756,7 @@ router.post('/bulk-reset-portal-passwords', authMiddleware, PLAN, MODGATE, rbac(
     let studentsReset = 0;
     const studentErrors = [];
     const credentials = [];
+    const studentEmailJobs = []; // see parentEmailJobs' comment below — same enqueueBatch fix
 
     if (studentPortalAllowed) {
       await Promise.all(classDocs.map(async student => {
@@ -1783,12 +1799,14 @@ router.post('/bulk-reset-portal-passwords', authMiddleware, PLAN, MODGATE, rbac(
 
           // Students log in by admission number, not email — only send
           // when a schoolEmail happens to be on file (same posture as
-          // every other student-portal route in this file).
+          // every other student-portal route in this file). Queued via
+          // enqueueBatch below, not fired inline — see parentEmailJobs'
+          // comment further down for why.
           if (student.schoolEmail) {
-            emailUtil.sendWelcomeCredentials({
-              name, email: student.schoolEmail.toLowerCase(), tempPassword,
+            studentEmailJobs.push(() => emailUtil.sendWelcomeCredentials({
+              name, email: student.schoolEmail.toLowerCase(), tempPassword, schoolId,
               schoolName: school.name, schoolEmail: school.systemEmail || '', role: 'Student', slug: school.slug,
-            }).catch(err => console.error('[bulk-reset-portal-passwords] student email send failed:', err.message));
+            }));
           }
 
           credentials.push({ studentId: studentDocId, name, admissionNumber: student.admissionNumber, username, tempPassword, action: 'reset' });
@@ -1797,11 +1815,17 @@ router.post('/bulk-reset-portal-passwords', authMiddleware, PLAN, MODGATE, rbac(
           studentErrors.push({ studentId: studentDocId, message: e.message });
         }
       }));
+
+      if (studentEmailJobs.length) {
+        enqueueBatch(studentEmailJobs).catch(err => console.error('[bulk-reset-portal-passwords] student welcome-email batch error:', err.message));
+      }
     }
 
     let parentsReset = 0;
     const parentErrors = [];
     const parentCredentials = [];
+    const parentEmailJobs = []; // queued, then sent via enqueueBatch once the loop below finishes —
+                                 // see the identical fix (and its full reasoning) in bulk-portal-accounts above
 
     if (parentPortalAllowed) {
       // Unconditional (_guardianContacts, not _eligibleGuardianContacts) —
@@ -1850,10 +1874,10 @@ router.post('/bulk-reset-portal-passwords', authMiddleware, PLAN, MODGATE, rbac(
             Students.updateOne({ _id: e.student._id }, { $set: { [e.flagField]: true, updatedAt: now } })
           ));
 
-          emailUtil.sendWelcomeCredentials({
-            name: parentName, email: parentEmail, tempPassword,
+          parentEmailJobs.push(() => emailUtil.sendWelcomeCredentials({
+            name: parentName, email: parentEmail, tempPassword, schoolId,
             schoolName: school.name, schoolEmail: school.systemEmail || '', role: 'Parent', slug: school.slug,
-          }).catch(err => console.error('[bulk-reset-portal-passwords] parent email send failed:', err.message));
+          }));
 
           for (const e of entries) {
             parentCredentials.push({
@@ -1867,6 +1891,10 @@ router.post('/bulk-reset-portal-passwords', authMiddleware, PLAN, MODGATE, rbac(
           parentErrors.push({ parentEmail, message: e.message });
         }
       }));
+
+      if (parentEmailJobs.length) {
+        enqueueBatch(parentEmailJobs).catch(err => console.error('[bulk-reset-portal-passwords] parent welcome-email batch error:', err.message));
+      }
     }
 
     // Same merge-into-one-row-per-student shape as bulk-portal-accounts —
@@ -2312,6 +2340,7 @@ router.post('/:id/parent-account', authMiddleware, PLAN, MODGATE, rbac('students
       name:        parentName,
       email:       parentEmail,
       tempPassword,
+      schoolId,
       schoolName:  school.name,
       schoolEmail: school.systemEmail || '',
       role:        'Parent',

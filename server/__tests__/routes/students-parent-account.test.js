@@ -146,6 +146,24 @@ describe('legacy path (no guardian) — unchanged', () => {
     expect(mockStudentDoc.hasMotherAccount).toBeUndefined();
     expect(mockUsersDocs).toHaveLength(1);
   });
+
+  // 2026-10-26 — reported directly: many real parents never received their
+  // welcome-credentials email and could never log in. Root cause traced to
+  // every sendWelcomeCredentials() call site in this file omitting schoolId,
+  // which makes _resolveTransporter() in utils/email.js always use the
+  // single shared PLATFORM SMTP mailbox instead of the school's own
+  // configured custom SMTP (and its Reply-To silently fall back to the
+  // platform owner's own address instead of the school's). This pins the
+  // fix for the single-account route; the 3 bulk routes get the identical
+  // fix pinned in students-bulk-reset-passwords.test.js and a new
+  // students-bulk-portal-accounts test.
+  test('passes schoolId to sendWelcomeCredentials so it uses the school\'s own SMTP, not the shared platform mailbox', async () => {
+    const { sendWelcomeCredentials } = require('../../utils/email');
+    await supertest(buildApp()).post('/api/students/stu_001/parent-account').send({});
+    expect(sendWelcomeCredentials).toHaveBeenCalledWith(
+      expect.objectContaining({ schoolId: SCHOOL, email: 'adjoa@example.com' })
+    );
+  });
 });
 
 describe('per-parent accounts', () => {

@@ -64,31 +64,57 @@ function invalidateSmtpCache(schoolId) {
 /**
  * Resolve the transporter and From address for a school.
  * Returns { transporter, from } — always falls back to platform.
+ *
+ * Reply-To fallback chain (2026-10-26): opts.schoolEmail (whatever the
+ * caller passed — in practice always `school.systemEmail`) wins when
+ * given, else the school's own `systemEmail`/`email` fields looked up
+ * here, else the platform's. Added after a direct report traced to
+ * exactly the gap this closes: `systemEmail` has no Settings UI field
+ * and isn't in settings.js's PATCH whitelist, so no school has ever had
+ * a way to set it — every caller's `schoolEmail` argument was always
+ * empty in production, meaning a reply to ANY email sent through the
+ * platform-SMTP fallback path (custom SMTP not configured, or it failed)
+ * landed with the platform owner instead of the school, for every school,
+ * always. `school.email` (the school's own general contact address) is
+ * usually set even when `systemEmail` never was, so this alone fixes most
+ * real cases without needing that UI field built too.
  */
 async function _resolveTransporter(schoolId, { schoolName, schoolEmail } = {}) {
-  const platformFrom    = schoolName ? `"${schoolName} via Msingi" <${SMTP_USER}>` : PLATFORM_FROM;
-  const platformReplyTo = schoolEmail || PLATFORM_EMAIL;
-  const platformResult  = { transporter: _platformTransporter, from: platformFrom, replyTo: platformReplyTo, isCustom: false };
+  const platformFrom = schoolName ? `"${schoolName} via Msingi" <${SMTP_USER}>` : PLATFORM_FROM;
 
-  if (!schoolId || !smtpEncryptReady()) return platformResult;
+  if (!schoolId) {
+    return { transporter: _platformTransporter, from: platformFrom, replyTo: schoolEmail || PLATFORM_EMAIL, isCustom: false };
+  }
 
-  /* Check cache first */
+  /* Check cache first — schoolEmail, if this call supplied one, still wins
+     over the cached school-level fallback (but never overrides a cached
+     custom-SMTP result, which deliberately carries no Reply-To at all). */
   const cached = _smtpCache.get(schoolId);
   if (cached && Date.now() < cached.expiresAt) {
+    if (schoolEmail && !cached.value.isCustom) return { ...cached.value, replyTo: schoolEmail };
     return cached.value;
   }
 
+  let school = null;
   try {
     const Schools = _model('schools');
-    const school  = await Schools.findOne(
+    school = await Schools.findOne(
       { id: schoolId },
-      { smtpEnabled:1, smtpHost:1, smtpPort:1, smtpSecure:1, smtpUser:1, smtpPassEnc:1, smtpFromName:1, smtpFromEmail:1 }
+      { email:1, systemEmail:1, smtpEnabled:1, smtpHost:1, smtpPort:1, smtpSecure:1, smtpUser:1, smtpPassEnc:1, smtpFromName:1, smtpFromEmail:1 }
     ).lean();
+  } catch (err) {
+    console.error(`[EMAIL] ⚠️ Failed to load school ${schoolId} for email resolution: ${err.message} — falling back to platform`);
+  }
 
-    if (!school?.smtpEnabled || !school?.smtpHost || !school?.smtpUser || !school?.smtpPassEnc) {
-      return platformResult;   // custom SMTP not configured — use platform
-    }
+  const platformReplyTo = schoolEmail || school?.systemEmail || school?.email || PLATFORM_EMAIL;
+  const platformResult  = { transporter: _platformTransporter, from: platformFrom, replyTo: platformReplyTo, isCustom: false };
 
+  if (!smtpEncryptReady() || !school?.smtpEnabled || !school?.smtpHost || !school?.smtpUser || !school?.smtpPassEnc) {
+    _smtpCache.set(schoolId, { value: platformResult, expiresAt: Date.now() + SMTP_CACHE_TTL });
+    return platformResult;   // custom SMTP not configured (or decryption unavailable) — use platform
+  }
+
+  try {
     const pass = decrypt(school.smtpPassEnc);
     const t    = nodemailer.createTransport({
       host:   school.smtpHost,
@@ -112,6 +138,7 @@ async function _resolveTransporter(schoolId, { schoolName, schoolEmail } = {}) {
     return result;
   } catch (err) {
     console.error(`[EMAIL] ⚠️ Failed to load custom SMTP for school ${schoolId}: ${err.message} — falling back to platform`);
+    _smtpCache.set(schoolId, { value: platformResult, expiresAt: Date.now() + SMTP_CACHE_TTL });
     return platformResult;
   }
 }
@@ -1195,6 +1222,7 @@ async function sendTicketNotice({ to, ref, subject, priority, source, schoolName
 
 module.exports = {
   invalidateSmtpCache,
+  _resolveTransporter, // test-only access — see students-bulk-welcome-email-fix.test.js's sibling email-resolve-transporter.test.js
   sendContactEnquiry,
   sendContactConfirmation,
   sendDemoOtp,
