@@ -83,7 +83,13 @@ const OBSERVATION_RATING_VALUES = ['excellent', 'good', 'improve'];
 
 /* ── Validation ─────────────────────────────────────────────── */
 const GradeBandSchema = z.object({
-  grade:      z.string().min(1).max(5),
+  // 2026-10-27, direct request — widened from 5 for Cambridge Primary/
+  // Lower Secondary grades expressed as words ("Outstanding",
+  // "Unclassified", …) rather than single letters. Matches
+  // assessment.js's grade_boundaries BandSchema, the actively-edited
+  // scale system — this embedded copy has no client UI of its own
+  // today, widened anyway for consistency with anything that writes it.
+  grade:      z.string().min(1).max(20),
   minScore:   z.number().min(0).max(100),
   maxScore:   z.number().min(0).max(100),
   points:     z.number().min(0).max(10).optional(),

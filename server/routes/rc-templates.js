@@ -34,7 +34,11 @@ const BandSchema = z.object({
   id:           z.string().optional(),
   label:        z.string().min(1).max(60).trim(),
   defaultScore: z.number().min(0).max(100).default(10),
-  grade:        z.string().min(1).max(6).trim().toUpperCase(),
+  // 2026-10-27, direct request — Cambridge Primary/Lower Secondary
+  // grades with words ("Outstanding", "Unclassified", …), not single
+  // letters; widened from 6 and dropped the forced .toUpperCase() (was
+  // fine for "a" -> "A", wrong for turning "Outstanding" into shouting).
+  grade:        z.string().min(1).max(20).trim(),
   color:        z.string().max(20).trim().default('slate'),
 });
 

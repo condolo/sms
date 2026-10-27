@@ -157,7 +157,7 @@ function BandRow({ band, onChange, onRemove }) {
   const labelEmpty = !band.label?.trim();
   const gradeEmpty = !band.grade?.trim();
   return (
-    <div className="grid grid-cols-[1fr_72px_54px_auto_28px] gap-2 items-center py-1.5 px-2 rounded-lg bg-slate-50 border border-slate-100">
+    <div className="grid grid-cols-[1fr_72px_150px_auto_28px] gap-2 items-center py-1.5 px-2 rounded-lg bg-slate-50 border border-slate-100">
       <input
         type="text" value={band.label}
         onChange={e => onChange({ ...band, label: e.target.value })}
@@ -179,9 +179,9 @@ function BandRow({ band, onChange, onRemove }) {
       </div>
       <input
         type="text" value={band.grade}
-        onChange={e => onChange({ ...band, grade: e.target.value.toUpperCase().slice(0, 6) })}
-        placeholder="A"
-        maxLength={6}
+        onChange={e => onChange({ ...band, grade: e.target.value.slice(0, 20) })}
+        placeholder="A or Outstanding"
+        maxLength={20}
         title={gradeEmpty ? 'Required — every band needs a grade' : undefined}
         className={`text-sm font-bold text-center border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 ${
           gradeEmpty ? 'border-red-300 focus:ring-red-400/40 bg-red-50/40' : 'border-slate-200 focus:ring-indigo-400/40'
@@ -754,7 +754,7 @@ function TemplateSlideOver({ initial, classes, subjectOptions, onSave, onClose, 
             </div>
 
             {/* Column headers */}
-            <div className="grid grid-cols-[1fr_72px_54px_auto_28px] gap-2 px-2 mb-1">
+            <div className="grid grid-cols-[1fr_72px_150px_auto_28px] gap-2 px-2 mb-1">
               <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Band label</span>
               <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide text-right">Score</span>
               <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide text-center">Grade</span>

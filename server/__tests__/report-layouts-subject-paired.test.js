@@ -397,8 +397,53 @@ describe('subject_paired — printed backgrounds are not silently dropped', () =
 describe('subject_paired — grade shows as a colored badge, not plain text', () => {
   test('each subject\'s grade renders in an ACCENT-colored pill, matching the PDF\'s navy+bronze pairing', () => {
     const html = LAYOUTS.subject_paired.renderHtml(computeSections());
-    expect(html).toMatch(/background:#f7ede1;color:#8a5a2b;font-weight:700">A<\/span>/);
-    expect(html).toMatch(/background:#f7ede1;color:#8a5a2b;font-weight:700">C<\/span>/);
+    expect(html).toMatch(/background:#f7ede1;color:#8a5a2b;font-weight:700;white-space:nowrap">A<\/span>/);
+    expect(html).toMatch(/background:#f7ede1;color:#8a5a2b;font-weight:700;white-space:nowrap">C<\/span>/);
+  });
+
+  // Reported directly 2026-10-27: Cambridge Primary/Lower Secondary
+  // grades with WORDS ("Outstanding", "Unclassified", …), not single
+  // letters — the Grade column was sized for ~1-2 characters in both
+  // renderers, so these would clip or overlap.
+  test('PDF: a report using word-based grades gets a wider Grade column than one on an ordinary A-U scale, text unchanged', () => {
+    const shortSnap = baseSnap({
+      subjects: {
+        math:    { finalScore: 85, grade: 'A', breakdown: { cat: 80, exam: 88 } },
+        english: { finalScore: 55, grade: 'C', breakdown: { cat: 50, exam: 58 } },
+      },
+    });
+    const wordSnap = baseSnap({
+      gradingSchema: [{ min: 0, grade: 'Outstanding', points: 12, label: 'Excellent' }],
+      subjects: {
+        math:    { finalScore: 85, grade: 'Outstanding', breakdown: { cat: 80, exam: 88 } },
+        english: { finalScore: 55, grade: 'Unclassified', breakdown: { cat: 50, exam: 58 } },
+      },
+    });
+
+    const short = makeSpyDoc();
+    LAYOUTS.subject_paired.renderPdf(short.spy, computeSections(shortSnap), {}, true);
+    const shortGradeDraw = short.calls.find(c => c.method === 'text' && c.args[0] === 'C');
+
+    const word = makeSpyDoc();
+    LAYOUTS.subject_paired.renderPdf(word.spy, computeSections(wordSnap), {}, true);
+    const wordGradeDraw = word.calls.find(c => c.method === 'text' && c.args[0] === 'Outstanding');
+
+    expect(shortGradeDraw).toBeTruthy();
+    expect(wordGradeDraw).toBeTruthy();
+    expect(wordGradeDraw.args[0]).toBe('Outstanding'); // never truncated
+    expect(wordGradeDraw.args[3].width).toBeGreaterThan(shortGradeDraw.args[3].width);
+  });
+
+  test('HTML: a word-based grade ("Outstanding") renders in full, not clipped', () => {
+    const snap = baseSnap({
+      gradingSchema: [{ min: 0, grade: 'Outstanding', points: 12, label: 'Excellent' }],
+      subjects: {
+        math:    { finalScore: 85, grade: 'Outstanding', breakdown: { cat: 80, exam: 88 } },
+        english: { finalScore: 55, grade: 'C', breakdown: { cat: 50, exam: 58 } },
+      },
+    });
+    const html = LAYOUTS.subject_paired.renderHtml(computeSections(snap));
+    expect(html).toContain('>Outstanding</span>');
   });
 });
 

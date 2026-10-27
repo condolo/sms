@@ -47,6 +47,31 @@ const FONT_FILES = {
   [FONTS.sansSemibold]: 'WorkSans-SemiBold.ttf', [FONTS.sansBold]: 'WorkSans-Bold.ttf',
   [FONTS.monoRegular]: 'IBMPlexMono-Regular.ttf', [FONTS.monoMedium]: 'IBMPlexMono-Medium.ttf',
 };
+
+/* Flexible Grade column width (2026-10-27, direct request) — Cambridge
+   Primary/Lower Secondary grades student performance with WORDS
+   ("Outstanding", "Unclassified", …), not single letters, so a column
+   hardcoded to fit "A"/"B+" clips or overlaps real grade text for those
+   schools. Measures every grade string that will actually be drawn in
+   THIS report (plus the column header) in the exact font/size it's
+   rendered with, and sizes the column to the widest one — a school on
+   an ordinary A–U scale still gets the old ~42px column (nothing here
+   grows unless the content actually needs it); `max` keeps one freak
+   value from blowing out the whole table. The type-score columns
+   (W_TYPE) absorb the difference automatically since they're already
+   computed as "whatever's left of PAGE_WIDTH" in every active layout —
+   nothing else needs to shrink by hand. */
+function _gradeColWidth(doc, texts, { font, size, min = 42, max = 120, padding = 14 } = {}) {
+  // Guarded for test doubles the same way _registerReportFonts above is —
+  // a spy doc only stubs the drawing methods its own tests assert on, not
+  // real text metrics, so this degrades to the old fixed `min` width
+  // rather than throwing.
+  if (typeof doc.widthOfString !== 'function') return min;
+  doc.font(font).fontSize(size);
+  const widest = texts.reduce((w, t) => Math.max(w, doc.widthOfString(String(t ?? ''))), 0);
+  return Math.min(max, Math.max(min, Math.ceil(widest) + padding));
+}
+
 // Idempotent per doc — registerFont is cheap, but a flag avoids redoing
 // it on every helper call. Guarded for test doubles that don't stub
 // registerFont (a spy doc only needs the drawing methods it asserts on).
@@ -1119,7 +1144,8 @@ function _renderSubjectPairedPdf(doc, s, images, isFirstPage) {
 
   const typeEntries = s.resultsTable.typeEntries;
   const showDev = s.resultsTable.showDeviation;
-  const W_SUBJECT = 150, W_SCORE = 42, W_GRADE = 42, W_DEV = showDev ? 40 : 0;
+  const W_GRADE = _gradeColWidth(doc, ['Grade', ...s.resultsTable.rows.map(r => r.gradeText)], { font: FONTS.serifBold, size: 9.5 });
+  const W_SUBJECT = 150, W_SCORE = 42, W_DEV = showDev ? 40 : 0;
   const fixedTotal = W_SUBJECT + W_SCORE + W_GRADE + W_DEV;
   const totalGaps  = (typeEntries.length + (showDev ? 3 : 2)) * 5;
   const W_TYPE = typeEntries.length > 0
@@ -1378,10 +1404,21 @@ function _renderSubjectPairedHtml(s) {
   // an equal container width always resolve to the same pixel width,
   // whichever table they're in.
   const devW = s.resultsTable.showDeviation ? 8 : 0;
+  // Flexible Grade column (2026-10-27, direct request) — Cambridge
+  // Primary/Lower Secondary grades with WORDS ("Outstanding",
+  // "Unclassified", …), not single letters; a column fixed at 10%
+  // (table-layout:fixed, so content can't just push it wider itself)
+  // clips or wraps those mid-word. Grows past the old 10% only when
+  // the longest grade actually used in this report needs it — same
+  // self-balancing idea as the PDF renderers' _gradeColWidth, just in
+  // percentage terms since these are HTML tables: the type-score
+  // columns absorb the difference automatically.
+  const maxGradeLen = Math.max('Grade'.length, ...s.resultsTable.rows.map(r => (r.gradeText || '').length));
+  const gradeW = Math.min(26, Math.max(10, 10 + (maxGradeLen - 5) * 1.6));
   const typeW = s.resultsTable.typeEntries.length > 0
-    ? (100 - 26 - 10 - 10 - devW) / s.resultsTable.typeEntries.length
+    ? (100 - 26 - 10 - gradeW - devW) / s.resultsTable.typeEntries.length
     : 0;
-  const colWidthStyle = [26, ...s.resultsTable.typeEntries.map(() => typeW), 10, 10, ...(s.resultsTable.showDeviation ? [devW] : [])];
+  const colWidthStyle = [26, ...s.resultsTable.typeEntries.map(() => typeW), 10, gradeW, ...(s.resultsTable.showDeviation ? [devW] : [])];
   const tableFixed = 'width:100%;table-layout:fixed;border-collapse:collapse';
 
   const colHeaders = s.resultsTable.typeEntries.map((t, i) => `<th style="${thS};width:${colWidthStyle[1 + i]}%">${_esc(t.key)}</th>`).join('');
@@ -1417,7 +1454,7 @@ function _renderSubjectPairedHtml(s) {
         <td style="${tdS};width:${colWidthStyle[0]}%;font-weight:700">${_esc(row.nameLine)}</td>
         ${markCells}
         <td style="${tdC};width:${avgW}%;font-weight:700">${_esc(row.scoreText)}</td>
-        <td style="${tdC};width:${gradeW}%">${row.gradeText ? `<span style="display:inline-block;min-width:20px;padding:1px 8px;border-radius:10px;background:${ACCENT_WASH};color:${ACCENT};font-weight:700">${_esc(row.gradeText)}</span>` : ''}</td>
+        <td style="${tdC};width:${gradeW}%">${row.gradeText ? `<span style="display:inline-block;min-width:20px;padding:1px 8px;border-radius:10px;background:${ACCENT_WASH};color:${ACCENT};font-weight:700;white-space:nowrap">${_esc(row.gradeText)}</span>` : ''}</td>
         ${devCell}
       </tr>
       ${commentEnabled ? `
@@ -1584,7 +1621,8 @@ function _renderMarksThenCommentsPdf(doc, s, images, isFirstPage) {
      back-to-back with no comment box between rows. ── */
   const typeEntries = s.resultsTable.typeEntries;
   const showDev = s.resultsTable.showDeviation;
-  const W_SUBJECT = 150, W_SCORE = 42, W_GRADE = 42, W_DEV = showDev ? 40 : 0;
+  const W_GRADE = _gradeColWidth(doc, ['Grade', ...s.resultsTable.rows.map(r => r.gradeText)], { font: FONTS.serifBold, size: 9.5 });
+  const W_SUBJECT = 150, W_SCORE = 42, W_DEV = showDev ? 40 : 0;
   const fixedTotal = W_SUBJECT + W_SCORE + W_GRADE + W_DEV;
   const totalGaps  = (typeEntries.length + (showDev ? 3 : 2)) * 5;
   const W_TYPE = typeEntries.length > 0
@@ -1988,7 +2026,8 @@ function _renderKindergartenPdf(doc, s, images, isFirstPage) {
   const showGrade = s.display.showGrade;
   const W_BAND  = 110;
   const W_SCORE = showScore ? 55 : 0;
-  const W_GRADE = showGrade ? 48 : 0;
+  const allBandGrades = s.kgSubjects.flatMap(subj => subj.indicators.map(ind => ind.bandGrade));
+  const W_GRADE = showGrade ? _gradeColWidth(doc, ['GRADE', ...allBandGrades], { font: FONTS.serifBold, size: 9.5, min: 48 }) : 0;
   const W_INDICATOR = PAGE_WIDTH - W_BAND - W_SCORE - W_GRADE - 12;
   const colDefs = [
     { key: 'indicator', label: 'INDICATOR', width: W_INDICATOR },
@@ -2281,4 +2320,4 @@ function getLayout(layoutKey) {
   return LAYOUTS[layoutKey] || LAYOUTS.legacy_tabular;
 }
 
-module.exports = { LAYOUTS, getLayout, _esc };
+module.exports = { LAYOUTS, getLayout, _esc, _gradeColWidth };

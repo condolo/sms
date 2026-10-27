@@ -671,7 +671,10 @@ router.delete('/types/:key', authMiddleware, PLAN, MODGATE, rbac('assessment', '
 
 const BandSchema = z.object({
   min:    z.number().min(0).max(100),
-  grade:  z.string().min(1).max(10).trim(),
+  // 2026-10-27, direct request — widened from 10 for Cambridge Primary/
+  // Lower Secondary grades expressed as words ("Outstanding",
+  // "Unclassified", …) rather than single letters.
+  grade:  z.string().min(1).max(20).trim(),
   points: z.number().min(0).max(100).optional().default(0),
   label:  z.string().max(100).trim().optional().default(''),
 });

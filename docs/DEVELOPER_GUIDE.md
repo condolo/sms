@@ -7099,4 +7099,32 @@ Reported directly: the whole-school Attendance report showed "Unknown class" for
 
 **Separate, unrelated finding, not fixed (nothing to fix):** Mascit's attendance collection has zero records since 2026-06-23 — the dashboard's "Present: 0" is accurate, not a symptom of the class-name bug. Worth a direct follow-up with the school, not a code change.
 
-**Not done:** backfilling the missing `id` field onto Mascit's 15 class documents directly. The code fix resolves the reported symptom without it; doing so would be a direct production-data write outside the normal app flow, offered as optional follow-up data hygiene rather than assumed.
+**Data backfilled same day, on explicit follow-up request:** all 15 of Mascit's class documents now have a unique `id` (uuidv4, matching the exact shape `POST /classes` and the CSV importer produce) — dry-run previewed first, write re-checked the `id: {$exists:false}` guard per document, verified afterward (15/15 updated, 0 classes platform-wide still missing `id`). The code fix above was not dependent on this — it already resolved the reported symptom on its own — this was additional data hygiene, done only once asked.
+
+## Flexible Grade column + word-based grade labels for Cambridge Primary/Lower Secondary (v5.221.0, 2026-10-27)
+
+Reported directly: Cambridge Primary/Lower Secondary grade with WORDS (Outstanding / High / Good / Aspiring / Basic / Unclassified), not letters (A–U). Replacing "A" with "Outstanding" hit two independent walls: every "grade" field was capped at 5–10 characters (and the Kindergarten template's own field silently force-uppercased it — "Outstanding" → "OUTSTANDING"), and the Grade *column* on both live report-card designs was sized for 1–2 characters.
+
+**Three server schemas widened, one `.toUpperCase()` dropped:**
+- `server/routes/assessment.js`'s `BandSchema.grade` (the grade-scales system, actively edited via `ConfigTab.jsx`) — 10 → 20 chars.
+- `server/routes/rc-templates.js`'s KG `BandSchema.grade` — 6 → 20 chars, and the `.toUpperCase()` transform removed (existed to tidy "a" → "A"; wrong for a multi-word label).
+- `server/routes/academic-config.js`'s embedded `GradeBandSchema.grade` — 5 → 20 chars. No client form writes this one today (confirmed: zero references to `gradingSchema` anywhere in `client/src`) — widened anyway for any future/other writer.
+
+**Client forms matched:** `ConfigTab.jsx` and `RCTemplatesSection.jsx` each had `onChange={e => onChange({ ...band, grade: e.target.value.toUpperCase().slice(0, 6) })}` — the SAME forced-uppercase-and-truncate on every keystroke, independent of the server schema. Removed the uppercase, widened the slice/`maxLength` to 20, and widened the grade input's own CSS grid column (both were hardcoded `grid-cols-[..._64px..._]`/`grid-cols-[..._54px..._]` — the header row's grid template had to move in lockstep or the column labels would misalign with the inputs below them) to `150px` so the text is comfortable to type and read, not merely accepted.
+
+**Flexible Grade column, both live report-card layouts** (`server/utils/report-layouts.js`): new shared helper
+```js
+function _gradeColWidth(doc, texts, { font, size, min = 42, max = 120, padding = 14 } = {}) {
+  if (typeof doc.widthOfString !== 'function') return min; // test-double doc without real text metrics
+  doc.font(font).fontSize(size);
+  const widest = texts.reduce((w, t) => Math.max(w, doc.widthOfString(String(t ?? ''))), 0);
+  return Math.min(max, Math.max(min, Math.ceil(widest) + padding));
+}
+```
+measures every grade string that will actually be drawn in THIS report, in the exact font/size it renders with, and sizes the PDF column to the widest one. An ordinary A–U scale keeps the exact same ~42px column as before — nothing grows unless the content needs it — and `max` keeps one freak value from blowing out the whole table. Applied to `_renderSubjectPairedPdf`, `_renderMarksThenCommentsPdf`, and `_renderKindergartenPdf` (replacing `showGrade ? 48 : 0` with `showGrade ? _gradeColWidth(...) : 0`, `min: 48`). In every case the type-score columns (`W_TYPE`/`W_INDICATOR`) were already computed as "whatever's left of `PAGE_WIDTH`," so they absorb the difference automatically — no other column needed manual adjustment.
+
+HTML side: `_renderSubjectPairedHtml`'s results table uses `table-layout:fixed` across several independent per-subject `<table>` elements specifically so their columns stay pixel-aligned with each other and the shared header table (see that layout's own header comment) — couldn't just delete the fixed width, so the Grade column's percentage is now computed the same way (10–26%, type columns absorbing the difference) instead of a flat 10%. `_renderMarksThenCommentsHtml` and `_renderKindergartenHtml` use the browser's ordinary auto table layout for this table — confirmed no `table-layout:fixed` on either — so a long grade string already widens its own column for free; nothing to change there.
+
+**`legacy_tabular` explicitly untouched** — its own file header commits to "byte-for-byte, zero behavior change," rendering only report-card snapshots published before the current template engine and never offered for a new assignment. Its Grade column stays fixed at 42px on purpose.
+
+Tests: `report-layouts-grade-column-width.test.js` (7 cases, unit-level on `_gradeColWidth`) + 2 new integration cases in `report-layouts-subject-paired.test.js` (PDF and HTML) proving a report using word-based grades gets a measurably wider column than one on an ordinary scale, text never truncated. One pre-existing HTML test's exact-match regex updated for the new `white-space:nowrap` on the grade badge (cosmetic addition, not what that test was pinning).

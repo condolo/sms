@@ -186,7 +186,7 @@ const EMPTY_BAND = { min: 0, grade: '', points: 0, label: '' };
 /** Single editable band row */
 function BandRow({ band, onChange, onDelete, rowIdx }) {
   return (
-    <div className="grid grid-cols-[72px_64px_64px_1fr_28px] gap-2 items-center py-1.5 px-2 rounded-lg bg-slate-50 border border-slate-100">
+    <div className="grid grid-cols-[72px_150px_64px_1fr_28px] gap-2 items-center py-1.5 px-2 rounded-lg bg-slate-50 border border-slate-100">
       <div className="relative">
         <input
           type="number" min="0" max="100" step="1"
@@ -199,9 +199,9 @@ function BandRow({ band, onChange, onDelete, rowIdx }) {
       <input
         type="text"
         value={band.grade}
-        onChange={e => onChange({ ...band, grade: e.target.value.toUpperCase().slice(0, 6) })}
-        placeholder="A+"
-        maxLength={6}
+        onChange={e => onChange({ ...band, grade: e.target.value.slice(0, 20) })}
+        placeholder="A+ or Outstanding"
+        maxLength={20}
         className={`${iCls()} text-xs py-1 font-bold text-center`}
       />
       <input
@@ -268,7 +268,7 @@ function BandEditor({ scale, onSave, saving }) {
   return (
     <div className="mt-3 border-t border-slate-100 pt-3 space-y-2">
       {/* Column headers */}
-      <div className="grid grid-cols-[72px_64px_64px_1fr_28px] gap-2 px-2">
+      <div className="grid grid-cols-[72px_150px_64px_1fr_28px] gap-2 px-2">
         <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide text-right">Min %</span>
         <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide text-center">Grade</span>
         <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide text-right">Points</span>
