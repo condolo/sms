@@ -1455,8 +1455,9 @@ router.post('/bulk-portal-accounts', authMiddleware, PLAN, MODGATE, rbac('studen
         // Match by studentId OR username — covers accounts orphaned by re-import
         const existing = await Users.findOne({ schoolId, $or: [{ studentId: studentDocId }, { username }] }).lean();
         if (existing) {
+          const emailPatch = await _studentEmailBackfillPatch(Users, schoolId, existing, student);
           await Users.updateOne({ _id: existing._id }, {
-            $set: { password: hash, mustChangePassword: true, isActive: true, studentId: studentDocId, updatedAt: now, updatedBy: userId },
+            $set: { password: hash, mustChangePassword: true, isActive: true, studentId: studentDocId, updatedAt: now, updatedBy: userId, ...emailPatch },
           });
         } else {
           const bulkDoc = {
@@ -1773,8 +1774,9 @@ router.post('/bulk-reset-portal-passwords', authMiddleware, PLAN, MODGATE, rbac(
 
           const existing = await Users.findOne({ schoolId, $or: [{ studentId: studentDocId }, { username }] }).lean();
           if (existing) {
+            const emailPatch = await _studentEmailBackfillPatch(Users, schoolId, existing, student);
             await Users.updateOne({ _id: existing._id }, {
-              $set: { password: hash, mustChangePassword: true, isActive: true, studentId: studentDocId, updatedAt: now, updatedBy: userId },
+              $set: { password: hash, mustChangePassword: true, isActive: true, studentId: studentDocId, updatedAt: now, updatedBy: userId, ...emailPatch },
             });
             const existingId = existing.id || String(existing._id);
             revokeUserTokens(existingId).catch(err => console.error('[bulk-reset-portal-passwords] student token revocation failed:', err.message));
@@ -1952,6 +1954,32 @@ function _portalAllowed(school, portalType) {
   return false;
 }
 
+/* ── Student-account email backfill, on reset of an EXISTING account ───
+   A student account is created without `email` when the student has no
+   schoolEmail yet (see the single-account route's own comment on why —
+   students log in by admission number, email is just where notifications
+   land). But schoolEmail is often added to the student record LATER,
+   after the portal account already exists — and every "reset an existing
+   account" branch in this file only ever touched password/status fields,
+   never backfilled email once it became available. The welcome/reset
+   email every one of those branches sends states the recipient's email
+   as their login (sendWelcomeCredentials' own template), so a student
+   whose schoolEmail was added after account creation got a credentials
+   email promising a login method the account was never actually given —
+   confirmed live, reported directly 2026-10-27 ("this is student account
+   sent by the system, but not working"): one school alone had 264/267
+   such students. Call this right alongside every existing-account
+   password-reset $set, so the email the recipient is told to use
+   actually works. Returns {} (nothing to merge) when email is already
+   set, no schoolEmail is on file, or another account already holds that
+   email (never silently overwrite or collide). */
+async function _studentEmailBackfillPatch(Users, schoolId, existing, student) {
+  if (existing.email || !student?.schoolEmail) return {};
+  const email = student.schoolEmail.toLowerCase();
+  const conflict = await Users.findOne({ schoolId, email, _id: { $ne: existing._id } }).lean();
+  return conflict ? {} : { email };
+}
+
 /* ── Guardian-contact resolution (shared by every bulk parent action) ──
    Reported directly: bulk "Activate All Portals" / "Grant Portal Access" /
    "Reset Passwords (by Class)" all only ever read student.parentEmail —
@@ -2076,7 +2104,10 @@ router.post('/:id/portal-account', authMiddleware, PLAN, MODGATE, rbac('students
     }).lean();
 
     if (existing) {
-      // Account already exists — reset password and back-fill studentId.
+      // Account already exists — reset password and back-fill studentId
+      // (and email, if the student's schoolEmail wasn't on file yet when
+      // this account was first created — see _studentEmailBackfillPatch).
+      const emailPatch = await _studentEmailBackfillPatch(Users, schoolId, existing, student);
       await Users.updateOne({ _id: existing._id }, {
         $set: {
           password:           hash,
@@ -2085,6 +2116,7 @@ router.post('/:id/portal-account', authMiddleware, PLAN, MODGATE, rbac('students
           studentId:          studentDocId,
           updatedAt:          now,
           updatedBy:          userId,
+          ...emailPatch,
         },
       });
     } else {

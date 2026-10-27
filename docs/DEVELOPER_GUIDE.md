@@ -7191,3 +7191,24 @@ Reported directly, with screenshots: Trinitas's report card watermark showed as 
 Verified against real data end-to-end, not just at the unit level: regenerated Trinitas's actual published report through `_buildPDFPage` before and after the fix. Before: generic placeholder circle, no watermark. After: the real Trinitas crest in the masthead, and the watermark rendering correctly faint behind the results table — confirming the fix, and that the underlying opacity/PDFKit drawing mechanics (already exhaustively tested in isolation during the original investigation) were never actually the problem.
 
 Tests: `_fetchImageBuf` (report-cards-render-extras.test.js) and the new `lesson-plan-pdf-fetch-image-buf.test.js`, 4 cases each — relative path resolves against the app base URL, an absolute URL passes through untouched, a `data:` URI never touches the network, null/empty/garbage input still returns `null` safely.
+
+## Student portal reset never backfilled email — a welcome email could promise a login that wasn't actually enabled (v5.225.0, 2026-10-27)
+
+Reported directly, with screenshots: a student's welcome email gave an email + password that produced "Invalid email or password" on sign-in.
+
+**Root cause, confirmed live:** a student portal account is created without `email` when the student had no `schoolEmail` on file yet (by design — students log in by admission-number-derived `username`; `email` is just where a credentials email lands when one happens to exist). `schoolEmail` is often added to the student record LATER, after the account already exists. Every "reset an existing account" branch across `students.js` only ever touched `password`/`mustChangePassword`/`isActive`/`studentId` — never backfilled `email` once it became available. `sendWelcomeCredentials`' shared template (`server/utils/email.js`) states the recipient's email as their login regardless of role (`<strong>Email:</strong> ${email}`), sourced from the student record's current `schoolEmail` — so the email correctly showed the real address, while the account itself was never actually given it. Confirmed via a platform-wide scan: 264/267 of one school's students with a `schoolEmail` on file had this exact gap (essentially isolated to that one school, which added `schoolEmail` to students in bulk well after its initial portal-account rollout — every other school's data was clean).
+
+**Fix:** a new shared helper, `_studentEmailBackfillPatch(Users, schoolId, existing, student)` in `server/routes/students.js`:
+```js
+async function _studentEmailBackfillPatch(Users, schoolId, existing, student) {
+  if (existing.email || !student?.schoolEmail) return {};
+  const email = student.schoolEmail.toLowerCase();
+  const conflict = await Users.findOne({ schoolId, email, _id: { $ne: existing._id } }).lean();
+  return conflict ? {} : { email };
+}
+```
+Returns `{}` (nothing to merge) when email is already set, there's no `schoolEmail` on file, or another account already owns that email — never silently overwrites or collides, same posture every account-creation branch in this file already takes toward the unique `(schoolId, email)` index. Spread into the `$set` of all three places an existing student account gets reset: `POST /bulk-portal-accounts` ("all" mode), `POST /bulk-reset-portal-passwords` (the confirmed trigger for this report), and the single-student `POST /:id/portal-account`.
+
+**Not done without confirmation:** backfilling the already-affected accounts live, or resending their welcome emails — this fix only stops new instances of the gap; the existing backlog is a separate, explicit action (same non-retroactive posture as the Parent Login/SMTP incident's own fix).
+
+Tests: 3 new cases in `students-bulk-reset-passwords.test.js` — an existing account's email backfills from the student's current `schoolEmail`; an account that already has the correct email is left untouched; a backfill that would collide with a different account's email is skipped (password reset still succeeds regardless). That file's `tenantModel('users', ...)` mock, previously an always-empty stub (every prior test used `dryRun: true`), gained a real seed-backed `findOne`/`updateOne` to make this the first test in that file to exercise the route's actual, non-dry-run write path.

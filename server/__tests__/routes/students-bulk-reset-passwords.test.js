@@ -80,6 +80,14 @@ const mockStudentsColl = {
     select: function () { return this; },
     lean: () => Promise.resolve(STUDENTS_SEED.filter(s => matches(s, filter))),
   }),
+  // Only reached on the non-dryRun write path (dryRun returns earlier) —
+  // every pre-existing test here used dryRun, so this was never needed
+  // until the email-backfill tests below, which exercise real writes.
+  updateOne: (filter) => {
+    const doc = STUDENTS_SEED.find(s => matches(s, filter));
+    if (doc) doc.hasPortalAccount = true;
+    return Promise.resolve({ modifiedCount: doc ? 1 : 0 });
+  },
 };
 const CLASSES_SEED = [{ id: 'classA', schoolId: SCHOOL_A, name: 'Class A' }, { id: 'classB', schoolId: SCHOOL_A, name: 'Class B' }];
 const mockClassesColl = {
@@ -89,11 +97,26 @@ const mockClassesColl = {
   }),
 };
 
+// Mutable seed + real findOne/updateOne — needed for the email-backfill
+// test below, which exercises the actual (non-dryRun) write path. Every
+// other test in this file only ever used dryRun, so `users` was never
+// anything but an always-empty stub before this.
+let USERS_SEED = [];
+const mockUsersColl = {
+  findOne: (filter = {}) => ({ lean: () => Promise.resolve(USERS_SEED.find(u => matches(u, filter)) ?? null) }),
+  updateOne: (filter, update) => {
+    const doc = USERS_SEED.find(u => matches(u, filter));
+    if (doc && update.$set) Object.assign(doc, update.$set);
+    return Promise.resolve({ modifiedCount: doc ? 1 : 0 });
+  },
+};
+
 jest.mock('../../utils/tenant-model', () => ({
   tenantContext: (req) => ({ schoolId: req.jwtUser.schoolId }),
   tenantModel: (collection) => {
     if (collection === 'students') return mockStudentsColl;
     if (collection === 'classes')  return mockClassesColl;
+    if (collection === 'users')    return mockUsersColl;
     return { find: () => ({ lean: () => Promise.resolve([]) }), findOne: () => ({ lean: () => Promise.resolve(null) }) };
   },
 }));
@@ -208,5 +231,59 @@ describe('POST /api/students/bulk-reset-portal-passwords — mother/father guard
     // mum6@x.com and dad7@x.com — two distinct guardian accounts, neither of
     // which was ever visible to this route before this fix.
     expect(res.body.data.parentCount).toBe(2);
+  });
+});
+
+/* Reported directly 2026-10-27, "this is student account sent by the
+   system, but not working": a student's welcome/reset email told them to
+   log in with their schoolEmail, but the account itself never had that
+   email — their portal account was created BEFORE schoolEmail was added
+   to their student record, and resetting an EXISTING account only ever
+   touched password/status fields, never backfilled email once it became
+   available. Confirmed live at one school: 264/267 students with a
+   schoolEmail on file had this exact gap. */
+describe('POST /api/students/bulk-reset-portal-passwords — email backfill on an existing account (2026-10-27)', () => {
+  beforeAll(() => {
+    STUDENTS_SEED.push(
+      { id: 's8', _id: 'oid_s8', schoolId: SCHOOL_A, classId: 'classD', firstName: 'Donique', lastName: 'Chege', status: 'active', admissionNumber: '17113', schoolEmail: 'donique.chege@trinitasinternationalschool.sc.ke' },
+      { id: 's9', _id: 'oid_s9', schoolId: SCHOOL_A, classId: 'classD', firstName: 'Already', lastName: 'HasEmail', status: 'active', admissionNumber: 'ADM-009', schoolEmail: 'already@x.com' },
+      { id: 's10', _id: 'oid_s10', schoolId: SCHOOL_A, classId: 'classD', firstName: 'Taken', lastName: 'Email', status: 'active', admissionNumber: 'ADM-010', schoolEmail: 'collision@x.com' },
+    );
+  });
+
+  beforeEach(() => {
+    USERS_SEED = [
+      // s8: account created before schoolEmail existed — username only, no email yet.
+      { _id: 'u_s8', id: 'u_s8', schoolId: SCHOOL_A, role: 'student', studentId: 's8', username: '17113', email: undefined },
+      // s9: already has the right email — must not be touched/overwritten.
+      { _id: 'u_s9', id: 'u_s9', schoolId: SCHOOL_A, role: 'student', studentId: 's9', username: 'adm-009', email: 'already@x.com' },
+      // s10: wants collision@x.com, but another (non-student) account already owns it.
+      { _id: 'u_s10', id: 'u_s10', schoolId: SCHOOL_A, role: 'student', studentId: 's10', username: 'adm-010', email: undefined },
+      { _id: 'u_other', id: 'u_other', schoolId: SCHOOL_A, role: 'parent', email: 'collision@x.com' },
+    ];
+  });
+
+  test('backfills email onto an existing account whose schoolEmail was added after creation', async () => {
+    mockRolePerms = { students: ['read', 'update'] };
+    const res = await supertest(buildApp(ADMIN)).post('/api/students/bulk-reset-portal-passwords').send({ classId: 'classD', dryRun: false });
+    expect(res.status).toBe(200);
+    const u8 = USERS_SEED.find(u => u.id === 'u_s8');
+    expect(u8.email).toBe('donique.chege@trinitasinternationalschool.sc.ke');
+    expect(u8.password).toBeTruthy(); // password reset still happened as normal
+  });
+
+  test('does not touch an account that already has the correct email', async () => {
+    mockRolePerms = { students: ['read', 'update'] };
+    await supertest(buildApp(ADMIN)).post('/api/students/bulk-reset-portal-passwords').send({ classId: 'classD', dryRun: false });
+    const u9 = USERS_SEED.find(u => u.id === 'u_s9');
+    expect(u9.email).toBe('already@x.com');
+  });
+
+  test('never overwrites/collides with an email already owned by a different account', async () => {
+    mockRolePerms = { students: ['read', 'update'] };
+    await supertest(buildApp(ADMIN)).post('/api/students/bulk-reset-portal-passwords').send({ classId: 'classD', dryRun: false });
+    const u10 = USERS_SEED.find(u => u.id === 'u_s10');
+    expect(u10.email).toBeUndefined();
+    expect(u10.password).toBeTruthy(); // the reset itself still succeeds
   });
 });
