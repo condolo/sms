@@ -13,6 +13,7 @@ const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { isTimetablePublished, publishedReader } = require('../utils/timetable-publish');
 const { ok, E }          = require('../utils/response');
 const { resolveTeacher } = require('../utils/resolveTeacher');
+const { resolveCurrentPeriod } = require('./academic-config');
 
 const router    = express.Router();
 // Lowercase — matches how timetable.js's own SlotSchema actually stores
@@ -118,6 +119,22 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
       .select('name academicYear termsPerYear emergencyOnlineMode')
       .lean();
     const academicYear = school?.academicYear || '';
+    // Reported directly 2026-10-27, "is the parent portal live, pulling
+    // data as required" — this dashboard's per-class attendance % and
+    // "at-risk students" list filtered the `attendance` collection by an
+    // `academicYear` field that doesn't exist on it at all (confirmed
+    // directly against live data), so both always came back empty/zero
+    // for every teacher. Same bug as parent-portal.js's/student-portal.js's
+    // identical fix — resolved by the current term's own date range
+    // instead, scoped to Attendance queries specifically; the
+    // Topics/Coverage queries elsewhere in this file keep using the
+    // `academicYear` string above unchanged (not verified broken, out of
+    // scope here).
+    const academicYears = await tenantModel('academic_years', tenantContext(req)).find({ schoolId }).lean();
+    const { term: currentTermDoc } = resolveCurrentPeriod(academicYears);
+    const attDateFilter = currentTermDoc
+      ? { date: { $gte: currentTermDoc.startDate, $lte: currentTermDoc.endDate } }
+      : {};
 
     // ── Teaching assignments (classIds + subjectIds) ─────────
     // Assignments are keyed by the teacher's LOGIN id (see teaching-
@@ -218,8 +235,8 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
 
       const [studentCount, attTotal, attPresent] = await Promise.all([
         Students.countDocuments({ schoolId, classId, status: 'active' }).catch(() => 0),
-        Attendance.countDocuments({ schoolId, classId, academicYear }).catch(() => 0),
-        Attendance.countDocuments({ schoolId, classId, academicYear, status: 'present' }).catch(() => 0),
+        Attendance.countDocuments({ schoolId, classId, ...attDateFilter }).catch(() => 0),
+        Attendance.countDocuments({ schoolId, classId, ...attDateFilter, status: 'present' }).catch(() => 0),
       ]);
 
       const attPct = attTotal > 0 ? Math.round((attPresent / attTotal) * 100) : 0;
@@ -276,7 +293,7 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     let atRiskStudents = [];
     if (classIds.length) {
       const absenceCounts = await Attendance.aggregate([
-        { $match: { schoolId, classId: { $in: classIds }, academicYear, status: 'absent' } },
+        { $match: { schoolId, classId: { $in: classIds }, ...attDateFilter, status: 'absent' } },
         { $group: { _id: '$studentId', absences: { $sum: 1 } } },
         { $match: { absences: { $gte: 3 } } },
         { $sort:  { absences: -1 } },

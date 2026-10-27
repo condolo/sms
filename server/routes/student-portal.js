@@ -106,8 +106,15 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
     const mpesaEnabled = !!_getMpesaConfig(school);
 
     // ── Attendance this term ─────────────────────────────────
+    // Same bug, same fix, as parent-portal.js's identical query (see its
+    // own comment for the full reasoning): `attendance` documents have no
+    // `academicYear` field at all, so this always matched zero records.
+    // Scoped by the resolved term's own date range instead.
+    const attDateFilter = currentTermDoc
+      ? { date: { $gte: currentTermDoc.startDate, $lte: currentTermDoc.endDate } }
+      : {};
     const attRecords = await Attendance.find({
-      schoolId, studentId, academicYear,
+      schoolId, studentId, ...attDateFilter,
     }).select('status').lean();
 
     const attSummary = { present: 0, absent: 0, late: 0, total: attRecords.length };

@@ -47,17 +47,26 @@ function mockMatchesFilter(doc, filter) {
   return Object.entries(filter || {}).every(([k, v]) => {
     if (k === '$or') return v.some(sub => mockMatchesFilter(doc, sub));
     if (v && typeof v === 'object' && !Array.isArray(v)) {
-      if ('$in' in v)  return v.$in.includes(doc[k]);
-      if ('$exists' in v) {
-        const has = Object.prototype.hasOwnProperty.call(doc, k) && doc[k] !== undefined;
-        return v.$exists ? has : !has;
-      }
-      if ('$gt' in v)  return doc[k] > v.$gt;
-      if ('$gte' in v) return doc[k] >= v.$gte;
-      if ('$ne' in v)  return doc[k] !== v.$ne;
-      if ('$lt' in v)  return doc[k] < v.$lt;
-      if ('$lte' in v) return doc[k] <= v.$lte;
-      return true;
+      // Every operator on this key must hold — a single early return here
+      // (as this helper used to do) silently drops every operator after
+      // the first match, so a combined {$gte, $lte} range only ever
+      // checked its lower bound. See teacher-portal.js's attendance fix.
+      return Object.entries(v).every(([op, opVal]) => {
+        switch (op) {
+          case '$in':  return opVal.includes(doc[k]);
+          case '$nin': return !opVal.includes(doc[k]);
+          case '$exists': {
+            const has = Object.prototype.hasOwnProperty.call(doc, k) && doc[k] !== undefined;
+            return opVal ? has : !has;
+          }
+          case '$gt':  return doc[k] > opVal;
+          case '$gte': return doc[k] >= opVal;
+          case '$ne':  return doc[k] !== opVal;
+          case '$lt':  return doc[k] < opVal;
+          case '$lte': return doc[k] <= opVal;
+          default: return true;
+        }
+      });
     }
     return doc[k] === v;
   });
@@ -150,10 +159,35 @@ jest.mock('../../routes/weekly-snapshots', () => ({
 }));
 
 /* resolveCurrentPeriod: returns the first academic year's name/term */
+// Mirrors academic-config.js's real `_resolveCurrentPeriod` (year by
+// isCurrent/date-range, term always resolved live by date range) rather than
+// stubbing term to null — a stub here previously made every attendance-fix
+// test pass for the wrong reason (reported directly 2026-10-27; see
+// mockAttendanceDocs' own comment on the same bug).
 jest.mock('../../routes/academic-config', () => ({
-  resolveCurrentPeriod: (years) => {
-    const y = (years || [])[0];
-    return { year: y || null, term: null, termNumber: null };
+  resolveCurrentPeriod: (years, todayStr) => {
+    todayStr = todayStr || new Date().toISOString().slice(0, 10);
+    let year = (years || []).find(y => y.isCurrent);
+    if (!year) {
+      year = (years || []).find(y => y.startDate <= todayStr && y.endDate >= todayStr)
+          ?? [...(years || [])].sort((a, b) => (b.startDate || '').localeCompare(a.startDate || ''))[0]
+          ?? null;
+    }
+    if (!year) return { year: null, term: null, termNumber: null };
+    const terms = Array.isArray(year.terms) ? year.terms : [];
+    let termIdx = terms.findIndex(t => t.startDate <= todayStr && t.endDate >= todayStr);
+    if (termIdx === -1) {
+      const upcoming = terms
+        .map((t, i) => ({ t, i }))
+        .filter(({ t }) => t.startDate > todayStr)
+        .sort((a, b) => a.t.startDate.localeCompare(b.t.startDate))[0];
+      termIdx = upcoming ? upcoming.i : (terms.length ? terms.length - 1 : -1);
+    }
+    return {
+      year,
+      term:       termIdx >= 0 ? terms[termIdx] : null,
+      termNumber: termIdx >= 0 ? termIdx + 1 : null,
+    };
   },
 }));
 
@@ -188,7 +222,13 @@ beforeEach(() => {
     id: SCHOOL_A, schoolId: SCHOOL_A, name: 'Test School',
     emergencyOnlineMode: false, portalConfig: {}, mpesa: null,
   };
-  mockAcademicYearDocs = [{ id: 'ay_2026', schoolId: SCHOOL_A, name: '2026', isCurrent: true, terms: [] }];
+  // terms[].startDate/endDate bracket any realistic test-run date — the
+  // attendance fix below scopes by this range, not by an `academicYear`
+  // field (see mockAttendanceDocs' own comment).
+  mockAcademicYearDocs = [{
+    id: 'ay_2026', schoolId: SCHOOL_A, name: '2026', isCurrent: true,
+    terms: [{ startDate: '2020-01-01', endDate: '2030-12-31' }],
+  }];
   mockSubjectDocs      = [
     { id: 'subj_eng', name: 'English', code: 'ENG' },
     { id: 'subj_math', name: 'Mathematics', code: 'MATH' },
@@ -198,10 +238,12 @@ beforeEach(() => {
     { id: 'topic_2', schoolId: SCHOOL_A, subjectId: 'subj_eng', academicYear: '2026', classId: CLASS_ID, subtopics: [] },
     { id: 'topic_3', schoolId: SCHOOL_A, subjectId: 'subj_math', academicYear: '2026', classId: CLASS_ID, subtopics: [] },
   ];
+  // Real attendance documents carry a `date` field, never `academicYear` —
+  // matching the live collection shape (reported directly 2026-10-27).
   mockAttendanceDocs   = [
-    { schoolId: SCHOOL_A, studentId: STUDENT_1, academicYear: '2026', status: 'present' },
-    { schoolId: SCHOOL_A, studentId: STUDENT_1, academicYear: '2026', status: 'absent' },
-    { schoolId: SCHOOL_A, studentId: STUDENT_1, academicYear: '2026', status: 'late' },
+    { schoolId: SCHOOL_A, studentId: STUDENT_1, date: TODAY_ISO, status: 'present' },
+    { schoolId: SCHOOL_A, studentId: STUDENT_1, date: TODAY_ISO, status: 'absent' },
+    { schoolId: SCHOOL_A, studentId: STUDENT_1, date: TODAY_ISO, status: 'late' },
   ];
   mockInvoiceDocs = [
     { schoolId: SCHOOL_A, studentId: STUDENT_1, total: 10000, balance: 3000, status: 'pending', dueDate: TODAY_ISO },
@@ -291,6 +333,33 @@ describe('GET /dashboard — attendance', () => {
     const att = res.body.data.attendance;
     expect(att.total).toBe(0);
     expect(att.percentage).toBe(0);
+  });
+
+  // Regression for the live bug (reported 2026-10-27): the dashboard used to
+  // filter attendance by a non-existent `academicYear` field, so every real
+  // record (which only ever has `date`) was silently excluded and the
+  // dashboard always showed 0. This proves records are counted by date, and
+  // that a record outside the current term's date range is excluded.
+  test('attendance is scoped by the current term\'s date range, not a nonexistent academicYear field', async () => {
+    mockAcademicYearDocs = [{
+      id: 'ay_2026', schoolId: SCHOOL_A, name: '2026', isCurrent: true,
+      terms: [{ startDate: '2026-09-02', endDate: '2026-12-11' }],
+    }];
+    mockAttendanceDocs = [
+      { schoolId: SCHOOL_A, studentId: STUDENT_1, date: '2026-10-16', status: 'present' },
+      { schoolId: SCHOOL_A, studentId: STUDENT_1, date: '2026-10-17', status: 'present' },
+      // Before the current term's start — must be excluded.
+      { schoolId: SCHOOL_A, studentId: STUDENT_1, date: '2026-01-05', status: 'absent' },
+      // After the current term's end — must also be excluded (proves the
+      // upper bound is actually enforced, not just the lower one).
+      { schoolId: SCHOOL_A, studentId: STUDENT_1, date: '2027-01-10', status: 'absent' },
+    ];
+    const res = await supertest(buildApp()).get('/api/student-portal/dashboard');
+    const att = res.body.data.attendance;
+    expect(att.present).toBe(2);
+    expect(att.absent).toBe(0);
+    expect(att.total).toBe(2);
+    expect(att.percentage).toBe(100);
   });
 });
 

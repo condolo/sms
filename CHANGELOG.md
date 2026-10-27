@@ -6,6 +6,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.223.0] - 2026-10-27 - fix(portals): parent/student/teacher dashboard attendance always showed zero — `academicYear` field never existed on attendance documents
+
+Reported directly, from a real Trinitas parent's screenshot of the Parent Portal "Attendance" page for a child with 18 real attendance records that term: "0 Present / 0 Absent / 0 Late / 0 Total Days, 0% this term" — followed by the wider question, "is the parents portal live really, pulling data as required... not just attendance."
+
+Root-caused directly against live production data: **`attendance` documents have no `academicYear`, `termId`, `termNumber`, or `academicYearId` field at all, ever** — a real document's full shape is `{ _id, date, schoolId, classId, studentId, status, streamId, markedBy, note, createdAt, createdBy, updatedAt, updatedBy, id, __v }`. Three portal-dashboard routes each filtered `Attendance` by `academicYear` anyway, guaranteeing zero matches, always, for every parent, student, and teacher, at every school, since each route shipped:
+
+- `server/routes/parent-portal.js`'s `GET /dashboard/:childId` — the attendance summary card (present/absent/late/total/percentage) and the "recent attendance" list.
+- `server/routes/student-portal.js`'s `GET /dashboard` — the same attendance summary card, student-facing.
+- `server/routes/teacher-portal.js`'s `GET /dashboard` — `myClasses[].attendancePct` (per-class attendance %) and the "at-risk students" widget's 3+-absences aggregate.
+
+`server/routes/attendance.js` (the staff-facing module teachers and admins actually mark attendance through) was checked and confirmed clean — it has always filtered by literal `date` values, never `academicYear`, which is why marking attendance itself was never affected, only these three read-only dashboards. Each of the three broken files' own code comments incorrectly cross-referenced the others as "already correctly fixed," suggesting the bug was copy-pasted forward rather than introduced three times independently.
+
+**Fix**: each route now resolves the current term live via `resolveCurrentPeriod` (the same utility `academic-config.js` itself is built on) and scopes the `Attendance` query by that term's own `date` range (`{ date: { $gte: startDate, $lte: endDate } }`) instead of the nonexistent field. A school that has never configured academic years (no term resolves) falls back to no date restriction — all-time — rather than silently showing zero, matching the "don't hide data behind a boundary nobody configured" precedent already used elsewhere in these files.
+
+**Found and fixed in the same pass**: the one existing test covering this exact code path (`student-portal-dashboard.test.js`) still passed both before and after the route fix — but only because its fixture gave the mock academic year an empty `terms: []` array, which made the resolved term (and therefore the date filter) always `null`/a no-op, and because that same test file's `academic-config` mock stubbed `resolveCurrentPeriod` to always return `term: null` regardless of input. Together these meant the test could never have caught the original bug, or any future regression of it. Strengthened the fixture to a realistic term with real `startDate`/`endDate`, and the mock to mirror `academic-config.js`'s real term-resolution logic instead of stubbing it away. A second, independent bug in that same test file's own mock query-matcher was found and fixed while doing this: it checked `$gte`/`$lte` (and other Mongo operators) on a filter key with an early `return` on the first operator it recognized, so a combined `{$gte, $lte}` range silently only ever enforced its lower bound — invisible until a test actually exercised a date past the upper bound.
+
+Tests: `student-portal-dashboard.test.js` — fixture and `academic-config` mock corrected as above, plus a new case proving a date-range boundary is enforced on both ends. Two new dedicated test files, `parent-portal-dashboard-attendance.test.js` (4 cases) and `teacher-portal-dashboard-attendance.test.js` (4 cases) — neither route had any prior attendance-dashboard test coverage at all. All new and pre-existing tests pass; full suite run clean (360 suites / 3812 tests).
+
 ## [v5.222.0] - 2026-10-27 - fix(inventory): Requisitions — silent Approve/Reject failures, blank requester name, missing reason, no category picker
 
 Reported directly, four issues on one screenshot: "I have tried to approve and no response whether its not working or not," a requester name that renders as "1 pc · by" with nothing after "by," no visible reason/description once an existing item is picked, and "nowhere does it pick the category that has been set" when raising a requisition.

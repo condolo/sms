@@ -7147,3 +7147,31 @@ Reported directly off one screenshot of the Requisitions tab: Approve gave no fe
 **Confirmed NOT a bug, a genuine missing feature — flagged, not built without asking:** a cost/price field. The Inventory module's own header comment says so explicitly: "Version 1 is deliberately lightweight... no asset-tag/serial-number tracking, no depreciation" — there is no cost concept anywhere in `inventory_items`, `inventory_categories`, `inventory_transactions`, or `inventory_requisitions` today. Adding one is a real data-model change (which collection owns it? shown where in the approval review?), not a quick fix, so it wasn't built speculatively.
 
 Tests: `server/__tests__/routes/inventory-requisitions.test.js` gained a `mockCategories` fake collection and 6 new cases (requesterName resolution from `users`, not `req.jwtUser.name`; graceful `''` for a since-deleted requester rather than throwing; `categoryId`→`categoryName` resolution for a new-item request; an existing-item request unaffected when no `categoryId` is sent; the self-heal path for a pre-existing blank-`requesterName` record). All 26 cases in that file pass (20 pre-existing + 6 new), confirming the pre-existing RBAC/self-scoping/workflow-eligibility/fulfill behavior is untouched.
+
+## Parent/Student/Teacher Portal dashboards: attendance always showed zero — `academicYear` never existed on attendance documents (v5.223.0, 2026-10-27)
+
+Reported directly off a real Trinitas parent's screenshot: "0 Present / 0 Absent / 0 Late / 0 Total Days, 0% this term" for a child with 18 real attendance records that term — followed by "is the parents portal live really, pulling data as required... not just attendance."
+
+**Root cause, confirmed against live production data:** a real `attendance` document's full shape is `{ _id, date, schoolId, classId, studentId, status, streamId, markedBy, note, createdAt, createdBy, updatedAt, updatedBy, id, __v }` — **no `academicYear`, `termId`, `termNumber`, or `academicYearId` field, ever.** (This is already noted elsewhere in this guide — see the Year-Archival "Known gaps" table above: "`attendance_records` — records carry no `academicYearId` field; attendance is date-scoped only.") Three dashboard routes filtered `Attendance` by `academicYear` anyway, so the filter matched zero documents, always, for every school:
+
+| Route | What broke |
+|---|---|
+| `parent-portal.js` `GET /dashboard/:childId` | attendance summary card (present/absent/late/total/%) + recent-attendance list |
+| `student-portal.js` `GET /dashboard` | same attendance summary card, student-facing |
+| `teacher-portal.js` `GET /dashboard` | `myClasses[].attendancePct` (per-class %) + "at-risk students" 3+-absences aggregate |
+
+`server/routes/attendance.js` — the staff-facing module attendance is actually *marked* through — was checked and is clean; it has always filtered by literal `date`, never `academicYear`, so marking attendance itself was never affected, only these three read-only dashboards. Each broken file's own comment incorrectly cross-referenced the others as "already correctly fixed," which is the likely reason the bug was copy-pasted into all three instead of caught once.
+
+**Fix:** each route resolves the current term live via `resolveCurrentPeriod` (`academic-config.js`'s own canonical helper — see that section above) and scopes `Attendance` by that term's own date range:
+```js
+const academicYears = await tenantModel('academic_years', tenantContext(req)).find({ schoolId }).lean();
+const { term: currentTermDoc } = resolveCurrentPeriod(academicYears);
+const attDateFilter = currentTermDoc
+  ? { date: { $gte: currentTermDoc.startDate, $lte: currentTermDoc.endDate } }
+  : {};
+```
+spread into each `Attendance.find`/`.countDocuments`/`.aggregate` call in place of the old `academicYear` key. A school with no academic years configured (no term resolves) falls back to no date restriction — all-time — rather than silently showing zero.
+
+**A second, test-infrastructure bug found and fixed in the same pass:** the one existing test for this code path, `student-portal-dashboard.test.js`, passed both before and after the route fix — but only because its `academic-config` mock stubbed `resolveCurrentPeriod` to always return `term: null` (making the new date filter a permanent no-op), and its fixture gave the mock academic year an empty `terms: []`. Together, no version of that test could ever have caught this bug or a regression of it. Fixed by making the mock mirror `academic-config.js`'s real term-resolution algorithm instead of stubbing it away, and giving the fixture a real term with real `startDate`/`endDate`. While fixing that, a second, independent bug turned up in the same test file's own mock query-matcher: it checked Mongo operators like `$gte`/`$lte` on a filter key with an early `return` on the first operator recognized, so `{ $gte, $lte }` together silently only ever enforced the lower bound — invisible until a test exercised a date past the upper bound too.
+
+Tests: `student-portal-dashboard.test.js` (fixture + mock corrected, new date-range-boundary case added), plus two new dedicated files with no prior coverage at all — `parent-portal-dashboard-attendance.test.js` (4 cases) and `teacher-portal-dashboard-attendance.test.js` (4 cases). Full suite: 360 suites / 3812 tests pass.

@@ -205,7 +205,25 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
     const mpesaEnabled = !!_getMpesaConfig(school);
 
     // ── Attendance ───────────────────────────────────────────
-    const attRecords = await Attendance.find({ schoolId, studentId: childId, academicYear })
+    // Reported directly 2026-10-27, "is the parent portal live, pulling
+    // data as required" — a real child with 18 real attendance records
+    // this term showed 0 present/absent/late/total on this dashboard.
+    // Root cause: `attendance` documents have no `academicYear` field at
+    // all (confirmed directly against live data — every real record has
+    // only date/classId/streamId/studentId/status, never academicYear),
+    // so this filter matched zero documents, always, for every parent,
+    // every child, every school, since this route shipped. Same class of
+    // staleness the comment above this block already flags for the YEAR
+    // resolution — just a field that was never populated in the first
+    // place rather than one that goes stale. Scoped by the resolved
+    // term's own date range instead (currentTermDoc.startDate/endDate),
+    // the same boundary _resolveCurrentPeriod itself is built on; no
+    // term resolved (school never configured academic years) falls back
+    // to all-time rather than silently showing zero.
+    const attDateFilter = currentTermDoc
+      ? { date: { $gte: currentTermDoc.startDate, $lte: currentTermDoc.endDate } }
+      : {};
+    const attRecords = await Attendance.find({ schoolId, studentId: childId, ...attDateFilter })
       .select('status date').lean();
     const attSummary = { present: 0, absent: 0, late: 0, total: attRecords.length };
     attRecords.forEach(r => {
