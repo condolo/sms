@@ -88,7 +88,7 @@ const mockRolePerms = {
   finance: { finance: ['read', 'create', 'update', 'delete'] }, // no inventory grant at all
 };
 
-let mockReqs, mockItems, mockTxns, mockDepartments, mockWorkflowConfigs, mockUsers, mockCustomRoles;
+let mockReqs, mockItems, mockTxns, mockDepartments, mockWorkflowConfigs, mockUsers, mockCustomRoles, mockCategories;
 jest.mock('../../utils/model', () => ({
   _model: jest.fn((c) => {
     if (c === 'role_permissions') {
@@ -103,6 +103,7 @@ jest.mock('../../utils/tenant-model', () => ({
     if (collection === 'inventory_requisitions') return mockReqs;
     if (collection === 'inventory_items')        return mockItems;
     if (collection === 'inventory_transactions') return mockTxns;
+    if (collection === 'inventory_categories')   return mockCategories;
     if (collection === 'departments')            return mockDepartments;
     if (collection === 'workflow_configs')       return mockWorkflowConfigs;
     if (collection === 'users')                  return mockUsers;
@@ -140,6 +141,10 @@ beforeEach(() => {
     { id: 'usr_teacher', schoolId: SCHOOL_A, name: 'A Teacher', role: 'teacher', isActive: true },
   ]);
   mockCustomRoles = mockMakeFakeCollection([]);
+  mockCategories = mockMakeFakeCollection([
+    { id: 'c1', schoolId: SCHOOL_A, name: 'ICT' },
+    { id: 'c2', schoolId: SCHOOL_A, name: 'Laboratory' },
+  ]);
 });
 
 describe('POST /api/inventory/requisitions — RBAC', () => {
@@ -183,6 +188,53 @@ describe('POST /api/inventory/requisitions — denormalization and no-config sta
     mockWorkflowConfigs = mockMakeFakeCollection([{ id: 'wfc', schoolId: SCHOOL_A, workflowKey: 'inventory_requisition', steps: [{ order: 1, assigneeType: 'role', assigneeValue: 'finance' }] }]);
     const res = await supertest(buildApp()).post('/api/inventory/requisitions').send({ itemId: 'i1', description: 'Need more laptops', quantity: 2 });
     expect(res.body.data.currentStepOrder).toBe(1);
+  });
+});
+
+describe('POST /api/inventory/requisitions — requesterName (reported directly, 2026-10-27)', () => {
+  // req.jwtUser never actually carries a `name` claim in production
+  // (userId, schoolId, role, roles, email, tv, identityId, …) — this
+  // suite's own mockJwtUser above includes one, which would have hidden
+  // the real bug, so these tests drop it explicitly to prove the fix
+  // resolves the name from the users collection instead of trusting
+  // req.jwtUser.name.
+  test('resolves the real display name from the users collection, not req.jwtUser.name', async () => {
+    mockJwtUser = { userId: 'usr_admin', schoolId: SCHOOL_A, role: 'admin', roles: ['admin'] }; // no `name` at all
+    const res = await supertest(buildApp()).post('/api/inventory/requisitions').send({ itemId: 'i1', description: 'Need more laptops', quantity: 2 });
+    expect(res.body.data.requesterName).toBe('Admin User');
+  });
+
+  test('an unknown/deleted requester still creates the requisition, with an empty requesterName rather than throwing', async () => {
+    mockJwtUser = { userId: 'usr_ghost', schoolId: SCHOOL_A, role: 'admin', roles: ['admin'] };
+    const res = await supertest(buildApp()).post('/api/inventory/requisitions').send({ itemId: 'i1', description: 'Need more laptops', quantity: 2 });
+    expect(res.status).toBe(201);
+    expect(res.body.data.requesterName).toBe('');
+  });
+});
+
+describe('POST /api/inventory/requisitions — category (reported directly, 2026-10-27: "nowhere does it pick the category")', () => {
+  test('a brand-new item request resolves categoryName server-side from categoryId', async () => {
+    mockItems = mockMakeFakeCollection([makeItem(), makeItem({ id: 'i2', categoryId: 'c2', categoryName: 'Laboratory' })]);
+    const res = await supertest(buildApp()).post('/api/inventory/requisitions')
+      .send({ itemName: 'Interactive Whiteboard', categoryId: 'c2', description: 'For Grade 7 classroom', quantity: 1 });
+    expect(res.status).toBe(201);
+    expect(res.body.data.categoryName).toBe('Laboratory');
+  });
+
+  test('an existing-item requisition is unaffected when no categoryId is sent (the item already has its own category)', async () => {
+    const res = await supertest(buildApp()).post('/api/inventory/requisitions').send({ itemId: 'i1', description: 'Need more laptops', quantity: 2 });
+    expect(res.status).toBe(201);
+    expect(res.body.data.categoryId).toBeUndefined();
+  });
+});
+
+describe('GET /api/inventory/requisitions — self-heals a blank requesterName from before the fix (2026-10-27)', () => {
+  test('a pre-existing record with requesterName baked in as \'\' is resolved for display, read-only', async () => {
+    mockReqs = mockMakeFakeCollection([
+      { id: 'r1', schoolId: SCHOOL_A, requesterId: 'usr_teacher', requesterName: '', description: 'A', quantity: 1, unit: 'pcs', status: 'pending', createdAt: '2026-01-01' },
+    ]);
+    const res = await supertest(buildApp()).get('/api/inventory/requisitions');
+    expect(res.body.data[0].requesterName).toBe('A Teacher');
   });
 });
 

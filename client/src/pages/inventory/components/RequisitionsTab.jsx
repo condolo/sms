@@ -41,6 +41,15 @@ export default function RequisitionsTab() {
   const [page, setPage] = useState(1);
   const [showForm, setShowForm] = useState(false);
   const [showWorkflow, setShowWorkflow] = useState(false);
+  // Reported directly 2026-10-27: clicking Approve/Reject gave no
+  // feedback either way — "I have tried to approve and no response
+  // whether its not working or not." advanceMutation had no onError at
+  // all (unlike fulfillMutation just below, which already alert()s) —
+  // the most likely real-world trigger is the 403 the row's own caption
+  // already warns about ("not eligible at this step"), which silently
+  // did nothing visible. Keyed by requisition id so one row's error
+  // doesn't show on a different row if several are open at once.
+  const [advanceError, setAdvanceError] = useState(null); // { id, message } | null
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['inventory', 'requisitions', { page }],
@@ -74,7 +83,11 @@ export default function RequisitionsTab() {
 
   const advanceMutation = useMutation({
     mutationFn: ({ id, status, notes }) => inventoryApi.requisitions.advance(id, { status, notes }),
-    onSuccess:  () => qc.invalidateQueries({ queryKey: ['inventory', 'requisitions'] }),
+    onSuccess:  (_data, { id }) => {
+      setAdvanceError(null);
+      qc.invalidateQueries({ queryKey: ['inventory', 'requisitions'] });
+    },
+    onError: (err, { id }) => setAdvanceError({ id, message: err?.message ?? 'Failed to update this requisition.' }),
   });
   const fulfillMutation = useMutation({
     mutationFn: (id) => inventoryApi.requisitions.fulfill(id),
@@ -133,9 +146,10 @@ export default function RequisitionsTab() {
           {rows.map(r => (
             <RequisitionRow
               key={r.id} req={r} userId={userId} canFulfill={canFulfill}
-              onAdvance={(status, notes) => advanceMutation.mutate({ id: r.id, status, notes })}
+              onAdvance={(status, notes) => { setAdvanceError(null); advanceMutation.mutate({ id: r.id, status, notes }); }}
               onFulfill={() => fulfillMutation.mutate(r.id)}
               busy={advanceMutation.isPending || fulfillMutation.isPending}
+              error={advanceError?.id === r.id ? advanceError.message : null}
             />
           ))}
           <div className="flex items-center justify-between px-4 py-3 bg-slate-50">
@@ -159,22 +173,35 @@ const STATUS_STYLE = {
   fulfilled: 'bg-emerald-50 text-emerald-700 border-emerald-200',
 };
 
-function RequisitionRow({ req, userId, canFulfill, onAdvance, onFulfill, busy }) {
+function RequisitionRow({ req, userId, canFulfill, onAdvance, onFulfill, busy, error }) {
   const [rejecting, setRejecting] = useState(false);
   const [notes, setNotes] = useState('');
   const isMine = req.requesterId === userId;
+  // Reported directly 2026-10-27: the reason/description typed when
+  // raising a requisition was only ever shown as a fallback TITLE (when
+  // no catalogue item was picked) — for the common case of requesting
+  // an existing item, the "why" an approver needs to review was
+  // silently dropped from this view entirely.
+  const title = req.itemName ?? req.description;
+  const showDescription = req.description && req.description !== title;
 
   return (
     <div className="px-4 py-3">
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-sm font-medium text-slate-800">{req.itemName ?? req.description}</p>
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-slate-800">{title}</p>
           <p className="text-xs text-slate-500 mt-0.5">
-            {req.quantity} {req.unit} {req.departmentName ? `· ${req.departmentName}` : ''} {!isMine ? `· by ${req.requesterName}` : ''}
+            {req.quantity} {req.unit} {req.categoryName ? `· ${req.categoryName}` : ''} {req.departmentName ? `· ${req.departmentName}` : ''} {!isMine ? `· by ${req.requesterName || 'a staff member'}` : ''}
           </p>
+          {showDescription && (
+            <p className="text-xs text-slate-500 mt-1 italic">"{req.description}"</p>
+          )}
         </div>
         <span className={`text-xs px-2 py-0.5 rounded-full border shrink-0 ${STATUS_STYLE[req.status] ?? STATUS_STYLE.pending}`}>{req.status}</span>
       </div>
+      {error && (
+        <p className="text-xs text-red-600 mt-2 flex items-center gap-1"><AlertTriangle size={12} /> {error}</p>
+      )}
 
       {req.status === 'approved' && canFulfill && (
         <div className="mt-2 flex justify-end">
@@ -207,12 +234,24 @@ function RequisitionRow({ req, userId, canFulfill, onAdvance, onFulfill, busy })
 
 function RequisitionForm({ categories, items, departments, onClose, onSaved }) {
   const [mode, setMode] = useState('existing'); // 'existing' | 'new'
-  const [form, setForm] = useState({ itemId: items[0]?.id ?? '', itemName: '', departmentId: '', description: '', quantity: 1, unit: 'pcs' });
+  // Reported directly 2026-10-27: "the form, there is nowhere it picks
+  // the category that has been set" — `categories` was already fetched
+  // and passed into this component but never actually used anywhere.
+  // For an existing item its category is already fixed (whatever the
+  // catalogue says) — this just narrows the picker so finding one item
+  // among many isn't a single giant flat list. For a brand-new item
+  // request (not yet in the catalogue) there's no existing category to
+  // narrow by, so this is instead where the requester actually assigns
+  // one, sent to the server as categoryId/categoryName.
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [form, setForm] = useState({ itemId: items[0]?.id ?? '', itemName: '', categoryId: '', departmentId: '', description: '', quantity: 1, unit: 'pcs' });
   function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
+
+  const visibleItems = categoryFilter ? items.filter(i => i.categoryId === categoryFilter) : items;
 
   const mutation = useMutation({
     mutationFn: () => inventoryApi.requisitions.create({
-      ...(mode === 'existing' ? { itemId: form.itemId } : { itemName: form.itemName }),
+      ...(mode === 'existing' ? { itemId: form.itemId } : { itemName: form.itemName, categoryId: form.categoryId || undefined }),
       departmentId: form.departmentId || undefined,
       description: form.description, quantity: Number(form.quantity), unit: form.unit,
     }),
@@ -230,21 +269,46 @@ function RequisitionForm({ categories, items, departments, onClose, onSaved }) {
       {mutation.isError && <p className="text-xs text-red-600">{mutation.error?.message ?? 'Failed to submit'}</p>}
 
       <div className="flex gap-2">
-        <button type="button" onClick={() => setMode('existing')} className={`flex-1 text-xs px-3 py-2 rounded-lg border transition ${mode === 'existing' ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 text-slate-600'}`}>Existing item</button>
-        <button type="button" onClick={() => setMode('new')} className={`flex-1 text-xs px-3 py-2 rounded-lg border transition ${mode === 'new' ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 text-slate-600'}`}>New item request</button>
+        <button type="button" onClick={() => { setMode('existing'); set('categoryId', ''); }} className={`flex-1 text-xs px-3 py-2 rounded-lg border transition ${mode === 'existing' ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 text-slate-600'}`}>Existing item</button>
+        <button type="button" onClick={() => { setMode('new'); setCategoryFilter(''); set('itemId', ''); }} className={`flex-1 text-xs px-3 py-2 rounded-lg border transition ${mode === 'new' ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 text-slate-600'}`}>New item request</button>
       </div>
 
       {mode === 'existing' ? (
-        <FField label="Item">
-          <select required className={iCls()} value={form.itemId} onChange={e => set('itemId', e.target.value)}>
-            <option value="">Select an item…</option>
-            {items.map(i => <option key={i.id} value={i.id}>{i.name} ({i.categoryName})</option>)}
-          </select>
-        </FField>
+        <>
+          <FField label="Category (optional — narrows the list below)">
+            <select
+              className={iCls()} value={categoryFilter}
+              onChange={e => { setCategoryFilter(e.target.value); set('itemId', ''); }}
+            >
+              <option value="">All categories</option>
+              {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </FField>
+          <FField label="Item">
+            <select required className={iCls()} value={form.itemId} onChange={e => set('itemId', e.target.value)}>
+              <option value="">Select an item…</option>
+              {visibleItems.map(i => <option key={i.id} value={i.id}>{i.name} ({i.categoryName})</option>)}
+            </select>
+            {categoryFilter && visibleItems.length === 0 && (
+              <p className="text-[11px] text-amber-600 mt-1">No items in this category — clear the filter or raise it as a new item request instead.</p>
+            )}
+          </FField>
+        </>
       ) : (
-        <FField label="Item name (not yet in the catalogue)">
-          <input required className={iCls()} value={form.itemName} onChange={e => set('itemName', e.target.value)} placeholder="e.g. Interactive whiteboard" />
-        </FField>
+        <>
+          <FField label="Item name (not yet in the catalogue)">
+            <input required className={iCls()} value={form.itemName} onChange={e => set('itemName', e.target.value)} placeholder="e.g. Interactive whiteboard" />
+          </FField>
+          <FField label="Category (optional)">
+            <select
+              className={iCls()} value={form.categoryId}
+              onChange={e => set('categoryId', e.target.value)}
+            >
+              <option value="">— None —</option>
+              {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </FField>
+        </>
       )}
 
       <FField label="Department (optional)">

@@ -403,6 +403,14 @@ const REQ_MIN_STEPS = 1; // schools may configure as few as one approver (e.g. j
 const RequisitionSchema = z.object({
   itemId:        z.string().optional(),        // omit for a brand-new item not yet in the catalogue
   itemName:      z.string().max(200).optional(), // free-text label when itemId is omitted; denormalized when present
+  // Reported directly 2026-10-27: raising a brand-new item request had no
+  // way to say what CATEGORY it belongs to — the field was fetched and
+  // handed to the form but never actually wired up. For an existing item
+  // its category is already known (inventory_items.categoryId); this is
+  // only meaningful when itemId is omitted, same denormalization pattern
+  // as departmentId/departmentName below.
+  categoryId:    z.string().optional(),
+  categoryName:  z.string().max(100).optional(),
   departmentId:  z.string().optional(),
   departmentName: z.string().max(150).optional(),
   description:   z.string().min(1).max(1000),
@@ -452,13 +460,31 @@ router.get('/requisitions', authMiddleware, PLAN, MODGATE, rbac('inventory', 're
       Reqs.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).select('-__v').lean(),
       Reqs.countDocuments(filter),
     ]);
+
+    // Self-heal existing records written before the POST /requisitions fix
+    // above: every requisition raised while req.jwtUser.name was (always)
+    // undefined got requesterName permanently baked in as ''. Resolve those
+    // in-memory for display rather than leaving the requester blank
+    // forever — read-only, nothing is written back here, so this can't
+    // race with anything. Same pattern as hr.js's GET /leave.
+    const blank = docs.filter(d => !d.requesterName && d.requesterId);
+    if (blank.length) {
+      const ids = [...new Set(blank.map(d => d.requesterId))];
+      const users = await tenantModel('users', tenantContext(req))
+        .find({ id: { $in: ids }, schoolId }).select('id name').lean();
+      const nameById = Object.fromEntries(users.map(u => [u.id, u.name]));
+      for (const d of blank) {
+        if (nameById[d.requesterId]) d.requesterName = nameById[d.requesterId];
+      }
+    }
+
     return ok(res, docs, paginate(page, limit, total));
   } catch (err) { console.error('[inventory/requisitions GET]', err); return E.serverError(res); }
 });
 
 router.post('/requisitions', authMiddleware, PLAN, MODGATE, rbac('inventory', 'create', 'requisition'), async (req, res) => {
   try {
-    const { schoolId, userId, name } = req.jwtUser;
+    const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(RequisitionSchema, req.body);
     if (error) return E.validation(res, error);
 
@@ -469,16 +495,28 @@ router.post('/requisitions', authMiddleware, PLAN, MODGATE, rbac('inventory', 'c
       data.itemName = item.name;
       if (!req.body.unit) data.unit = item.unit;
     }
+    if (data.categoryId && !data.categoryName) {
+      const category = await tenantModel('inventory_categories', ctx).findOne({ id: data.categoryId, schoolId }).select('name').lean();
+      if (category) data.categoryName = category.name;
+    }
     if (data.departmentId && !data.departmentName) {
       const dept = await tenantModel('departments', ctx).findOne({ id: data.departmentId, schoolId }).select('name').lean();
       if (dept) data.departmentName = dept.name;
     }
 
+    // Reported directly 2026-10-27: every requisition ever raised had
+    // requesterName permanently baked in as '' — req.jwtUser has no
+    // `name` claim at all (userId, schoolId, role, roles, email, …),
+    // so this always evaluated to undefined. Same bug, same fix shape
+    // as hr.js's leave_requests (see that file's POST /leave) —
+    // resolve the real display name from the users collection instead.
+    const requester = await tenantModel('users', ctx).findOne({ id: userId, schoolId }).select('name').lean();
+
     const config = await getWorkflowConfig(ctx, schoolId, REQ_WORKFLOW_KEY);
 
     const doc = await tenantModel('inventory_requisitions', ctx).create({
       ...data, id: uuidv4(), schoolId,
-      requesterId: userId, requesterName: name ?? '',
+      requesterId: userId, requesterName: requester?.name || '',
       status: 'pending', currentStepOrder: config ? 1 : null,
       createdBy: userId, createdAt: new Date().toISOString(),
     });
