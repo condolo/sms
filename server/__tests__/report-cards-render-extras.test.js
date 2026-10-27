@@ -61,6 +61,30 @@ jest.mock('../routes/assessment', () => ({
   getConfig: jest.fn(() => Promise.resolve(mockCaConfig)),
 }));
 
+// _fetchImageBuf's own test double for `http`/`https`.get — captures the
+// URL actually requested (to prove a relative logoUrl gets resolved to an
+// absolute one first) and feeds back a controllable response. A plain
+// function declaration, not jest.fn/const, so it's fully hoisted above
+// the jest.mock(...) calls below, which Babel hoists above everything else.
+function mockFakeGet(url, optsOrCb, maybeCb) {
+  global.__lastRequestedUrl = url;
+  const callback = typeof optsOrCb === 'function' ? optsOrCb : maybeCb;
+  const resp = { on: (event, cb) => {
+    if (event === 'data') (global.__mockResponseChunks || [Buffer.from('fake-image-bytes')]).forEach(cb);
+    if (event === 'end') cb();
+    return resp;
+  } };
+  if (typeof callback === 'function') callback(resp);
+  const req = { on: () => req, destroy: () => {} };
+  return req;
+}
+// Only overrides `.get` — express/mongoose/etc. depend on the rest of
+// these modules' real exports (IncomingMessage and friends), so a full
+// replacement breaks unrelated requires elsewhere in this file.
+jest.mock('http', () => ({ ...jest.requireActual('http'), get: (...args) => mockFakeGet(...args) }));
+jest.mock('https', () => ({ ...jest.requireActual('https'), get: (...args) => mockFakeGet(...args) }));
+jest.mock('../utils/app-url', () => ({ appUrl: (p = '') => `https://app.example.test${p.startsWith('/') ? p : `/${p}`}` }));
+
 const reportCardsRouter = require('../routes/report-cards');
 
 function baseSnap(overrides = {}) {
@@ -130,5 +154,48 @@ describe('_loadRenderExtras', () => {
     const extra = await reportCardsRouter._loadRenderExtras({}, 'sch_1', baseSnap());
     expect(extra.subjectNames).toEqual({ math: 'Mathematics' });
     expect(extra.subjectNames.english).toBeUndefined();
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════
+   _fetchImageBuf — reported directly 2026-10-27, "the logo is supposed
+   to be fainted watermark" / bulk PDF export. Root cause: settings.js's
+   logo-upload flow always writes a RELATIVE, self-hosted path
+   (`/api/public/school-asset/logo?slug=...`) to `school.logoUrl` — fine
+   for a browser `<img>` tag (resolves against the page's own origin),
+   but this is a server-side Node http(s).get() with no "current page"
+   to resolve a relative path against. Confirmed directly against live
+   production data for two different schools that this silently returned
+   null for every real school's logo, in every PDF export (single and
+   bulk alike) — not a bulk-specific bug, just one only noticed there.
+   ══════════════════════════════════════════════════════════════ */
+describe('_fetchImageBuf', () => {
+  beforeEach(() => {
+    global.__lastRequestedUrl = null;
+    global.__mockResponseChunks = [Buffer.from('fake-image-bytes')];
+  });
+
+  test('a relative, self-hosted logoUrl is resolved against the app base URL before fetching', async () => {
+    const buf = await reportCardsRouter._fetchImageBuf('/api/public/school-asset/logo?slug=sch_demo');
+    expect(global.__lastRequestedUrl).toBe('https://app.example.test/api/public/school-asset/logo?slug=sch_demo');
+    expect(buf.toString()).toBe('fake-image-bytes');
+  });
+
+  test('an already-absolute http(s) URL is fetched unchanged', async () => {
+    await reportCardsRouter._fetchImageBuf('https://cdn.example.com/logo.png');
+    expect(global.__lastRequestedUrl).toBe('https://cdn.example.com/logo.png');
+  });
+
+  test('a data: URI is decoded directly, never sent to http/https.get', async () => {
+    const buf = await reportCardsRouter._fetchImageBuf(`data:image/png;base64,${Buffer.from('hi').toString('base64')}`);
+    expect(buf.toString()).toBe('hi');
+    expect(global.__lastRequestedUrl).toBeNull();
+  });
+
+  test('null/empty/garbage input still resolves to null, not a crash', async () => {
+    expect(await reportCardsRouter._fetchImageBuf(null)).toBeNull();
+    expect(await reportCardsRouter._fetchImageBuf('')).toBeNull();
+    expect(await reportCardsRouter._fetchImageBuf('not a url at all')).toBeNull();
+    expect(global.__lastRequestedUrl).toBeNull();
   });
 });

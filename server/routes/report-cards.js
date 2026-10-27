@@ -57,6 +57,7 @@ const { getWorkflowConfig, saveWorkflowConfig, resolveStep, resolveAssigneeLabel
 const { dispatchNotification } = require('../utils/notify-dispatch');
 const { enqueueJob, registerHandler } = require('../utils/job-queue');
 const email = require('../utils/email');
+const { appUrl } = require('../utils/app-url');
 const {
   aggregateAssessmentMarks,
   computeFinalScores,
@@ -2432,7 +2433,20 @@ async function _fetchImageBuf(url) {
     const b64 = url.split(',')[1];
     return b64 ? Buffer.from(b64, 'base64') : null;
   }
-  if (!url.startsWith('http://') && !url.startsWith('https://')) return null;
+  // A relative, self-hosted path (e.g. settings.js's logo-upload flow
+  // writes `/api/public/school-asset/logo?slug=...`) resolves fine in a
+  // browser, relative to the page's own origin — but this is a
+  // server-side fetch with no "current page" of its own, so it has to be
+  // made absolute against the app's own base URL first. Reported directly
+  // 2026-10-27: without this, NO school logo (or the faint watermark that
+  // reuses the same buffer) ever rendered in any downloaded PDF report
+  // card, for any school using the normal logo-upload flow — confirmed
+  // live for both the reporting school and a second, unrelated one; the
+  // fetch below never even attempted a request.
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    if (!url.startsWith('/')) return null; // not a fetchable URL or app-relative path
+    url = appUrl(url);
+  }
   return new Promise((resolve) => {
     const mod = url.startsWith('https://') ? require('https') : require('http');
     const req = mod.get(url, { timeout: 5000 }, resp => {
@@ -3847,6 +3861,7 @@ router.patch('/draft-comments/:studentId/advance', authMiddleware, PLAN, MODGATE
 // convention as qa-health.js's exported check functions.
 router._notifyReportCardsPublished = _notifyReportCardsPublished;
 router._normalizeGradeScaleBands = _normalizeGradeScaleBands;
+router._fetchImageBuf = _fetchImageBuf;
 router._buildPDFPage = _buildPDFPage;
 router._loadRenderExtras = _loadRenderExtras;
 router._resolveDisplayNames = _resolveDisplayNames;

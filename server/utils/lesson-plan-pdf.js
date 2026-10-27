@@ -19,18 +19,30 @@
    ============================================================ */
 'use strict';
 
+const { appUrl } = require('./app-url');
+
 /* Decode a URL or data: URI to a Buffer. Non-fatal — returns null on any
    error, mirroring report-cards.js's own _fetchImageBuf exactly (kept as
    a local copy rather than a cross-import — both files are self-contained
    rendering engines by design, same as payslip-engine.js never imports
-   report-layouts.js). */
+   report-layouts.js).
+
+   A relative, self-hosted logo path (settings.js's upload flow writes
+   `/api/public/school-asset/logo?slug=...`) has to be resolved against
+   the app's own base URL first — this is a server-side fetch, not a
+   browser `<img>` tag, so there's no "current page" to resolve a relative
+   path against. Same fix as report-cards.js's _fetchImageBuf, same root
+   cause (reported directly 2026-10-27). */
 async function fetchImageBuf(url) {
   if (!url) return null;
   if (url.startsWith('data:')) {
     const b64 = url.split(',')[1];
     return b64 ? Buffer.from(b64, 'base64') : null;
   }
-  if (!url.startsWith('http://') && !url.startsWith('https://')) return null;
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    if (!url.startsWith('/')) return null;
+    url = appUrl(url);
+  }
   return new Promise((resolve) => {
     const mod = url.startsWith('https://') ? require('https') : require('http');
     const req = mod.get(url, { timeout: 5000 }, resp => {
