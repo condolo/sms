@@ -344,6 +344,18 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
         photo:           student.photo || null,
         gender:          student.gender,
         dateOfBirth:     student.dateOfBirth || null,
+        // Reported directly 2026-10-27 ("will my average and rank work?"):
+        // the client's Class Rank stat card (StudentDashboard.jsx) has
+        // always read student.classRank/classSize, but this route never
+        // set either — the data exists (reportCards[0].rankings.class,
+        // written by report-cards.js only when the school has ranking
+        // enabled) but was never mapped here, so the card showed "—"
+        // unconditionally, even once a report card with real rankings was
+        // published. null when no published report card has rankings
+        // (ranking disabled for the school, or nothing published yet) —
+        // the client already renders "—" for a null classRank.
+        classRank:       reportCards[0]?.rankings?.class?.rank   ?? null,
+        classSize:       reportCards[0]?.rankings?.class?.outOf  ?? null,
       },
       school: {
         name: school?.name,

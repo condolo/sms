@@ -258,7 +258,11 @@ beforeEach(() => {
     {
       id: 'rc_1', schoolId: SCHOOL_A, studentId: STUDENT_1, status: 'published', superseded: false,
       academicYear: '2026', termName: 'Term 1', termNumber: 1,
-      totalScore: 450, averageScore: 82.5, gpa: 3.8, rankings: { class: 5, school: 12 },
+      totalScore: 450, averageScore: 82.5, gpa: 3.8,
+      // Real shape, confirmed against report-cards.js's own ranking writer
+      // (rankings.class = { rank, outOf }, only present when the school
+      // has ranking enabled) — not a bare number.
+      rankings: { class: { rank: 5, outOf: 12 } },
       publishedAt: new Date().toISOString(), version: 1,
       subjects: { subj_eng: { finalScore: 85, grade: 'A' }, subj_math: { finalScore: 70, grade: 'B' } },
     },
@@ -310,6 +314,42 @@ describe('GET /dashboard — student & school identity', () => {
     mockStudentDoc = null;
     const res = await supertest(buildApp()).get('/api/student-portal/dashboard');
     expect(res.status).toBe(404);
+  });
+});
+
+/* Reported directly 2026-10-27 ("will my average and rank work [once
+   published]?"): the client's Class Rank stat card has always read
+   student.classRank/classSize, but this route never set either field —
+   the dashboard showed "—" unconditionally, even with a real published
+   report card carrying real rankings. */
+describe('GET /dashboard — student.classRank / classSize', () => {
+  test('resolves from the most recent published report card\'s rankings.class', async () => {
+    const res = await supertest(buildApp()).get('/api/student-portal/dashboard');
+    const s = res.body.data.student;
+    expect(s.classRank).toBe(5);
+    expect(s.classSize).toBe(12);
+  });
+
+  test('is null (not a crash) when no published report card exists', async () => {
+    mockReportCardDocs = [];
+    const res = await supertest(buildApp()).get('/api/student-portal/dashboard');
+    const s = res.body.data.student;
+    expect(s.classRank).toBeNull();
+    expect(s.classSize).toBeNull();
+  });
+
+  test('is null when the school has ranking disabled (rankings.class absent on the snapshot)', async () => {
+    mockReportCardDocs = [{
+      id: 'rc_2', schoolId: SCHOOL_A, studentId: STUDENT_1, status: 'published', superseded: false,
+      academicYear: '2026', termName: 'Term 1', termNumber: 1,
+      totalScore: 450, averageScore: 82.5, gpa: 3.8,
+      rankings: {}, // report-cards.js writes {} when config.rankingEnabled is false
+      publishedAt: new Date().toISOString(), version: 1, subjects: {},
+    }];
+    const res = await supertest(buildApp()).get('/api/student-portal/dashboard');
+    const s = res.body.data.student;
+    expect(s.classRank).toBeNull();
+    expect(s.classSize).toBeNull();
   });
 });
 
