@@ -242,6 +242,15 @@ function _wrap(body, schoolName) {
     .info{background:#f1f5f9;border-radius:8px;padding:16px 20px;margin:16px 0}
     .info p{margin:4px 0;font-size:14px;color:#374151}
     .info strong{color:#1e1b4b}
+    /* Decorative only — many mail clients (especially native mobile mail
+       apps) strip head/style blocks entirely. Every .btn anchor below
+       now also carries this same look as an inline style attribute,
+       which survives everywhere; a capable client just sees the
+       identical result twice. Reported directly, with a screenshot: a
+       welcome-credentials email's Sign-In button rendered as a blank
+       gap with no visible text or color at all — the anchor had no
+       styling left once this block was stripped, nothing else to fall
+       back to. */
     .btn{display:inline-block;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff!important;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0}
     .ft{padding:20px 32px;background:#f8fafc;text-align:center;font-size:12px;color:#9ca3af;border-top:1px solid #e5e7eb}
     .badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600}
@@ -270,7 +279,7 @@ async function sendPlatformOperatorInvite({ name, email: toEmail, inviterName, t
     <h2>You've been invited to the Msingi platform team</h2>
     <p>Hi ${_escapeHtml(name || 'there')},${inviterName ? ` <strong>${_escapeHtml(inviterName)}</strong> has` : ' you have been'} invited you to a Msingi platform operator account${templateLabel ? ` with the role <strong>${_escapeHtml(templateLabel)}</strong>` : ''}.</p>
     <p>Choose a password to activate your account:</p>
-    <p style="text-align:center"><a href="${inviteUrl}" class="btn">Set your password &rarr;</a></p>
+    <p style="text-align:center"><a href="${inviteUrl}" class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0">Set your password &rarr;</a></p>
     <div class="info">
       <p><strong>Sign-in:</strong> ${_escapeHtml(toEmail)}</p>
       ${expires ? `<p><strong>Invite expires:</strong> ${expires}</p>` : ''}
@@ -314,7 +323,7 @@ async function sendAdminNewSchoolAlert({ schoolName, slug, adminName, adminEmail
       <p><strong>Status:</strong> <span class="badge pending">⏳ Pending Approval</span></p>
     </div>
     <p style="text-align:center">
-      <a href="${APP_URL}/platform" class="btn">Review in Platform Dashboard →</a>
+      <a href="${APP_URL}/platform" class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0">Review in Platform Dashboard →</a>
     </p>
   `);
   return _send(PLATFORM_EMAIL, `[Msingi] New School Registration — ${schoolName}`, html);
@@ -373,7 +382,7 @@ async function sendApprovalWelcome({ adminName, adminEmail, schoolName, slug, pl
       <p style="margin:0;font-size:13px;color:#92400e"><strong>⚠️ Important:</strong> You will be asked to set a new password on your first login. Choose something strong — this temporary password will no longer work after you change it.</p>
     </div>` : ''}
     <p style="text-align:center">
-      <a href="${loginUrl}" class="btn">Log In to Msingi →</a>
+      <a href="${loginUrl}" class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0">Log In to Msingi →</a>
     </p>
     <p style="font-size:13px;color:#6b7280">Need help? Contact us at <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>.</p>
     <p style="font-size:12px;color:#9ca3af">⚠️ Never share your password with anyone — Msingi will never ask for it by email.</p>
@@ -405,7 +414,7 @@ async function sendAdminApprovalAlert({ schoolName, adminEmail, plan }) {
       <p><strong>Status:</strong> <span class="badge approved">✓ Active</span></p>
     </div>
     <p style="text-align:center">
-      <a href="${APP_URL}/platform" class="btn">View in Platform Dashboard →</a>
+      <a href="${APP_URL}/platform" class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0">View in Platform Dashboard →</a>
     </p>
   `);
   return _send(PLATFORM_EMAIL, `[Msingi] Approved: ${schoolName}`, html);
@@ -444,7 +453,7 @@ async function sendTrialReminder({ adminName, adminEmail, schoolName, schoolEmai
     </div>
     <p>To keep your school running smoothly with no interruption, please confirm your subscription before the trial expires.</p>
     <p style="text-align:center">
-      <a href="${APP_URL}" class="btn">Manage My Subscription →</a>
+      <a href="${APP_URL}" class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0">Manage My Subscription →</a>
     </p>
     <p style="font-size:13px;color:#6b7280">Questions? Contact us at <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>.</p>
   `, schoolName);
@@ -481,10 +490,10 @@ async function sendSystemUpdateNotice({ adminName, adminEmail, schoolName, title
       <p style="margin:0;font-size:13px;color:#92400e"><strong>⚠️ Action recommended:</strong> Before this update, please log in and create a data backup. This takes less than a minute and ensures your data is safe.</p>
     </div>
     <p style="text-align:center">
-      <a href="${APP_URL}" class="btn">Log In & Back Up Now →</a>
+      <a href="${APP_URL}" class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0">Log In & Back Up Now →</a>
     </p>` : `
     <p style="text-align:center">
-      <a href="${APP_URL}" class="btn">Visit Your Dashboard →</a>
+      <a href="${APP_URL}" class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0">Visit Your Dashboard →</a>
     </p>`}
     <p style="font-size:13px;color:#6b7280">Questions about this notice? Contact us at <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>.</p>
   `);
@@ -542,7 +551,7 @@ async function sendWelcomeCredentials({ name, email, tempPassword, schoolName, s
       <p><strong>Password:</strong> <span style="font-family:monospace;font-size:15px;font-weight:700;color:#4f46e5;background:#ede9fe;padding:3px 8px;border-radius:4px">${tempPassword}</span></p>
     </div>
     <p style="text-align:center">
-      <a href="${loginUrl || APP_URL}" class="btn">Sign In Now →</a>
+      <a href="${loginUrl || APP_URL}" class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0">Sign In Now →</a>
     </p>
     <p style="font-size:13px;color:#6b7280">If you did not expect this email, contact your school administrator at <a href="mailto:${support}">${support}</a>.</p>
     <p style="font-size:12px;color:#9ca3af">⚠️ Never share your password with anyone — Msingi will never ask for it.</p>
@@ -561,7 +570,7 @@ async function sendPasswordExpirySoon({ name, email, schoolName, schoolEmail, sc
     <h2>${urgency}: Your password expires ${expiryWhen}</h2>
     ${bodyHtml}
     <p style="text-align:center">
-      <a href="${APP_URL}" class="btn">Update Password Now →</a>
+      <a href="${APP_URL}" class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0">Update Password Now →</a>
     </p>
     <p style="font-size:13px;color:#6b7280">Need help? Contact your school administrator at <a href="mailto:${support}">${support}</a>.</p>
   `, schoolName);
@@ -577,7 +586,7 @@ async function sendPasswordChanged({ name, email, schoolName, schoolEmail, schoo
     ${bodyHtml}
     <p style="font-size:13px;color:#6b7280">If you did not make this change, contact your school administrator immediately at <a href="mailto:${support}">${support}</a>.</p>
     <p style="text-align:center">
-      <a href="${APP_URL}" class="btn">Sign In →</a>
+      <a href="${APP_URL}" class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0">Sign In →</a>
     </p>
   `, schoolName);
   return _sendAsSchool(email, subject, html, { schoolName, schoolEmail, schoolId });
@@ -598,7 +607,7 @@ async function sendRoleChanged({ name, email, schoolName, schoolEmail, schoolId 
       ${changedBy ? `<p><strong>Changed by:</strong> ${changedBy}</p>` : ''}
     </div>
     <p style="text-align:center">
-      <a href="${APP_URL}" class="btn">Sign In →</a>
+      <a href="${APP_URL}" class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0">Sign In →</a>
     </p>
     <p style="font-size:13px;color:#6b7280">If you believe this change was made in error, contact your school administrator at <a href="mailto:${support}">${support}</a>.</p>
   `, schoolName);
@@ -644,7 +653,7 @@ async function sendMessageNotification({ recipientName, recipientEmail, senderNa
       ${!isDirect ? `<p><strong>From:</strong> ${senderName} · ${schoolName}</p>` : ''}
     </div>
     <p style="text-align:center">
-      <a href="${url}" class="btn">Open ${schoolName} →</a>
+      <a href="${url}" class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0">Open ${schoolName} →</a>
     </p>
     <p style="font-size:12px;color:#9ca3af">You are receiving this because you are a member of <strong>${schoolName}</strong>. Log in to manage your notification preferences.</p>
   `, schoolName);
@@ -675,7 +684,7 @@ async function sendAssessmentReminder({
       <p><strong>Status:</strong> <span style="color:${statusDetails.color};font-weight:700">${status.toUpperCase()}</span></p>
     </div>
     <p style="text-align:center">
-      <a href="${APP_URL}/exams" class="btn">Open Gradebook →</a>
+      <a href="${APP_URL}/exams" class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0">Open Gradebook →</a>
     </p>
     <p style="font-size:12px;color:#9ca3af">You are receiving this as a teacher at <strong>${schoolName}</strong>.</p>
   `, schoolName);
@@ -701,7 +710,7 @@ async function sendInvoiceEmail({
     </div>
     <p>Log in to your school portal, go to <strong>Settings → Subscription</strong>, and pay via M-Pesa STK Push. Your platform access continues uninterrupted while your invoice is pending.</p>
     <p style="text-align:center">
-      <a href="${APP_URL}/platform" class="btn">Open Subscription Settings →</a>
+      <a href="${APP_URL}/platform" class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0">Open Subscription Settings →</a>
     </p>
   `, schoolName);
   return _sendAsSchool(email, `[Msingi] Invoice ${invoiceRef} — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
@@ -757,7 +766,7 @@ async function sendBehaviourIncidentAlert({
       ${typeof points === 'number' ? `<p><strong>Points:</strong> ${points > 0 ? '+' : ''}${points}</p>` : ''}
     </div>
     <p style="text-align:center">
-      <a href="${url}" class="btn">Open ${schoolName} →</a>
+      <a href="${url}" class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0">Open ${schoolName} →</a>
     </p>
     <p style="font-size:12px;color:#9ca3af">You are receiving this because you are a parent/guardian at <strong>${schoolName}</strong>. Log in to manage your notification preferences.</p>
   `, schoolName);
@@ -782,7 +791,7 @@ async function sendPayrollStatusEmail({
       <p><strong>Net pay:</strong> ${currency || 'KES'} ${Number(netSalary || 0).toLocaleString()}</p>
     </div>
     <p style="text-align:center">
-      <a href="${url}" class="btn">View in ${schoolName} →</a>
+      <a href="${url}" class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0">View in ${schoolName} →</a>
     </p>
     <p style="font-size:12px;color:#9ca3af">You are receiving this because you are a staff member at <strong>${schoolName}</strong>. Log in to manage your notification preferences.</p>
   `, schoolName);
@@ -808,7 +817,7 @@ async function sendDigestSummary({
     ${bodyHtml}
     ${rows}
     <p style="text-align:center">
-      <a href="${url}" class="btn">Open ${schoolName} →</a>
+      <a href="${url}" class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0">Open ${schoolName} →</a>
     </p>
     <p style="font-size:12px;color:#9ca3af">You're receiving this as a daily digest instead of individual emails. Change this anytime in your notification preferences.</p>
   `, schoolName);
@@ -830,7 +839,7 @@ async function sendReportCardPublishedAlert({
     <h2>📄 Report Card Published</h2>
     ${bodyHtml}
     <p style="text-align:center">
-      <a href="${url}" class="btn">View Report Card →</a>
+      <a href="${url}" class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0">View Report Card →</a>
     </p>
     <p style="font-size:12px;color:#9ca3af">You are receiving this because you are a parent/guardian at <strong>${schoolName}</strong>. Log in to manage your notification preferences.</p>
   `, schoolName);
@@ -850,7 +859,7 @@ async function sendWeeklySnapshotReady({
     <h2>📅 Weekly Student Snapshot Ready</h2>
     ${bodyHtml}
     <p style="text-align:center">
-      <a href="${url}" class="btn">View Snapshot →</a>
+      <a href="${url}" class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0">View Snapshot →</a>
     </p>
     <p style="font-size:12px;color:#9ca3af">You are receiving this because you are a parent/guardian at <strong>${schoolName}</strong>. Log in to manage your notification preferences.</p>
   `, schoolName);
@@ -870,7 +879,7 @@ async function sendExamResultsAlert({
     <h2>📝 Exam Results Published</h2>
     ${bodyHtml}
     <p style="text-align:center">
-      <a href="${url}" class="btn">View Results →</a>
+      <a href="${url}" class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0">View Results →</a>
     </p>
     <p style="font-size:12px;color:#9ca3af">You are receiving this because you are a parent/guardian at <strong>${schoolName}</strong>. Log in to manage your notification preferences.</p>
   `, schoolName);
@@ -891,7 +900,7 @@ async function sendFeeInvoiceCreatedAlert({
     <h2>🧾 New Invoice</h2>
     ${bodyHtml}
     <p style="text-align:center">
-      <a href="${url}" class="btn">View Invoice →</a>
+      <a href="${url}" class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0">View Invoice →</a>
     </p>
     <p style="font-size:12px;color:#9ca3af">You are receiving this because you are a parent/guardian at <strong>${schoolName}</strong>. Log in to manage your notification preferences.</p>
   `, schoolName);
@@ -913,7 +922,7 @@ async function sendFeePaymentReceivedAlert({
     <h2>✅ Payment Received</h2>
     ${bodyHtml}
     <p style="text-align:center">
-      <a href="${url}" class="btn">View Receipt →</a>
+      <a href="${url}" class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0">View Receipt →</a>
     </p>
     <p style="font-size:12px;color:#9ca3af">You are receiving this because you are a parent/guardian at <strong>${schoolName}</strong>. Log in to manage your notification preferences.</p>
   `, schoolName);
@@ -933,7 +942,7 @@ async function sendAbsenceAlert({
     <h2>🚸 Absence Alert</h2>
     ${bodyHtml}
     <p style="text-align:center">
-      <a href="${url}" class="btn">View Attendance →</a>
+      <a href="${url}" class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0">View Attendance →</a>
     </p>
     <p style="font-size:12px;color:#9ca3af">You are receiving this because you are a parent/guardian at <strong>${schoolName}</strong>. Log in to manage your notification preferences.</p>
   `, schoolName);
@@ -957,7 +966,7 @@ async function sendInvoiceOverdueAlert({
       <p><strong>Outstanding balance:</strong> ${currency} ${balance}</p>
     </div>
     <p style="text-align:center">
-      <a href="${url}" class="btn">Pay Now →</a>
+      <a href="${url}" class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0">Pay Now →</a>
     </p>
     <p style="font-size:12px;color:#9ca3af">You are receiving this because you are a parent/guardian at <strong>${schoolName}</strong>. Log in to manage your notification preferences.</p>
   `, schoolName);
@@ -982,7 +991,7 @@ async function sendInvoiceDueSoonAlert({
       <p><strong>Outstanding balance:</strong> ${currency} ${balance}</p>
     </div>
     <p style="text-align:center">
-      <a href="${url}" class="btn">Pay Now →</a>
+      <a href="${url}" class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0">Pay Now →</a>
     </p>
     <p style="font-size:12px;color:#9ca3af">You are receiving this because you are a parent/guardian at <strong>${schoolName}</strong>. Log in to manage your notification preferences.</p>
   `, schoolName);
@@ -1008,7 +1017,7 @@ async function sendAttendanceSummaryAlert({
       <p style="margin:4px 0 0">Total records: <strong>${total}</strong></p>
     </div>
     <p style="text-align:center">
-      <a href="${url}" class="btn">View Attendance →</a>
+      <a href="${url}" class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0">View Attendance →</a>
     </p>
   `, schoolName);
   return _sendAsSchool(recipientEmail, subject, html, { schoolName, schoolEmail, schoolId });
@@ -1035,7 +1044,7 @@ async function sendAbsenteeStaffAlert({
     ${bodyHtml}
     <ul>${studentNames.map(n => `<li>${n}</li>`).join('')}</ul>
     <p style="text-align:center">
-      <a href="${url}" class="btn">View Absentees →</a>
+      <a href="${url}" class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0">View Absentees →</a>
     </p>
   `, schoolName);
   return _sendAsSchool(recipientEmail, emailSubject, html, { schoolName, schoolEmail, schoolId });
@@ -1123,7 +1132,7 @@ async function sendDemoCredentials({ to, name, schoolName, slug, password, expir
       <p><strong>Student:</strong> student</p>
       <p style="margin-top:10px"><strong>Password (all roles):</strong> <code style="background:#eef2ff;padding:2px 6px;border-radius:4px">${password}</code></p>
     </div>
-    <p style="margin-top:8px"><a class="btn" href="${url}">Open the demo →</a></p>
+    <p style="margin-top:8px"><a class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0" href="${url}">Open the demo →</a></p>
     <p style="font-size:13px;color:#6b7280">This demo uses fictional school data and a sandbox payment environment. It expires automatically — reply to this email if you need more time or want a walkthrough.</p>
   `);
   return _send(to, `Your ${schoolName} demo is ready — login details inside`, html);
@@ -1143,7 +1152,7 @@ async function sendDemoLifecycle({ to, name, schoolName, kind, daysLeft, loginUr
     <h2>${copy.heading}</h2>
     <p>Hi ${_escapeHtml(name || 'there')},</p>
     <p>${copy.body}</p>
-    ${loginUrl ? `<p><a class="btn" href="${loginUrl}">Open ${_escapeHtml(schoolName)} →</a></p>` : ''}
+    ${loginUrl ? `<p><a class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0" href="${loginUrl}">Open ${_escapeHtml(schoolName)} →</a></p>` : ''}
   `);
   return _send(to, copy.subject, html);
 }
@@ -1204,7 +1213,7 @@ async function sendSupportReply({ to, name, ref, subject, body, schoolName }) {
     <p>Hi ${_escapeHtml(name || 'there')},</p>
     <p><strong>${_escapeHtml(ref)} · ${_escapeHtml(subject)}</strong></p>
     <div class="info"><p style="white-space:pre-wrap">${_escapeHtml(body)}</p></div>
-    <p><a class="btn" href="${url}/support">Open the ticket →</a></p>
+    <p><a class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0" href="${url}/support">Open the ticket →</a></p>
     <p style="font-size:13px;color:#6b7280">Reply from the same page to keep the conversation in one place.</p>
   `);
   return _send(to, `[${ref}] Reply to your support ticket`, html);
@@ -1247,7 +1256,7 @@ async function sendTicketNotice({ to, ref, subject, priority, source, schoolName
         <td style="padding:6px 0;text-align:right;font-size:13px">${sla}</td>
       </tr>
     </table>
-    <p><a class="btn" href="${url}/tickets">Open the ticket →</a></p>
+    <p><a class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0" href="${url}/tickets">Open the ticket →</a></p>
     <p style="font-size:13px;color:#6b7280">Claim it, or leave it in the unassigned queue for a colleague.</p>
   `);
   return _send(to, `New support ticket ${ref} — ${subject}`, html);

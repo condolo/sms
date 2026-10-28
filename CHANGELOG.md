@@ -6,6 +6,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.233.0] - 2026-10-28 - fix(email): every "Sign In" / "Open" button in an automated email could render as an invisible blank gap
+
+Reported directly, with a screenshot: a parent's welcome-credentials email showed School/Role/Email/Password correctly, but where the "Sign In Now →" button should have been was just empty space — "the system is sending the portal access login without the school URL/joining link... has been working, then just disappears."
+
+**Confirmed: nothing is actually broken in the link-building logic.** Checked end to end: Trinitas's `school.slug` is correctly set (`trinitas-tis`), every one of the 12 current call sites of `sendWelcomeCredentials()` across the codebase correctly passes `slug`, `_buildSchoolLoginUrl()` correctly derives `https://trinitas-tis.msingi.io` from production's `APP_URL` (`https://msingi.io`, per `render.yaml`). The link was always being generated correctly and is still in the email's HTML.
+
+**Real root cause: no inline styling, anywhere, on any email button in this codebase.** Every `<a class="btn">` across `server/utils/email.js` (31 buttons — welcome, approval, password reset, invoices, receipts, report cards, OTP, platform invites, everything) and `server/utils/lesson-email.js` (2 more) relied ENTIRELY on a `.btn{...}` rule inside a `<style>` block in the document `<head>`, with no inline fallback and no CSS-inlining step before sending (plain `nodemailer`, HTML sent as-is). Many mail clients — especially native mobile mail apps, which is almost certainly what that screenshot came from — strip `<head><style>` blocks entirely for security. With nothing inline to fall back to, the anchor lost its background, color, and padding all at once: a real, clickable link with real text, rendering as a blank gap because its text color and background both vanished together. This explains "intermittent" perfectly — it was never about the code changing, only about which mail app happened to open it.
+
+**Fixed:** every `class="btn"` anchor in both files now also carries the identical look as an inline `style=""` attribute (solid `#4f46e5` instead of the gradient, since gradients are themselves unreliable in email and inline styles always win over the `<style>` block regardless — no point keeping a gradient no client would ever actually show once inlined). A client that keeps the `<style>` block sees the same result either way; a client that strips it now gets a fully visible, correctly colored button instead of nothing.
+
+### Files
+- `server/utils/email.js` — 31 buttons.
+- `server/utils/lesson-email.js` — 2 buttons.
+
+### Verified
+- Full Jest suite (3918 tests, 367 suites) passes.
+- Confirmed Trinitas's `slug`, every `sendWelcomeCredentials()` call site, and production `APP_URL` are all correct — ruling out the link itself as the cause before concluding this was a rendering gap, not a logic regression.
+
 ## [v5.232.0] - 2026-10-28 - fix(report-cards): any teacher, including one with zero assignments, could pick ANY class in the school from the Generate & Publish class dropdown
 
 Reported directly, logged in as a demo teacher with no teaching assignments at all: Report Cards → Generate & Publish's Class dropdown offered every class in the school, including Year 5 — a class this account has no connection to whatsoever — and selecting it showed "Not published... Marks and comments are still editable," even though Year 5 was genuinely published (and re-published) earlier that same day. "Am I assigned class teacher or all teachers see all report card module?"

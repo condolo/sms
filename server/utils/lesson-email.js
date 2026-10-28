@@ -60,6 +60,9 @@ function _wrap(body, schoolName) {
     .info p{margin:4px 0;font-size:14px;color:#374151}
     .warn{background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:14px 18px;margin:14px 0}
     .warn p{margin:0;font-size:14px;color:#92400e}
+    /* Decorative only now — see email.js's identical comment: every .btn
+       anchor also carries this same look inline, which survives mail
+       clients that strip <head><style> entirely. */
     .btn{display:inline-block;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff!important;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:10px 0}
     .ft{padding:18px 32px;background:#f8fafc;text-align:center;font-size:12px;color:#9ca3af;border-top:1px solid #e5e7eb}
     table{width:100%;border-collapse:collapse}
@@ -104,7 +107,7 @@ async function sendLessonReminder({ toEmail, toName, schoolName, type, pendingCo
     </div>
     <p>Updating your coverage helps students and parents track the curriculum progress and helps your HOD plan effectively.</p>
     <p>
-      <a class="btn" href="${APP_URL}/lessons">Update Lesson Coverage</a>
+      <a class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:10px 0" href="${APP_URL}/lessons">Update Lesson Coverage</a>
     </p>
     <p style="font-size:13px;color:#6b7280">This only takes a few minutes. Tap each topic or subtopic you covered to mark it done.</p>
   `;
@@ -147,7 +150,7 @@ async function sendHodEscalation({ toEmail, toName, schoolName, pending }) {
     </div>
 
     <p>
-      <a class="btn" href="${APP_URL}/lessons">View Lessons Overview</a>
+      <a class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:10px 0" href="${APP_URL}/lessons">View Lessons Overview</a>
     </p>
   `;
 
