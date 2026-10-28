@@ -268,6 +268,47 @@ const INDEXES = [
     ],
   },
 
+  /* ── mpesa_transactions (STK attempts) ────────────────────────────
+     The unique key is what makes payment initiation idempotent under a
+     genuine double tap: the second insert loses and returns the first
+     attempt's checkoutRequestId (see mpesa.js guard 1). Sparse, because
+     pre-existing rows and the C2B/subscription paths carry no key. */
+  {
+    col: 'mpesa_transactions',
+    indexes: [
+      { key: { id: 1 }, name: 'mpesatxn_id', unique: true, sparse: true },
+      { key: { checkoutRequestId: 1 }, name: 'mpesatxn_checkout' },
+      { key: { idempotencyKey: 1, schoolId: 1 }, name: 'mpesatxn_idem', unique: true, sparse: true },
+      // Guard 2's lookup: live prompt for one invoice.
+      { key: { schoolId: 1, invoiceId: 1, status: 1, createdAt: -1 }, name: 'mpesatxn_invoice_status' },
+    ],
+  },
+
+  /* ── child_link_codes (office-issued guardian access) ─────────────
+     Looked up by hash on redemption; listed per school by the office. */
+  {
+    col: 'child_link_codes',
+    indexes: [
+      { key: { codeHash: 1, schoolId: 1 }, name: 'linkcode_hash_school' },
+      { key: { id: 1 },                    name: 'linkcode_id', unique: true, sparse: true },
+      { key: { schoolId: 1, studentId: 1, status: 1 }, name: 'linkcode_school_student_status' },
+      { key: { schoolId: 1, issuedAt: -1 }, name: 'linkcode_school_issued' },
+    ],
+  },
+
+  /* ── mobile_devices (the app's push registry) ─────────────────────
+     One row per device token. A token is looked up by value on register
+     (upsert) and by school+user on send, so it needs both. */
+  {
+    col: 'mobile_devices',
+    indexes: [
+      { key: { token: 1 },              name: 'mobiledev_token', unique: true, sparse: true },
+      { key: { id: 1 },                 name: 'mobiledev_id', unique: true, sparse: true },
+      { key: { schoolId: 1, userId: 1 }, name: 'mobiledev_school_user' },
+      { key: { schoolId: 1, lastSeenAt: -1 }, name: 'mobiledev_school_seen' },
+    ],
+  },
+
   /* ── demo_requests (platform console) ─────────────────────────────
      Platform-level request registry (a request to create a demo school);
      read across every school, so it is indexed by its own lifecycle

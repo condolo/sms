@@ -129,6 +129,8 @@ function _mapSchoolDoc(doc) {
     accentColor:    doc.accentColor  || '#7c3aed',
     themePreset:    doc.themePreset  || null,
     faviconUrl:     doc.faviconUrl   || null,
+    /* The school's own line — the app shows it on the launch splash. */
+    tagline:        doc.tagline      || null,
     /* ── Module visibility ── */
     moduleConfig:   doc.moduleConfig  || null,
     /* ── Student/parent portal config ── */

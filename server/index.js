@@ -355,6 +355,12 @@ app.use('/api/student-portal', require('./routes/student-portal'));
 app.use('/api/parent-portal',  require('./routes/parent-portal'));
 app.use('/api/teacher-portal', require('./routes/teacher-portal'));
 
+/* ── Mobile platform API — force-update gate + device push registry ──
+   Public /bootstrap (the app must learn "you are too old" BEFORE it can
+   authenticate) and auth'd /devices. Everything school-data-shaped lives
+   under /api/{auth,parent-portal,...} — this router carries none of it. */
+app.use('/api/mobile', require('./routes/mobile'));
+
 /* ── Lesson Plans ── */
 app.use('/api/lesson-plans', require('./routes/lesson-plans'));
 

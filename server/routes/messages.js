@@ -12,6 +12,7 @@ const { rbac, hasExplicitSubGrant } = require('../middleware/rbac');
 const { moduleGate }       = require('../middleware/module-gate');
 const email = require('../utils/email');
 const notif = require('../utils/notif-settings');
+const push  = require('../utils/push');
 const { enqueueBatch } = require('../utils/email-queue');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { schoolLoginUrl } = require('../utils/school-url');
@@ -494,6 +495,10 @@ router.post('/', rbac('messages', 'create'), async (req, res) => {
     // actual event, not always 'new_message' regardless of type.
     const notifEventKey = isDirect ? 'new_message' : 'announcement';
     const emailEnabled = await notif.isEnabled(schoolId, notifEventKey, 'email');
+    const pushEnabled  = await notif.isEnabled(schoolId, notifEventKey, 'push');
+    /* Collected separately from notifyJobs: that list is gated on the
+       recipient having an email address, and push must not inherit that. */
+    const pushTargetIds = new Set();
 
     for (const recipient of recipientList) {
       if (recipient === 'all') {
@@ -501,6 +506,7 @@ router.post('/', rbac('messages', 'create'), async (req, res) => {
         const targets = await User.find({
           schoolId, isActive: true, id: { $ne: userId }
         }).lean();
+        for (const u of targets) pushTargetIds.add(u.id);
         for (const u of targets) {
           if (u.email && emailEnabled) {
             // Push a thunk — function not yet called — so enqueueBatch
@@ -527,6 +533,7 @@ router.post('/', rbac('messages', 'create'), async (req, res) => {
           role: { $in: roles },
           id:   { $ne: userId }
         }).lean();
+        for (const u of targets) pushTargetIds.add(u.id);
         for (const u of targets) {
           if (u.email && emailEnabled) {
             notifyJobs.push(() => email.sendMessageNotification({
@@ -546,6 +553,7 @@ router.post('/', rbac('messages', 'create'), async (req, res) => {
       } else {
         // Direct / group — already validated and loaded above
         const target = directRecipientUsers.find(u => u.id === recipient);
+        if (target?.id && target.id !== userId) pushTargetIds.add(target.id);
         if (target?.email && emailEnabled) {
           notifyJobs.push(() => email.sendMessageNotification({
             recipientName:  target.name,
@@ -569,6 +577,19 @@ router.post('/', rbac('messages', 'create'), async (req, res) => {
     enqueueBatch(notifyJobs).catch(err =>
       console.error('[messages] email queue error:', err)
     );
+
+    /* One push per recipient, not one per message: sendToUsers takes the whole
+       list and does a single FCM multicast. A school-wide announcement to 600
+       parents is one request to FCM, not 600. */
+    if (pushEnabled && pushTargetIds.size) {
+      push.sendToUsers({
+        schoolId,
+        userIds: [...pushTargetIds],
+        title:   isDirect ? (subject || 'New message') : (subject || school?.name || 'Notice from school'),
+        body:    preview,
+        data:    { type: isDirect ? 'message' : 'notice', messageId: msg.id },
+      }).catch(err => console.error('[messages] push error:', err.message));
+    }
 
     res.status(201).json(msg.toObject());
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -607,6 +628,20 @@ async function createDirectMessage(req, { recipientUserIds, subject, body, sende
     }));
   }
   enqueueBatch(notifyJobs).catch(err => console.error('[messages] email queue error:', err));
+
+  /* Push for a direct message. Kept OUT of the email loop above on purpose:
+     that loop skips anyone without an email address, and a parent with no
+     inbox is exactly who a push serves. Non-blocking, like the email queue. */
+  const pushOn = await notif.isEnabled(schoolId, 'new_message', 'push');
+  if (pushOn) {
+    push.sendToUsers({
+      schoolId,
+      userIds: recipientUserIds.filter(id => id !== userId),
+      title:   subject || 'New message',
+      body:    preview,
+      data:    { type: 'message', senderId: userId, senderRole: senderRole || 'parent' },
+    }).catch(err => console.error('[messages] push error:', err.message));
+  }
 
   return msg.toObject();
 }

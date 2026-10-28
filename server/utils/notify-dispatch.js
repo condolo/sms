@@ -25,6 +25,7 @@
 const { v4: uuidv4 } = require('uuid');
 const { tenantModel } = require('./tenant-model');
 const notif = require('./notif-settings');
+const push  = require('./push');
 
 async function dispatchNotification({
   ctx, schoolId, eventKey, actorUserId, recipients,
@@ -33,9 +34,10 @@ async function dispatchNotification({
   for (const r of recipients || []) {
     if (!r?.userId) continue;
     try {
-      const [inAppOn, emailOn] = await Promise.all([
+      const [inAppOn, emailOn, pushOn] = await Promise.all([
         notif.isEnabled(schoolId, eventKey, 'inApp'),
         notif.isEnabled(schoolId, eventKey, 'email'),
+        notif.isEnabled(schoolId, eventKey, 'push'),
       ]);
 
       if (inAppOn && inAppSubject) {
@@ -52,6 +54,22 @@ async function dispatchNotification({
           isRead:     {},
           createdAt:  new Date().toISOString(),
         });
+      }
+
+      /* Push is its own channel, deliberately independent of inApp and email:
+         a school may want a phone buzz for a fee reminder and no email at all
+         (that is the common case — most parents have no inbox they check).
+         It fires AFTER the in-app record exists, because the notification is
+         only a nudge: whatever the parent taps must already be there.
+         Demo tenants are suppressed inside push.sendToUsers, never here. */
+      if (pushOn && inAppSubject) {
+        await push.sendToUsers({
+          schoolId,
+          userIds: [r.userId],
+          title: inAppSubject,
+          body:  inAppBody || inAppSubject,
+          data:  { type: 'notification', eventKey },
+        }).catch(() => {});
       }
 
       if (emailOn && r.email) {

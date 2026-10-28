@@ -501,7 +501,7 @@ async function sendSystemUpdateNotice({ adminName, adminEmail, schoolName, title
    ══════════════════════════════════════════════════════════════ */
 
 /* 7. Two-factor authentication OTP */
-async function sendLoginOTP({ name, email, otp, schoolName, schoolEmail, schoolId = null }) {
+async function sendLoginOTP({ name, email, otp, schoolName, schoolEmail, schoolId = null, ttlMinutes = 5 }) {
   const support = schoolEmail || SUPPORT_EMAIL;
   const html = _wrap(`
     <h2>Your sign-in code 🔐</h2>
@@ -512,7 +512,7 @@ async function sendLoginOTP({ name, email, otp, schoolName, schoolEmail, schoolI
         <div style="font-size:36px;font-weight:800;letter-spacing:10px;color:#4f46e5;font-family:monospace">${otp}</div>
       </div>
     </div>
-    <p style="font-size:13px;color:#6b7280">This code expires in <strong>5 minutes</strong>. If you did not attempt to sign in, please change your password immediately and contact <a href="mailto:${support}">${support}</a>.</p>
+    <p style="font-size:13px;color:#6b7280">This code expires in <strong>${ttlMinutes} minutes</strong>. If you did not attempt to sign in, please change your password immediately and contact <a href="mailto:${support}">${support}</a>.</p>
     <p style="font-size:12px;color:#9ca3af">Do not share this code with anyone — Msingi will never ask for it.</p>
   `, schoolName);
   return _sendAsSchool(email, `${otp} — Your ${schoolName} sign-in code`, html, { schoolName, schoolEmail, schoolId });

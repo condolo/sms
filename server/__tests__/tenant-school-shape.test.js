@@ -223,6 +223,8 @@ describe('_mapSchoolDoc — no undefined required fields', () => {
     // signed-in request in middleware/auth.js.
     'status', 'isDemo', 'expiresAt', 'demoExpired',
     'primaryColor', 'accentColor', 'themePreset', 'faviconUrl',
+    // The school's own line — shown on the app's launch splash.
+    'tagline',
     'moduleConfig',
     'portalConfig',
     'admissionConfig',

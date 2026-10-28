@@ -75,6 +75,7 @@ async function seedDemo() {
     $set: {
       id: schoolId, slug: DEMO_SLUG,
       name: 'Msingi Demo School', shortName: 'Demo',
+      tagline: 'Every child seen, every term',
       type: 'private', country: 'Kenya', city: 'Nairobi',
       plan: 'family', addOns: [], isActive: true, status: 'active',
       curriculum: ['cbc', 'cambridge'], sections: ['primary', 'secondary'],

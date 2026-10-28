@@ -33,6 +33,7 @@ const { EXPLICIT_SUB_KEYS, FINANCE_SUB_GRANTS } = require('../middleware/explici
 const { invalidateModuleConfigCache } = require('../middleware/module-gate');
 const { invalidateScopeCache, invalidateScopeCacheForRole } = require('../middleware/scopeMiddleware');
 const AuditService           = require('../services/audit');
+const { generateLinkCode, hashLinkCode, linkCodeExpiry } = require('../utils/link-codes');
 const SessionService         = require('../services/sessionService');
 const { peekAdmissionCounter, setAdmissionCounter } = require('../utils/counters');
 const { MODULE_REGISTRY, MODULE_KEYS } = require('../config/moduleRegistry');
@@ -2103,6 +2104,128 @@ router.put('/admission-counter', authMiddleware, rbac('settings', 'update'), asy
   } catch (err) {
     console.error('[settings] PUT /admission-counter:', err);
     return res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Failed to set counter.' } });
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   CHILD-LINK CODES — the office side of the parent app's flow 03
+
+   POST /api/settings/link-codes   issue a code for ONE student
+   GET  /api/settings/link-codes   what has been issued, and what happened
+
+   The parent app can see a child's records the moment a code is redeemed,
+   so issuing one is an access decision, not a lookup: it is admin-gated,
+   audited on both ends (here and in parent-portal on redemption), single
+   use, and revocable. The plaintext code is returned exactly ONCE — it is
+   read out or printed by the office, and it can never be recovered from
+   the server afterwards, only re-issued.
+   ══════════════════════════════════════════════════════════════ */
+
+/* POST /api/settings/link-codes  { studentId, relationship? } */
+router.post('/link-codes', authMiddleware, rbac('settings', 'update'), async (req, res) => {
+  try {
+    const { schoolId, userId, role } = req.jwtUser;
+    const studentId    = String(req.body?.studentId || '');
+    const relationship = req.body?.relationship === 'co-guardian' ? 'co-guardian' : 'primary';
+
+    if (!studentId) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'studentId is required.' } });
+    }
+
+    const Students = tenantModel('students', tenantContext(req));
+    const student = await Students.findOne({ id: studentId, schoolId })
+      .select('id firstName lastName className admissionNumber').lean();
+    if (!student) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Student not found.' } });
+    }
+
+    const Codes = tenantModel('child_link_codes', tenantContext(req));
+    const now = new Date();
+
+    // One live code per child: re-issuing supersedes the previous one rather
+    // than leaving two working keys to the same records. A code already in
+    // someone's hand stops working the moment a new one is printed, which is
+    // exactly what the office needs when a slip goes missing.
+    const superseded = await Codes.updateMany(
+      { schoolId, studentId, status: 'issued' },
+      { $set: { status: 'superseded', updatedAt: now.toISOString() } },
+    ).catch(() => ({ modifiedCount: 0 }));
+
+    const code = generateLinkCode();
+    const doc = {
+      id:          `lnk_${crypto.randomUUID()}`,
+      schoolId,
+      studentId,
+      studentName: `${student.firstName || ''} ${student.lastName || ''}`.trim(),
+      codeHash:    hashLinkCode(code),
+      relationship,
+      status:      'issued',
+      issuedByUserId: userId,
+      issuedByRole:   role,
+      issuedAt:    now.toISOString(),
+      expiresAt:   linkCodeExpiry(now),
+      usedByUserId: null,
+      usedAt:      null,
+    };
+    await Codes.create(doc);
+
+    AuditService.log({
+      action: 'settings.link_code_issued',
+      actor: { userId, role },
+      schoolId,
+      req,
+      details: { studentId, relationship, codeId: doc.id, superseded: superseded?.modifiedCount ?? 0 },
+    });
+
+    return res.status(201).json({
+      success: true,
+      data: {
+        id: doc.id,
+        // The ONLY time this is ever sent. The response says so, because an
+        // operator who assumes they can look it up again will lose it.
+        code,
+        plaintextShownOnce: true,
+        student: { id: student.id, name: doc.studentName, className: student.className || null, admissionNumber: student.admissionNumber || null },
+        relationship,
+        expiresAt: doc.expiresAt,
+      },
+    });
+  } catch (err) {
+    console.error('[settings] POST /link-codes:', err);
+    return res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Failed to issue a link code.' } });
+  }
+});
+
+/* GET /api/settings/link-codes?studentId=&status=&limit= */
+router.get('/link-codes', authMiddleware, rbac('settings', 'read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    const query = { schoolId };
+    if (req.query.studentId) query.studentId = String(req.query.studentId);
+    if (req.query.status)    query.status = String(req.query.status);
+
+    const Codes = tenantModel('child_link_codes', tenantContext(req));
+    const rows = await Codes.find(query).sort({ issuedAt: -1 }).limit(limit)
+      // Projection, not a post-filter: the hash must not be able to leave this
+      // process by accident when someone adds a field later.
+      .select('id studentId studentName relationship status issuedByUserId issuedAt expiresAt usedByUserId usedAt -codeHash')
+      .lean();
+
+    // Expiry is derived on read, so a code never looks "live" after its window
+    // simply because nothing has swept the collection yet.
+    const now = new Date();
+    return res.json({
+      success: true,
+      data: rows.map(r => ({
+        ...r,
+        expired: Boolean(r.expiresAt && new Date(r.expiresAt) < now),
+        live: r.status === 'issued' && !(r.expiresAt && new Date(r.expiresAt) < now),
+      })),
+    });
+  } catch (err) {
+    console.error('[settings] GET /link-codes:', err);
+    return res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Failed to load link codes.' } });
   }
 });
 
