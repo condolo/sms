@@ -44,8 +44,11 @@ jest.mock('../../services/securityService', () => ({
   clearFail:        jest.fn().mockResolvedValue(undefined),
 }));
 jest.mock('../../utils/email', () => ({
-  sendLoginOTP:        jest.fn().mockResolvedValue(undefined),
-  sendTrialReminder:   jest.fn().mockResolvedValue(undefined),
+  /* TRUE = delivered. sendLoginOTP resolves a boolean, and org-login's MFA step
+     now refuses the challenge when it is false rather than claiming a code was
+     sent — so `undefined` would read as a delivery failure. */
+  sendLoginOTP:        jest.fn().mockResolvedValue(true),
+  sendTrialReminder:   jest.fn().mockResolvedValue(true),
 }));
 
 let mockOrgDocs = {};          // keyed by slug for organizations.findOne({slug})... and by id

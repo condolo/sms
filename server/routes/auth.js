@@ -521,17 +521,36 @@ router.post('/login', loginIpLimiter, tenantMiddleware, async (req, res) => {
       const expiry   = new Date(Date.now() + 5 * 60 * 1000).toISOString(); // 5 min
       await tenantModel('users', { schoolId: req.school.id }).updateOne({ _id: user._id }, { mfaOtp: otpHash, mfaExpiry: expiry });
 
-      // Send OTP email with plaintext code (non-blocking — log if it fails)
-      email.sendLoginOTP({
+      /* The password is already verified by the time we get here, so there is
+         no enumeration left to protect: if the code cannot be delivered, SAY
+         SO. This used to be fire-and-forget, and sendLoginOTP reports a failed
+         send by RETURNING FALSE, not by rejecting — so the .catch() never
+         fired, nothing was logged, and the caller was told "a code has been
+         sent" to an inbox that never received one. Same fix in
+         _stepUpIfRequired and _completeOrgLoginSession below.
+         clearFail moves above the send on purpose: the password was correct,
+         so a mail failure must not leave the failed-attempt counter hot. */
+      SecurityService.clearFail(req.school.id, loginId).catch(() => {});
+      const sent = await email.sendLoginOTP({
         name:        user.name,
         email:       user.email,
         otp,                                   // send plaintext code, store hash
         schoolName:  req.school.name || req.school.slug,
         schoolEmail: req.school.systemEmail || '',
         schoolId:    req.school.id,
-      }).catch(err => console.error('[2FA email]', err.message));
+      }).catch(err => { console.error('[2FA email]', err.message); return false; });
 
-      SecurityService.clearFail(req.school.id, loginId).catch(() => {});
+      if (!sent) {
+        console.error(`[auth/login] 2FA email to ${user.email} was NOT delivered — refusing the challenge rather than claiming it was sent.`);
+        return res.status(502).json({
+          success: false,
+          error: {
+            code:    'MFA_EMAIL_FAILED',
+            message: "We could not email your verification code. Please try again, or ask your administrator to check the school's email settings.",
+          },
+        });
+      }
+
       return res.json({
         mfaRequired: true,
         userId:      _userId,
@@ -755,14 +774,30 @@ async function _stepUpIfRequired(req, res, user) {
     mfaExpiry: new Date(Date.now() + MFA_STEP_UP_TTL_MS).toISOString(),
   } });
 
-  email.sendLoginOTP({
+  const sent = await email.sendLoginOTP({
     name: user.name,
     email: user.email,
     otp,
     schoolName: req.school.name || req.school.slug,
     schoolEmail: req.school.systemEmail || '',
     schoolId: req.school.id,
-  }).catch(err => console.error('[2FA email]', err.message));
+  }).catch(err => { console.error('[2FA email]', err.message); return false; });
+
+  /* Same reasoning as /login's own step-up: the caller reached here by proving
+     a first factor, so a failed delivery is not worth hiding — and answering
+     "code sent" when it was not leaves them stuck with no code and no way to
+     tell why. */
+  if (!sent) {
+    console.error(`[2FA email] code to ${user.email} was NOT delivered — refusing the step-up.`);
+    res.status(502).json({
+      success: false,
+      error: {
+        code:    'MFA_EMAIL_FAILED',
+        message: "We could not email your verification code. Please try again, or ask your administrator to check the school's email settings.",
+      },
+    });
+    return true;
+  }
 
   res.json({
     success: true,
@@ -865,6 +900,13 @@ router.post('/otp/request', mobileAuthLimiter, tenantMiddleware, async (req, res
       schoolEmail: req.school.systemEmail || '',
       schoolId: req.school.id,
       ttlMinutes: LOGIN_OTP_TTL_MS / 60000,
+    }).then(sent => {
+      /* The RESPONSE stays deliberately generic (Property 2 above) — an
+         unknown address, the resend window, the hourly cap and a delivery
+         failure must be indistinguishable to a caller. But a delivery failure
+         still has to be visible SOMEWHERE, or unconfigured SMTP looks exactly
+         like "no parent has a code waiting". Log only; never answer. */
+      if (!sent) console.error(`[auth/otp] code for ${email_} was NOT delivered (SMTP failure or unconfigured).`);
     }).catch(err => console.error('[auth/otp] send failed:', err.message));
 
     AuditService.log({ action: 'auth.otp.requested', actor: { userId: user.id, role: user.primaryRole || user.role, email: email_ }, schoolId: req.school.id, req });
@@ -2117,14 +2159,25 @@ async function _completeOrgLoginSession(req, res, user, school, identity) {
     const expiry  = new Date(Date.now() + 5 * 60 * 1000).toISOString();
     await tenantModel('users', { schoolId: school.id }).updateOne({ _id: user._id }, { mfaOtp: otpHash, mfaExpiry: expiry });
 
-    email.sendLoginOTP({
+    const sent = await email.sendLoginOTP({
       name:        user.name,
       email:       user.email,
       otp,
       schoolName:  school.name || school.slug,
       schoolEmail: school.systemEmail || '',
       schoolId:    school.id,
-    }).catch(err => console.error('[org-login 2FA email]', err.message));
+    }).catch(err => { console.error('[org-login 2FA email]', err.message); return false; });
+
+    if (!sent) {
+      console.error(`[org-login 2FA email] code to ${user.email} was NOT delivered — refusing the challenge.`);
+      return res.status(502).json({
+        success: false,
+        error: {
+          code:    'MFA_EMAIL_FAILED',
+          message: "We could not email your verification code. Please try again, or ask your administrator to check the school's email settings.",
+        },
+      });
+    }
 
     return res.json({
       mfaRequired: true,
