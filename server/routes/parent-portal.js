@@ -191,9 +191,23 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
     const DAY_NAMES = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
     const todayDay  = DAY_NAMES[new Date().getDay()];
 
-    const student = await Students.findOne({ id: childId, schoolId })
-      .select('firstName lastName admissionNumber classId className streamId photo status dateOfBirth gender')
-      .lean();
+    /* Three independent reads, ONE batch. They used to be three sequential
+       awaits on the critical path of every parent dashboard load; only
+       `student` is depended on by anything else here, and the year doc feeds
+       the term/attendance filters resolved below. */
+    const [student, school, academicYears] = await Promise.all([
+      Students.findOne({ id: childId, schoolId })
+        .select('firstName lastName admissionNumber classId className streamId photo status dateOfBirth gender')
+        .lean(),
+      // Live-resolved, not the schools.academicYear cached field — that
+      // field is only ever written by academic-config.js's year-transition
+      // endpoint as a backward-compat sync and goes stale the moment that
+      // sync is skipped or a year's isCurrent flag changes any other way.
+      // Same staleness class report-cards.js's _resolveTermScope was
+      // written to fix; this dashboard had the old, unfixed version of it.
+      Schools.findOne({ id: schoolId }).select('name portalConfig mpesa').lean(),
+      tenantModel('academic_years', tenantContext(req)).find({ schoolId }).lean(),
+    ]);
     if (!student) return E.notFound(res, 'Student record not found.');
 
     // This child's own stream's timetable slots, unioned with any genuine
@@ -205,14 +219,6 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
       ? [{ streamId: student.streamId }, { streamId: { $exists: false } }]
       : [{ streamId: { $exists: false } }];
 
-    // Live-resolved, not the schools.academicYear cached field — that
-    // field is only ever written by academic-config.js's year-transition
-    // endpoint as a backward-compat sync and goes stale the moment that
-    // sync is skipped or a year's isCurrent flag changes any other way.
-    // Same staleness class report-cards.js's _resolveTermScope was
-    // written to fix; this dashboard had the old, unfixed version of it.
-    const school = await Schools.findOne({ id: schoolId }).select('name portalConfig mpesa').lean();
-    const academicYears = await tenantModel('academic_years', tenantContext(req)).find({ schoolId }).lean();
     const { year: currentYearDoc, term: currentTermDoc, termNumber: currentTermNumber } = resolveCurrentPeriod(academicYears);
     const academicYear = currentYearDoc?.name || '';
     const currentTerm  = currentTermDoc?.name || (currentTermNumber ? `Term ${currentTermNumber}` : '');
@@ -237,8 +243,36 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
     const attDateFilter = currentTermDoc
       ? { date: { $gte: currentTermDoc.startDate, $lte: currentTermDoc.endDate } }
       : {};
-    const attRecords = await Attendance.find({ schoolId, studentId: childId, ...attDateFilter })
-      .select('status date').lean();
+
+    /* This child's OWN stream's coverage, unioned with any legacy/whole-class
+       record — declared here because the batched read below needs it. */
+    const coverageStreamOr = student.streamId
+      ? [{ streamId: student.streamId }, { streamId: { $exists: false } }]
+      : [{ streamId: { $exists: false } }];
+
+    /* Five independent reads in ONE batch. Each of these used to be awaited on
+       its own, one after another, so a parent waited out every round-trip in
+       series before the page could render. Nothing here depends on anything
+       else in the batch — the coverage subject list is the only derived input,
+       and only the block below consumes it. */
+    const [attRecords, invoices, recentPayments, reportCards, coverageSubjectIds] = await Promise.all([
+      Attendance.find({ schoolId, studentId: childId, ...attDateFilter })
+        .select('status date').lean(),
+      FeeInvoices.find({ schoolId, studentId: childId })
+        .select('total balance status dueDate termId').lean(),
+      FeePayments.find({ schoolId, studentId: childId })
+        .sort({ paidAt: -1 }).limit(5)
+        .select('amount paidAt mpesaCode method reference').lean(),
+      Reports.find({
+        schoolId, studentId: childId, status: 'published', superseded: { $ne: true },
+      }).sort({ publishedAt: -1 }).limit(6)
+        .select('id academicYear termName termNumber totalScore averageScore gpa rankings status publishedAt version termId academicYearId subjects')
+        .lean(),
+      student.classId
+        ? Coverage.distinct('subjectId', { schoolId, classId: student.classId, academicYear, $or: coverageStreamOr })
+        : [],
+    ]);
+
     const attSummary = { present: 0, absent: 0, late: 0, total: attRecords.length };
     attRecords.forEach(r => {
       if (r.status === 'present') attSummary.present++;
@@ -255,31 +289,22 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
       .map(r => ({ date: r.date, status: r.status }));
 
     // ── Fee balance, clearance & recent payments ─────────────
-    const invoices     = await FeeInvoices.find({ schoolId, studentId: childId }).select('total balance status dueDate termId').lean();
     const feeBalance   = invoices.reduce((acc, inv) => acc + (inv.balance || 0), 0);
     const totalBilled  = invoices.reduce((acc, inv) => acc + (inv.total  || 0), 0);
     const feeClearancePct = totalBilled > 0
       ? Math.round(((totalBilled - feeBalance) / totalBilled) * 100)
       : 100;
 
-    const recentPayments = await FeePayments.find({ schoolId, studentId: childId })
-      .sort({ paidAt: -1 }).limit(5)
-      .select('amount paidAt mpesaCode method reference')
-      .lean();
-
     // ── Lessons coverage ─────────────────────────────────────
     // A coverage record's mere EXISTENCE means "covered" — the previous
     // `covered: true` condition never matched any real document (see
     // lessons.js's POST /coverage), so this always showed 0% regardless
-    // of real progress. streamOr: this child's OWN stream's coverage
+    // of real progress. coverageStreamOr: this child's OWN stream's coverage
     // UNION any legacy/whole-class record — see student-portal.js's
     // identical fix for the full reasoning.
     let lessonsCoverage = [];
-    if (student.classId) {
-      const streamOr = student.streamId
-        ? [{ streamId: student.streamId }, { streamId: { $exists: false } }]
-        : [{ streamId: { $exists: false } }];
-      const subjectIds  = await Coverage.distinct('subjectId', { schoolId, classId: student.classId, academicYear, $or: streamOr });
+    if (student.classId && coverageSubjectIds.length) {
+      const subjectIds  = coverageSubjectIds;
       const subjectDocs = await Subjects.find({ id: { $in: subjectIds }, schoolId }).select('id name code').lean();
       const subjectMap  = Object.fromEntries(subjectDocs.map(s => [s.id, s]));
 
@@ -288,10 +313,31 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
       // class, but a topic scoped to a DIFFERENT class must not inflate
       // this child's own class total.
       const topicClassOr = [{ classId: student.classId }, { classId: { $exists: false } }];
+
+      /* Two grouped counts, not two queries PER SUBJECT. The loop this
+         replaces issued countDocuments twice for every subject in the class
+         and awaited each before starting the next: a 12-subject class meant
+         24 sequential round-trips on EVERY parent dashboard load, all of it
+         latency the parent waits through. Grouping server-side makes it two,
+         run together. (Same fix belongs in student-portal.js, which carries
+         the identical loop.) */
+      const [topicCounts, coverageCounts] = await Promise.all([
+        Topics.aggregate([
+          { $match: { academicYear, $or: topicClassOr } },
+          { $group: { _id: '$subjectId', n: { $sum: 1 } } },
+        ]),
+        Coverage.aggregate([
+          { $match: { classId: student.classId, academicYear, $or: coverageStreamOr } },
+          { $group: { _id: '$subjectId', n: { $sum: 1 } } },
+        ]),
+      ]);
+      const totalTopicsBySubject    = Object.fromEntries(topicCounts.map(r => [r._id, r.n]));
+      const coveredTopicsBySubject  = Object.fromEntries(coverageCounts.map(r => [r._id, r.n]));
+
       for (const subjectId of subjectIds) {
-        const totalTopics   = await Topics.countDocuments({ schoolId, subjectId, academicYear, $or: topicClassOr });
-        const coveredTopics = await Coverage.countDocuments({ schoolId, classId: student.classId, subjectId, academicYear, $or: streamOr });
+        const totalTopics   = totalTopicsBySubject[subjectId] || 0;
         if (totalTopics === 0) continue;
+        const coveredTopics = coveredTopicsBySubject[subjectId] || 0;
         lessonsCoverage.push({
           subjectId,
           subjectName:  subjectMap[subjectId]?.name || subjectId,
@@ -304,11 +350,7 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
     }
 
     // ── Published report cards ───────────────────────────────
-    const reportCards = await Reports.find({
-      schoolId, studentId: childId, status: 'published', superseded: { $ne: true },
-    }).sort({ publishedAt: -1 }).limit(6)
-      .select('id academicYear termName termNumber totalScore averageScore gpa rankings status publishedAt version termId academicYearId subjects')
-      .lean();
+    // (fetched in the batch above — reportCards)
 
     // ── Real per-subject marks — the one place this dashboard can show an
     // actual mark, since family roles have no access to the live Markbook
