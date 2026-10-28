@@ -35,12 +35,12 @@ import {
   CheckCircle, Download, FileText, GraduationCap,
   Lock, LogOut, MessageSquare, Send, Star, Wallet,
   ChevronDown, ChevronLeft, ChevronRight, MonitorPlay, MapPin, BookOpen, CalendarCheck,
-  Menu, X, TrendingUp, LifeBuoy,
+  Menu, X, TrendingUp, LifeBuoy, KeyRound, Eye, EyeOff, Loader2,
 } from 'lucide-react';
 import NotificationBell from '@/components/layout/NotificationBell.jsx';
 import FloatingHelp from '@/components/help/FloatingHelp.jsx';
 import MessagesPanel from './components/MessagesPanel.jsx';
-import { messages as messagesApi, parentMessaging } from '@/api/client.js';
+import { messages as messagesApi, parentMessaging, auth as authApi } from '@/api/client.js';
 
 /* ── API helpers ────────────────────────────────────────────────── */
 const API_BASE = import.meta.env.VITE_API_BASE || '';
@@ -312,6 +312,93 @@ function ComposeMessageModal({ open, mode, sent, recipientOptions, form, onFormC
   );
 }
 
+/* Reported directly 2026-10-28: "parents dont have that clickable
+   profile to update or change their password" — the self-service
+   POST /api/auth/change-password route already works for any
+   authenticated role (confirmed: no role check at all in that route,
+   just authMiddleware scoped to the caller's own userId/schoolId), and
+   the staff-facing ProfilePage.jsx already has a form calling it —
+   there was simply no equivalent anywhere in either portal shell, since
+   neither has a /profile page at all (they're separate top-level routes,
+   /parent-dashboard and /student-dashboard, with no nested "profile"
+   route under them). A self-contained modal, not a new page, for the
+   same reason ComposeMessageModal above is one: no portal-wide "second
+   page" concept to hook into.
+
+   Hoisted to a top-level component for the exact reason documented on
+   ComposeMessageModal above — a function defined inside the main
+   component's body gets a new identity every render, which would
+   unmount/remount this modal (dropping input focus) on every keystroke. */
+function ChangePasswordModal({ open, currentPw, newPw, confirmPw, onCurrentChange, onNewChange, onConfirmChange, showPws, onToggleShow, banner, saving, onClose, onSubmit, primary }) {
+  if (!open) return null;
+  return (
+    <AnimatePresence>
+      <motion.div key="pw-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        className="fixed inset-0 bg-black/30 z-40" onClick={onClose} />
+      <motion.div key="pw-dialog" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }}
+        className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm" onClick={e => e.stopPropagation()}>
+          <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+            <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+              <KeyRound size={14} className="text-slate-400" /> Change Password
+            </h3>
+            <button onClick={onClose} className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100">
+              <X size={16} />
+            </button>
+          </div>
+
+          <form onSubmit={onSubmit} className="px-5 py-4 space-y-3">
+            <div>
+              <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Current password</label>
+              <input
+                type={showPws ? 'text' : 'password'} autoComplete="current-password" autoFocus
+                className="w-full mt-1 text-[13px] border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1"
+                value={currentPw} onChange={e => onCurrentChange(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">New password</label>
+              <input
+                type={showPws ? 'text' : 'password'} autoComplete="new-password"
+                className="w-full mt-1 text-[13px] border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1"
+                value={newPw} onChange={e => onNewChange(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Confirm new password</label>
+              <input
+                type={showPws ? 'text' : 'password'} autoComplete="new-password"
+                className="w-full mt-1 text-[13px] border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1"
+                value={confirmPw} onChange={e => onConfirmChange(e.target.value)}
+              />
+            </div>
+            <button type="button" onClick={onToggleShow} className="flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-slate-600">
+              {showPws ? <EyeOff size={12} /> : <Eye size={12} />} {showPws ? 'Hide' : 'Show'} passwords
+            </button>
+
+            {banner?.msg && (
+              <p className={`text-[12px] ${banner.type === 'success' ? 'text-emerald-600' : 'text-red-600'}`}>{banner.msg}</p>
+            )}
+
+            <div className="flex justify-end gap-2 pt-1">
+              <button type="button" onClick={onClose} className="text-[12px] font-medium text-slate-500 px-3 py-2 rounded-lg hover:bg-slate-50">
+                Cancel
+              </button>
+              <button
+                type="submit" disabled={saving}
+                className="flex items-center gap-1.5 text-[12px] font-semibold text-white px-4 py-2 rounded-lg disabled:opacity-50"
+                style={{ background: primary }}
+              >
+                {saving ? <Loader2 size={12} className="animate-spin" /> : <KeyRound size={12} />} {saving ? 'Updating…' : 'Update password'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
 /* ══════════════════════════════════════════════════════════════════
    MAIN COMPONENT
    ══════════════════════════════════════════════════════════════════ */
@@ -352,6 +439,14 @@ export default function ParentDashboard() {
   const [composeSending,  setComposeSending]  = useState(false);
   const [composeError,    setComposeError]    = useState('');
   const [composeSent,     setComposeSent]     = useState(false);
+  // Self-service password change — see ChangePasswordModal's own comment above.
+  const [pwModalOpen, setPwModalOpen] = useState(false);
+  const [currentPw,   setCurrentPw]   = useState('');
+  const [newPw,       setNewPw]       = useState('');
+  const [confirmPw,   setConfirmPw]   = useState('');
+  const [pwShow,      setPwShow]      = useState(false);
+  const [pwSaving,    setPwSaving]    = useState(false);
+  const [pwBanner,    setPwBanner]    = useState({ type: '', msg: '' });
   const [initError,     setInitError]     = useState('');
   const [activePage,    setActivePage]    = useState('overview');
   const [childMenuOpen, setChildMenuOpen] = useState(false);
@@ -531,6 +626,26 @@ export default function ParentDashboard() {
 
   function handleLogout() { logout(); navigate('/login', { replace: true }); }
 
+  /* Same validation/flow as the staff-facing ProfilePage.jsx's own
+     change-password handler — not reusing it directly (that page's
+     logic is written as an inline function tied to its own state, not
+     an exported helper), kept in exact parity so behaviour matches. */
+  function handlePasswordChange(e) {
+    e.preventDefault();
+    if (!currentPw) { setPwBanner({ type: 'error', msg: 'Current password is required.' }); return; }
+    if (newPw.length < 8) { setPwBanner({ type: 'error', msg: 'New password must be at least 8 characters.' }); return; }
+    if (newPw !== confirmPw) { setPwBanner({ type: 'error', msg: 'Passwords do not match.' }); return; }
+    setPwSaving(true);
+    setPwBanner({ type: '', msg: '' });
+    authApi.changePassword({ currentPassword: currentPw, newPassword: newPw })
+      .then(() => {
+        setPwBanner({ type: 'success', msg: 'Password changed successfully. Use your new password next time you sign in.' });
+        setCurrentPw(''); setNewPw(''); setConfirmPw('');
+      })
+      .catch(err => setPwBanner({ type: 'error', msg: err.message || 'Failed to change password.' }))
+      .finally(() => setPwSaving(false));
+  }
+
   /* Real page switching, not an anchor-scroll within one long page —
      reported directly: clicking a nav item "just moves slightly" on a
      single scrolling page read as "nothing happened." Each item now
@@ -706,6 +821,39 @@ export default function ParentDashboard() {
                 {downloading === `snap-${latestWeek.weekStart}` ? 'Saving…' : 'PDF'}
               </button>
             </div>
+          </Card>
+        )}
+
+        {/* Reported directly: the Overview should show the school calendar
+            inline (same live d.upcomingEvents the dedicated "School
+            Calendar" tab already uses — see CalendarPage below — not just
+            reachable by clicking into a separate tab), matching the
+            Student Portal's own Overview, which already shows its events
+            section inline rather than behind a tab. */}
+        {isModuleEnabled('events') && d.upcomingEvents?.length > 0 && (
+          <Card id="section-calendar-teaser">
+            <CardHeader
+              icon={Calendar} iconClass="text-blue-500" title="School Calendar"
+              right={<span className="text-[11px] font-semibold text-blue-600 bg-blue-50 px-2.5 py-[5px] rounded-full">{d.upcomingEvents.length} upcoming</span>}
+            />
+            <div className="divide-y divide-slate-50">
+              {d.upcomingEvents.slice(0, 3).map((ev, i) => {
+                const days = _daysUntil(ev.date);
+                return (
+                  <div key={`cal-teaser-${ev.id ?? i}`} className="flex items-center gap-3 px-[18px] py-3">
+                    <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: ev.color ?? primary }} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[13px] font-medium text-slate-800 truncate">{ev.title}</p>
+                      <p className="text-[11px] text-slate-400">{_weekday(ev.date)}, {_fmtDate(ev.date)}</p>
+                    </div>
+                    <span className="text-[11px] text-slate-400 flex-shrink-0">{days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : `${days}d`}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <button onClick={() => goToPage('calendar')} className="w-full text-[11px] font-medium text-indigo-600 hover:text-indigo-700 py-2.5 border-t border-slate-100">
+              View full calendar →
+            </button>
           </Card>
         )}
 
@@ -1382,6 +1530,9 @@ export default function ParentDashboard() {
                 {children.length === 1 && activeChild ? `Parent · ${activeChild.name?.split(' ')[0]}` : `${children.length} children`}
               </div>
             </div>
+            <button id="sidebar-change-password-btn" onClick={() => { setPwBanner({ type: '', msg: '' }); setPwModalOpen(true); }} title="Change Password" className={`flex-shrink-0 transition-colors hover:text-amber-300 ${collapsed ? 'lg:hidden' : ''}`} style={{ color: '#a8a29e' }}>
+              <KeyRound size={14} />
+            </button>
             <button id="sidebar-support-btn" onClick={() => navigate('/support')} title="Support" className={`flex-shrink-0 transition-colors hover:text-amber-300 ${collapsed ? 'lg:hidden' : ''}`} style={{ color: '#a8a29e' }}>
               <LifeBuoy size={14} />
             </button>
@@ -1505,6 +1656,16 @@ export default function ParentDashboard() {
       </div>
       {/* end MAIN AREA */}
 
+      <ChangePasswordModal
+        open={pwModalOpen}
+        currentPw={currentPw} newPw={newPw} confirmPw={confirmPw}
+        onCurrentChange={setCurrentPw} onNewChange={setNewPw} onConfirmChange={setConfirmPw}
+        showPws={pwShow} onToggleShow={() => setPwShow(s => !s)}
+        banner={pwBanner} saving={pwSaving}
+        onClose={() => setPwModalOpen(false)}
+        onSubmit={handlePasswordChange}
+        primary={primary}
+      />
     </div>
   );
 }

@@ -7,7 +7,7 @@
  * Data: all fetched from /api/student-portal/dashboard (unchanged).
  */
 import { useState, useEffect, useRef } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import useAuthStore from '@/store/auth.js';
 import { useSchoolTheme } from '@/hooks/useSchoolTheme.js';
@@ -16,9 +16,11 @@ import {
   Download, GraduationCap, LogOut, AlertCircle,
   BookOpen, Lock, Bell, MessageSquare, Activity, Star,
   MapPin, Play, MonitorPlay, CalendarCheck, Menu, X, LifeBuoy,
+  KeyRound, Eye, EyeOff, Loader2,
 } from 'lucide-react';
 import NotificationBell from '@/components/layout/NotificationBell.jsx';
 import FloatingHelp from '@/components/help/FloatingHelp.jsx';
+import { auth as authApi } from '@/api/client.js';
 
 /* ── API ────────────────────────────────────────────────────────── */
 const API_BASE = import.meta.env.VITE_API_BASE || '';
@@ -146,6 +148,90 @@ function GradeBar({ id, label, pct, delay = 0 }) {
   );
 }
 
+/* Reported directly 2026-10-28: "parents dont have that clickable
+   profile to update or change their password" — same gap on the
+   Student Portal, same fix. POST /api/auth/change-password already
+   works for any authenticated role (no role check at all, just
+   authMiddleware scoped to the caller's own userId/schoolId); there
+   was simply nowhere in this portal to reach it, since there's no
+   /profile route nested under /student-dashboard. A self-contained
+   modal, not a new page — same reasoning as ParentDashboard.jsx's own
+   identical addition.
+
+   Hoisted to a top-level component (not nested inside the main
+   component's body) for the same reason ParentDashboard.jsx's
+   ComposeMessageModal is — a function defined inside a render body gets
+   a new identity every render, which would unmount/remount this modal
+   and drop input focus on every keystroke. */
+function ChangePasswordModal({ open, currentPw, newPw, confirmPw, onCurrentChange, onNewChange, onConfirmChange, showPws, onToggleShow, banner, saving, onClose, onSubmit }) {
+  if (!open) return null;
+  return (
+    <AnimatePresence>
+      <motion.div key="pw-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        className="fixed inset-0 bg-black/30 z-40" onClick={onClose} />
+      <motion.div key="pw-dialog" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }}
+        className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm" onClick={e => e.stopPropagation()}>
+          <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+            <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+              <KeyRound size={14} className="text-slate-400" /> Change Password
+            </h3>
+            <button onClick={onClose} className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100">
+              <X size={16} />
+            </button>
+          </div>
+
+          <form onSubmit={onSubmit} className="px-5 py-4 space-y-3">
+            <div>
+              <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Current password</label>
+              <input
+                type={showPws ? 'text' : 'password'} autoComplete="current-password" autoFocus
+                className="w-full mt-1 text-[13px] border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1"
+                value={currentPw} onChange={e => onCurrentChange(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">New password</label>
+              <input
+                type={showPws ? 'text' : 'password'} autoComplete="new-password"
+                className="w-full mt-1 text-[13px] border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1"
+                value={newPw} onChange={e => onNewChange(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Confirm new password</label>
+              <input
+                type={showPws ? 'text' : 'password'} autoComplete="new-password"
+                className="w-full mt-1 text-[13px] border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1"
+                value={confirmPw} onChange={e => onConfirmChange(e.target.value)}
+              />
+            </div>
+            <button type="button" onClick={onToggleShow} className="flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-slate-600">
+              {showPws ? <EyeOff size={12} /> : <Eye size={12} />} {showPws ? 'Hide' : 'Show'} passwords
+            </button>
+
+            {banner?.msg && (
+              <p className={`text-[12px] ${banner.type === 'success' ? 'text-emerald-600' : 'text-red-600'}`}>{banner.msg}</p>
+            )}
+
+            <div className="flex justify-end gap-2 pt-1">
+              <button type="button" onClick={onClose} className="text-[12px] font-medium text-slate-500 px-3 py-2 rounded-lg hover:bg-slate-50">
+                Cancel
+              </button>
+              <button
+                type="submit" disabled={saving}
+                className="flex items-center gap-1.5 text-[12px] font-semibold text-white bg-emerald-700 hover:bg-emerald-800 px-4 py-2 rounded-lg disabled:opacity-50 transition"
+              >
+                {saving ? <Loader2 size={12} className="animate-spin" /> : <KeyRound size={12} />} {saving ? 'Updating…' : 'Update password'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
 /* ══════════════════════════════════════════════════════════════════
    MAIN COMPONENT
    ══════════════════════════════════════════════════════════════════ */
@@ -163,6 +249,31 @@ export default function StudentDashboard() {
   const [dlError,     setDlError]     = useState('');
   const [latestWeek,  setLatestWeek]  = useState(null); // most recent Weekly Snapshot, or undefined if none generated yet
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  // Self-service password change — see ChangePasswordModal's own comment above.
+  const [pwModalOpen, setPwModalOpen] = useState(false);
+  const [currentPw,   setCurrentPw]   = useState('');
+  const [newPw,       setNewPw]       = useState('');
+  const [confirmPw,   setConfirmPw]   = useState('');
+  const [pwShow,      setPwShow]      = useState(false);
+  const [pwSaving,    setPwSaving]    = useState(false);
+  const [pwBanner,    setPwBanner]    = useState({ type: '', msg: '' });
+
+  function handlePasswordChange(e) {
+    e.preventDefault();
+    if (!currentPw) { setPwBanner({ type: 'error', msg: 'Current password is required.' }); return; }
+    if (newPw.length < 8) { setPwBanner({ type: 'error', msg: 'New password must be at least 8 characters.' }); return; }
+    if (newPw !== confirmPw) { setPwBanner({ type: 'error', msg: 'Passwords do not match.' }); return; }
+    setPwSaving(true);
+    setPwBanner({ type: '', msg: '' });
+    authApi.changePassword({ currentPassword: currentPw, newPassword: newPw })
+      .then(() => {
+        setPwBanner({ type: 'success', msg: 'Password changed successfully. Use your new password next time you sign in.' });
+        setCurrentPw(''); setNewPw(''); setConfirmPw('');
+      })
+      .catch(err => setPwBanner({ type: 'error', msg: err.message || 'Failed to change password.' }))
+      .finally(() => setPwSaving(false));
+  }
 
   /* ── Per-school branding — same pattern as Sidebar.jsx (admin shell) ── */
   const authSchool      = session?.school;
@@ -436,6 +547,14 @@ export default function StudentDashboard() {
                 {student.className ? `${student.className} · Student` : 'Student'}
               </div>
             </div>
+            <button
+              id="sidebar-change-password-btn"
+              onClick={() => { setPwBanner({ type: '', msg: '' }); setPwModalOpen(true); }}
+              title="Change Password"
+              className="text-emerald-500 hover:text-emerald-300 transition flex-shrink-0"
+            >
+              <KeyRound size={14} />
+            </button>
             <button
               id="sidebar-support-btn"
               onClick={() => navigate('/support')}
@@ -1109,6 +1228,15 @@ export default function StudentDashboard() {
       </div>
       {/* end MAIN AREA */}
 
+      <ChangePasswordModal
+        open={pwModalOpen}
+        currentPw={currentPw} newPw={newPw} confirmPw={confirmPw}
+        onCurrentChange={setCurrentPw} onNewChange={setNewPw} onConfirmChange={setConfirmPw}
+        showPws={pwShow} onToggleShow={() => setPwShow(s => !s)}
+        banner={pwBanner} saving={pwSaving}
+        onClose={() => setPwModalOpen(false)}
+        onSubmit={handlePasswordChange}
+      />
     </div>
   );
 }

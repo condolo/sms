@@ -6,6 +6,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.229.0] - 2026-10-28 - feat(portals): parents and students can now change their own password — plus a live school calendar on the Parent Overview
+
+Reported directly: "Parents from different schools wants to update their password, we had mentioned that you go to ur profile and update the password but parents dont have that clickable profile to update or change their password."
+
+**Confirmed, not assumed:** neither the Parent Portal nor the Student Portal has anything resembling a profile/account page — both are standalone top-level routes (`/parent-dashboard`, `/student-dashboard`) with no nested route tree at all, unlike the staff app's `/profile` (`ProfilePage.jsx`), which already has a working change-password form. The "go to your profile" guidance given to parents was simply never true for the portal they're actually using — it describes a page staff have and parents don't.
+
+**The backend already worked for any role — this was purely a missing client surface.** `POST /api/auth/change-password` has no role check at all, only `authMiddleware` scoped to the caller's own `userId`/`schoolId` — a parent or student account can already call it successfully today, there was just no button anywhere that would. Added a self-contained `ChangePasswordModal` to both `ParentDashboard.jsx` and `StudentDashboard.jsx`, triggered by a new key-icon button in each sidebar footer (next to Support/Sign out), reusing `ProfilePage.jsx`'s own validation exactly (current password required, new password ≥ 8 characters, confirmation must match) and calling the identical `authApi.changePassword(...)`. Hoisted to a top-level component in both files, not nested inside the main component's body — the same fix `ParentDashboard.jsx`'s own `ComposeMessageModal` already needed, for the same reason: a component defined inside a render body gets a new identity every render, which would unmount/remount the modal and drop input focus on every keystroke.
+
+**A second, related gap closed in the same pass:** "in the overview, in parents default dashboard, they should see school calendar... the calendar should be live from the school's data." The data was already live and already fetched — `GET /dashboard/:childId` has returned real `upcomingEvents` from the `events` collection all along, and a full "School Calendar" tab already renders it correctly. It just wasn't visible from the Overview itself, unlike the Student Portal, whose Overview already shows its events section inline rather than requiring a tab click. Added an "Upcoming Events" teaser card to the Parent Portal's `OverviewPage` (next 3 events, same `upcomingEvents` array, a "View full calendar →" link into the existing tab) — matching the same teaser pattern the Overview already uses for Upcoming Exams. No backend change; the data was never the problem.
+
+Not done: the identical Overview-calendar-teaser pattern was not also added to the Student Portal, since its Overview already shows events inline — nothing to add there.
+
+No tests added — this project's client has no test runner configured (confirmed: no `.test.jsx` files, no test script in `client/package.json`); every client-facing fix in this project is verified by compiling cleanly and a browser walkthrough, which both files were confirmed to do (Vite serves each with 200, no transform error).
+
 ## [v5.228.0] - 2026-10-28 - feat(grades): the post-publish mark-unlock capability can now be granted to any role, not just admin/principal — and actually reaches its own UI tab
 
 Reported directly: "recall, when report card is published, the marks are automatically locked... now, in the configuration is still showing open... how is this redone?" — followed by the explicit build request: "build it, though be flexible enough that even another user like exam office can unlock if given the rights."
