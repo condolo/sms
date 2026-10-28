@@ -17,6 +17,8 @@ const { isIdentityCutoverEnabled } = require('../utils/identity-cutover');
 const { MODULE_REGISTRY } = require('../config/moduleRegistry');
 const { _mergeUserOverrides } = require('../middleware/rbac');
 const { issueCsrfCookie, clearCsrfCookie } = require('../utils/csrf');
+const passwordTicket = require('../utils/password-ticket');
+const { schoolLoginUrl } = require('../utils/school-url');
 
 const router = express.Router();
 
@@ -63,6 +65,22 @@ function _issueExchangeCode(token) {
     if (v.expiresAt <= Date.now()) _exchangeCodes.delete(k);
   }
   return code;
+}
+
+/* ── Password tickets ─────────────────────────────────────
+   See utils/password-ticket.js. A force-change ticket is minted ONLY after
+   the caller has proved the password (the login route's passwordExpired
+   branches), and a reset ticket only after proving control of the inbox. It
+   is stored hashed on the user document and is single-use.
+
+   This exists because POST /auth/force-change used to take a bare
+   client-supplied `userId` and set that account's password with no proof of
+   anything — an anonymous takeover of any account whose id could be guessed
+   or obtained. */
+async function _mintForceChangeTicket(user, schoolId) {
+  const { token, set } = passwordTicket.issueTicket('forceChange');
+  await tenantModel('users', { schoolId }).updateOne({ _id: user._id }, { $set: set });
+  return token;
 }
 
 /* ── OTP helpers — cryptographically secure ─────────────── */
@@ -468,7 +486,9 @@ router.post('/login', loginIpLimiter, tenantMiddleware, async (req, res) => {
       return res.json({
         passwordExpired: true,
         reason: 'first_login',
-        userId:   _userId,
+        // A one-shot ticket, NOT the userId: the password was just proved, so
+        // this caller may set a new one once. Nothing else may.
+        ticket:   await _mintForceChangeTicket(user, req.school.id),
         schoolId: req.school.id,
         hint:     'Your administrator has set a temporary password. Please choose your own password to continue.'
       });
@@ -494,7 +514,8 @@ router.post('/login', loginIpLimiter, tenantMiddleware, async (req, res) => {
       return res.json({
         passwordExpired: true,
         reason: 'expired',
-        userId:   _userId,
+        // Same one-shot ticket as the first_login branch above.
+        ticket:   await _mintForceChangeTicket(user, req.school.id),
         schoolId: req.school.id,
         hint:     `Your password is ${ageDays} days old. For your security, please set a new password to continue.`
       });
@@ -1116,10 +1137,20 @@ async function _checkPasswordExpiryAndNotify(user, school) {
 }
 
 /* POST /api/auth/force-change — change password when 90-day rotation is due
-   No JWT required (user is locked at password screen)
-   Body: { userId, schoolId, newPassword }
-   userId may be either the custom `id` field (e.g. "usr_xxx") or the MongoDB
-   _id hex string — the $or lookup handles both cases.
+   No JWT required (the user is locked at the password screen), and that is
+   deliberate: they have just proved the password but cannot yet hold a
+   session.
+
+   Body: { ticket, newPassword }
+   The `ticket` is minted ONLY by the login route's passwordExpired branches
+   (see utils/password-ticket.js) — single-use, 15 minutes, hashed at rest.
+   It is the entire authorization.
+
+   This used to take { userId, schoolId, newPassword } and look the user up by
+   that id with no proof of anything, which let an anonymous caller set any
+   account's password and receive a session for it. There is no id-based
+   lookup left to abuse: the ticket's hash, purpose and expiry are matched by
+   the database.
 */
 const forceChangeLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -1130,21 +1161,30 @@ const forceChangeLimiter = rateLimit({
 
 router.post('/force-change', forceChangeLimiter, tenantMiddleware, async (req, res) => {
   try {
-    const { userId, schoolId, newPassword } = req.body;
-    if (!userId || !newPassword) return res.status(400).json({ error: 'userId and newPassword required' });
+    const { ticket, newPassword } = req.body;
+    if (!ticket || !newPassword) return res.status(400).json({ error: 'ticket and newPassword required' });
     if (newPassword.length < 8)  return res.status(400).json({ error: 'Password must be at least 8 characters' });
 
-    const sid  = schoolId || req.school?.id;
+    const sid = req.school?.id;
+    if (!sid) return res.status(400).json({ error: 'Could not resolve school from request' });
     const User = tenantModel('users', { schoolId: sid });
 
-    /* Support users with custom `id` field AND users that only have MongoDB _id */
-    const isOid     = /^[0-9a-f]{24}$/i.test(userId);
-    const userQuery = isOid
-      ? { schoolId: sid, $or: [{ id: userId }, { _id: userId }] }
-      : { id: userId, schoolId: sid };
+    /* The TICKET is the authorization, and the database decides it: the query
+       matches on the ticket's hash, its purpose, and an unexpired window, so a
+       guessed id, a replayed ticket or one minted for a different purpose
+       cannot match. The ticket is minted only in the login route's
+       passwordExpired branches, i.e. only after the password was verified.
 
-    const user = await User.findOne(userQuery).lean();
-    if (!user) return res.status(404).json({ error: 'User not found' });
+       This replaced a lookup on a client-supplied `userId`, which authorized
+       nothing whatsoever: an anonymous POST with a guessed id set that
+       account's password and returned a session for it. */
+    const user = await User.findOne({
+      schoolId: sid,
+      ...passwordTicket.ticketFilter(ticket, 'forceChange'),
+    }).lean();
+    if (!user) {
+      return res.status(401).json({ error: 'This password change is no longer valid. Please sign in again.' });
+    }
 
     const now    = new Date().toISOString();
     const hashed = await bcrypt.hash(newPassword, 12);
@@ -1160,6 +1200,8 @@ router.post('/force-change', forceChangeLimiter, tenantMiddleware, async (req, r
       mustChangePassword: false,  // clear legacy flag if present
       mustChangePwd:      false,  // clear legacy alias if present
       lastLogin:          now,
+      // Single-use: the ticket dies with the password it changed.
+      ...passwordTicket.clearTicketSet(),
     });
 
     const _fcUserId = user.id || user._id.toString();
@@ -1223,6 +1265,158 @@ router.post('/force-change', forceChangeLimiter, tenantMiddleware, async (req, r
   } catch (err) {
     console.error('[auth/force-change]', err);
     res.status(500).json({ error: 'Password change failed' });
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   POST /auth/forgot-password — email a reset link
+   POST /auth/reset-password  — spend it
+
+   The caller cannot know the current password (that is the whole point), so
+   control of the inbox IS the proof. Requests answer IDENTICALLY whether or
+   not the address is enrolled — the same non-enumeration rule /otp/request
+   follows — and the link carries a single-use, hour-lived, hashed ticket.
+
+   Reset deliberately does NOT hand back a session. A reset proves control of
+   an inbox, not knowledge of the password; making the user sign in with the
+   new one confirms it actually worked.
+   ══════════════════════════════════════════════════════════════ */
+const forgotPasswordLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.headers['cf-connecting-ip'] || req.ip || 'unknown',
+  message: { success: false, error: { code: 'RATE_LIMITED', message: 'Too many requests. Please try again shortly.' } },
+});
+
+router.post('/forgot-password', forgotPasswordLimiter, tenantMiddleware, async (req, res) => {
+  // Property 2: one answer, every branch below.
+  const ok = {
+    success: true,
+    data: { sent: true, message: 'If that address is on this school\u2019s records, a reset link is on its way.' },
+  };
+
+  const email_ = String(req.body?.email || '').trim().toLowerCase();
+  if (!email_) {
+    return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Email required' } });
+  }
+
+  try {
+    const sid  = req.school?.id;
+    const User = tenantModel('users', { schoolId: sid });
+    const user = await User.findOne({ email: email_, schoolId: sid }).lean();
+
+    if (!user || !user.isActive) {
+      AuditService.log({ action: 'auth.forgot_password_unknown', actor: { userId: 'public', role: 'public', email: email_ }, schoolId: sid, req });
+      return res.json(ok);
+    }
+
+    const { token, set } = passwordTicket.issueTicket('reset');
+    await User.updateOne({ _id: user._id }, { $set: set });
+
+    /* Built from the school's OWN sign-in host, never PUBLIC_URL — PUBLIC_URL
+       is not provisioned in production, which is exactly what made every
+       Google redirect_uri relative. See utils/school-url.js. The slug is
+       carried too, so the link still resolves if a school has no subdomain. */
+    const base = await schoolLoginUrl(sid);
+    const resetUrl = `${base}/reset-password?ticket=${encodeURIComponent(token)}`
+      + (req.school?.slug ? `&school=${encodeURIComponent(req.school.slug)}` : '');
+
+    email.sendPasswordReset({
+      name:        user.name,
+      email:       user.email,
+      resetUrl,
+      schoolName:  req.school?.name || req.school?.slug || 'your school',
+      schoolEmail: req.school?.systemEmail || '',
+      schoolId:    sid,
+      ttlMinutes:  passwordTicket.PURPOSES.reset.ttlMs / 60000,
+    }).then(sent => {
+      // The RESPONSE stays generic, but a delivery failure must be visible
+      // somewhere or unconfigured SMTP looks exactly like "no such user".
+      if (!sent) console.error(`[auth/forgot-password] reset link for ${email_} was NOT delivered (SMTP failure or unconfigured).`);
+    }).catch(err => console.error('[auth/forgot-password] send failed:', err.message));
+
+    AuditService.log({ action: 'auth.forgot_password_requested', actor: { userId: user.id, role: user.primaryRole || user.role, email: email_ }, schoolId: sid, req });
+    return res.json(ok);
+  } catch (err) {
+    console.error('[auth/forgot-password]', err);
+    // Answer identically even here: an error only on the enrolled-address path
+    // would itself be an existence oracle.
+    return res.json(ok);
+  }
+});
+
+router.post('/reset-password', forgotPasswordLimiter, tenantMiddleware, async (req, res) => {
+  try {
+    const { ticket, newPassword } = req.body;
+    const sid = req.school?.id;
+    if (!sid) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Could not resolve school from request.' } });
+    }
+    if (!ticket || !newPassword) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'ticket and newPassword required' } });
+    }
+    if (newPassword.length < 8) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Password must be at least 8 characters' } });
+    }
+
+    const User = tenantModel('users', { schoolId: sid });
+    // The ticket's hash, purpose and expiry are matched by the database.
+    const user = await User.findOne({ schoolId: sid, ...passwordTicket.ticketFilter(ticket, 'reset') }).lean();
+    if (!user) {
+      return res.status(401).json({ success: false, error: { code: 'RESET_LINK_INVALID', message: 'This reset link is invalid or has expired. Please request a new one.' } });
+    }
+    if (!user.isActive) {
+      return res.status(403).json({ success: false, error: { code: 'ACCOUNT_INACTIVE', message: 'This account is not active. Please contact your school office.' } });
+    }
+
+    const now    = new Date().toISOString();
+    const hashed = await bcrypt.hash(newPassword, 12);
+    const updateFilter = user.id ? { id: user.id } : { _id: user._id };
+
+    await User.updateOne(updateFilter, {
+      password:           hashed,
+      passwordChangedAt:  now,
+      mustChangePassword: false,
+      mustChangePwd:      false,
+      loginOtp:           null,
+      loginOtpExpiry:     null,
+      ...passwordTicket.clearTicketSet(),
+    });
+
+    const _rpUserId = user.id || user._id.toString();
+
+    /* A reset is the strongest signal an account may have been compromised, so
+       every existing session on every device is revoked — the same ordering
+       force-change uses. Dual-write keeps the shared credential in step. */
+    try {
+      if (user.identityId) {
+        await _model('identities').updateOne(
+          { id: user.identityId },
+          { $set: { passwordHash: hashed, updatedAt: now } },
+        );
+      }
+      await revokeUserTokens(_rpUserId);
+      if (user.identityId) await revokeIdentityTokens(user.identityId);
+    } catch (revokeErr) {
+      console.error('[auth/reset-password] dual-write/revocation failed (non-fatal):', revokeErr.message);
+    }
+
+    email.sendPasswordChanged({
+      name:       user.name,
+      email:      user.email,
+      schoolName: req.school?.name || '',
+      schoolEmail: req.school?.systemEmail || '',
+      schoolId:   sid,
+    }).catch(() => {});
+
+    AuditService.log({ action: 'auth.password_reset', actor: { userId: _rpUserId, role: user.primaryRole || user.role, email: user.email }, schoolId: sid, req });
+
+    return res.json({ success: true, data: { reset: true, message: 'Your password has been changed. You can now sign in.' } });
+  } catch (err) {
+    console.error('[auth/reset-password]', err);
+    return res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Could not reset the password. Please try again.' } });
   }
 });
 

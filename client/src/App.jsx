@@ -8,6 +8,7 @@ import { detectSchool } from '@/utils/schoolDetect.js';
 
 // ─── Eager pages ──────────────────────────────────────────────────────────────
 import Login   from '@/pages/Login.jsx';
+import ResetPassword from '@/pages/ResetPassword.jsx';
 import Landing from '@/pages/Landing.jsx';
 import Contact       from '@/pages/Contact.jsx';
 import DemoRequest   from '@/pages/DemoRequest.jsx';
@@ -191,6 +192,10 @@ export const router = createBrowserRouter([
 
   // Login — branded when on school subdomain, generic otherwise
   { path: '/login', element: <Login /> },
+
+  // Password reset — the landing page for a forgot-password link. Public: the
+  // ticket in the URL is the authorization, and they cannot hold a session yet.
+  { path: '/reset-password', element: <ResetPassword /> },
 
   // Student portal — accessible after student login (no AppShell)
   { path: '/student-dashboard', element: <SuspenseWrapper><StudentDashboard /></SuspenseWrapper> },

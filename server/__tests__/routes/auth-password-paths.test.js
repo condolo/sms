@@ -195,14 +195,23 @@ describe('POST /api/auth/change-password', () => {
 });
 
 describe('POST /api/auth/force-change', () => {
+  /* force-change now requires a one-shot ticket instead of a bare userId.
+     These two tests are about the revocation/dual-write behaviour, so they
+     mint a real ticket and put it on the user doc. */
+  function ticketFor(overrides = {}) {
+    const { token, set } = require('../../utils/password-ticket').issueTicket('forceChange');
+    return { token, doc: { ...overrides, ...set } };
+  }
+
   test('a user WITH an identityId: dual-writes, revokes both tiers, and the newly-issued token carries the POST-revocation tv (not stale)', async () => {
-    mockUserDoc = makeUser({ identityId: 'idt_demo_001', tokenVersion: 7 });
+    const { token: pwdTicket, doc } = ticketFor({ identityId: 'idt_demo_001', tokenVersion: 7 });
+    mockUserDoc = makeUser(doc);
     mockIdentityDoc = { id: 'idt_demo_001', tokenVersion: 2 };
 
     const app = buildApp();
     const res = await supertest(app)
       .post('/api/auth/force-change')
-      .send({ userId: 'usr_demo_001', schoolId: 'sch_demo_001', newPassword: 'BrandNewPassword123!' });
+      .send({ ticket: pwdTicket, newPassword: 'BrandNewPassword123!' });
 
     expect(res.status).toBe(200);
 
@@ -236,12 +245,13 @@ describe('POST /api/auth/force-change', () => {
   });
 
   test('a user with no identityId: no identities writes, but users.tokenVersion is still revoked', async () => {
-    mockUserDoc = makeUser({ tokenVersion: 0 });
+    const { token: pwdTicket2, doc: doc2 } = ticketFor({ tokenVersion: 0 });
+    mockUserDoc = makeUser(doc2);
 
     const app = buildApp();
     const res = await supertest(app)
       .post('/api/auth/force-change')
-      .send({ userId: 'usr_demo_001', schoolId: 'sch_demo_001', newPassword: 'BrandNewPassword123!' });
+      .send({ ticket: pwdTicket2, newPassword: 'BrandNewPassword123!' });
 
     expect(res.status).toBe(200);
     expect(mockIdentitiesUpdateOne).not.toHaveBeenCalled();
