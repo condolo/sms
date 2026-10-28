@@ -345,11 +345,11 @@ describe('marks_then_comments — class teacher and principal sign-off stack ver
 describe('marks_then_comments — assessment-type key ("what does CA/HW/MT/ET mean")', () => {
   // Same direct request/reasoning as subject_paired's identical test —
   // sourced only from this snapshot's own assessmentWeights.
-  test('lists the KEY and full label for every configured type, after marks, before the Grading Key', () => {
+  test('lists the KEY and full label for every configured type, after marks, before the Grading Scale', () => {
     const html = LAYOUTS.marks_then_comments.renderHtml(computeSections());
     const keyIdx     = html.indexOf('cat</b> = CAT');
     const totalIdx   = html.indexOf('Total Score');
-    const gradingIdx = html.indexOf('Grading Key');
+    const gradingIdx = html.indexOf('Grading Scale');
     expect(keyIdx).toBeGreaterThan(-1);
     expect(html).toContain('exam</b> = Exam');
     expect(keyIdx).toBeGreaterThan(totalIdx);
@@ -359,6 +359,54 @@ describe('marks_then_comments — assessment-type key ("what does CA/HW/MT/ET me
   test('no assessment types configured omits the key entirely', () => {
     const html = LAYOUTS.marks_then_comments.renderHtml(computeSections({ assessmentWeights: [] }));
     expect(html).not.toContain('</b> = ');
+  });
+});
+
+// Reported directly, with a side-by-side PDF comparison: the admin's Print
+// (HTML) output for a published report still showed the old 3-column
+// Excellent/Good/Improve checkbox grid, "Total Incidents", and a full
+// Grade/Range/Points/Description Grading Key table — none of which match
+// what the same snapshot's own PDF download (what parents/students
+// actually get) has shown since the 2026-10-08 RCE8 redesign. Unified onto
+// the PDF's design.
+describe('marks_then_comments.renderHtml — Class Teacher Observations match the PDF\'s pill design, not the old checkbox grid', () => {
+  test('selected rating renders as a pill; unrated renders "Not yet rated" — never the Excellent/Good/Improve checkbox grid', () => {
+    const sections = computeSections(
+      { comments: { ...baseSnap().comments, observationRatings: { Teamwork: 'good', Confidence: null } } },
+      { showObservationRatings: true, observationCategories: ['Teamwork', 'Confidence'] },
+    );
+    const html = LAYOUTS.marks_then_comments.renderHtml(sections);
+    expect(html).toContain('Class Teacher Observations');
+    expect(html).toContain('Teamwork');
+    expect(html).toContain('>Good<');
+    expect(html).toContain('Not yet rated');
+    expect(html).not.toContain('grid-template-columns:repeat(3,1fr)');
+    expect(html).not.toMatch(/EXCELLENT|IMPROVE/);
+  });
+
+  test('never shown when the school has not turned it on', () => {
+    const html = LAYOUTS.marks_then_comments.renderHtml(computeSections());
+    expect(html).not.toContain('Class Teacher Observations');
+  });
+});
+
+describe('marks_then_comments.renderHtml — Behaviour tile wording matches the PDF ("Total", not "Total Incidents")', () => {
+  test('the fourth tile is labeled Total', () => {
+    const html = LAYOUTS.marks_then_comments.renderHtml(
+      computeSections({}, {}, { behaviour: { merits: 2, demerits: 0, points: 45, total: 2 } }),
+    );
+    expect(html).toContain('>Total<');
+    expect(html).not.toContain('Total Incidents');
+  });
+});
+
+describe('marks_then_comments.renderHtml — Grading Scale is a compact one-line strip, matching the PDF, not a 4-column table', () => {
+  test('renders grade+range inline, no Points/Description columns', () => {
+    const html = LAYOUTS.marks_then_comments.renderHtml(computeSections());
+    const gradingIdx = html.indexOf('Grading Scale');
+    expect(gradingIdx).toBeGreaterThan(-1);
+    expect(html).toContain('A 0');
+    expect(html.slice(gradingIdx, gradingIdx + 400)).not.toContain('<th');
   });
 });
 

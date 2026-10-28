@@ -160,6 +160,35 @@ function _observationRatingsHtml(s) {
   </div>`;
 }
 
+// Pill-list version of the above, matching the PDF's _drawObservationRatingsPdf
+// (2026-10-08's RCE8 redesign: a filled pill for the selected rating, or
+// "Not yet rated" in muted italic) — used by subject_paired/marks_then_comments
+// only. _observationRatingsHtml's own checkbox-grid design is kept as-is for
+// legacy_tabular (a separate, earlier, explicit design request — see its own
+// comment above); this one closes the gap reported directly, with a
+// side-by-side PDF comparison, between the two "new" layouts' HTML output
+// (still the checkbox grid) and what their own PDF download already renders
+// for the exact same published report.
+function _observationRatingsPillsHtml(s) {
+  if (!s.comments.showObservationRatings || !s.comments.observationRatings.length) return '';
+  const rows = s.comments.observationRatings.map(({ category, rating }) => {
+    const ratingHtml = rating
+      ? `<span style="display:inline-block;padding:2px 10px;border-radius:10px;background:${BRAND_WASH};color:${BRAND};font-weight:700;font-size:9px">${_esc(rating.charAt(0).toUpperCase() + rating.slice(1))}</span>`
+      : `<span style="color:#94a3b8;font-style:italic;font-size:9px">Not yet rated</span>`;
+    return `
+    <tr>
+      <td style="padding:5px 0;border-bottom:1px solid #e2e8f0;font-size:10px;color:#0f172a">${_esc(category)}</td>
+      <td style="padding:5px 0;border-bottom:1px solid #e2e8f0;text-align:right">${ratingHtml}</td>
+    </tr>`;
+  }).join('');
+  // Same atomic-block reasoning as _observationRatingsHtml above.
+  return `
+  <div style="margin:16px 0;page-break-inside:avoid;break-inside:avoid">
+    <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 6px">Class Teacher Observations</p>
+    <table style="width:100%;border-collapse:collapse">${rows}</table>
+  </div>`;
+}
+
 
 // Reported directly: "I need... the footer see" (a reference design's
 // prominent term-dates bar). closingDate/nextTermBegin already existed
@@ -1468,10 +1497,6 @@ function _renderSubjectPairedHtml(s) {
     </table>`;
   }).join('');
 
-  const gradingRows = s.gradingKey.map(b => `
-    <tr><td style="${tdC};font-weight:700">${_esc(b.grade)}</td><td style="${tdC}">${_esc(b.range)}</td>
-        <td style="${tdC}">${_esc(b.points)}</td><td style="${tdS}">${_esc(b.label)}</td></tr>`).join('');
-
   const behHtml = s.behaviour ? `
   <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:16px 0;page-break-inside:avoid;break-inside:avoid">
     ${[
@@ -1547,14 +1572,9 @@ function _renderSubjectPairedHtml(s) {
   ${_assessmentKeyHtml(s)}
   ${s.attendance ? `<p style="font-size:11px;color:#475569;margin:0 0 12px"><b>Attendance:</b> ${_esc(s.attendance.text)}</p>` : ''}
   ${s.gradingKey.length ? `
-  <div style="page-break-inside:avoid;break-inside:avoid">
-    <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">Grading Key</p>
-    <table style="width:100%;border-collapse:collapse;font-size:10px;max-width:480px;margin-bottom:12px">
-      <thead><tr><th style="${thS}">Grade</th><th style="${thS}">Range</th><th style="${thS}">Points</th><th style="${thS};text-align:left">Description</th></tr></thead>
-      <tbody>${gradingRows}</tbody>
-    </table>
-  </div>` : ''}
-  ${_observationRatingsHtml(s)}
+  <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">Grading Scale</p>
+  <p style="font-size:10px;color:#64748b;font-family:monospace;margin:0 0 12px">${s.gradingKey.map(b => `${_esc(b.grade)} ${_esc(b.range)}`).join('&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;')}</p>` : ''}
+  ${_observationRatingsPillsHtml(s)}
   ${behHtml}
   ${_sportsAndTalentHtml(s)}
   ${_termDatesFooterHtml(s)}
@@ -1865,10 +1885,6 @@ function _renderMarksThenCommentsHtml(s) {
       </tr>`;
   }).join('');
 
-  const gradingRows = s.gradingKey.map(b => `
-    <tr><td style="${tdC};font-weight:700">${_esc(b.grade)}</td><td style="${tdC}">${_esc(b.range)}</td>
-        <td style="${tdC}">${_esc(b.points)}</td><td style="${tdS}">${_esc(b.label)}</td></tr>`).join('');
-
   const marksHtml = `
 <div style="page-break-before:always">
   ${pageHeaderHtml('Academic Results')}
@@ -1891,13 +1907,8 @@ function _renderMarksThenCommentsHtml(s) {
   ${_assessmentKeyHtml(s)}
   ${s.attendance ? `<p style="font-size:11px;color:#475569;margin:0 0 14px"><b>Attendance:</b> ${_esc(s.attendance.text)}</p>` : ''}
   ${s.gradingKey.length ? `
-  <div style="page-break-inside:avoid;break-inside:avoid">
-    <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">Grading Key</p>
-    <table style="width:100%;border-collapse:collapse;font-size:10px;max-width:480px">
-      <thead><tr><th style="${thS}">Grade</th><th style="${thS}">Range</th><th style="${thS}">Points</th><th style="${thS};text-align:left">Description</th></tr></thead>
-      <tbody>${gradingRows}</tbody>
-    </table>
-  </div>` : ''}
+  <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">Grading Scale</p>
+  <p style="font-size:10px;color:#64748b;font-family:monospace;margin:0 0 12px">${s.gradingKey.map(b => `${_esc(b.grade)} ${_esc(b.range)}`).join('&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;')}</p>` : ''}
 </div>`;
 
   // RCE4 — comments shown as a Subject | Teacher | Comment table (not
@@ -1950,7 +1961,9 @@ function _renderMarksThenCommentsHtml(s) {
       { label: 'Merits', value: beh.merits, color: '#16a34a' },
       { label: 'Demerits', value: beh.demerits, color: '#dc2626' },
       { label: 'Net Points', value: beh.points, color: beh.points >= 0 ? '#16a34a' : '#dc2626' },
-      { label: 'Total Incidents', value: beh.total, color: '#475569' },
+      // 'Total', matching this layout's own PDF (_renderMarksThenCommentsPdf) —
+      // was 'Total Incidents' here only, same number, different wording.
+      { label: 'Total', value: beh.total, color: '#475569' },
     ].map(m => `
     <div style="border:1px solid #e2e8f0;border-radius:8px;padding:16px;text-align:center">
       <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#94a3b8;margin:0 0 4px">${_esc(m.label)}</p>
@@ -1969,7 +1982,7 @@ function _renderMarksThenCommentsHtml(s) {
 <div style="page-break-before:always">
   ${pageHeaderHtml('Teacher Comments')}
   ${subjectCommentsSectionHtml}
-  ${_observationRatingsHtml(s)}
+  ${_observationRatingsPillsHtml(s)}
   ${behHtml}
   ${_sportsAndTalentHtml(s)}
   ${_termDatesFooterHtml(s)}

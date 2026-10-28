@@ -6,6 +6,28 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.230.0] - 2026-10-28 - fix(report-cards): admin's Print (HTML) output still used the pre-RCE8 design — finally matches what parents/students actually download
+
+Reported directly, with a side-by-side comparison of two PDFs for the same published report card (same Report ID, same batch, same scores): the admin's "Print" button produced a visibly different document from the parent portal's "Download PDF" button — "what is in the school account is what we are pushing to any account, parent and student... we need to address this once and for all."
+
+**Confirmed: no data integrity issue.** Both downloads trace back to the exact same `report_card_snapshots` document (`layoutKey: marks_then_comments`) — identical scores, identical comments, identical merits/demerits. The difference is purely cosmetic, between the two renderers `server/utils/report-layouts.js` keeps for one IR: the native PDFKit renderer (used by the parent/student portal's download and the admin's bulk class export) and the HTML renderer (used by the admin's "Print" button, opened in a window and printed to PDF by the browser).
+
+**Root cause, with an exact date:** `v5.170.0` (2026-10-08, "premium institutional redesign of the native report-card PDF") redesigned the PDF renderer for `subject_paired`/`marks_then_comments` — Class Teacher Observations became a pill/"Not yet rated" list (replacing a 3-column Excellent/Good/Improve checkbox grid), the Grading Scale became a compact one-line strip, and several wording details changed. That changelog entry explicitly flagged: *"Known follow-ups, intentionally out of scope here: the HTML preview path still uses its earlier (already-upgraded-once) visual language."* That follow-up was never picked back up — until this report surfaced it directly, 20 days later.
+
+**Fixed, for `subject_paired` and `marks_then_comments` only:**
+- Class Teacher Observations in HTML now use the same pill/"Not yet rated" design as the PDF (new `_observationRatingsPillsHtml`), instead of the old 3-column checkbox grid.
+- The Behaviour tile is labeled "Total" in HTML, matching the PDF — was "Total Incidents" for the same number, in `marks_then_comments` only (`subject_paired`'s HTML already said "Total").
+- The Grading Key collapses to a compact "Grading Scale" one-line strip (grade + range only), matching the PDF — was a full Grade/Range/Points/Description table.
+
+**Deliberately left untouched: `legacy_tabular`.** Its own doc comment already says "frozen, Helvetica, exact pre-existing output" — its PDF renderer has no grading-key section and no behaviour section at all, so there is no PDF design for its HTML to converge toward without a separate, larger decision (legacy_tabular's HTML and PDF have always differed structurally, not just cosmetically, predating RCE8 entirely). `_observationRatingsHtml` (the checkbox-grid function) is kept, unchanged, as `legacy_tabular`'s own renderer — it was itself built for a separate, explicit, earlier design request ("Class teacher observation, see the design"), with its own locked-in test (`report-layouts-legacy-tabular.test.js`). Only `subject_paired`/`marks_then_comments` now call the new pill function.
+
+### Files
+- `server/utils/report-layouts.js` — new `_observationRatingsPillsHtml`; `subject_paired`/`marks_then_comments` HTML switched to it; Behaviour tile wording and Grading Key markup brought in line with each layout's own PDF; unused `gradingRows` removed from both.
+- `server/__tests__/report-layouts-subject-paired.test.js`, `server/__tests__/report-layouts-marks-then-comments.test.js` — "Grading Key" → "Grading Scale" assertions updated; new tests lock in the pill design, the "Total" wording, and the compact grading-scale strip for both layouts.
+
+### Verified
+- Full `report-layouts*`/`report-cards*` suite (401 tests) green.
+
 ## [v5.229.0] - 2026-10-28 - feat(portals): parents and students can now change their own password — plus a live school calendar on the Parent Overview
 
 Reported directly: "Parents from different schools wants to update their password, we had mentioned that you go to ur profile and update the password but parents dont have that clickable profile to update or change their password."

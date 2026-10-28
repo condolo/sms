@@ -454,12 +454,12 @@ describe('subject_paired — assessment-type key ("what does CA/HW/MT/ET mean")'
   // is already derived from the snapshot's own assessmentWeights, so a
   // school running a completely different set of types gets a key that
   // matches exactly what's on their own report.
-  test('lists the KEY and full label for every configured type, placed after marks, before the Grading Key', () => {
+  test('lists the KEY and full label for every configured type, placed after marks, before the Grading Scale', () => {
     const html = LAYOUTS.subject_paired.renderHtml(computeSections());
     const keyIdx     = html.indexOf('cat</b> = CAT');
     const examIdx    = html.indexOf('exam</b> = Exam');
     const totalIdx   = html.indexOf('Total Score');
-    const gradingIdx = html.indexOf('Grading Key');
+    const gradingIdx = html.indexOf('Grading Scale');
     expect(keyIdx).toBeGreaterThan(-1);
     expect(examIdx).toBeGreaterThan(-1);
     // After the marks/summary table, before the next section down.
@@ -479,6 +479,38 @@ describe('subject_paired — assessment-type key ("what does CA/HW/MT/ET mean")'
     LAYOUTS.subject_paired.renderPdf(spy, sections, {}, true);
     const textCalls = calls.filter(c => c.method === 'text').map(c => c.args[0]);
     expect(textCalls.some(t => String(t).includes('cat = CAT') && String(t).includes('exam = Exam'))).toBe(true);
+  });
+});
+
+// Reported directly, with a side-by-side PDF comparison: the admin's Print
+// (HTML) output for a published report still showed the old 3-column
+// Excellent/Good/Improve checkbox grid and a full Grade/Range/Points/
+// Description Grading Key table — neither matches what the same
+// snapshot's own PDF download (what parents/students actually get) has
+// shown since the 2026-10-08 RCE8 redesign. Unified onto the PDF's design.
+describe('subject_paired.renderHtml — Class Teacher Observations match the PDF\'s pill design, not the old checkbox grid', () => {
+  test('selected rating renders as a pill; unrated renders "Not yet rated" — never the Excellent/Good/Improve checkbox grid', () => {
+    const sections = computeSections(
+      { comments: { ...baseSnap().comments, observationRatings: { Teamwork: 'good', Confidence: null } } },
+      { showObservationRatings: true, observationCategories: ['Teamwork', 'Confidence'] },
+    );
+    const html = LAYOUTS.subject_paired.renderHtml(sections);
+    expect(html).toContain('Class Teacher Observations');
+    expect(html).toContain('Teamwork');
+    expect(html).toContain('>Good<');
+    expect(html).toContain('Not yet rated');
+    expect(html).not.toContain('grid-template-columns:repeat(3,1fr)');
+    expect(html).not.toMatch(/EXCELLENT|IMPROVE/);
+  });
+});
+
+describe('subject_paired.renderHtml — Grading Scale is a compact one-line strip, matching the PDF, not a 4-column table', () => {
+  test('renders grade+range inline, no Points/Description columns', () => {
+    const html = LAYOUTS.subject_paired.renderHtml(computeSections());
+    const gradingIdx = html.indexOf('Grading Scale');
+    expect(gradingIdx).toBeGreaterThan(-1);
+    expect(html).toContain('A 0');
+    expect(html.slice(gradingIdx, gradingIdx + 400)).not.toContain('<th');
   });
 });
 
