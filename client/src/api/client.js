@@ -244,6 +244,11 @@ export const auth = {
   login:           (credentials)  => _post('/auth/login', credentials),
   verifyOtp:       (data, opts)   => _post('/auth/verify-otp', data, opts),
   forceChange:     (data)         => _post('/auth/force-change', data),
+  // Reset by link. forgotPassword always answers the same way (it must not
+  // reveal whether an address is enrolled), so the UI cannot tell "sent" from
+  // "no such user" — and should not try.
+  forgotPassword:  (data)         => _post('/auth/forgot-password', data),
+  resetPassword:   (data)         => _post('/auth/reset-password', data),
   logout:          ()             => _post('/auth/logout'),
   ping:            ()             => _post('/auth/ping'),
   me:              ()             => _get('/auth/me'),

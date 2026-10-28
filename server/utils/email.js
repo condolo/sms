@@ -527,6 +527,25 @@ async function sendLoginOTP({ name, email, otp, schoolName, schoolEmail, schoolI
   return _sendAsSchool(email, `${otp} — Your ${schoolName} sign-in code`, html, { schoolName, schoolEmail, schoolId });
 }
 
+/* 7b. Password reset — the link a user follows from "Forgot password?".
+   `resetUrl` is built by the CALLER (auth.js) from schoolLoginUrl(), never
+   from PUBLIC_URL: PUBLIC_URL is not provisioned in production and a relative
+   or wrong-host reset link is useless. ttlMinutes is passed in for the same
+   reason sendLoginOTP takes one — the email must state the real window. */
+async function sendPasswordReset({ name, email, resetUrl, schoolName, schoolEmail, schoolId = null, ttlMinutes = 60 }) {
+  const support = schoolEmail || SUPPORT_EMAIL;
+  const html = _wrap(`
+    <h2>Reset your password 🔑</h2>
+    <p>Hi ${name},</p>
+    <p>Someone asked to reset the password for your <strong>${schoolName}</strong> account. If that was you, choose a new password below.</p>
+    <p style="text-align:center"><a href="${resetUrl}" class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0">Choose a new password &rarr;</a></p>
+    <p style="font-size:13px;color:#6b7280">This link expires in <strong>${ttlMinutes} minutes</strong> and can only be used once. If it expires, just ask for another from the sign-in page.</p>
+    <p style="font-size:13px;color:#6b7280">If you did not ask for this, you can ignore this email — your password stays exactly as it is. If it keeps happening, contact <a href="mailto:${support}">${support}</a>.</p>
+    <p style="font-size:12px;color:#9ca3af">For your safety, never forward this link to anyone.</p>
+  `, schoolName);
+  return _sendAsSchool(email, `Reset your ${schoolName} password`, html, { schoolName, schoolEmail, schoolId });
+}
+
 /* 8. New user welcome — sends login credentials
    `slug` builds the school's own subdomain login URL (via
    _buildSchoolLoginUrl) — every call site used to build/pass a raw
