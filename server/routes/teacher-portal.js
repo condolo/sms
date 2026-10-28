@@ -14,6 +14,7 @@ const { isTimetablePublished, publishedReader } = require('../utils/timetable-pu
 const { ok, E }          = require('../utils/response');
 const { resolveTeacher } = require('../utils/resolveTeacher');
 const { _inboxQuery }   = require('./messages');
+const { recipientSummary } = require('../utils/message-audience');
 const { resolveCurrentPeriod } = require('./academic-config');
 
 const router    = express.Router();
@@ -567,12 +568,15 @@ router.get('/inbox', authMiddleware, async (req, res) => {
         { schoolId, senderId: userId },
       ],
     }).sort({ createdAt: -1 }).limit(300)
-      .select('id senderId senderName senderRole recipients subject body isRead createdAt')
+      .select('id senderId senderName senderRole recipients subject body isRead createdAt groupId groupName')
       .lean();
 
     // A "thread" = (this teacher, one counterpart). The counterpart is the
     // other party of each message: when I sent it, the recipient; when
-    // received, the sender. Group by that id.
+    // received, the sender. Group by that id. A message to several people is
+    // one document, so it pairs with the first recipient — recipientSummary()
+    // travels with the row so the app can say so instead of implying a
+    // private chat.
     const counterpartOf = (msg) => {
       if (msg.senderId === userId) {
         const other = (msg.recipients || []).find((r) => r !== userId && r !== 'all');
@@ -599,6 +603,7 @@ router.get('/inbox', authMiddleware, async (req, res) => {
           preview: String(msg.body || '').slice(0, 120),
           lastAt: at,
           unread,
+          ...recipientSummary(msg),
         });
       } else {
         existing.unread += unread;
@@ -606,6 +611,7 @@ router.get('/inbox', authMiddleware, async (req, res) => {
           existing.subject = msg.subject || existing.subject;
           existing.preview = String(msg.body || '').slice(0, 120);
           existing.lastAt = at;
+          Object.assign(existing, recipientSummary(msg));
         }
         if (!existing.name && counterpart.name) {
           existing.name = counterpart.name;
