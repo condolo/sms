@@ -6,6 +6,21 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.231.0] - 2026-10-28 - fix(student-portal): a transient null session could crash the whole Student Dashboard with "Unexpected Application Error"
+
+Reported directly, with a screenshot: "Cannot read properties of null (reading 'user')" appeared on the Student Dashboard, then disappeared on reload — a classic symptom of a brief window where the auth store's `session` is `null` (e.g. right as a stale/expired session is cleared) while the page is still mounted.
+
+**Root cause:** `StudentDashboard.jsx` reads `session` from the auth store and guards every other access with `session?.…` — except one: `<NotificationBell myUserId={session.user?.id} …>`, which dereferences `session` directly with no optional chaining. On any render where `session` is `null` (the exact state the component's own auth-guard `useEffect` checks for and redirects away from, one render tick too late to stop this line from throwing first), this line throws and the error boundary takes down the whole page — "disappeared when i reload" because by the time the page reloads, `session` has settled back to a real value (or the user is bounced to `/login` instead).
+
+**Fixed:** `session.user?.id` → `session?.user?.id`, matching the pattern already used correctly everywhere else in this same file, and in `ParentDashboard.jsx`'s identical `NotificationBell` usage (`session?.user?.id`) — this file was the one outlier.
+
+### Files
+- `client/src/pages/student-portal/StudentDashboard.jsx` — one-line optional-chaining fix.
+
+### Verified
+- `vite build` succeeds with no errors.
+- No other occurrence of this pattern (`session.user` without `session?.`) anywhere else in the file or in the Parent/Teacher dashboards' own `NotificationBell` usage.
+
 ## [v5.230.0] - 2026-10-28 - fix(report-cards): admin's Print (HTML) output still used the pre-RCE8 design — finally matches what parents/students actually download
 
 Reported directly, with a side-by-side comparison of two PDFs for the same published report card (same Report ID, same batch, same scores): the admin's "Print" button produced a visibly different document from the parent portal's "Download PDF" button — "what is in the school account is what we are pushing to any account, parent and student... we need to address this once and for all."

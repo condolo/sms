@@ -594,7 +594,7 @@ export default function StudentDashboard() {
           <span id="topbar-term-badge" className="hidden sm:inline text-[12px] font-medium text-slate-500 bg-slate-100 px-3 py-1 rounded-full whitespace-nowrap">
             {termLabel}
           </span>
-          <NotificationBell myUserId={session.user?.id} onSelect={() => scrollToSection('section-messages')} />
+          <NotificationBell myUserId={session?.user?.id} onSelect={() => scrollToSection('section-messages')} />
           <div className="flex items-center gap-2 w-full sm:w-auto order-last sm:order-none">
             <button
               id="btn-report-card"
