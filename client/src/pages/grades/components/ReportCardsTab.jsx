@@ -130,9 +130,19 @@ export default function ReportCardsTab() {
 
   /* ── Data queries ─────────────────────────────────────── */
 
+  // Reported directly, with a live comparison: a teacher with no
+  // assignment to a class at all could still pick it from this dropdown,
+  // land on a misleading "Not published" banner for a class actually
+  // published weeks ago (the snapshots list below is correctly scoped
+  // server-side via ScopeEngine, so it just came back empty for them —
+  // the dropdown was the one thing in this tab that wasn't). Same
+  // assignedOnly=true fix already applied to ExamsPage's/GrowthProfile's
+  // own class pickers — reuses ScopeEngine.resolveClassPickerScope via
+  // classes.js's existing opt-in flag, a no-op for admin/principal-tier
+  // callers, correctly narrowing anyone else to classes they actually teach.
   const { data: classesData } = useQuery({
-    queryKey: ['classes', 'list'],
-    queryFn:  () => classesApi.list({ limit: 200, status: 'active' }),
+    queryKey: ['classes', 'assignedOnly', 'active'],
+    queryFn:  () => classesApi.list({ limit: 200, status: 'active', assignedOnly: true }),
     staleTime: 5 * 60_000,
   });
   const classesList = classesData?.data ?? [];

@@ -6,6 +6,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.232.0] - 2026-10-28 - fix(report-cards): any teacher, including one with zero assignments, could pick ANY class in the school from the Generate & Publish class dropdown
+
+Reported directly, logged in as a demo teacher with no teaching assignments at all: Report Cards → Generate & Publish's Class dropdown offered every class in the school, including Year 5 — a class this account has no connection to whatsoever — and selecting it showed "Not published... Marks and comments are still editable," even though Year 5 was genuinely published (and re-published) earlier that same day. "Am I assigned class teacher or all teachers see all report card module?"
+
+**Confirmed: no data leak, but a real, misleading gap.** The underlying data calls are already correctly scoped: `GET /api/report-cards` (the snapshots list behind the "Published"/"Not published" banner) applies `ScopeEngine.applyToFilter(req, 'report_cards', filter)` — for this zero-assignment teacher it correctly returns nothing. `POST /generate` filters per-student through `viewReportFor`, which returns `null` for any student whose subjects this teacher doesn't teach — also correctly empty. The one thing that was NOT scoped: `ReportCardsTab.jsx`'s own Class dropdown, which called `classesApi.list({ limit: 200, status: 'active' })` with no `assignedOnly` flag — `classes.js`'s own header comment is explicit that this is opt-in: *"Every other consumer that never passes the flag sees exactly the same unrestricted list it always has."* `ExamsPage.jsx` and `GrowthProfilePage.jsx` already opted in (`assignedOnly: true`) when they hit the identical problem; Report Cards' picker never did.
+
+The practical effect: a teacher could select a class they have zero connection to, and land on a banner that reads exactly like genuinely-unpublished, editable data ("Not published... still editable") instead of "you don't have access to this class" — actively misleading, not just permissive.
+
+**Fixed:** `ReportCardsTab.jsx`'s class query now passes `assignedOnly: true`, same fix already applied to `ExamsPage.jsx`/`GrowthProfilePage.jsx` — reuses `ScopeEngine.resolveClassPickerScope` via `classes.js`'s existing opt-in flag; a no-op for admin/principal-tier roles, and correctly narrows everyone else to classes they actually teach or are the form tutor of. No server change needed — the scoping mechanism already existed, this tab just never asked for it.
+
+**Noted, not fixed here — a narrower, separate follow-up:** once `classId` is scoped to classes the teacher is genuinely connected to, the Stream dropdown and student list within a multi-stream class are not further narrowed to just the teacher's own stream (a stream-only assignment deliberately doesn't contribute to `scope.classIds`, per `scopeMiddleware`'s own documented reasoning) — a teacher who teaches only one stream of a class could still see the other stream's students listed (though, per `viewReportFor`, still only the subjects they teach, never full totals/rankings/other subjects). Flagging this because it's the same bug *class*, just one level down; a decision on whether to carry `assignedOnly`'s narrowing into the stream level too.
+
+### Files
+- `client/src/pages/grades/components/ReportCardsTab.jsx` — class picker query now passes `assignedOnly: true`.
+
+### Verified
+- `vite build` succeeds with no errors.
+- Confirmed directly against live Trinitas data: the reported account (`ndolocollins@gmail.com`, role `teacher`, zero `teaching_assignments`) has no `classTeacherId`/stream assignment anywhere in the school.
+
 ## [v5.231.0] - 2026-10-28 - fix(student-portal): a transient null session could crash the whole Student Dashboard with "Unexpected Application Error"
 
 Reported directly, with a screenshot: "Cannot read properties of null (reading 'user')" appeared on the Student Dashboard, then disappeared on reload — a classic symptom of a brief window where the auth store's `session` is `null` (e.g. right as a stale/expired session is cleared) while the page is still mounted.
