@@ -17,20 +17,11 @@ const { enqueueBatch } = require('../utils/email-queue');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { schoolLoginUrl } = require('../utils/school-url');
 const { _model } = require('../utils/model');
+const { ROLE_GROUPS, AUDIENCE_KEYS, namedRecipients, recipientSummary } = require('../utils/message-audience');
 
 const router = express.Router();
 router.use(authMiddleware, tenantMiddleware, moduleGate('messages'));
 
-
-/* ── Role → recipient group mapping ─────────────────────── */
-const ROLE_GROUPS = {
-  teachers: ['teacher', 'section_head', 'deputy_principal'],
-  parents:  ['parent', 'guardian'],
-  students: ['student'],
-  staff:    ['teacher', 'section_head', 'deputy_principal', 'principal', 'hr',
-             'admissions_officer', 'finance', 'exams_officer', 'timetabler',
-             'discipline_committee'],
-};
 
 /* Portal roles: they may only message staff directly (never another
    parent/student they were not explicitly linked to), and they cannot
@@ -361,34 +352,30 @@ router.get('/', rbac('messages', 'read'), async (req, res) => {
        message looked identical to a one-person one. Resolve those ids to
        name/role once for the whole page, and expose a stable
        recipientUsers array the compose/detail UI can render as chips. */
-    const directIds = [...new Set(msgs.flatMap(m =>
-      (m.recipients ?? []).filter(r => r !== 'all' && !ROLE_GROUPS[r]),
-    ))];
-    if (directIds.length) {
-      const User = tenantModel('users', tenantContext(req));
-      const users = await User.find({ id: { $in: directIds } }).select('id name role isActive').lean();
-      const byId = Object.fromEntries(users.map(u => [u.id, u]));
-      msgs.forEach(m => {
-        m.recipientUsers = (m.recipients ?? [])
-          .filter(r => r !== 'all' && !ROLE_GROUPS[r])
-          .map(id => ({
-            id,
-            name: byId[id]?.name ?? 'Removed user',
-            role: byId[id]?.role ?? '',
-            roleLabel: _roleLabel(byId[id]?.role),
-            isActive: byId[id]?.isActive !== false,
-          }));
-        m.recipientCount = (m.recipients ?? [])
-          .filter(r => r !== 'all' && !ROLE_GROUPS[r]).length;
-        m.isGroup = !!m.groupId;
+    const directIds = [...new Set(msgs.flatMap(m => namedRecipients(m)))];
+    const byId = directIds.length
+      ? Object.fromEntries(
+          (await tenantModel('users', tenantContext(req))
+            .find({ id: { $in: directIds } }).select('id name role isActive').lean())
+            .map(u => [u.id, u]),
+        )
+      : {};
+    msgs.forEach(m => {
+      Object.assign(m, recipientSummary(m), {
+        recipientUsers: namedRecipients(m).map(id => ({
+          id,
+          name: byId[id]?.name ?? 'Removed user',
+          role: byId[id]?.role ?? '',
+          roleLabel: _roleLabel(byId[id]?.role),
+          isActive: byId[id]?.isActive !== false,
+        })),
+        /* The web badge means "went out via a saved group" specifically, and
+           a plain multi-person send is labelled there from recipientCount;
+           `multiRecipient` is the wider question the portal/mobile rows ask —
+           three people is multi-person even when no group exists. */
+        isGroup: Boolean(m.groupId),
       });
-    } else {
-      msgs.forEach(m => {
-        m.recipientUsers = [];
-        m.recipientCount = 0;
-        m.isGroup = !!m.groupId;
-      });
-    }
+    });
 
     res.json({
       data: msgs,
@@ -447,7 +434,7 @@ router.post('/', rbac('messages', 'create'), async (req, res) => {
       if (!recipientList.length) {
         return res.status(400).json({ error: 'Choose an audience for the announcement.' });
       }
-      const invalid = recipientList.find(r => r !== 'all' && !ROLE_GROUPS[r]);
+      const invalid = recipientList.find(r => !AUDIENCE_KEYS.has(r));
       if (invalid) {
         return res.status(400).json({ error: `Unknown audience "${invalid}". Choose Everyone, Teachers, Parents, Students, or Staff.` });
       }
