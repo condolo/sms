@@ -60,7 +60,11 @@ let mockEnqueued;
 jest.mock('../../middleware/auth', () => ({
   authMiddleware: (req, _res, next) => { req.jwtUser = mockCurrentUser; next(); },
 }));
-jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => next() }));
+let mockHasExplicitSubGrant;
+jest.mock('../../middleware/rbac', () => ({
+  rbac: () => (_req, _res, next) => next(),
+  hasExplicitSubGrant: (...args) => mockHasExplicitSubGrant(...args),
+}));
 jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) => next() }));
 jest.mock('../../utils/model', () => ({ _model: jest.fn((col) => mockStores[col]) }));
 
@@ -90,6 +94,10 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockEnqueued = [];
   mockCurrentUser = { userId: 'u_admin', schoolId: SCHOOL, role: 'admin', roles: [], email: 'a@x.io' };
+  // Default: no explicit grant — existing "non-admin/principal cannot
+  // unlock" coverage keeps exercising the real floor-only path. Tests
+  // for the explicit-grant case override this per-test.
+  mockHasExplicitSubGrant = jest.fn(() => Promise.resolve(false));
   mockStores = {
     mark_submissions:  makeStore([{ id: 'sub_1', schoolId: SCHOOL, status: 'locked', unlockRequestStatus: null, ...SUB_FILTER }]),
     assessment_marks:  makeStore([]),
@@ -126,6 +134,53 @@ describe('legacy schools (no marks_unlock config) — unchanged behavior', () =>
     expect(mockEnqueued).toHaveLength(1);
     expect(mockEnqueued[0].type).toBe('marks_relock');
     expect(mockEnqueued[0].runAt.getTime()).toBeGreaterThan(Date.now() + 23 * 60 * 60 * 1000);
+  });
+});
+
+/* Reported directly 2026-10-28: "be flexible enough that even another
+   user like exam office can unlock if given the rights" — unlock, lock,
+   and reject-unlock-request each independently hardcoded ['admin',
+   'principal'] with no path for any other role, even one explicitly
+   granted grades→mark_submissions ("Review / Approve Mark Submissions")
+   in Settings. Fixed by routing all three through the same _isReviewer
+   check POST /:id/review already used. */
+describe('a role with an explicit grades→mark_submissions grant (e.g. exams_officer) — not just admin/principal', () => {
+  test('can unlock, with no workflow configured', async () => {
+    const app = buildApp();
+    mockCurrentUser = { userId: 'u_examsofficer', schoolId: SCHOOL, role: 'exams_officer', roles: [] };
+    mockHasExplicitSubGrant = jest.fn(() => Promise.resolve(true));
+    const res = await supertest(app).post('/api/mark-submissions/sub_1/unlock').send({ reason: 'correcting a transposed mark' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('approved');
+    expect(mockHasExplicitSubGrant).toHaveBeenCalledWith(expect.anything(), 'grades', 'mark_submissions', 'update');
+  });
+
+  test('without the grant, the same role is still forbidden', async () => {
+    const app = buildApp();
+    mockCurrentUser = { userId: 'u_examsofficer', schoolId: SCHOOL, role: 'exams_officer', roles: [] };
+    mockHasExplicitSubGrant = jest.fn(() => Promise.resolve(false));
+    const res = await supertest(app).post('/api/mark-submissions/sub_1/unlock').send({ reason: 'x' });
+    expect(res.status).toBe(403);
+  });
+
+  test('can lock an approved (unlocked) submission', async () => {
+    mockStores.mark_submissions = makeStore([{ id: 'sub_2', schoolId: SCHOOL, status: 'approved', unlockRequestStatus: null, ...SUB_FILTER }]);
+    const app = buildApp();
+    mockCurrentUser = { userId: 'u_examsofficer', schoolId: SCHOOL, role: 'exams_officer', roles: [] };
+    mockHasExplicitSubGrant = jest.fn(() => Promise.resolve(true));
+    const res = await supertest(app).post('/api/mark-submissions/sub_2/lock');
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('locked');
+  });
+
+  test('can reject a pending unlock request', async () => {
+    mockStores.mark_submissions = makeStore([{ id: 'sub_3', schoolId: SCHOOL, status: 'locked', unlockRequestStatus: 'pending', unlockRequestedBy: 'u_teacher', ...SUB_FILTER }]);
+    const app = buildApp();
+    mockCurrentUser = { userId: 'u_examsofficer', schoolId: SCHOOL, role: 'exams_officer', roles: [] };
+    mockHasExplicitSubGrant = jest.fn(() => Promise.resolve(true));
+    const res = await supertest(app).post('/api/mark-submissions/sub_3/reject-unlock-request').send({ reason: 'not justified' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.unlockRequestStatus).toBe('rejected');
   });
 });
 

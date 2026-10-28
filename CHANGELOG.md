@@ -6,6 +6,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.228.0] - 2026-10-28 - feat(grades): the post-publish mark-unlock capability can now be granted to any role, not just admin/principal — and actually reaches its own UI tab
+
+Reported directly: "recall, when report card is published, the marks are automatically locked... now, in the configuration is still showing open... how is this redone?" — followed by the explicit build request: "build it, though be flexible enough that even another user like exam office can unlock if given the rights."
+
+**Clarified first, no code involved:** the Assessment Schedule config screen's "Status: On" tracks a separate, independent lock — a manual toggle on the *schedule entry itself* (`assessment_schedule.isLocked`), unaffected by publishing. The lock that actually matters here is the automatic per-mark one `report-cards.js` sets on every `assessment_marks` document the moment its report card is published — two different mechanisms by design, not a bug.
+
+**What already existed, found by tracing the real "how is this redone" question instead of assuming nothing was built:** a complete, working "Locked Marks" moderation UI (`ExamsPage.jsx`'s "Review" tab) and backend (`mark-submissions.js`'s `POST /:id/unlock`, with an optional configurable-approver workflow, full audit logging, and a 24-hour auto-relock safety net) already existed — likely from the same 2026-10-26 permission audit that fixed `/:id/review`'s own gating. Two real gaps kept it from reaching anyone outside a hardcoded admin/principal pair:
+
+1. **Client bug:** the Review tab's own *visibility* was already correctly gated by `canReviewSubmissions` (role floor + an explicit `grades.mark_submissions` grant) — but its *content* render was still gated by the old `canCreate` (a hardcoded exam-creation role list with no relation to review rights). A role granted the review permission could see the tab appear and click it, and nothing would render.
+2. **Server gap:** `POST /:id/unlock`, `POST /:id/lock`, and `POST /:id/reject-unlock-request` each independently hardcoded `['admin', 'principal']` with no path to the explicit grant at all — unlike `POST /:id/review`, which already used it. `GET /` and `GET /:id` (the queue itself) also only ever bypassed their per-subject teaching-scope narrowing for management-tier roles — a granted-but-non-teaching exams_officer would see an empty queue despite having real rights to act on it.
+
+**Fix:** one shared `_isReviewer(req)` check (admin/principal/section_head, or an explicit `grades.mark_submissions` grant via Settings → Roles & Permissions — the same sub-permission `/:id/review` already used, reused everywhere rather than invented again) now gates all five routes identically, plus the scope-widening on the two GET routes. Client: the Review tab's content render now checks the same `canReviewSubmissions` its own tab-visibility already did.
+
+**Not touched, deliberately — no data in the system was altered:** this is a pure permission-check and client-gating fix. No `mark_submissions`, `assessment_marks`, or report-card data was read-written beyond what each route already did; no migration, no backfill. Tenancy unaffected — every query already scoped by `schoolId` via `tenantModel`, unchanged.
+
+**How to grant it:** Settings → Roles & Permissions → Grades & Marks → "Review / Approve Mark Submissions", ticked for any role (e.g. Exams Officer) or a specific person. That one grant now covers reviewing, locking, unlocking, and rejecting an unlock request — the same separation-of-duties posture `/:id/review` already established (no coarse `grades:update` fallback — a teacher who can edit their own marks does not automatically gain reviewer authority).
+
+Tests: 4 new cases in `mark-submissions-unlock-workflow.test.js` (an exams_officer with the grant can unlock/lock/reject-unlock-request; without it, still forbidden) and 6 new cases in `mark-submissions-review-permission.test.js` against the real RBAC-resolution path (not a mocked boolean) — covering the same three routes plus `GET /`'s queue-visibility widening. Found and fixed a latent bug in that test file's own harness while writing these: `rbac.js` caches resolved permissions per `(schoolId, role)` in memory, and the file never invalidated it between tests — a later test reusing the same role could silently inherit an earlier test's grant. Full suite: 367 suites / 3909 tests pass.
+
 ## [v5.227.0] - 2026-10-28 - data-incident: Mascit's own `id` backfill (v5.220.0) broke every class/stream picker at that school — reverted, no code change
 
 Reported directly: "at mascit, classes and streams are not appearing... anywhere in the system where class or stream is supposed to be selected/filtered... I hope its not global." Confirmed real, confirmed caused by this session's own earlier work, confirmed isolated to Mascit alone — not global.

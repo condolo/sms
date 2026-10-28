@@ -142,6 +142,27 @@ function _validate(schema, data) {
   return { data: r.data };
 }
 
+/* Reviewer floor — admin/principal/section_head unconditionally, plus any
+   role explicitly granted grades→mark_submissions ("Review / Approve Mark
+   Submissions") in Settings → Roles & Permissions. hasExplicitSubGrant has
+   no coarse fallback, same reason POST /:id/review already uses it: a
+   plain grades:update holder (any teacher editing their own marks) must
+   never gain reviewer authority as a side effect.
+
+   Reported directly 2026-10-28: "be flexible enough that even another
+   user like exam office can unlock if given the rights" — unlock, lock,
+   and reject-unlock-request each independently hardcoded ['admin',
+   'principal'] with no way for a granted role to reach them at all,
+   while POST /:id/review and the client's own tab-visibility check
+   (ExamsPage.jsx's canReviewSubmissions) already used this exact grant.
+   One shared check now, reused everywhere a "may moderate" decision is
+   made, so the four actions can never drift apart again. */
+async function _isReviewer(req) {
+  const role = req.jwtUser?.role;
+  if (['admin', 'principal', 'section_head'].includes(role)) return true;
+  return hasExplicitSubGrant(req, 'grades', 'mark_submissions', 'update');
+}
+
 /* ── GET /api/mark-submissions ──────────────────────────── */
 router.get('/', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), async (req, res) => {
   try {
@@ -163,8 +184,15 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), async (re
     // Same rule the mark guards use: this stream's submissions, plus legacy whole-class ones.
     if (req.query.streamId)       filter.streamId       = { $in: [req.query.streamId, null] };
 
-    // Submissions carry marks snapshots: only the subjects this caller teaches.
-    await restrictToTaught(req, filter);
+    // Submissions carry marks snapshots: only the subjects this caller
+    // teaches — UNLESS they're a reviewer (ExamsPage.jsx's "Review" tab,
+    // the moderation queue). A reviewer, e.g. an exams_officer who
+    // teaches nothing at all, must see every locked submission awaiting
+    // a decision, not just ones for subjects they personally teach —
+    // restrictToTaught's own management-only bypass doesn't cover that
+    // role, and section_head (already trusted by POST /:id/review) isn't
+    // in teaching-scope.js's MANAGEMENT_ROLES either.
+    if (!(await _isReviewer(req))) await restrictToTaught(req, filter);
     const docs = await tenantModel('mark_submissions', tenantContext(req))
       .find(filter)
       .sort({ createdAt: -1 })
@@ -183,9 +211,12 @@ router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), async 
     const { schoolId } = req.jwtUser;
     const doc = await tenantModel('mark_submissions', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!doc) return E.notFound(res, 'Submission not found');
-    const pairs = await taughtPairs(req);
-    if (pairs && !pairs.some(p => p.classId === doc.classId && p.subjectId === doc.subjectId && (!p.streamId || !doc.streamId || p.streamId === doc.streamId))) {
-      return E.forbidden(res, 'You do not teach this subject in this class.');
+    // Same reviewer bypass as GET / above.
+    if (!(await _isReviewer(req))) {
+      const pairs = await taughtPairs(req);
+      if (pairs && !pairs.some(p => p.classId === doc.classId && p.subjectId === doc.subjectId && (!p.streamId || !doc.streamId || p.streamId === doc.streamId))) {
+        return E.forbidden(res, 'You do not teach this subject in this class.');
+      }
     }
     return ok(res, doc);
   } catch (err) {
@@ -354,7 +385,7 @@ router.post('/:id/recall', authMiddleware, PLAN, MODGATE, rbac('grades', 'update
 /* ── POST /api/mark-submissions/:id/review  (admin/section head reviews) */
 router.post('/:id/review', authMiddleware, PLAN, MODGATE, rbac('grades', 'update'), async (req, res) => {
   try {
-    const { schoolId, userId, role } = req.jwtUser;
+    const { schoolId, userId } = req.jwtUser;
     // Permission Granularity Plan 2026-09, Priority 0 — this was an
     // unconditional hardcoded role list, invisible to and unconfigurable
     // from Settings (a BYPASS finding — found while implementing this
@@ -366,8 +397,7 @@ router.post('/:id/review', authMiddleware, PLAN, MODGATE, rbac('grades', 'update
     // back to plain grades:update would hand reviewer authority to any
     // teacher who can edit their own marks — the exact separation of
     // duties this permission exists to enforce.
-    const isFloorRole = ['admin', 'principal', 'section_head'].includes(role);
-    if (!isFloorRole && !(await hasExplicitSubGrant(req, 'grades', 'mark_submissions', 'update'))) {
+    if (!(await _isReviewer(req))) {
       return E.forbidden(res, 'Only admins, principals, section heads, or explicitly granted reviewers can review submissions.');
     }
     const { data, error } = _validate(ReviewSchema, req.body);
@@ -537,8 +567,12 @@ router.post('/:id/reject-unlock-request', authMiddleware, PLAN, MODGATE, rbac('g
       if (!eligible.some(u => u.id === userId)) {
         return res.status(403).json({ error: 'You are not the configured approver for unlock requests.' });
       }
-    } else if (!['admin', 'principal'].includes(role)) {
-      return E.forbidden(res, 'Only admins and principals can decide unlock requests.');
+    // No workflow configured (the default — no Settings UI writes one
+    // today): fall back to the same reviewer floor as POST /:id/review
+    // and POST /:id/unlock, not just a hardcoded admin/principal pair —
+    // see _isReviewer's own comment for the full reasoning.
+    } else if (!(await _isReviewer(req))) {
+      return E.forbidden(res, 'Only admins, principals, section heads, or explicitly granted reviewers can decide unlock requests.');
     }
 
     const doc = await Sub.findOneAndUpdate(
@@ -560,12 +594,17 @@ router.post('/:id/reject-unlock-request', authMiddleware, PLAN, MODGATE, rbac('g
   }
 });
 
-/* ── POST /api/mark-submissions/:id/lock  (system — called by report-cards publish) */
+/* ── POST /api/mark-submissions/:id/lock (re-lock after a correction —
+   the automatic lock at publish writes 'locked' directly via
+   report-cards.js's _lockSubmissionCombos, not through this HTTP route;
+   this is the manual re-lock an admin/reviewer clicks once a correction
+   made after an unlock is saved, same ReviewTab.jsx "Lock" button that
+   calls it for an 'approved' — i.e. unlocked — submission.) ── */
 router.post('/:id/lock', authMiddleware, PLAN, MODGATE, rbac('grades', 'update'), async (req, res) => {
   try {
-    const { schoolId, userId, role } = req.jwtUser;
-    if (!['admin', 'principal'].includes(role)) {
-      return E.forbidden(res, 'Only admins and principals can lock submissions.');
+    const { schoolId, userId } = req.jwtUser;
+    if (!(await _isReviewer(req))) {
+      return E.forbidden(res, 'Only admins, principals, section heads, or explicitly granted reviewers can lock submissions.');
     }
     const sub = await tenantModel('mark_submissions', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!sub) return E.notFound(res, 'Submission not found');
@@ -627,8 +666,12 @@ router.post('/:id/unlock', authMiddleware, PLAN, MODGATE, rbac('grades', 'update
         return res.status(403).json({ error: 'You are not the configured approver for unlock requests.' });
       }
       reason = (reason && reason.trim()) || sub.unlockRequestReason;
-    } else if (!['admin', 'principal'].includes(role)) {
-      return E.forbidden(res, 'Only admins and principals can unlock submissions.');
+    // No workflow configured (the default today — see _isReviewer's own
+    // comment): fall back to the shared reviewer floor, not a hardcoded
+    // admin/principal pair — this is the exact route ExamsPage.jsx's
+    // ReviewTab "Unlock" button already calls directly for every school.
+    } else if (!(await _isReviewer(req))) {
+      return E.forbidden(res, 'Only admins, principals, section heads, or explicitly granted reviewers can unlock submissions.');
     }
 
     if (!reason || !reason.trim()) {

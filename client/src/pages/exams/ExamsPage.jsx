@@ -171,7 +171,7 @@ export default function ExamsPage() {
               <MarkListTab years={years} />
             </motion.div>
           )}
-          {tab === 'review' && canCreate && (
+          {tab === 'review' && canReviewSubmissions && (
             <ReviewTab key="review" years={years} />
           )}
           {tab === 'reminders' && (

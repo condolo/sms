@@ -38,31 +38,64 @@ jest.mock('../../middleware/auth', () => ({
 const SCHOOL = 'sch_test';
 
 function mockMatchFilter(doc, filter) {
-  return Object.entries(filter || {}).every(([k, v]) => doc[k] === v);
+  return Object.entries(filter || {}).every(([k, v]) => {
+    if (k === '$and') return v.every((sub) => mockMatchFilter(doc, sub));
+    if (k === '$or')  return v.some((sub) => mockMatchFilter(doc, sub));
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      return Object.entries(v).every(([op, opVal]) => {
+        switch (op) {
+          case '$in':  return opVal.includes(doc[k]);
+          case '$nin': return !opVal.includes(doc[k]);
+          case '$ne':  return doc[k] !== opVal;
+          default: return true;
+        }
+      });
+    }
+    return doc[k] === v;
+  });
 }
 let mockRolePermsDocs;
 let mockSubmissionDocs;
 function mockChain(result) { return { lean: () => Promise.resolve(result) }; }
+function mockListChain(result) {
+  return { sort: () => mockListChain(result), limit: () => mockListChain(result), select: () => mockListChain(result), lean: () => Promise.resolve(result) };
+}
 jest.mock('../../utils/model', () => ({
   _model: jest.fn((collection) => {
     if (collection === 'role_permissions') {
       return { findOne: (filter) => mockChain(mockRolePermsDocs.find((d) => mockMatchFilter(d, filter)) ?? null) };
     }
-    return { findOne: () => mockChain(null), find: () => mockChain([]) };
+    return { findOne: () => mockChain(null), find: () => mockListChain([]) };
   }),
 }));
+function mockFindOneAndUpdate(docs, filter, update) {
+  const doc = docs.find((d) => mockMatchFilter(d, filter));
+  if (doc && update.$set) Object.assign(doc, update.$set);
+  return { lean: () => Promise.resolve(doc ? { ...doc } : null) };
+}
 jest.mock('../../utils/tenant-model', () => ({
   tenantModel: jest.fn((collection) => {
     if (collection === 'mark_submissions') {
-      return { findOne: (filter) => mockChain(mockSubmissionDocs.find((d) => mockMatchFilter(d, filter)) ?? null) };
+      return {
+        findOne:          (filter) => mockChain(mockSubmissionDocs.find((d) => mockMatchFilter(d, filter)) ?? null),
+        find:             (filter) => mockListChain(mockSubmissionDocs.filter((d) => mockMatchFilter(d, filter))),
+        findOneAndUpdate: (filter, update) => mockFindOneAndUpdate(mockSubmissionDocs, filter, update),
+      };
     }
-    return { findOne: () => mockChain(null), find: () => mockChain([]) };
+    if (collection === 'assessment_marks' || collection === 'indicator_marks') {
+      return { updateMany: jest.fn().mockResolvedValue({ modifiedCount: 0 }) };
+    }
+    // teaching_assignments / class_subjects (teaching-scope.js's taughtPairs,
+    // reached whenever a caller is NOT a reviewer) — empty, same as a real
+    // non-teaching exams_officer with no rows in either collection.
+    return { findOne: () => mockChain(null), find: () => mockListChain([]) };
   }),
   tenantContext: jest.fn((req) => ({ schoolId: req.jwtUser.schoolId })),
 }));
 
 const express   = require('express');
 const supertest = require('supertest');
+const { invalidatePermCache } = require('../../middleware/rbac');
 
 function buildApp() {
   const app = express();
@@ -73,6 +106,11 @@ function buildApp() {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  // rbac.js caches resolved permissions per (schoolId, role) in memory —
+  // without busting it here, a later test reusing the same role (e.g.
+  // every exams_officer test below shares SCHOOL) would silently see an
+  // earlier test's permissions instead of its own fresh mockRolePermsDocs.
+  invalidatePermCache(SCHOOL);
   mockRolePermsDocs = [];
   // A submission in 'submitted' status — required for /review to even
   // reach the point of returning something other than a 400. Not
@@ -113,5 +151,86 @@ describe('POST /api/mark-submissions/:id/review — permission gate', () => {
     ];
     const res = await supertest(buildApp()).post('/api/mark-submissions/sub_1/review').send({ action: 'approve' });
     expect(res.status).not.toBe(403);
+  });
+});
+
+/* Reported directly 2026-10-28: "be flexible enough that even another
+   user like exam office can unlock if given the rights" — unlock, lock,
+   and reject-unlock-request each independently hardcoded admin/principal
+   only, unlike /review which already used this exact grant. Same
+   real-RBAC harness as the /review tests above (role_permissions
+   resolved for real, not a mocked boolean), so this exercises the actual
+   permission-resolution path an exams_officer would hit in production. */
+describe('POST /:id/unlock, /:id/lock, /:id/reject-unlock-request — same grant as /review', () => {
+  beforeEach(() => {
+    mockSubmissionDocs = [
+      { id: 'sub_1', schoolId: SCHOOL, status: 'locked',   unlockRequestStatus: null,      classId: 'c1', subjectId: 's1', termNumber: 1, assessmentType: 'CA', instance: 1 },
+      { id: 'sub_2', schoolId: SCHOOL, status: 'approved', unlockRequestStatus: null,      classId: 'c1', subjectId: 's1', termNumber: 1, assessmentType: 'CA', instance: 1 },
+      { id: 'sub_3', schoolId: SCHOOL, status: 'locked',   unlockRequestStatus: 'pending', unlockRequestedBy: 'u_teacher', classId: 'c1', subjectId: 's1', termNumber: 1, assessmentType: 'CA', instance: 1 },
+    ];
+  });
+
+  test('a coarse grades:update teacher cannot unlock', async () => {
+    mockJwtUser = { userId: 'u_teacher', schoolId: SCHOOL, role: 'teacher', roles: ['teacher'] };
+    mockRolePermsDocs = [{ schoolId: SCHOOL, roleKey: 'teacher', permissions: { grades: ['read', 'create', 'update'] } }];
+    const res = await supertest(buildApp()).post('/api/mark-submissions/sub_1/unlock').send({ reason: 'x' });
+    expect(res.status).toBe(403);
+  });
+
+  test('an exams_officer explicitly granted grades.mark_submissions can unlock', async () => {
+    mockJwtUser = { userId: 'u_eo', schoolId: SCHOOL, role: 'exams_officer', roles: ['exams_officer'] };
+    mockRolePermsDocs = [{ schoolId: SCHOOL, roleKey: 'exams_officer', permissions: { grades: ['read', 'update'], grades__mark_submissions: ['update'] } }];
+    const res = await supertest(buildApp()).post('/api/mark-submissions/sub_1/unlock').send({ reason: 'correcting a transposed mark' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('approved');
+  });
+
+  test('the same grant also covers lock', async () => {
+    mockJwtUser = { userId: 'u_eo', schoolId: SCHOOL, role: 'exams_officer', roles: ['exams_officer'] };
+    // grades:update is the outer rbac('grades','update') gate every one
+    // of these routes sits behind — grades__mark_submissions alone would
+    // never even reach this route's own _isReviewer check.
+    mockRolePermsDocs = [{ schoolId: SCHOOL, roleKey: 'exams_officer', permissions: { grades: ['update'], grades__mark_submissions: ['update'] } }];
+    const res = await supertest(buildApp()).post('/api/mark-submissions/sub_2/lock');
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('locked');
+  });
+
+  test('the same grant also covers reject-unlock-request', async () => {
+    mockJwtUser = { userId: 'u_eo', schoolId: SCHOOL, role: 'exams_officer', roles: ['exams_officer'] };
+    mockRolePermsDocs = [{ schoolId: SCHOOL, roleKey: 'exams_officer', permissions: { grades: ['update'], grades__mark_submissions: ['update'] } }];
+    const res = await supertest(buildApp()).post('/api/mark-submissions/sub_3/reject-unlock-request').send({ reason: 'not justified' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.unlockRequestStatus).toBe('rejected');
+  });
+});
+
+/* GET / (the Review tab's moderation-queue list) — same class of gap:
+   restrictToTaught only ever bypassed for teaching-scope.js's own
+   MANAGEMENT_ROLES, which doesn't include exams_officer/section_head —
+   a granted exams_officer who teaches nothing would see an empty queue
+   despite having real rights to act on it. */
+describe('GET / — the moderation queue list sees everything for a granted reviewer', () => {
+  beforeEach(() => {
+    mockSubmissionDocs = [
+      { id: 'sub_1', schoolId: SCHOOL, status: 'locked', classId: 'c1', subjectId: 's1', termNumber: 1, assessmentType: 'CA', instance: 1 },
+    ];
+  });
+
+  test('a non-teaching exams_officer WITHOUT the grant sees an empty queue (unaffected, pre-existing behavior)', async () => {
+    mockJwtUser = { userId: 'u_eo', schoolId: SCHOOL, role: 'exams_officer', roles: ['exams_officer'] };
+    mockRolePermsDocs = [{ schoolId: SCHOOL, roleKey: 'exams_officer', permissions: { grades: ['read'] } }];
+    const res = await supertest(buildApp()).get('/api/mark-submissions');
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([]);
+  });
+
+  test('the same exams_officer WITH the grant sees every submission, not just ones they personally teach', async () => {
+    mockJwtUser = { userId: 'u_eo', schoolId: SCHOOL, role: 'exams_officer', roles: ['exams_officer'] };
+    mockRolePermsDocs = [{ schoolId: SCHOOL, roleKey: 'exams_officer', permissions: { grades: ['read'], grades__mark_submissions: ['update'] } }];
+    const res = await supertest(buildApp()).get('/api/mark-submissions');
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].id).toBe('sub_1');
   });
 });
