@@ -68,6 +68,25 @@ function mockCollection(seed = []) {
     findOne:        jest.fn(() => mockChain(seed[0] ?? null)),
     countDocuments: jest.fn((filter) => Promise.resolve(seed.filter(d => mockMatchesFilter(d, filter)).length)),
     distinct:       jest.fn((field, filter) => Promise.resolve([...new Set(seed.filter(d => mockMatchesFilter(d, filter)).map(d => d[field]))])),
+    /* The dashboard groups its per-subject counts server-side instead of
+       issuing countDocuments per subject, so the double must understand the
+       one pipeline shape it uses: $match then $group { _id: '$<field>',
+       n: { $sum: 1 } }. Enough to keep the tests honest about WHICH documents
+       each bucket counts, without reimplementing an aggregation engine. */
+    aggregate:      jest.fn((pipeline = []) => {
+      const match = pipeline.find(st => st.$match)?.$match;
+      const group = pipeline.find(st => st.$group)?.$group;
+      const rows  = match ? seed.filter(d => mockMatchesFilter(d, match)) : seed;
+      if (!group) return Promise.resolve(rows);
+      const field = String(group._id || '').replace(/^\$/, '');
+      const counts = new Map();
+      for (const d of rows) {
+        const key = d[field];
+        if (key === undefined) continue;
+        counts.set(key, (counts.get(key) || 0) + 1);
+      }
+      return Promise.resolve([...counts].map(([_id, n]) => ({ _id, n })));
+    }),
   };
 }
 
