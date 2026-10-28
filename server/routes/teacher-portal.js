@@ -13,6 +13,7 @@ const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { isTimetablePublished, publishedReader } = require('../utils/timetable-publish');
 const { ok, E }          = require('../utils/response');
 const { resolveTeacher } = require('../utils/resolveTeacher');
+const { _inboxQuery }   = require('./messages');
 const { resolveCurrentPeriod } = require('./academic-config');
 
 const router    = express.Router();
@@ -161,7 +162,7 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
       isActive: true,
       $or: [{ teacherId }, { teacherId: userId }],
     }).sort({ startTime: 1 })
-      .select('subject subjectId classId streamId startTime endTime room teacherName')
+      .select('subject subjectId classId streamId period periodNumber startTime endTime room teacherName')
       .lean();
 
     // 'timetable' stores only the FK ids (classId/streamId), not the
@@ -215,8 +216,39 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     for (const s of attendanceStatus) {
       attStatusMap[_slotKey(s.classId, s.streamId)] = s;
     }
-    const attendanceWidget = Object.values(attStatusMap);
-    const pendingCount     = attendanceWidget.filter(s => !s.submitted).length;
+    // ── (class, stream) detail from today's timetable, for the widget ──
+    // The attendance widget is keyed by (class, stream) only; the lesson's
+    // period/subject/time come from the teacher's timetable slot for that
+    // key. A (class, stream) can have several lessons in a day, so keep the
+    // EARLIEST lesson's details (matches the ".sort({ startTime: 1 })" the
+    // dashboard already relies on for ordering) rather than overwriting it.
+    const slotDetailByKey = {};
+    for (const slot of timetableToday) {
+      const k = _slotKey(slot.classId, slot.streamId);
+      if (!slotDetailByKey[k]) {
+        slotDetailByKey[k] = {
+          period:       slot.periodNumber ? String(slot.periodNumber) : (slot.period ?? ''),
+          subjectName:  slot.subject ?? null,
+          subjectId:    slot.subjectId ?? null,
+          startTime:    slot.startTime ?? null,
+        };
+      }
+    }
+
+    const attendanceWidget = Object.values(attStatusMap).map((s) => {
+      const detail = slotDetailByKey[_slotKey(s.classId, s.streamId)] ?? {};
+      return {
+        ...s,
+        period:       detail.period ?? '',
+        subjectName:  detail.subjectName ?? null,
+        subjectId:    detail.subjectId ?? null,
+        startTime:    detail.startTime ?? null,
+        // The app's TeacherHomeItem reads `registerTaken`; the widget's own
+        // field is `submitted`. Emit both so the two shapes stay in sync.
+        registerTaken: s.submitted,
+      };
+    });
+    const pendingCount     = attendanceWidget.filter(s => !s.registerTaken).length;
 
     // ── Classes info ─────────────────────────────────────────
     const [classDocs, subjectDocs] = await Promise.all([
@@ -508,6 +540,102 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     });
   } catch (err) {
     console.error('[teacher-portal GET /dashboard]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   GET /api/teacher-portal/inbox
+   The teacher's Messages tab. Same counterpart-pairing logic as the
+   parent portal's /inbox (a "thread" is the pair (this user, one
+   counterpart), not a stored document) — but gated on the teacher role
+   and resolving the role groups a teacher actually belongs to, so a
+   teacher sees office → teacher threads (and any parent → teacher
+   direct messages), not the parent-scoped view that 403s here.
+   ══════════════════════════════════════════════════════════════ */
+router.get('/inbox', authMiddleware, async (req, res) => {
+  if (!_requireTeacher(req, res)) return;
+  try {
+    const { schoolId, userId, role } = req.jwtUser;
+    const Msg = tenantModel('messages', tenantContext(req));
+
+    // Everything addressed to me (my role group or personally) plus
+    // everything I sent — the two halves of a conversation in one read.
+    const docs = await Msg.find({
+      $or: [
+        _inboxQuery({ schoolId, userId, role }),
+        { schoolId, senderId: userId },
+      ],
+    }).sort({ createdAt: -1 }).limit(300)
+      .select('id senderId senderName senderRole recipients subject body isRead createdAt')
+      .lean();
+
+    // A "thread" = (this teacher, one counterpart). The counterpart is the
+    // other party of each message: when I sent it, the recipient; when
+    // received, the sender. Group by that id.
+    const counterpartOf = (msg) => {
+      if (msg.senderId === userId) {
+        const other = (msg.recipients || []).find((r) => r !== userId && r !== 'all');
+        return other ? { userId: other, name: null, role: null, outboundOnly: true } : null;
+      }
+      return { userId: msg.senderId, name: msg.senderName || null, role: msg.senderRole || null };
+    };
+
+    const byCounterpart = new Map();
+    for (const msg of docs) {
+      const counterpart = counterpartOf(msg);
+      if (!counterpart?.userId) continue;
+      const key = counterpart.userId;
+      const existing = byCounterpart.get(key);
+      const at = msg.createdAt || '';
+      const unread = msg.senderId !== userId && !msg.isRead?.[userId] ? 1 : 0;
+
+      if (!existing) {
+        byCounterpart.set(key, {
+          counterpartUserId: key,
+          name: counterpart.name,
+          role: counterpart.role,
+          subject: msg.subject || '',
+          preview: String(msg.body || '').slice(0, 120),
+          lastAt: at,
+          unread,
+        });
+      } else {
+        existing.unread += unread;
+        if (at > existing.lastAt) {
+          existing.subject = msg.subject || existing.subject;
+          existing.preview = String(msg.body || '').slice(0, 120);
+          existing.lastAt = at;
+        }
+        if (!existing.name && counterpart.name) {
+          existing.name = counterpart.name;
+          existing.role = counterpart.role;
+        }
+      }
+    }
+
+    // Names for conversations where the teacher sent first (counterpart is a
+    // recipient id we have to resolve against users).
+    const missing = [...byCounterpart.values()].filter((t) => !t.name).map((t) => t.counterpartUserId);
+    if (missing.length) {
+      const users = await tenantModel('users', tenantContext(req))
+        .find({ schoolId, id: { $in: missing } }).select('id name role').lean().catch(() => []);
+      const byId = Object.fromEntries(users.map((u) => [u.id, u]));
+      for (const t of byCounterpart.values()) {
+        if (!t.name && byId[t.counterpartUserId]) {
+          t.name = byId[t.counterpartUserId].name || null;
+          t.role = byId[t.counterpartUserId].role || null;
+        }
+      }
+    }
+
+    return ok(res, {
+      threads: [...byCounterpart.values()]
+        .map((t) => ({ ...t, name: t.name || 'School office' }))
+        .sort((a, b) => (a.lastAt < b.lastAt ? 1 : -1)),
+    });
+  } catch (err) {
+    console.error('[teacher-portal GET /inbox]', err);
     return E.serverError(res);
   }
 });
