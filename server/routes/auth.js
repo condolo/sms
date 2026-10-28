@@ -217,6 +217,22 @@ function _attachExtraRoleFields(safeUser, tokenPayload) {
   return safeUser;
 }
 
+// The avatar is not on the `users` document — it lives in `user_photos`, which
+// is why the mobile app showed initials for everyone: the login/verify payload
+// never carried a URL for <Image> to load. Same lookup and same URL shape the
+// session-exchange route below already uses.
+async function _attachPhotoUrl(safeUser, schoolId) {
+  const uid = safeUser.id || safeUser._id?.toString();
+  const photo = uid
+    ? await tenantModel('user_photos', { schoolId })
+      .findOne({ userId: uid, schoolId }).lean().catch(() => null)
+    : null;
+  safeUser.photoUrl = photo
+    ? `/api/users/${uid}/photo?schoolId=${encodeURIComponent(schoolId)}`
+    : null;
+  return safeUser;
+}
+
 /**
  * Which schools can this identity actually log into, within one
  * organization? The single source of truth for "eligible schools" used
@@ -349,9 +365,10 @@ const loginIpLimiter = rateLimit({
 const SecurityService = require('../services/securityService');
 
 /* POST /api/auth/login
-   Body: { email, password }
+   Body: { email | identifier, password }
    Header: X-School-Slug: demo         (or resolved from subdomain by tenant middleware)
-   Returns: { token, user, school }
+   Returns: { token, user, school } — or, for platform: 'mobile', the same
+   payload inside { success, data } with no cookie (students sign in this way).
 */
 router.post('/login', loginIpLimiter, tenantMiddleware, async (req, res) => {
   try {
@@ -439,6 +456,15 @@ router.post('/login', loginIpLimiter, tenantMiddleware, async (req, res) => {
     // ── First-login forced change (new user temp password or admin reset) ──
     if (user.mustChangePassword || user.mustChangePwd) {
       SecurityService.clearFail(req.school.id, loginId).catch(() => {});
+      if (_isMobileClient(req)) {
+        return res.status(403).json({
+          success: false,
+          error: {
+            code: 'PASSWORD_EXPIRED',
+            message: 'Your administrator set a temporary password. Change it on the school website, then sign in here.',
+          },
+        });
+      }
       return res.json({
         passwordExpired: true,
         reason: 'first_login',
@@ -456,6 +482,15 @@ router.post('/login', loginIpLimiter, tenantMiddleware, async (req, res) => {
       SecurityService.clearFail(req.school.id, loginId).catch(() => {});
       // Send expiry email (non-blocking, deduplication by day)
       _checkPasswordExpiryAndNotify(user, req.school).catch(() => {});
+      if (_isMobileClient(req)) {
+        return res.status(403).json({
+          success: false,
+          error: {
+            code: 'PASSWORD_EXPIRED',
+            message: 'Your password has expired. Change it on the school website, then sign in here.',
+          },
+        });
+      }
       return res.json({
         passwordExpired: true,
         reason: 'expired',
@@ -525,6 +560,7 @@ router.post('/login', loginIpLimiter, tenantMiddleware, async (req, res) => {
 
     const safeUser = { ...user, password: undefined };
     _attachExtraRoleFields(safeUser, tokenPayload);
+    await _attachPhotoUrl(safeUser, req.school.id);
 
     // Attach merged role permissions so the client sidebar can filter correctly.
     // Merges across all roles the user holds (union of actions per module).
@@ -537,6 +573,13 @@ router.post('/login', loginIpLimiter, tenantMiddleware, async (req, res) => {
     const availableSchools = await _availableSchools(tokenPayload);
 
     SecurityService.clearFail(req.school.id, loginId).catch(() => {});
+    // The app presents platform: 'mobile' and gets the token in the body — no
+    // cookies, same contract as /otp/verify (see "Mobile sign-in" below). This
+    // is what lets students, who have no email on file, sign in by admission
+    // number.
+    if (_isMobileClient(req)) {
+      return res.json({ success: true, data: { token, user: safeUser, school: req.school, absoluteExpiry } });
+    }
     _setAuthCookie(res, token, absoluteExpiry);
     res.json({
       user: safeUser, school: req.school, absoluteExpiry, moduleRegistry: MODULE_REGISTRY,
@@ -603,6 +646,7 @@ router.post('/verify-otp', otpLimiter, tenantMiddleware, async (req, res) => {
     // Attach merged role permissions so sidebar filters correctly (same as regular login)
     const safeUser = { ...user, password: undefined, mfaOtp: undefined, mfaExpiry: undefined };
     _attachExtraRoleFields(safeUser, otpTokenPayload);
+    await _attachPhotoUrl(safeUser, user.schoolId);
     const otpAllRoles = Array.isArray(user.roles) && user.roles.length ? user.roles : [_otpUserRole];
     const otpMergedPerms = await _loadMergedPermissions(user.schoolId, otpAllRoles, user.id);
     if (otpMergedPerms !== null) safeUser.permissions = otpMergedPerms;
@@ -610,6 +654,14 @@ router.post('/verify-otp', otpLimiter, tenantMiddleware, async (req, res) => {
     const otpAvailableSchools = await _availableSchools(otpTokenPayload);
 
     _checkTrialAndNotify(school).catch(() => {});
+    // Mobile clients (the app) get the token in the body and NO cookies — see
+    // the "Mobile sign-in" section below for why that is also what keeps the
+    // CSRF double-submit check out of the app's way. Web keeps the HttpOnly
+    // cookie, and its JS still can never read the token.
+    if (_isMobileClient(req)) {
+      return res.json({ success: true, data: { token, user: safeUser, school, absoluteExpiry: otpAbsExpiry } });
+    }
+
     _setAuthCookie(res, token, otpAbsExpiry);
     res.json({
       user: safeUser, school, absoluteExpiry: otpAbsExpiry, moduleRegistry: MODULE_REGISTRY,
@@ -618,6 +670,317 @@ router.post('/verify-otp', otpLimiter, tenantMiddleware, async (req, res) => {
   } catch (err) {
     console.error('[auth/verify-otp]', err);
     res.status(500).json({ error: 'Verification failed' });
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   Mobile sign-in (app only) — PLAN.md §3
+
+   The app has three ways in:
+     POST /login         → admission number + password (students)
+     POST /otp/request   → a 6-digit code by email (parents, teachers)
+     POST /otp/verify    → that code, exchanged for a session
+     POST /mobile/google → a Firebase ID token from the device
+
+   Students have no email on file, so the email-code path cannot serve them;
+   /login answers a mobile caller with the token in the body instead of the
+   web's HttpOnly cookie. Three deliberate properties:
+
+   1. NO COOKIES, EVER. The token comes back in the response body and the app
+      keeps it in the device keystore. This is also why the app never trips
+      the CSRF double-submit check — utils/csrf.js passes a caller through
+      that presents no csrf_token cookie, and the app presents none. That
+      defence exists for cookie-authenticated browser requests; the app makes
+      none.
+   2. NO ACCOUNT ENUMERATION on the email-code path. Requesting a code answers
+      identically whether the email exists or not, and a wrong code fails like
+      an unknown email. A school's parent list is not something an
+      unauthenticated caller gets to probe. (The password path necessarily
+      confirms the pair matched — it is the school's own admission number, not
+      a directory.)
+   3. IDENTICAL CLAIMS. Sessions are built through the same
+      _buildTokenPayload → sign() path as web, so tv/itv/absoluteExpiry and
+      demo expiry behave the same. Revocation and demo lockout cannot drift
+      between the two clients.
+   ══════════════════════════════════════════════════════════════ */
+
+const { verifyIdToken: verifyFirebaseIdToken } = require('../utils/firebase');
+
+const LOGIN_OTP_TTL_MS = 10 * 60 * 1000;
+const LOGIN_OTP_MAX_ATTEMPTS = 5;
+const LOGIN_OTP_RESEND_MS = 60 * 1000;   // silent: no second email, identical answer
+const LOGIN_OTP_MAX_PER_HOUR = 5;        // silent: protects the parent's inbox
+const MFA_STEP_UP_TTL_MS = 5 * 60 * 1000;
+
+/* 150 per 15 min, NOT 20: an entire school sits behind one campus NAT IP, and
+   the whole point of the app is that every parent uses it — a parents' meeting
+   where 40 people request a code at once must not lock the school out. The
+   real abuse bounds are per-account (5 codes/hour, 5 verify attempts) and the
+   platform-wide authLimiter in index.js, exactly as on the web login. */
+const mobileAuthLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 150,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test',
+  keyGenerator: (req) => req.headers['cf-connecting-ip'] || req.ip,
+  message: { success: false, error: { code: 'RATE_LIMIT', message: 'Too many attempts. Please try again shortly.' } },
+});
+
+/** The app identifies itself so web behaviour can never change by accident. */
+function _isMobileClient(req) {
+  return req.body?.platform === 'mobile' || req.get('x-client-platform') === 'mobile';
+}
+
+function _maskEmail(value) {
+  return String(value || '').replace(/(.{2})(.*)(@.*)/, '$1***$3');
+}
+
+/**
+ * Second factor for privileged roles — the decision recorded in PLAN.md §3:
+ * Google and the email code are a FIRST factor only, and admin / deputy /
+ * principal / finance still complete a code sent to their inbox. Reuses the
+ * exact `mfaOtp` fields, `/verify-otp` endpoint and email the password flow
+ * already uses, so there is one step-up mechanism rather than two.
+ * Returns true when it has already answered the request.
+ */
+async function _stepUpIfRequired(req, res, user) {
+  const role = user.primaryRole || user.role;
+  const isDemo = !!req.school?.isDemo || req.school?.slug === 'demo';
+  if (isDemo || !MFA_ROLES.has(role) || user.mfaEnabled === false) return false;
+
+  const otp = _genOTP();
+  await tenantModel('users', { schoolId: req.school.id }).updateOne({ _id: user._id }, { $set: {
+    mfaOtp: _hashOTP(otp),
+    mfaExpiry: new Date(Date.now() + MFA_STEP_UP_TTL_MS).toISOString(),
+  } });
+
+  email.sendLoginOTP({
+    name: user.name,
+    email: user.email,
+    otp,
+    schoolName: req.school.name || req.school.slug,
+    schoolEmail: req.school.systemEmail || '',
+    schoolId: req.school.id,
+  }).catch(err => console.error('[2FA email]', err.message));
+
+  res.json({
+    success: true,
+    data: {
+      mfaRequired: true,
+      userId: user.id || user._id.toString(),
+      schoolId: req.school.id,
+      hint: `A 6-digit code has been sent to ${_maskEmail(user.email)}`,
+    },
+  });
+  return true;
+}
+
+/** Issue an app session: same claims as web, no cookies, token in the body. */
+async function _issueMobileSession(req, user, school, { deviceId = null, action } = {}) {
+  const role = user.primaryRole || user.role;
+  const userId = user.id || user._id.toString();
+
+  const { sessionId, absoluteExpiry } = await SessionService.createSession(
+    userId, school.id, role,
+    req.headers['cf-connecting-ip'] || req.ip,
+    req.headers['user-agent'] || '',
+  );
+
+  const tokenPayload = await _buildTokenPayload(user, school.id, school);
+  const token = sign({
+    ...tokenPayload,
+    sessionId,
+    absoluteExpiry,
+    platform: 'mobile',
+    ...(deviceId ? { deviceId } : {}),
+  });
+
+  await tenantModel('users', { schoolId: school.id }).updateOne(
+    { _id: user._id },
+    { $set: { lastLogin: new Date().toISOString() } },
+  );
+
+  AuditService.log({
+    action: action || 'auth.mobile.login',
+    actor: { userId, role, email: user.email },
+    schoolId: school.id,
+    req,
+  });
+
+  const safeUser = {
+    ...user,
+    password: undefined, mfaOtp: undefined, mfaExpiry: undefined,
+    loginOtp: undefined, loginOtpExpiry: undefined, loginOtpAttempts: undefined, loginOtpSends: undefined,
+  };
+  _attachExtraRoleFields(safeUser, tokenPayload);
+
+  return { token, user: safeUser, school, absoluteExpiry };
+}
+
+/* POST /api/auth/otp/request — email a sign-in code (app only) */
+router.post('/otp/request', mobileAuthLimiter, tenantMiddleware, async (req, res) => {
+  try {
+    const email_ = String(req.body?.email || '').trim().toLowerCase();
+    if (!email_) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Email required' } });
+    }
+
+    // Property 2: the same answer in every branch below.
+    const ok = { success: true, data: { sent: true, expiresInSeconds: LOGIN_OTP_TTL_MS / 1000 } };
+
+    const User = tenantModel('users', { schoolId: req.school.id });
+    const user = await User.findOne({ email: email_, schoolId: req.school.id }).lean();
+
+    if (!user || !user.isActive) {
+      AuditService.log({ action: 'auth.otp.request_unknown', actor: { userId: 'public', role: 'public', email: email_ }, schoolId: req.school.id, req });
+      return res.json(ok);
+    }
+
+    const lastSent = user.loginOtpSentAt ? new Date(user.loginOtpSentAt).getTime() : 0;
+    if (lastSent && Date.now() - lastSent < LOGIN_OTP_RESEND_MS) return res.json(ok);
+
+    const recentSends = Array.isArray(user.loginOtpSends)
+      ? user.loginOtpSends.filter(t => Date.now() - new Date(t).getTime() < 60 * 60 * 1000)
+      : [];
+    if (recentSends.length >= LOGIN_OTP_MAX_PER_HOUR) {
+      console.warn(`[auth/otp] ${email_} hit the ${LOGIN_OTP_MAX_PER_HOUR}-codes-per-hour limit — not sending another.`);
+      return res.json(ok);
+    }
+
+    const otp = _genOTP();
+    await User.updateOne({ _id: user._id }, { $set: {
+      loginOtp: _hashOTP(otp),
+      loginOtpExpiry: new Date(Date.now() + LOGIN_OTP_TTL_MS).toISOString(),
+      loginOtpAttempts: 0,
+      loginOtpSentAt: new Date().toISOString(),
+      loginOtpSends: [...recentSends, new Date().toISOString()],
+    } });
+
+    email.sendLoginOTP({
+      name: user.name,
+      email: user.email,
+      otp,
+      schoolName: req.school.name || req.school.slug,
+      schoolEmail: req.school.systemEmail || '',
+      schoolId: req.school.id,
+      ttlMinutes: LOGIN_OTP_TTL_MS / 60000,
+    }).catch(err => console.error('[auth/otp] send failed:', err.message));
+
+    AuditService.log({ action: 'auth.otp.requested', actor: { userId: user.id, role: user.primaryRole || user.role, email: email_ }, schoolId: req.school.id, req });
+    return res.json(ok);
+  } catch (err) {
+    console.error('[auth/otp/request]', err);
+    return res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'We could not send a code right now.' } });
+  }
+});
+
+/* POST /api/auth/otp/verify — exchange the code for a session (app only) */
+router.post('/otp/verify', mobileAuthLimiter, tenantMiddleware, async (req, res) => {
+  try {
+    const email_ = String(req.body?.email || '').trim().toLowerCase();
+    const code = String(req.body?.code || '').trim();
+    const deviceId = typeof req.body?.deviceId === 'string' ? req.body.deviceId.slice(0, 64) : null;
+
+    if (!email_ || !/^\d{6}$/.test(code)) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Enter the 6-digit code from your email.' } });
+    }
+
+    // One failure shape for every reason — an unknown email must be
+    // indistinguishable from a wrong code.
+    const invalid = { success: false, error: { code: 'INVALID_OTP', message: 'That code isn’t right, or it has expired. Ask for a new one.' } };
+
+    const User = tenantModel('users', { schoolId: req.school.id });
+    const user = await User.findOne({ email: email_, schoolId: req.school.id });
+    if (!user || !user.isActive) return res.status(401).json(invalid);
+
+    if (!user.loginOtp || !user.loginOtpExpiry) return res.status(401).json(invalid);
+    if (new Date(user.loginOtpExpiry) < new Date()) {
+      await User.updateOne({ _id: user._id }, { $unset: { loginOtp: 1, loginOtpExpiry: 1 } });
+      return res.status(401).json(invalid);
+    }
+    if ((user.loginOtpAttempts ?? 0) >= LOGIN_OTP_MAX_ATTEMPTS) return res.status(401).json(invalid);
+
+    if (!_verifyOTP(code, user.loginOtp)) {
+      await User.updateOne({ _id: user._id }, { $inc: { loginOtpAttempts: 1 } });
+      return res.status(401).json(invalid);
+    }
+
+    // Consume the code BEFORE anything else that can fail, so it can never be
+    // replayed even if the step-up email or session creation throws.
+    await User.updateOne({ _id: user._id }, { $unset: {
+      loginOtp: 1, loginOtpExpiry: 1, loginOtpAttempts: 1, loginOtpSentAt: 1, loginOtpSends: 1,
+    } });
+
+    const fresh = { ...user.toObject(), loginOtp: undefined, loginOtpExpiry: undefined };
+
+    if (await _stepUpIfRequired(req, res, fresh)) {
+      AuditService.log({ action: 'auth.otp.step_up_required', actor: { userId: fresh.id, role: fresh.primaryRole || fresh.role, email: email_ }, schoolId: req.school.id, req });
+      return;
+    }
+
+    const session = await _issueMobileSession(req, fresh, req.school, { deviceId, action: 'auth.otp.login' });
+    return res.json({ success: true, data: session });
+  } catch (err) {
+    console.error('[auth/otp/verify]', err);
+    return res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'We could not verify that code.' } });
+  }
+});
+
+/* POST /api/auth/mobile/google — Firebase ID token → session (app only) */
+router.post('/mobile/google', mobileAuthLimiter, tenantMiddleware, async (req, res) => {
+  try {
+    const idToken = String(req.body?.idToken || '');
+    const deviceId = typeof req.body?.deviceId === 'string' ? req.body.deviceId.slice(0, 64) : null;
+    if (!idToken) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'idToken required' } });
+    }
+
+    let decoded;
+    try {
+      decoded = await verifyFirebaseIdToken(idToken);
+    } catch (err) {
+      if (err?.code === 'GOOGLE_NOT_CONFIGURED') {
+        // Honest 503 — the app keeps its Google button disabled on this code
+        // rather than pretending the tap did something.
+        return res.status(503).json({ success: false, error: { code: 'GOOGLE_NOT_CONFIGURED', message: 'Google sign-in is not available yet.' } });
+      }
+      return res.status(401).json({ success: false, error: { code: 'GOOGLE_TOKEN_INVALID', message: 'Google sign-in could not be verified. Try again.' } });
+    }
+
+    const email_ = String(decoded?.email || '').trim().toLowerCase();
+    if (!email_ || decoded.email_verified !== true) {
+      return res.status(403).json({ success: false, error: { code: 'GOOGLE_EMAIL_UNVERIFIED', message: 'That Google account has no verified email address.' } });
+    }
+
+    const user = await tenantModel('users', { schoolId: req.school.id }).findOne({ email: email_, schoolId: req.school.id }).lean();
+
+    // Decided in PLAN.md §3: refuse, don't provision. The app turns this code
+    // into "ask the office" — kinder than creating an account the school never
+    // agreed to, and there is no activation surface in the app until Phase 5.
+    if (!user || !user.isActive) {
+      AuditService.log({ action: 'auth.mobile.google_not_enrolled', actor: { userId: 'public', role: 'public', email: email_ }, schoolId: req.school.id, req, details: { googleUid: decoded.uid } });
+      return res.status(403).json({ success: false, error: { code: 'NOT_ENROLLED', message: 'This email isn’t on the school’s records yet. Ask the office to add you, then try again.' } });
+    }
+
+    // Record the provider link for the audit trail, never clobbering an
+    // existing mapping (one person can legitimately hold two Google accounts).
+    if (!user.googleId && decoded.uid) {
+      await tenantModel('users', { schoolId: req.school.id })
+        .updateOne({ _id: user._id }, { $set: { googleId: decoded.uid, authProvider: user.authProvider || 'google' } })
+        .catch(() => {});
+    }
+
+    if (await _stepUpIfRequired(req, res, user)) {
+      AuditService.log({ action: 'auth.mobile.google.step_up_required', actor: { userId: user.id, role: user.primaryRole || user.role, email: email_ }, schoolId: req.school.id, req });
+      return;
+    }
+
+    const session = await _issueMobileSession(req, user, req.school, { deviceId, action: 'auth.mobile.google' });
+    return res.json({ success: true, data: session });
+  } catch (err) {
+    console.error('[auth/mobile/google]', err);
+    return res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'We could not sign you in with Google.' } });
   }
 });
 
@@ -1809,5 +2172,13 @@ async function _completeOrgLoginSession(req, res, user, school, identity) {
 router._buildTokenPayload    = _buildTokenPayload;
 router._availableSchools     = _availableSchools;
 router._loadMergedPermissions = _loadMergedPermissions; // test-only access, same pattern as the two exports above
+
+/* Child linking (parent-portal POST /link/confirm) re-issues a session after
+   it grants access to a new child: the child lists are baked into the token at
+   sign-in, so without a fresh token the parent would be linked on the server
+   and still refused by every child endpoint until they signed out and back in.
+   Exported rather than duplicated so there is ONE place that decides what a
+   mobile session contains. */
+router._issueMobileSession = _issueMobileSession;
 
 module.exports = router;

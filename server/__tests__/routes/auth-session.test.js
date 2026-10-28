@@ -320,6 +320,50 @@ describe('POST /api/auth/login — school shape', () => {
 });
 
 /* ══════════════════════════════════════════════════════════════
+   POST /api/auth/login — mobile clients
+══════════════════════════════════════════════════════════════ */
+describe('POST /api/auth/login — mobile clients', () => {
+  test('returns the token in the body and sets no cookie', async () => {
+    const res = await supertest(buildApp())
+      .post('/api/auth/login')
+      .set('X-School-Slug', 'demo')
+      .send({ identifier: 'demo-student', password: 'Password123!', platform: 'mobile' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(typeof res.body.data.token).toBe('string');
+    expect(res.body.data.user.password).toBeUndefined();
+    expect(res.body.data.school).toHaveProperty('currency', 'KES');
+
+    const cookies = [].concat(res.headers['set-cookie'] || []);
+    expect(cookies.find((c) => c.startsWith('token='))).toBeUndefined();
+  });
+
+  test('accepts an admission number via identifier (students have no email)', async () => {
+    mockUserDoc = makeUser({ email: undefined, username: 'adm-2026-00002', role: 'student', primaryRole: 'student', roles: ['student'] });
+
+    const res = await supertest(buildApp())
+      .post('/api/auth/login')
+      .set('X-School-Slug', 'demo')
+      .send({ identifier: 'adm-2026-00002', password: 'Password123!', platform: 'mobile' });
+
+    expect(res.status).toBe(200);
+    expect(typeof res.body.data.token).toBe('string');
+    expect(res.body.data.user.username).toBe('adm-2026-00002');
+  });
+
+  test('web clients keep the HttpOnly cookie and no body token', async () => {
+    const res = await supertest(buildApp())
+      .post('/api/auth/login')
+      .set('X-School-Slug', 'demo')
+      .send({ email: 'admin@demo.school', password: 'Password123!' });
+
+    expect(res.body).not.toHaveProperty('token');
+    expect(res.body).not.toHaveProperty('data');
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════
    POST /api/auth/login — error paths
 ══════════════════════════════════════════════════════════════ */
 describe('POST /api/auth/login — error paths', () => {
