@@ -148,10 +148,38 @@ function _mapSchoolDoc(doc) {
   };
 }
 
+/* Every field _mapSchoolDoc reads, and nothing else — see _findSchool's own
+   comment for why this must stay a projection. _id needs no entry: MongoDB
+   returns it unless explicitly excluded. */
+const SCHOOL_FIELDS = [
+  'id', 'slug', 'name', 'shortName', 'logoUrl', 'systemEmail', 'adminEmail',
+  'plan', 'addOns', 'isActive', 'planExpiresAt',
+  'status', 'isDemo', 'expiresAt', 'demoExpired',
+  'primaryColor', 'accentColor', 'themePreset', 'faviconUrl', 'tagline',
+  'moduleConfig', 'portalConfig', 'admissionConfig',
+  'currency', 'currencySymbol', 'timezone', 'country',
+  'academicYear', 'termsPerYear',
+].join(' ');
+
 async function _findSchool(filter) {
   try {
     const Sch = _model('schools');
-    const doc = await Sch.findOne(filter).lean();
+    /* PROJECTED, and it must stay projected. Without .select() this pulled the
+       ENTIRE school document on every resolution, including logoBase64 and
+       loginBgBase64 — which run 1-2MB+ the moment a school uploads a real
+       image. public.js already documents that exact find (2026-09-28) and
+       fixed its own unauthenticated routes with a projection; this one is
+       strictly worse, because tenantMiddleware resolves the tenant on EVERY
+       school-scoped request, so the whole product paid a multi-megabyte
+       document transfer before any route handler ran. Measured live: ~5-6s per
+       request for a school with a real upload, against ~1.3s for the same
+       query that misses.
+
+       SCHOOL_FIELDS is every field _mapSchoolDoc reads and nothing else.
+       tenant-school-shape.test.js pins that the two lists stay in step — a
+       field added to the mapper without being added here would silently map to
+       its default (null) rather than fail loudly. */
+    const doc = await Sch.findOne(filter).select(SCHOOL_FIELDS).lean();
     if (!doc) return null;
     return _mapSchoolDoc(doc);
   } catch { return null; }

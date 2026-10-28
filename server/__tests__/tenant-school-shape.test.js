@@ -257,6 +257,53 @@ describe('_mapSchoolDoc — no undefined required fields', () => {
 });
 
 /* ══════════════════════════════════════════════════════════════
+   The tenant projection must cover the mapper
+   ══════════════════════════════════════════════════════════════
+   _findSchool projects the school document rather than pulling it whole —
+   an unprojected read dragged logoBase64/loginBgBase64 (1-2MB+) through
+   tenantMiddleware on EVERY school-scoped request, which measured ~5-6s per
+   request in production.
+
+   The danger of a projection is silence: a field the mapper reads but the
+   projection omits resolves to undefined and then to that field's default,
+   with no error anywhere — a school's real currency quietly becoming 'KES'.
+   The shape tests above cannot catch that, because they feed the mapper a
+   hand-built doc and never touch the query. This one reads both lists out of
+   the source and asserts the projection is a superset. */
+describe('_findSchool projection covers every field _mapSchoolDoc reads', () => {
+  const fs   = require('fs');
+  const path = require('path');
+
+  const src = fs.readFileSync(path.join(__dirname, '..', 'middleware', 'tenant.js'), 'utf8');
+
+  test('no field is read by the mapper but missing from SCHOOL_FIELDS', () => {
+    const mapper = src.slice(
+      src.indexOf('function _mapSchoolDoc'),
+      src.indexOf('const SCHOOL_FIELDS'),
+    );
+    // _id deliberately needs no entry: MongoDB returns it unless excluded.
+    const reads = new Set(
+      [...mapper.matchAll(/doc\.([A-Za-z_]+)/g)].map(m => m[1]).filter(f => f !== '_id'),
+    );
+    const listed = new Set(
+      [...(src.match(/const SCHOOL_FIELDS = \[([\s\S]*?)\]/)?.[1] || '')
+        .matchAll(/'([^']+)'/g)].map(m => m[1]),
+    );
+
+    // Sanity: if either extraction silently failed, the assertion below would
+    // pass vacuously — so assert the extractions found something first.
+    expect(reads.size).toBeGreaterThan(20);
+    expect(listed.size).toBeGreaterThan(20);
+
+    expect([...reads].filter(f => !listed.has(f))).toEqual([]);
+  });
+
+  test('_findSchool actually applies the projection', () => {
+    expect(src).toMatch(/findOne\(filter\)\.select\(SCHOOL_FIELDS\)\.lean\(\)/);
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════
    CURRENCY_SYMBOLS export
 ══════════════════════════════════════════════════════════════ */
 describe('CURRENCY_SYMBOLS', () => {
