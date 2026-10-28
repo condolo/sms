@@ -90,17 +90,61 @@ async function _reconcileInvoice(invoiceId, schoolId) {
 
 /* ══════════════════════════════════════════════════════════════
    STK PUSH — initiate payment
+
+   Two different ways the same parent gets prompted twice — and can pay
+   twice — which is the one failure this screen is not allowed to have:
+
+   1. THE SAME INTENT ARRIVING TWICE (a flaky network, a retry, a double
+      tap). The client sends an `idempotencyKey` per payment intent; the
+      second call returns the ORIGINAL checkoutRequestId rather than
+      starting a second prompt. That is idempotency, not an error.
+
+   2. A NEW INTENT WHILE THE FIRST PROMPT IS STILL LIVE (the common
+      real-world case: the parent saw nothing, gave up, tapped again
+      20 seconds later). No client key can see this one, so the server
+      refuses to start a second push for the same invoice while a pending
+      attempt is inside PENDING_WINDOW — and hands back the live
+      checkoutRequestId so the app can resume watching the attempt it
+      already has instead of starting a race.
+
+   After the window a new push IS allowed: a prompt that expired on the
+   phone must never leave a parent unable to try again.
    ══════════════════════════════════════════════════════════════ */
+
+const PENDING_WINDOW_MS = 120_000;   // matches how long an STK prompt lives on the handset
+
 router.post('/stk-push', authMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const { invoiceId, phone, amount } = req.body;
+    const { invoiceId, phone, amount, idempotencyKey } = req.body;
 
     if (!invoiceId || !phone || !amount) {
       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'invoiceId, phone, and amount are required.' } });
     }
     if (typeof amount !== 'number' || amount <= 0) {
       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'amount must be a positive number.' } });
+    }
+
+    const Transactions = tenantModel('mpesa_transactions', tenantContext(req));
+
+    /* Guard 1 — the same intent, again. Checked before anything else so a
+       retry never pays for a second config lookup, invoice read or push. */
+    if (idempotencyKey) {
+      const already = await Transactions.findOne({
+        schoolId, idempotencyKey: String(idempotencyKey), type: 'stk_push',
+      }).lean().catch(() => null);
+
+      if (already) {
+        return res.json({
+          success:           true,
+          duplicate:         true,
+          checkoutRequestId: already.checkoutRequestId,
+          merchantRequestId: already.merchantRequestId,
+          txnId:             already.id,
+          status:            already.status,
+          message:           'This request was already sent. Check the phone for the prompt.',
+        });
+      }
     }
 
     const Schools = _model('schools');
@@ -113,6 +157,41 @@ router.post('/stk-push', authMiddleware, async (req, res) => {
     const Invoices = tenantModel('invoices', tenantContext(req));
     const invoice  = await Invoices.findOne({ id: invoiceId, schoolId }).lean();
     if (!invoice) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Invoice not found.' } });
+
+    /* Paying MORE than is owed is the other half of a double charge: it
+       leaves the family chasing a refund. Only enforced when the balance is
+       actually known — a record with no balance is a data gap, not a reason
+       to block a parent who is trying to pay. */
+    if (typeof invoice.balance === 'number' && amount > invoice.balance) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'AMOUNT_EXCEEDS_BALANCE',
+          message: `That is more than the ${invoice.balance} still outstanding on this invoice.`,
+        },
+      });
+    }
+
+    /* Guard 2 — a live prompt already waiting on the phone. */
+    const pending = await Transactions.findOne({
+      schoolId,
+      invoiceId,
+      type:      'stk_push',
+      status:    'pending',
+      createdAt: { $gte: new Date(Date.now() - PENDING_WINDOW_MS).toISOString() },
+    }).sort({ createdAt: -1 }).lean().catch(() => null);
+
+    if (pending) {
+      return res.status(409).json({
+        success:           false,
+        checkoutRequestId: pending.checkoutRequestId,
+        txnId:             pending.id,
+        error: {
+          code:    'PAYMENT_IN_PROGRESS',
+          message: 'A payment request for this invoice is already waiting on the phone. Enter your M-Pesa PIN to complete it, or wait two minutes before sending a new one.',
+        },
+      });
+    }
 
     const normalizedPhone = mpesa.normalizePhone(phone);
     const env             = cfg.env || (process.env.NODE_ENV === 'production' ? 'production' : 'sandbox');
@@ -146,10 +225,13 @@ router.post('/stk-push', authMiddleware, async (req, res) => {
       });
     }
 
-    // Record pending transaction
-    const Transactions = tenantModel('mpesa_transactions', tenantContext(req));
+    // Record pending transaction. The `idempotencyKey` is stored WITH the
+    // attempt, and the unique index on it is what makes guard 1 survive a
+    // genuine race (two requests in flight at once): the loser gets a
+    // duplicate-key error and returns the winner's checkoutRequestId rather
+    // than starting a second prompt.
     const txnId = _uid();
-    await Transactions.create({
+    const txnDoc = {
       id:                txnId,
       schoolId,
       invoiceId,
@@ -162,7 +244,29 @@ router.post('/stk-push', authMiddleware, async (req, res) => {
       type:              'stk_push',
       createdAt:         new Date().toISOString(),
       updatedAt:         new Date().toISOString(),
-    });
+      ...(idempotencyKey ? { idempotencyKey: String(idempotencyKey) } : {}),
+    };
+
+    try {
+      await Transactions.create(txnDoc);
+    } catch (recErr) {
+      if (recErr?.code === 11000 && idempotencyKey) {
+        const winner = await Transactions.findOne({ schoolId, idempotencyKey: String(idempotencyKey), type: 'stk_push' }).lean().catch(() => null);
+        return res.json({
+          success:           true,
+          duplicate:         true,
+          checkoutRequestId: winner?.checkoutRequestId || result.CheckoutRequestID,
+          merchantRequestId: winner?.merchantRequestId || result.MerchantRequestID,
+          txnId:             winner?.id || txnId,
+          message:           'This request was already sent. Check the phone for the prompt.',
+        });
+      }
+      /* The push IS live on the handset at this point, so failing the
+         response would tell a parent their payment did not start when it
+         did — the worst possible lie on this screen. Record the loss and
+         still answer honestly. */
+      console.error('[mpesa] pending transaction could not be recorded for', result.CheckoutRequestID, recErr?.message);
+    }
 
     return res.json({
       success:           true,

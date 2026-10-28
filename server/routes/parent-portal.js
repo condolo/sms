@@ -10,7 +10,14 @@
 
 const express            = require('express');
 const { authMiddleware } = require('../middleware/auth');
+const { CURRENCY_SYMBOLS } = require('../middleware/tenant');
 const { planGate }       = require('../middleware/plan');
+/* One alphabet, one hash, one TTL — shared with the office console that
+   issues the codes (see utils/link-codes.js for why). */
+const {
+  hashLinkCode: _hashLinkCode,
+  normaliseLinkCode: _normaliseLinkCode,
+} = require('../utils/link-codes');
 
 /* Portal access is the tier boundary: student portals need 'student', parent
    portals need 'family'. Before this, the tiers existed only as prices — a
@@ -23,6 +30,7 @@ const { resolveCurrentPeriod } = require('./academic-config');
 const { _getMpesaConfig } = require('./mpesa');
 const { _inboxQuery } = require('./messages');
 const { ok, created, E } = require('../utils/response');
+const AuditService = require('../services/audit');
 // Weekly Snapshot's read logic is shared with weekly-snapshots.js's own
 // staff-facing routes — see that file's _findAuthorizedStudent header
 // comment for why this isn't reimplemented here.
@@ -117,6 +125,11 @@ router.get('/children', authMiddleware, PLAN, async (req, res) => {
     return ok(res, children.map(c => ({
       id:              c.id,
       name:            `${c.firstName} ${c.lastName}`,
+      // Split names as well as the joined one: the app renders a first name
+      // in a chip and the pair in a header, and re-splitting "Mary Anne Wanjiru"
+      // in the client gets it wrong for anyone whose surname is two words.
+      firstName:       c.firstName,
+      lastName:        c.lastName,
       admissionNumber: c.admissionNumber,
       classId:         c.classId,
       className:       c.className,
@@ -550,6 +563,802 @@ router.post('/messages', authMiddleware, PLAN, async (req, res) => {
     return created(res, msg);
   } catch (err) {
     console.error('[parent-portal POST /messages]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════════
+   Phase 1 mobile screens — the reads the app needs that the single fat
+   dashboard payload deliberately does NOT carry.
+
+   The dashboard is built for first paint: totals, the last five of
+   everything, stop. Screens 5–13 each need a *history* — a month of
+   attendance, every invoice, an invoice's receipts, the term's report,
+   the whole notice board, a conversation. Bolting those onto the
+   dashboard would have made every parent pay for data they are not
+   looking at, on the connection where that hurts most.
+
+   Two conventions, applied to all of them:
+     - the same child-access rule as the dashboard (studentIds ∪ guardianOf,
+       never a client-supplied id);
+     - `ok(res, …)` envelopes and the same nulls-not-zeroes discipline, so
+       a screen can tell "nothing recorded yet" from "genuinely zero".
+   ══════════════════════════════════════════════════════════════════ */
+
+function _linkedIds(req) {
+  return [...new Set([...(req.jwtUser.studentIds || []), ...(req.jwtUser.guardianOf || [])])];
+}
+
+/** True (and answers) when this child is not this parent's — see the dashboard's identical guard. */
+function _unlinked(req, res, childId) {
+  if (_linkedIds(req).includes(childId)) return false;
+  E.forbidden(res, 'You do not have access to this student\'s records.');
+  return true;
+}
+
+/** Currency + symbol from one source of truth (middleware/tenant.js), never hard-coded per route. */
+function _money(currency) {
+  const code = String(currency || 'KES').toUpperCase();
+  return { currency: code, currencySymbol: CURRENCY_SYMBOLS[code] || code };
+}
+
+/* ── Screen 5: one month of attendance ─────────────────────────── */
+
+router.get('/attendance/:childId', authMiddleware, PLAN, async (req, res) => {
+  if (!_requireParent(req, res)) return;
+  try {
+    const { schoolId } = req.jwtUser;
+    const childId = req.params.childId;
+    if (_unlinked(req, res, childId)) return;
+
+    // Validated before it reaches a date filter — this is the only input.
+    const rawMonth = String(req.query.month || '');
+    const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(rawMonth) ? rawMonth : new Date().toISOString().slice(0, 7);
+    const [year, mon] = month.split('-').map(Number);
+    const firstDay = `${month}-01`;
+    const lastDay  = new Date(Date.UTC(year, mon, 0)).toISOString().slice(0, 10); // day 0 of next month
+
+    // `$or` covers both storages of `date` (ISO string, as the bulk marker
+    // writes it, and a real Date from older imports) without guessing which
+    // this school has — guessing is what silently blanked a parent calendar.
+    const Attendance = tenantModel('attendance', tenantContext(req));
+    const records = await Attendance.find({
+      schoolId,
+      studentId: childId,
+      $or: [
+        { date: { $gte: firstDay, $lte: lastDay } },
+        { date: { $gte: new Date(`${firstDay}T00:00:00.000Z`), $lte: new Date(`${lastDay}T23:59:59.999Z`) } },
+      ],
+    }).select('date status note period').sort({ date: 1 }).lean();
+
+    // A day can hold several records (per period/subject). The calendar shows
+    // ONE tint per day, so the day resolves to its worst status: a child who
+    // was absent for first period did not "attend" that day.
+    const WEIGHT = { absent: 3, late: 2, present: 1 };
+    const byDay = new Map();
+    for (const r of records) {
+      const day = String(r.date).slice(0, 10);
+      const held = byDay.get(day);
+      if (!held || (WEIGHT[r.status] ?? 0) > (WEIGHT[held.status] ?? 0)) byDay.set(day, r);
+    }
+
+    const days = [...byDay.entries()]
+      .sort(([a], [b]) => (a < b ? -1 : 1))
+      .map(([date, r]) => ({ date, status: r.status }));
+
+    const summary = { present: 0, absent: 0, late: 0, total: days.length };
+    for (const d of days) if (summary[d.status] !== undefined) summary[d.status] += 1;
+    summary.percentage = summary.total ? Math.round((summary.present / summary.total) * 100) : 0;
+
+    return ok(res, {
+      month,
+      summary,
+      days,
+      // The board asks for the recent exceptions *with their notes* — the
+      // reason is the part a parent actually wants.
+      exceptions: [...byDay.entries()]
+        .filter(([, r]) => r.status === 'absent' || r.status === 'late')
+        .sort(([a], [b]) => (a < b ? 1 : -1))
+        .slice(0, 5)
+        .map(([date, r]) => ({ date, status: r.status, note: r.note || '' })),
+    });
+  } catch (err) {
+    console.error('[parent-portal GET /attendance]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ── Screen 6: the term report ─────────────────────────────────── */
+
+router.get('/report/:childId', authMiddleware, PLAN, async (req, res) => {
+  if (!_requireParent(req, res)) return;
+  try {
+    const { schoolId } = req.jwtUser;
+    const childId = req.params.childId;
+    if (_unlinked(req, res, childId)) return;
+
+    const Reports  = tenantModel('report_card_snapshots', tenantContext(req));
+    const Subjects = tenantModel('subjects', tenantContext(req));
+
+    const cards = await Reports.find({ schoolId, studentId: childId, status: 'published', superseded: { $ne: true } })
+      .sort({ publishedAt: -1 })
+      .limit(6)
+      .select('id academicYear termName termNumber totalScore averageScore gpa rankings publishedAt subjects classTeacherRemark principalRemark')
+      .lean();
+
+    const latest = cards[0] || null;
+
+    // Marks come only from the published snapshot — family roles carry no
+    // Markbook grant at all (see server/utils/repairPermissions.js), so the
+    // snapshot IS the record, never provisional assessment_marks.
+    const snapshotSubjects = latest?.subjects || {};
+    const ids = Object.keys(snapshotSubjects);
+    const subjectDocs = ids.length
+      ? await Subjects.find({ id: { $in: ids }, schoolId }).select('id name code').lean()
+      : [];
+    const nameOf = Object.fromEntries(subjectDocs.map(s => [s.id, s.name]));
+
+    const subjects = ids
+      .map(subjectId => ({
+        subjectId,
+        subjectName: nameOf[subjectId] || subjectId,
+        finalScore:  snapshotSubjects[subjectId]?.finalScore ?? null,
+        grade:       snapshotSubjects[subjectId]?.grade ?? null,
+      }))
+      .sort((a, b) => a.subjectName.localeCompare(b.subjectName));
+
+    const trend = [...cards]
+      .sort((a, b) => {
+        const ay = (s) => String(s.academicYear || '').replace('/', '');
+        if (ay(a) !== ay(b)) return ay(a).localeCompare(ay(b));
+        return (a.termNumber ?? 0) - (b.termNumber ?? 0);
+      })
+      .map(rc => ({ label: `${rc.academicYear || ''} T${rc.termNumber ?? ''}`.trim(), average: rc.averageScore ?? null }))
+      .filter(t => t.average != null);
+
+    const student = await tenantModel('students', tenantContext(req))
+      .findOne({ id: childId, schoolId }).select('firstName lastName className classId').lean();
+
+    let classTeacher = null;
+    if (student?.classId) {
+      const classDoc = await tenantModel('classes', tenantContext(req))
+        .findOne({ id: student.classId, schoolId }).select('formTeacherId').lean().catch(() => null);
+      if (classDoc?.formTeacherId) {
+        const t = await tenantModel('teachers', tenantContext(req))
+          .findOne({ id: classDoc.formTeacherId, schoolId }).select('firstName lastName title').lean().catch(() => null);
+        if (t) classTeacher = `${t.title ? `${t.title} ` : ''}${t.firstName} ${t.lastName}`.trim();
+      }
+    }
+
+    const academicYears = await tenantModel('academic_years', tenantContext(req)).find({ schoolId }).lean();
+    const { year: currentYearDoc, term: currentTermDoc, termNumber: currentTermNumber } = resolveCurrentPeriod(academicYears);
+
+    return ok(res, {
+      child: { id: childId, name: `${student?.firstName || ''} ${student?.lastName || ''}`.trim(), className: student?.className || null },
+      term: {
+        academicYear: currentYearDoc?.name || '',
+        termName: currentTermDoc?.name || (currentTermNumber ? `Term ${currentTermNumber}` : ''),
+      },
+      latest: latest ? {
+        id: latest.id,
+        academicYear: latest.academicYear,
+        termName: latest.termName,
+        termNumber: latest.termNumber,
+        averageScore: latest.averageScore ?? null,
+        totalScore: latest.totalScore ?? null,
+        gpa: latest.gpa ?? null,
+        rankings: latest.rankings ?? null,
+        publishedAt: latest.publishedAt ?? null,
+        classTeacherRemark: latest.classTeacherRemark || '',
+        principalRemark: latest.principalRemark || '',
+      } : null,
+      subjects,
+      trend,
+      classTeacher,
+    });
+  } catch (err) {
+    console.error('[parent-portal GET /report]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ── Screen 7: the notice board ────────────────────────────────── */
+
+router.get('/notices', authMiddleware, PLAN, async (req, res) => {
+  if (!_requireParent(req, res)) return;
+  try {
+    const { schoolId } = req.jwtUser;
+
+    const Announcements = tenantModel('announcements', tenantContext(req));
+    const Events        = tenantModel('events', tenantContext(req));
+
+    const limit = Math.min(Number(req.query.limit) || 30, 100);
+
+    const [announcements, events] = await Promise.all([
+      Announcements.find({
+        schoolId,
+        $or: [{ expiresAt: { $gte: new Date() } }, { expiresAt: { $exists: false } }, { expiresAt: null }],
+      }).sort({ priority: -1, createdAt: -1 }).limit(limit)
+        .select('id title body createdAt priority expiresAt category type audience')
+        .lean().catch(() => []),
+      Events.find({ schoolId, date: { $gte: new Date().toISOString().slice(0, 10) } })
+        .sort({ date: 1 }).limit(10)
+        .select('id title date category')
+        .lean().catch(() => []),
+    ]);
+
+    // An announcement addressed to staff only must not appear in a parent's
+    // board. `audience` is optional in the collection, so absence = everyone.
+    const forParents = (a) => {
+      const aud = a.audience;
+      if (!aud) return true;
+      const list = Array.isArray(aud) ? aud : [aud];
+      return list.some(v => ['all', 'parents', 'guardians', 'family'].includes(String(v).toLowerCase()));
+    };
+
+    // "Money" notices are the board's amber card that jumps to Fees. Derived
+    // from an explicit category when the school sets one, and otherwise from
+    // the wording — never from a hard-coded id, so a new fee notice works the
+    // day the office writes it.
+    const MONEY_RE = /\b(fee|fees|invoice|balance|payment|payments|mpesa|m-pesa|arrears|outstanding)\b/i;
+
+    return ok(res, {
+      notices: announcements.filter(forParents).map(a => {
+        const category = String(a.category || a.type || '').toLowerCase();
+        return {
+          id: a.id,
+          title: a.title,
+          body: a.body,
+          createdAt: a.createdAt,
+          priority: a.priority || 'normal',
+          pinned: a.priority === 'high' || a.priority === 'urgent',
+          money: ['fee', 'fees', 'finance', 'money'].includes(category) || MONEY_RE.test(`${a.title} ${a.body}`),
+        };
+      }),
+      events,
+    });
+  } catch (err) {
+    console.error('[parent-portal GET /notices]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ── Screen 8: fees — invoices and receipts as first-class rows ── */
+
+router.get('/fees/:childId', authMiddleware, PLAN, async (req, res) => {
+  if (!_requireParent(req, res)) return;
+  try {
+    const { schoolId } = req.jwtUser;
+    const childId = req.params.childId;
+    if (_unlinked(req, res, childId)) return;
+
+    const FeeInvoices = tenantModel('invoices', tenantContext(req));
+    const FeePayments = tenantModel('payments', tenantContext(req));
+    const Schools     = _model('schools');
+
+    const [invoices, payments, school] = await Promise.all([
+      FeeInvoices.find({ schoolId, studentId: childId })
+        .sort({ dueDate: -1 })
+        .select('id invoiceNumber total balance status dueDate currency termId termName issuedAt')
+        .lean(),
+      FeePayments.find({ schoolId, studentId: childId })
+        .sort({ paidAt: -1 }).limit(50)
+        .select('id amount paidAt mpesaCode method reference invoiceId status')
+        .lean(),
+      Schools.findOne({ id: schoolId }).select('name logoUrl mpesa').lean(),
+    ]);
+
+    const currency = invoices[0]?.currency || 'KES';
+    const totalBilled = invoices.reduce((sum, inv) => sum + (inv.total || 0), 0);
+    const balance     = invoices.reduce((sum, inv) => sum + (inv.balance || 0), 0);
+    const clearancePct = totalBilled > 0 ? Math.round(((totalBilled - balance) / totalBilled) * 100) : 100;
+
+    const todayISO = new Date().toISOString().slice(0, 10);
+    const outstanding = invoices.filter(inv => (inv.balance || 0) > 0);
+
+    return ok(res, {
+      ..._money(currency),
+      mpesaEnabled: !!_getMpesaConfig(school),
+      balance,
+      totalBilled,
+      clearancePct,
+      // The next date a parent can actually act on: the earliest due date
+      // still AHEAD. A past-due invoice is already shown as overdue — putting
+      // its old date here as "due by" would be a lie the Pay screen repeats.
+      nextDueDate: outstanding.map(i => i.dueDate).filter(d => d && d >= todayISO).sort()[0] ?? null,
+      // "overdue" is derived, not trusted: an invoice's stored status is not
+      // always re-written when its due date passes.
+      invoices: invoices.map(inv => ({
+        id: inv.id,
+        invoiceNumber: inv.invoiceNumber || inv.id,
+        total: inv.total ?? 0,
+        balance: inv.balance ?? 0,
+        dueDate: inv.dueDate || null,
+        termName: inv.termName || null,
+        status: (inv.balance || 0) <= 0
+          ? 'paid'
+          : (inv.dueDate && inv.dueDate < todayISO ? 'overdue' : 'outstanding'),
+      })),
+      receipts: payments.map(p => ({
+        id: p.id,
+        code: p.mpesaCode || p.reference || p.id,
+        amount: p.amount ?? 0,
+        paidAt: p.paidAt || null,
+        method: p.method || (p.mpesaCode ? 'mpesa' : 'other'),
+        invoiceId: p.invoiceId || null,
+      })),
+    });
+  } catch (err) {
+    console.error('[parent-portal GET /fees]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ── Screen 10: one receipt, as a shareable artefact ───────────── */
+
+router.get('/receipts/:paymentId', authMiddleware, PLAN, async (req, res) => {
+  if (!_requireParent(req, res)) return;
+  try {
+    const { schoolId } = req.jwtUser;
+    const linked = _linkedIds(req);
+
+    const FeePayments = tenantModel('payments', tenantContext(req));
+    const FeeInvoices = tenantModel('invoices', tenantContext(req));
+    const Students    = tenantModel('students', tenantContext(req));
+    const Schools     = _model('schools');
+
+    const payment = await FeePayments.findOne({ id: req.params.paymentId, schoolId }).lean();
+    if (!payment) return E.notFound(res, 'Receipt not found.');
+    // A receipt is a money document: it may only be opened by a guardian of
+    // the child it belongs to. No id guessing, no cross-family leak.
+    if (!linked.includes(payment.studentId)) {
+      return E.forbidden(res, 'You do not have access to this receipt.');
+    }
+
+    const [student, invoice, school] = await Promise.all([
+      Students.findOne({ id: payment.studentId, schoolId }).select('id firstName lastName className admissionNumber').lean(),
+      payment.invoiceId
+        ? FeeInvoices.findOne({ id: payment.invoiceId, schoolId }).select('id invoiceNumber balance total currency dueDate').lean()
+        : null,
+      Schools.findOne({ id: schoolId }).select('name logoUrl systemEmail').lean(),
+    ]);
+
+    return ok(res, {
+      receipt: {
+        id: payment.id,
+        code: payment.mpesaCode || payment.reference || payment.id,
+        amount: payment.amount ?? 0,
+        paidAt: payment.paidAt || payment.createdAt || null,
+        method: payment.method || (payment.mpesaCode ? 'mpesa' : 'other'),
+        reference: payment.reference || null,
+        status: payment.status || 'completed',
+      },
+      invoice: invoice ? {
+        id: invoice.id,
+        invoiceNumber: invoice.invoiceNumber || invoice.id,
+        // Current, not historical: the balance NOW. Labelled that way in the
+        // UI so a receipt never claims to show a past statement total.
+        balance: invoice.balance ?? 0,
+        total: invoice.total ?? 0,
+      } : null,
+      child: student ? {
+        id: student.id,
+        name: `${student.firstName || ''} ${student.lastName || ''}`.trim(),
+        className: student.className || null,
+        admissionNumber: student.admissionNumber || null,
+      } : null,
+      school: { name: school?.name || '', logoUrl: school?.logoUrl || null },
+      ..._money(invoice?.currency || 'KES'),
+    });
+  } catch (err) {
+    console.error('[parent-portal GET /receipts/:id]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ── Screens 11 & 12: inbox and one conversation ───────────────── */
+
+/* The messages collection has no thread document — a "thread" is the pair
+   (this parent, one staff user), which is exactly how the web inbox reads it
+   too. Grouping in JS over one bounded query beats inventing a threadId that
+   the rest of the product does not write. */
+function _counterpartOf(msg, userId) {
+  if (msg.senderId === userId) {
+    const other = (msg.recipients || []).find(r => r !== userId && r !== 'all');
+    return other ? { userId: other, name: null, role: null, outboundOnly: true } : null;
+  }
+  return { userId: msg.senderId, name: msg.senderName || null, role: msg.senderRole || null, outboundOnly: false };
+}
+
+router.get('/inbox', authMiddleware, PLAN, async (req, res) => {
+  if (!_requireParent(req, res)) return;
+  try {
+    const { schoolId, userId, role } = req.jwtUser;
+    const Msg = tenantModel('messages', tenantContext(req));
+
+    // Everything addressed to me (role group or personal) plus everything I
+    // sent — the two halves of a conversation, in one bounded read.
+    const docs = await Msg.find({
+      $or: [
+        _inboxQuery({ schoolId, userId, role }),
+        { schoolId, senderId: userId },
+      ],
+    }).sort({ createdAt: -1 }).limit(300)
+      .select('id senderId senderName senderRole recipients subject body isRead createdAt')
+      .lean();
+
+    const byCounterpart = new Map();
+    for (const msg of docs) {
+      const counterpart = _counterpartOf(msg, userId);
+      if (!counterpart?.userId) continue;
+      const key = counterpart.userId;
+      const existing = byCounterpart.get(key);
+      const at = msg.createdAt || '';
+      const unread = msg.senderId !== userId && !msg.isRead?.[userId] ? 1 : 0;
+
+      if (!existing) {
+        byCounterpart.set(key, {
+          counterpartUserId: key,
+          name: counterpart.name,
+          role: counterpart.role,
+          subject: msg.subject || '',
+          preview: String(msg.body || '').slice(0, 120),
+          lastAt: at,
+          unread,
+        });
+      } else {
+        existing.unread += unread;
+        if (at > existing.lastAt) {           // docs are newest-first
+          existing.subject = msg.subject || existing.subject;
+          existing.preview = String(msg.body || '').slice(0, 120);
+          existing.lastAt = at;
+        }
+        if (!existing.name && counterpart.name) {
+          existing.name = counterpart.name;
+          existing.role = counterpart.role;
+        }
+      }
+    }
+
+    // Names for conversations where the parent sent first (the counterpart is
+    // a recipient id we have to resolve).
+    const missing = [...byCounterpart.values()].filter(t => !t.name).map(t => t.counterpartUserId);
+    if (missing.length) {
+      const staff = await tenantModel('users', tenantContext(req))
+        .find({ schoolId, id: { $in: missing } }).select('id name role').lean().catch(() => []);
+      const byId = Object.fromEntries(staff.map(u => [u.id, u]));
+      for (const t of byCounterpart.values()) {
+        if (!t.name && byId[t.counterpartUserId]) {
+          t.name = byId[t.counterpartUserId].name || null;
+          t.role = byId[t.counterpartUserId].role || null;
+        }
+      }
+    }
+
+    return ok(res, {
+      threads: [...byCounterpart.values()]
+        .map(t => ({ ...t, name: t.name || 'School office' }))
+        .sort((a, b) => (a.lastAt < b.lastAt ? 1 : -1)),
+    });
+  } catch (err) {
+    console.error('[parent-portal GET /inbox]', err);
+    return E.serverError(res);
+  }
+});
+
+router.get('/threads/:counterpartUserId', authMiddleware, PLAN, async (req, res) => {
+  if (!_requireParent(req, res)) return;
+  try {
+    const { schoolId, userId, role } = req.jwtUser;
+    const counterpartUserId = req.params.counterpartUserId;
+    const Msg = tenantModel('messages', tenantContext(req));
+
+    const docs = await Msg.find({
+      $or: [
+        { schoolId, senderId: userId, recipients: counterpartUserId },
+        { senderId: counterpartUserId, ..._inboxQuery({ schoolId, userId, role }) },
+      ],
+    }).sort({ createdAt: 1 }).limit(300)
+      .select('id senderId senderName senderRole subject body isRead createdAt')
+      .lean();
+
+    // Opening a conversation IS reading it — the same single write the web
+    // inbox does on open, not a per-message round trip.
+    const unreadIds = docs.filter(m => m.senderId !== userId && !m.isRead?.[userId]).map(m => m.id);
+    if (unreadIds.length) {
+      await Msg.updateMany({ schoolId, id: { $in: unreadIds } }, { $set: { [`isRead.${userId}`]: true } }).catch(() => {});
+    }
+
+    const counterpart = await tenantModel('users', tenantContext(req))
+      .findOne({ schoolId, id: counterpartUserId }).select('id name role').lean().catch(() => null);
+
+    return ok(res, {
+      counterpartUserId,
+      counterpart: {
+        id: counterpartUserId,
+        name: counterpart?.name || 'School office',
+        role: counterpart?.role || null,
+      },
+      messages: docs.map(m => ({
+        id: m.id,
+        mine: m.senderId === userId,
+        from: m.senderId === userId ? 'You' : (m.senderName || counterpart?.name || 'School office'),
+        subject: m.subject || '',
+        body: m.body,
+        at: m.createdAt,
+        // Two different questions, and conflating them is how an app ends up
+        // telling a parent their message was read when nobody opened it:
+        //   - my own message → has the OTHER person read it?
+        //   - their message  → have I read it? (which I just did, above)
+        read: m.senderId === userId
+          ? Boolean(m.isRead?.[counterpartUserId])
+          : Boolean(m.isRead?.[userId]),
+      })),
+    });
+  } catch (err) {
+    console.error('[parent-portal GET /threads/:id]', err);
+    return E.serverError(res);
+  }
+});
+
+router.post('/threads/:counterpartUserId/messages', authMiddleware, PLAN, async (req, res) => {
+  if (!_requireParent(req, res)) return;
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const counterpartUserId = req.params.counterpartUserId;
+    const body    = String(req.body?.body || '').trim();
+    const subject = String(req.body?.subject || '').trim() || 'Message from parent';
+
+    if (!body) return E.badRequest(res, 'Write a message first.');
+    if (body.length > 4000) return E.badRequest(res, 'That message is too long.');
+
+    // The counterpart must be a real person in THIS school — otherwise a
+    // crafted id could drop a message into another tenant's inbox.
+    const counterpart = await tenantModel('users', tenantContext(req))
+      .findOne({ schoolId, id: counterpartUserId }).select('id name role isActive').lean();
+    if (!counterpart || counterpart.isActive === false) {
+      return E.badRequest(res, 'That recipient is no longer available — please pick another and try again.');
+    }
+
+    const sender = await tenantModel('users', tenantContext(req))
+      .findOne({ id: userId, schoolId }).select('name email').lean();
+
+    const msg = await createDirectMessage(req, {
+      recipientUserIds: [counterpartUserId],
+      subject,
+      body,
+      senderName: sender?.name || sender?.email || 'Parent',
+      senderRole: 'parent',
+    });
+
+    return created(res, { id: msg.id, at: msg.createdAt });
+  } catch (err) {
+    console.error('[parent-portal POST /threads/:id/messages]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ── Screen 13: the parent's own profile ───────────────────────── */
+
+router.get('/profile', authMiddleware, PLAN, async (req, res) => {
+  if (!_requireParent(req, res)) return;
+  try {
+    const { schoolId, userId, studentIds = [], guardianOf = [] } = req.jwtUser;
+
+    const Users    = tenantModel('users', tenantContext(req));
+    const Students = tenantModel('students', tenantContext(req));
+    const Schools  = _model('schools');
+
+    const [me, school, children] = await Promise.all([
+      Users.findOne({ id: userId, schoolId }).select('id name email phone createdAt lastLogin').lean(),
+      Schools.findOne({ id: schoolId }).select('name logoUrl slug currency systemEmail').lean(),
+      Students.find({ id: { $in: _linkedIds(req) }, schoolId })
+        .select('id firstName lastName className admissionNumber photo status').lean(),
+    ]);
+
+    // Primary vs co-guardian is the board's distinction and it changes what a
+    // parent may do (a co-guardian does not manage the child's account). The
+    // JWT carries both lists; only users in BOTH resolve as primary.
+    const childrenOut = children.map(c => ({
+      id: c.id,
+      name: `${c.firstName || ''} ${c.lastName || ''}`.trim(),
+      className: c.className || null,
+      admissionNumber: c.admissionNumber || null,
+      photoUrl: c.photo || null,
+      relationship: studentIds.includes(c.id) ? 'primary' : 'co-guardian',
+      isPrimary: studentIds.includes(c.id),
+    }));
+
+    const academicYears = await tenantModel('academic_years', tenantContext(req)).find({ schoolId }).lean();
+    const { year: currentYearDoc, term: currentTermDoc, termNumber: currentTermNumber } = resolveCurrentPeriod(academicYears);
+
+    return ok(res, {
+      user: { id: userId, name: me?.name || '', email: me?.email || null, phone: me?.phone || null },
+      school: {
+        name: school?.name || '',
+        slug: school?.slug || null,
+        logoUrl: school?.logoUrl || null,
+        supportEmail: school?.systemEmail || null,
+      },
+      term: {
+        academicYear: currentYearDoc?.name || '',
+        termName: currentTermDoc?.name || (currentTermNumber ? `Term ${currentTermNumber}` : ''),
+      },
+      children: childrenOut,
+      // Link counts are what the "add a child" row needs to explain itself:
+      // the office is the only thing that can grant access, and the app must
+      // not pretend otherwise.
+      canAddChild: true,
+    });
+  } catch (err) {
+    console.error('[parent-portal GET /profile]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ── Screen 3: linking a child with the office's code ──────────────
+   The board's flow 03, and the one place in the parent app where access is
+   GRANTED rather than read. Three deliberate properties:
+
+   1. THE APP CANNOT GRANT ITSELF ANYTHING. The code is generated by the
+      office, for one student, and is single-use. There is no
+      "admission number + surname" self-service path, because anyone who knows
+      a child's name could otherwise attach themselves to that child's records.
+   2. THE PARENT SEES THE RECORD BEFORE CONFIRMING (preview), never a silent
+      binding — the board is explicit about this, and it is also the cheapest
+      guard against a mistyped or already-used code.
+   3. CONFIRM RE-ISSUES THE SESSION. Child lists are baked into the JWT at
+      sign-in, so without a fresh token the parent would be linked on the
+      server and still refused by every child endpoint until they signed out
+      and back in. The swap happens inside this one response instead.
+   ────────────────────────────────────────────────────────────────── */
+
+/* The code format itself lives in utils/link-codes.js, shared with the office
+   console that issues the codes — one alphabet, one hash, one TTL. */
+const linkCodeLimiter = require('express-rate-limit')({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test',
+  keyGenerator: (req) => req.headers['cf-connecting-ip'] || req.ip,
+  message: { success: false, error: { code: 'RATE_LIMIT', message: 'Too many attempts. Please ask the office for a new code.' } },
+});
+
+/** Loads an unexpired, unused code for this school. Shared by preview and confirm. */
+async function _findLinkCode(req, res, rawCode) {
+  const code = _normaliseLinkCode(rawCode);
+  if (code.length !== 6) {
+    E.badRequest(res, 'Enter the 6-character code the office gave you.');
+    return null;
+  }
+
+  const Codes = tenantModel('child_link_codes', tenantContext(req));
+  const doc = await Codes.findOne({
+    schoolId: req.jwtUser.schoolId,
+    codeHash: _hashLinkCode(code),
+    status: 'issued',
+  }).lean();
+
+  if (!doc) {
+    // One answer for wrong, already-used and never-existed: a parent who has
+    // the wrong code does not need to know which kind of wrong it is.
+    res.status(404).json({
+      success: false,
+      error: { code: 'INVALID_CODE', message: 'That code isn’t right, or it has already been used. Ask the office for a new one.' },
+    });
+    return null;
+  }
+  if (doc.expiresAt && new Date(doc.expiresAt) < new Date()) {
+    await Codes.updateOne({ id: doc.id }, { $set: { status: 'expired', updatedAt: new Date().toISOString() } }).catch(() => {});
+    res.status(404).json({
+      success: false,
+      error: { code: 'INVALID_CODE', message: 'That code has expired. Ask the office for a new one.' },
+    });
+    return null;
+  }
+  return doc;
+}
+
+/* POST /api/parent-portal/link/preview — show the child, grant nothing. */
+router.post('/link/preview', authMiddleware, PLAN, linkCodeLimiter, async (req, res) => {
+  if (!_requireParent(req, res)) return;
+  try {
+    const { schoolId } = req.jwtUser;
+    const doc = await _findLinkCode(req, res, req.body?.code);
+    if (!doc) return;
+
+    const student = await tenantModel('students', tenantContext(req))
+      .findOne({ id: doc.studentId, schoolId })
+      .select('id firstName lastName className admissionNumber photo status')
+      .lean();
+    if (!student) {
+      return E.notFound(res, 'That student is no longer on the school’s records. Please ask the office.');
+    }
+
+    return ok(res, {
+      code: _normaliseLinkCode(req.body?.code),   // echoed for the confirm step
+      // Already linked is information, not an error: the screen says so
+      // instead of offering to link the same child twice.
+      alreadyLinked: _linkedIds(req).includes(doc.studentId),
+      relationship: doc.relationship || 'primary',
+      child: {
+        id: student.id,
+        name: `${student.firstName || ''} ${student.lastName || ''}`.trim(),
+        className: student.className || null,
+        admissionNumber: student.admissionNumber || null,
+        photoUrl: student.photo || null,
+      },
+    });
+  } catch (err) {
+    console.error('[parent-portal POST /link/preview]', err);
+    return E.serverError(res);
+  }
+});
+
+/* POST /api/parent-portal/link/confirm — grant, then re-issue the session. */
+router.post('/link/confirm', authMiddleware, PLAN, linkCodeLimiter, async (req, res) => {
+  if (!_requireParent(req, res)) return;
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const doc = await _findLinkCode(req, res, req.body?.code);
+    if (!doc) return;
+
+    const student = await tenantModel('students', tenantContext(req))
+      .findOne({ id: doc.studentId, schoolId }).select('id firstName lastName className').lean();
+    if (!student) return E.notFound(res, 'That student is no longer on the school’s records.');
+
+    const Users = tenantModel('users', tenantContext(req));
+    const me = await Users.findOne({ id: userId, schoolId }).lean();
+    if (!me) return E.notFound(res, 'Account not found.');
+
+    // Primary guardians live in studentIds, co-guardians in guardianOf — the
+    // two fields every child-access check in the product reads.
+    const field = (doc.relationship === 'co-guardian') ? 'guardianOf' : 'studentIds';
+    const now = new Date().toISOString();
+    const Codes = tenantModel('child_link_codes', tenantContext(req));
+
+    // Claim the code FIRST: whoever wins the claim is the one who gets the
+    // child. Granting before claiming would let two taps of the same code add
+    // two guardians.
+    const claimed = await Codes.updateOne(
+      { id: doc.id, status: 'issued' },
+      { $set: { status: 'used', usedByUserId: userId, usedAt: now, updatedAt: now } },
+    );
+    if ((claimed?.modifiedCount ?? 0) === 0) {
+      return res.status(409).json({
+        success: false,
+        error: { code: 'INVALID_CODE', message: 'That code has already been used. Ask the office for a new one.' },
+      });
+    }
+
+    await Users.updateOne({ id: userId, schoolId }, { $addToSet: { [field]: student.id }, $set: { updatedAt: now } });
+
+    AuditService.log({
+      action: 'parent.link_child',
+      actor: { userId, role: req.jwtUser.role, email: me.email },
+      schoolId,
+      req,
+      details: { studentId: student.id, relationship: doc.relationship || 'primary', codeId: doc.id },
+    });
+
+    // A fresh session so the child is usable immediately (see the header).
+    const authRoutes = require('./auth');   // lazy: keeps this router loadable without the auth stack
+    const schoolDoc = req.school ?? await _model('schools').findOne({ id: schoolId }).lean();
+    const updated = { ...me, [field]: [...new Set([...(me[field] || []), student.id])] };
+    const session = await authRoutes._issueMobileSession(req, updated, schoolDoc, { action: 'auth.mobile.link' });
+
+    return ok(res, {
+      childId: student.id,
+      child: {
+        id: student.id,
+        name: `${student.firstName || ''} ${student.lastName || ''}`.trim(),
+        className: student.className || null,
+      },
+      ...session,
+    });
+  } catch (err) {
+    console.error('[parent-portal POST /link/confirm]', err);
     return E.serverError(res);
   }
 });

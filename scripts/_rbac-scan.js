@@ -17,6 +17,15 @@ const ALLOWLISTED_FILES = new Set([
   'parent-portal.js', 'student-portal.js',
   // teacher-portal uses _requireTeacher() role guard — same portal pattern
   'teacher-portal.js',
+  // mobile.js is the app's own surface, same reasoning as auth.js: /bootstrap
+  // is public by design (a build that is too old must learn that BEFORE it can
+  // authenticate), and /devices* act only on the caller's OWN registration —
+  // push.registerDevice/unregisterDevice take schoolId from req.jwtUser, and the
+  // DELETE is scoped to the caller's own tokens so a leaked token string cannot
+  // unsubscribe another school's parent. There is no module+action permission
+  // that could express "manage my own device", and inventing one to satisfy
+  // this gate would be a gate that never denies anyone.
+  'mobile.js',
 ]);
 
 const OWN_ACCOUNT_PATTERNS = [

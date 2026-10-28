@@ -6,6 +6,20 @@ import { Tag, Zap, Bug, Shield, Sparkles } from 'lucide-react';
 
 const RELEASES = [
   {
+    version: '4.63.0',
+    date: '2026-10-24',
+    label: 'Msingi mobile — sign-in, pushes and the parent app’s own endpoints',
+    changes: [
+      { type: 'new', text: 'The Msingi parent app signs in with a Google account or a 6-digit code sent to the parent’s email — no password to remember. The code expires in ten minutes, works once, and asking for one tells you nothing about whether that email is on file.' },
+      { type: 'new', text: 'Parents get push notifications on their phone: a new message from the school, a fee reminder or an invoice falling due, and every notice posted. Tapping one opens the screen it is about — the conversation, the fees page or the notice board — not just the app.' },
+      { type: 'new', text: 'Linking a child to a parent account is now an office decision: the office issues a 6-character code for one child, the parent types it, sees that child’s record (name, class, admission number) and confirms. The code works once, expires after a day, and issuing a new one cancels the last — so a slip that goes missing stops working.' },
+      { type: 'new', text: 'The parent app’s own reads: a month of attendance day by day with the office’s notes, the term report with every subject mark and the teacher’s remark, the full fee history with invoices and receipts as real rows, a receipt you can share, the school’s notices, and a private conversation with the office.' },
+      { type: 'fix', text: 'A message you sent could be shown as “Read” before anyone had opened it. A tick now means what it says: Sent until the other person actually opens the conversation.' },
+      { type: 'improvement', text: 'Schools keep control of pushes: each notification type has its own push switch alongside email and in-app, and a demo school can never push to a real phone.' },
+      { type: 'improvement', text: 'Staff and parents signing in on the app are held to the same rules as the website: admin, deputy, principal and finance accounts still complete the existing second code, and an unknown Google or email address is refused with “ask the office” rather than quietly creating an account.' },
+    ],
+  },
+  {
     version: '4.62.0',
     date: '2026-10-20',
     label: 'Parent Portal → Messages — rebuilt',
