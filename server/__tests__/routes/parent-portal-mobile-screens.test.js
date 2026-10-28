@@ -445,6 +445,46 @@ describe('GET /api/parent-portal/inbox', () => {
     expect(res.body.data.threads[0].name).toBe('Njeri');
     expect(res.body.data.threads[0].role).toBe('finance');
   });
+
+  /* A "thread" is only ever a LOOKUP PAIR — the messages collection has no
+     thread document — so a message that went to several people still lands
+     under one of them. Without the recipient fields on the row the app would
+     present that as a private conversation with one bursar. */
+  test('a send to several staff says so, on the row it was paired into', async () => {
+    mockCollections.messages._seed.length = 0;
+    mockCollections.messages._seed.push(
+      { id: 'm_1', schoolId: SCHOOL, senderId: PARENT, senderName: 'Mrs. Kamau', senderRole: 'parent', recipients: ['usr_bursar', 'usr_head', 'usr_discipline'], subject: 'Uniform', body: 'Please advise.', createdAt: '2026-10-21T10:00:00.000Z', isRead: {} },
+    );
+
+    const res = await supertest(buildApp()).get('/api/parent-portal/inbox');
+    const row = res.body.data.threads[0];
+    expect(row.counterpartUserId).toBe('usr_bursar');   // the pairing is unchanged…
+    expect(row.recipientCount).toBe(3);                 // …but it is not presented as 1:1
+    expect(row.multiRecipient).toBe(true);
+    expect(row.groupId).toBeNull();
+    expect(row.groupName).toBeNull();
+  });
+
+  test('a saved-group send names the group; a school-wide notice does not claim recipients', async () => {
+    mockCollections.messages._seed.length = 0;
+    mockCollections.messages._seed.push(
+      { id: 'm_grp', schoolId: SCHOOL, senderId: 'usr_head', senderName: 'Mr. Otieno', senderRole: 'principal', recipients: [PARENT, 'usr_bursar'], groupId: 'grp_junior', groupName: 'Junior School Team', subject: 'Sports day', body: 'Report at 8.', createdAt: '2026-10-22T10:00:00.000Z', isRead: {} },
+      { id: 'm_bcast', schoolId: SCHOOL, senderId: 'usr_office', senderName: 'Front Desk', senderRole: 'admin', recipients: ['parents'], subject: 'Term ends Friday', body: 'Half term.', createdAt: '2026-10-21T09:00:00.000Z', isRead: {} },
+    );
+
+    const res = await supertest(buildApp()).get('/api/parent-portal/inbox');
+    const bySubject = Object.fromEntries(res.body.data.threads.map((t) => [t.subject, t]));
+
+    expect(bySubject['Sports day'].groupName).toBe('Junior School Team');
+    expect(bySubject['Sports day'].groupId).toBe('grp_junior');
+    expect(bySubject['Sports day'].recipientCount).toBe(2);
+    expect(bySubject['Sports day'].multiRecipient).toBe(true);
+
+    // An audience key is a broadcast, not a named recipient — so a notice is
+    // not dressed up as a two-person group chat.
+    expect(bySubject['Term ends Friday'].recipientCount).toBe(0);
+    expect(bySubject['Term ends Friday'].multiRecipient).toBe(false);
+  });
 });
 
 describe('GET /api/parent-portal/threads/:counterpartUserId', () => {
@@ -463,12 +503,34 @@ describe('GET /api/parent-portal/threads/:counterpartUserId', () => {
     expect(res.body.data.counterpart.name).toBe('Njeri');
     expect(res.body.data.messages.map((m) => m.mine)).toEqual([true, false]);
     expect(res.body.data.messages[0].body).toBe('I paid yesterday.');   // chronological
+    expect(res.body.data.messages[0].multiRecipient).toBe(false);       // a real 1:1 pair
 
     const Msg = mockCollections.messages;
     expect(Msg.updateMany).toHaveBeenCalledTimes(1);
     const [filter, update] = Msg.updateMany.mock.calls[0];
     expect(filter.id.$in).toEqual(['m_2']);                 // only the inbound one
     expect(update.$set[`isRead.${PARENT}`]).toBe(true);
+  });
+
+  test('a bubble that went to several people carries that, so the app can withhold one person’s read tick', async () => {
+    mockCollections.messages._seed.length = 0;
+    mockCollections.messages._seed.push(
+      { id: 'm_1', schoolId: SCHOOL, senderId: PARENT, senderName: 'Mrs. Kamau', senderRole: 'parent', recipients: ['usr_bursar', 'usr_head'], subject: 'Uniform', body: 'Please advise.', createdAt: '2026-10-21T10:00:00.000Z', isRead: { usr_bursar: true } },
+      { id: 'm_2', schoolId: SCHOOL, senderId: 'usr_bursar', senderName: 'Njeri', senderRole: 'finance', recipients: [PARENT], subject: 'Uniform', body: 'Noted with thanks.', createdAt: '2026-10-22T10:00:00.000Z', isRead: {} },
+    );
+
+    const res = await supertest(buildApp()).get('/api/parent-portal/threads/usr_bursar');
+    const [mine, theirs] = res.body.data.messages;
+
+    expect(mine.mine).toBe(true);
+    expect(mine.recipientCount).toBe(2);
+    expect(mine.multiRecipient).toBe(true);
+    // `read` here answers "did THIS person open it" — true, and still not a
+    // claim that the whole group has. The app has both facts to choose from.
+    expect(mine.read).toBe(true);
+
+    expect(theirs.recipientCount).toBe(1);
+    expect(theirs.multiRecipient).toBe(false);
   });
 });
 

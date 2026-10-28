@@ -36,6 +36,7 @@ const AuditService = require('../services/audit');
 // comment for why this isn't reimplemented here.
 const { _helpers: weeklySnapshotHelpers } = require('./weekly-snapshots');
 const { resolveMessageCategories, resolveOneCategory } = require('../utils/parent-message-recipients');
+const { recipientSummary } = require('../utils/message-audience');
 const { createDirectMessage } = require('./messages');
 
 const router = express.Router();
@@ -961,7 +962,11 @@ router.get('/receipts/:paymentId', authMiddleware, PLAN, async (req, res) => {
 /* The messages collection has no thread document — a "thread" is the pair
    (this parent, one staff user), which is exactly how the web inbox reads it
    too. Grouping in JS over one bounded query beats inventing a threadId that
-   the rest of the product does not write. */
+   the rest of the product does not write.
+   A message addressed to several staff (a Discipline Office compose, a saved
+   group send) is still ONE document, so it pairs with whichever recipient this
+   picks — hence every row/bubble also carries recipientSummary(): the pairing
+   is a lookup key, not a claim that the conversation was private. */
 function _counterpartOf(msg, userId) {
   if (msg.senderId === userId) {
     const other = (msg.recipients || []).find(r => r !== userId && r !== 'all');
@@ -984,7 +989,7 @@ router.get('/inbox', authMiddleware, PLAN, async (req, res) => {
         { schoolId, senderId: userId },
       ],
     }).sort({ createdAt: -1 }).limit(300)
-      .select('id senderId senderName senderRole recipients subject body isRead createdAt')
+      .select('id senderId senderName senderRole recipients subject body isRead createdAt groupId groupName')
       .lean();
 
     const byCounterpart = new Map();
@@ -1005,6 +1010,10 @@ router.get('/inbox', authMiddleware, PLAN, async (req, res) => {
           preview: String(msg.body || '').slice(0, 120),
           lastAt: at,
           unread,
+          // Which of these rows was really several people. The thread key is
+          // still one counterpart — see the header above — so without this the
+          // app would render a group send as a private chat with one of them.
+          ...recipientSummary(msg),
         });
       } else {
         existing.unread += unread;
@@ -1012,6 +1021,7 @@ router.get('/inbox', authMiddleware, PLAN, async (req, res) => {
           existing.subject = msg.subject || existing.subject;
           existing.preview = String(msg.body || '').slice(0, 120);
           existing.lastAt = at;
+          Object.assign(existing, recipientSummary(msg));
         }
         if (!existing.name && counterpart.name) {
           existing.name = counterpart.name;
@@ -1059,7 +1069,7 @@ router.get('/threads/:counterpartUserId', authMiddleware, PLAN, async (req, res)
         { senderId: counterpartUserId, ..._inboxQuery({ schoolId, userId, role }) },
       ],
     }).sort({ createdAt: 1 }).limit(300)
-      .select('id senderId senderName senderRole subject body isRead createdAt')
+      .select('id senderId senderName senderRole subject body isRead createdAt recipients groupId groupName')
       .lean();
 
     // Opening a conversation IS reading it — the same single write the web
@@ -1086,6 +1096,11 @@ router.get('/threads/:counterpartUserId', authMiddleware, PLAN, async (req, res)
         subject: m.subject || '',
         body: m.body,
         at: m.createdAt,
+        /* Which bubble here was really a group send. `read` below answers the
+           narrow question — did THIS counterpart open it — which is not the
+           same claim as "the group read it", so the app has to know the
+           difference rather than showing one person's tick as everyone's. */
+        ...recipientSummary(m),
         // Two different questions, and conflating them is how an app ends up
         // telling a parent their message was read when nobody opened it:
         //   - my own message → has the OTHER person read it?
