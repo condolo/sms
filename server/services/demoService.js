@@ -37,6 +37,11 @@ const CLONE_DENY = new Set([
   'messages', 'elearning_tokens', 'mpesa_transactions', 'mark_audit_log',
   'report_card_counters', 'demo_requests', 'tickets', 'user_photos',
   'staff_documents',
+  /* Device push tokens are credentials for a REAL handset. Cloning them into
+     a demo tenant would hand a cloned school the ability to wake up real
+     phones (sendToUsers suppresses demo tenants, but the tokens should never
+     be there in the first place). */
+  'mobile_devices',
 ]);
 
 function _hashOtp(code) {
