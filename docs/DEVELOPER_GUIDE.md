@@ -7227,3 +7227,32 @@ Asked directly as a set of verification questions once a student could finally l
 - **Sidebar nav not reflecting clicks**: matches `89c8ea2` ("Portal fixes: dead sidebar nav..."), merged the day before this report — two sidebar-linked sections (`section-messages`, `section-lessons`) previously only rendered their wrapper element when they had content, so clicking them when empty scrolled to nothing; a scroll-spy effect was also added so manual scrolling keeps the sidebar highlight in sync rather than going stale. Confirmed directly in the current codebase: all 7 sidebar-linked section wrappers (`section-dashboard`, `-timetable`, `-grades`, `-attendance`, `-messages`, `-lessons`, `-exams`) now render unconditionally. If this is still observed live, it points to a stale cached JS bundle on the client, not an unfixed defect in this codebase.
 
 Tests: 3 new cases in `student-portal-dashboard.test.js` — `classRank`/`classSize` resolve correctly from a real published snapshot; both are `null` (not a crash) with no published report card; both are `null` when the school has ranking disabled (`rankings: {}`, no `.class` key). That file's own report-card fixture previously had `rankings: { class: 5 }` — a bare number, never the real `{ rank, outOf }` object shape — corrected to match reality alongside this fix.
+
+## Mascit's class-`id` backfill (v5.220.0) broke its own class/stream pickers — reverted, no code change (v5.227.0, 2026-10-28)
+
+Reported directly: "at mascit, classes and streams are not appearing... anywhere in the system where class or stream is supposed to be selected/filtered... I hope its not global." A self-caused regression from this session's own earlier work, confirmed and corrected, and confirmed not global.
+
+**The exact mechanism, found by reading `GET /api/classes` all the way through, not just the attendance code the original fix touched.** That route has always normalized every class it returns with:
+```js
+const normalised = docs.map(d => ({ ...d, id: d.id || d._id?.toString() }));
+```
+Before v5.220.0, Mascit's 15 class documents had no `id` field at all — the `||` fallback kicked in every time, producing the Mongo `_id` string, which is what every real reference in this school's data (`streams.classId`, `teaching_assignments.classId`, `assessment_marks.classId`, `report_card_snapshots.classId`, most of `students.classId`) actually stores. v5.220.0 backfilled a real `id` onto all 15 classes as an *explicitly optional* follow-up to its own code fix (`attendance.js`'s `_classNameMap`, which keys by both `id` and `_id` and needed no `id` field to already be correct). Once every class had a truthy `id`, the `||` fallback stopped firing — `GET /classes` started handing pickers the new UUID, and every downstream `classId` filter (most visibly `GET /streams?classId=...`) started searching for a value nothing in the school's existing data used. The original fix was never wrong; the backfill that followed it was an unaudited, unnecessary data change that turned out to be actively harmful.
+
+**Why a straight revert wasn't safe, and the audit that proved it:** by the time this was reported, several hours of real Mascit usage had already landed on the broken new identifier — 4 new student enrollments and 28 attendance records, both referencing classes by the new UUID because that's what the (broken) picker was offering. Every collection with a `classId` at this school was counted before touching anything:
+
+| Collection | Total | Old form (`_id`) | New form (UUID) |
+|---|---|---|---|
+| assessment_marks | 414 | 414 | 0 |
+| report_card_snapshots | 42 | 42 | 0 |
+| teaching_assignments | 120 | 120 | 0 |
+| streams | 17 | 17 | 0 |
+| students | 54 | 50 | 4 |
+| attendance | 59 | 31 | 28 |
+
+674 of 706 records were already on the `_id` form — the established identity, not a minority to chase. Migrating the 32 stragglers back to match 674 existing records is a far smaller, safer operation than migrating 674 records forward to match 32 that only existed because of the bug.
+
+**Fix, data-only:** migrated the 4 students and 28 attendance records created since the backfill back onto the `_id` form, then removed the backfilled `id` field from all 15 Mascit class documents — `$unset`, not a rewrite, restoring exactly the pre-v5.220.0-backfill state. `GET /classes`'s own fallback does the rest; no code anywhere needed to change. Verified after: all 6 collections above are 100% on the `_id` form, no exceptions. `report_card_snapshots` — already-published report cards, the thing this was explicitly asked not to lose — was confirmed untouched at 42/42 on the old form both before and after; it was never affected by either the original backfill or this correction.
+
+**Confirmed not global, the explicit question asked:** every other school's classes are created through `POST /classes` or the CSV importer, both of which have always set `id: uuidv4()` at creation — Mascit having classes with no `id` at all was the specific, singular anomaly v5.220.0 existed to work around in the first place (confirmed via a platform-wide scan at the time: 40 total class documents, 15 missing `id`, all 15 Mascit's). No other school's classes were ever in the state that made this failure possible.
+
+**Standing lesson:** "the code fix already resolves the reported symptom, this backfill is optional data hygiene" is only as trustworthy as the audit behind it. The original backfill was checked against the one consumer (`attendance.js`) the report named, not against `GET /classes`'s own normalization or the other collections that turned out to depend on its output. Giving a record a missing identity field needs the same cross-collection reference audit this entry's table shows, every time — "optional" and "safe to skip the full check" are not the same thing.

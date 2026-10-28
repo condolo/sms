@@ -6,6 +6,31 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.227.0] - 2026-10-28 - data-incident: Mascit's own `id` backfill (v5.220.0) broke every class/stream picker at that school — reverted, no code change
+
+Reported directly: "at mascit, classes and streams are not appearing... anywhere in the system where class or stream is supposed to be selected/filtered... I hope its not global." Confirmed real, confirmed caused by this session's own earlier work, confirmed isolated to Mascit alone — not global.
+
+**Root cause — a side effect of v5.220.0's class-`id` backfill that wasn't checked against every consumer.** `GET /api/classes` has long normalized every returned class with `id: d.id || d._id?.toString()` — before that backfill, every Mascit class had no `id` field at all, so this line correctly fell back to the Mongo `_id` string, which is what **every real reference in the school's data** (streams, teaching_assignments, assessment_marks, report_card_snapshots, students) actually stores as `classId`. Once v5.220.0 gave all 15 of Mascit's classes a real `id`, that fallback stopped firing — the class picker started handing out the new UUID instead, and every downstream query filtering by `classId` (most directly `GET /streams?classId=...`, but the same shape applies anywhere a picker's selected class flows into a filter) now searched for a value nothing in the school's existing data used. v5.220.0's own code fix (`_classNameMap`, keying by both forms) was never the problem and needed no change — this was entirely a consequence of the *optional, "not required" data backfill* that fix's writeup explicitly flagged as optional.
+
+**Why this had to be fixed carefully, not just reverted.** By the time this was reported, Mascit staff had already used the broken picker for several hours: 4 new students were enrolled and 28 attendance records were marked, both landing on the new (now going to be removed) UUID form — real actions by real users, not something to discard. Audited every collection with a `classId` at this school before touching anything:
+
+| Collection | Total | Old form (`_id`) | New form (UUID) |
+|---|---|---|---|
+| assessment_marks | 414 | 414 | 0 |
+| report_card_snapshots | 42 | 42 | 0 |
+| teaching_assignments | 120 | 120 | 0 |
+| streams | 17 | 17 | 0 |
+| students | 54 | 50 | 4 |
+| attendance | 59 | 31 | 28 |
+
+674 of 706 records were already on the old `_id` form — overwhelmingly the established identity for this school's classes, not a minority to migrate away from.
+
+**Fix (data only, no code changed):** migrated the 32 stragglers (4 students + 28 attendance records created in the hours since the backfill) back onto the `_id` form to match everything else, then removed the backfilled `id` field from all 15 class documents — restoring `GET /classes`'s own existing fallback to the behavior it had before v5.220.0's backfill, with zero code changes required. Verified after: every one of the 6 collections above is now 100% on the `_id` form, including the 4 students and 28 attendance records that were just reconciled. `report_card_snapshots` (already-published report cards) was never touched by either the original backfill or this fix — confirmed 42/42 on the old form both before and after, addressing the explicit "no data loss, we have already sent/published report cards" concern directly.
+
+**Confirmed not global**, per the direct question: every other school's classes were already created through `POST /classes` or the CSV importer, both of which always set `id: uuidv4()` at creation time — Mascit was the sole historical exception (the entire reason v5.220.0 existed), so no other school's classes were ever missing `id` in the first place, and no other school was ever exposed to this failure mode.
+
+**Lesson for next time, recorded so it isn't repeated:** a "the code fix resolves the reported symptom on its own, this backfill is optional data hygiene" judgment call is only as safe as the audit behind it. The original v5.220.0 backfill was checked against the one route (`attendance.js`) that prompted the report, not against `GET /classes`'s own id-normalization fallback or any of the other 6 collections that turned out to depend on it. Any future "give this record a missing identity field" fix needs the same full-system reference audit this entry's table demonstrates, before deciding a backfill is safe to skip or safe to do.
+
 ## [v5.226.0] - 2026-10-27 - fix(student-portal): Class Rank never populated, even after publishing — `classRank`/`classSize` were never sent to the client
 
 Asked directly, as a set of verification questions after the student-portal login fix landed: "will my average and rank work [once marks are published]?", "today's schedule?", "will My Grades also appear when published?" — "answer fix and ensure nothing is broken, no assumptions." Investigated each against the real code and live data rather than guessing.
