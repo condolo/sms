@@ -197,6 +197,19 @@ describe('POST /api/auth/otp/request', () => {
     expect(email.sendLoginOTP).not.toHaveBeenCalled();
   });
 
+  /* Deliberately the opposite policy to /login's 2FA step (which refuses the
+     challenge when the mail fails): this route is unauthenticated and
+     passwordless, so "delivered" and "not delivered" must be
+     indistinguishable — a difference would say whether the address is
+     enrolled. The failure is logged, never answered. */
+  test('a delivery failure is still answered with the same generic success', async () => {
+    email.sendLoginOTP.mockResolvedValueOnce(false);
+    const res = await supertest(buildApp()).post('/api/auth/otp/request').send({ email: 'kamau@example.com' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({ sent: true, expiresInSeconds: 600 });
+  });
+
   test('a second request inside the resend window answers the same but sends nothing', async () => {
     const app = buildApp();
     await supertest(app).post('/api/auth/otp/request').send({ email: 'kamau@example.com' });

@@ -59,9 +59,13 @@ jest.mock('../../middleware/tenant', () => ({
 
 /* ── Mock email utility — prevents real SMTP calls ─────────── */
 jest.mock('../../utils/email', () => ({
-  sendLoginOTP:           jest.fn().mockResolvedValue(undefined),
-  sendPasswordExpirySoon: jest.fn().mockResolvedValue(undefined),
-  sendTrialExpirySoon:    jest.fn().mockResolvedValue(undefined),
+  /* Returns TRUE = delivered. The real sendLoginOTP resolves a BOOLEAN, and
+     /login's MFA step now refuses the challenge when it is false (rather than
+     claiming a code was sent), so a mock resolving `undefined` would silently
+     be read as a delivery failure. */
+  sendLoginOTP:           jest.fn().mockResolvedValue(true),
+  sendPasswordExpirySoon: jest.fn().mockResolvedValue(true),
+  sendTrialExpirySoon:    jest.fn().mockResolvedValue(true),
 }));
 
 /* ── Mock SessionService — prevents real DB session writes ──── */
@@ -563,6 +567,72 @@ describe('POST /api/auth/login — C8/MR-001 Phase 3 cutover', () => {
     } finally {
       delete module.exports.__MOCK_SCHOOL__;
     }
+  });
+
+  /* ── 2FA delivery failure ────────────────────────────────────────
+     sendLoginOTP resolves a BOOLEAN, and a failed send used to be dropped
+     on the floor: the response still said a code had been sent, so the user
+     waited for a code that was never coming, with nothing in the log either.
+     The password is already verified at that point, so there is no
+     enumeration left to protect — say it failed. */
+  describe('2FA email delivery failure', () => {
+    /* NOTE: makeUser() defaults mfaEnabled:false — with that, MFA is skipped
+       and login succeeds directly, so these MUST opt in. */
+    test('a failed send refuses the challenge instead of claiming a code was sent', async () => {
+      module.exports.__MOCK_SCHOOL__ = { ...MOCK_SCHOOL, slug: 'not-demo' };
+      try {
+        mockUserDoc = makeUser({ role: 'admin', primaryRole: 'admin', mfaEnabled: true });
+        require('../../utils/email').sendLoginOTP.mockResolvedValueOnce(false);
+
+        const res = await supertest(buildApp())
+          .post('/api/auth/login')
+          .set('X-School-Slug', 'not-demo')
+          .send({ email: 'admin@demo.school', password: 'Password123!' });
+
+        expect(res.status).toBe(502);
+        expect(res.body.error.code).toBe('MFA_EMAIL_FAILED');
+        expect(res.body.mfaRequired).toBeUndefined();   // never claim it was sent
+      } finally {
+        delete module.exports.__MOCK_SCHOOL__;
+      }
+    });
+
+    test('a delivered send still answers with mfaRequired (no regression)', async () => {
+      module.exports.__MOCK_SCHOOL__ = { ...MOCK_SCHOOL, slug: 'not-demo' };
+      try {
+        mockUserDoc = makeUser({ role: 'admin', primaryRole: 'admin', mfaEnabled: true });
+        require('../../utils/email').sendLoginOTP.mockResolvedValueOnce(true);
+
+        const res = await supertest(buildApp())
+          .post('/api/auth/login')
+          .set('X-School-Slug', 'not-demo')
+          .send({ email: 'admin@demo.school', password: 'Password123!' });
+
+        expect(res.status).toBe(200);
+        expect(res.body.mfaRequired).toBe(true);
+      } finally {
+        delete module.exports.__MOCK_SCHOOL__;
+      }
+    });
+
+    test('the failed attempt clears the lockout counter (the password WAS right)', async () => {
+      module.exports.__MOCK_SCHOOL__ = { ...MOCK_SCHOOL, slug: 'not-demo' };
+      try {
+        mockUserDoc = makeUser({ role: 'admin', primaryRole: 'admin', mfaEnabled: true });
+        require('../../utils/email').sendLoginOTP.mockResolvedValueOnce(false);
+        const SecurityService = require('../../services/securityService');
+
+        const res = await supertest(buildApp())
+          .post('/api/auth/login')
+          .set('X-School-Slug', 'not-demo')
+          .send({ email: 'admin@demo.school', password: 'Password123!' });
+
+        expect(res.status).toBe(502);                 // the mail really did fail
+        expect(SecurityService.clearFail).toHaveBeenCalled();
+      } finally {
+        delete module.exports.__MOCK_SCHOOL__;
+      }
+    });
   });
 });
 
