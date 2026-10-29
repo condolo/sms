@@ -187,35 +187,6 @@ function _observationRatingsHtml(s) {
   </div>`;
 }
 
-// Pill-list version of the above, matching the PDF's _drawObservationRatingsPdf
-// (2026-10-08's RCE8 redesign: a filled pill for the selected rating, or
-// "Not yet rated" in muted italic) — used by subject_paired/marks_then_comments
-// only. _observationRatingsHtml's own checkbox-grid design is kept as-is for
-// legacy_tabular (a separate, earlier, explicit design request — see its own
-// comment above); this one closes the gap reported directly, with a
-// side-by-side PDF comparison, between the two "new" layouts' HTML output
-// (still the checkbox grid) and what their own PDF download already renders
-// for the exact same published report.
-function _observationRatingsPillsHtml(s) {
-  if (!s.comments.showObservationRatings || !s.comments.observationRatings.length) return '';
-  const rows = s.comments.observationRatings.map(({ category, rating }) => {
-    const ratingHtml = rating
-      ? `<span style="display:inline-block;padding:2px 10px;border-radius:10px;background:${BRAND_WASH};color:${BRAND};font-weight:700;font-size:9px">${_esc(rating.charAt(0).toUpperCase() + rating.slice(1))}</span>`
-      : `<span style="color:#94a3b8;font-style:italic;font-size:9px">Not yet rated</span>`;
-    return `
-    <tr>
-      <td style="padding:5px 0;border-bottom:1px solid #e2e8f0;font-size:10px;color:#0f172a">${_esc(category)}</td>
-      <td style="padding:5px 0;border-bottom:1px solid #e2e8f0;text-align:right">${ratingHtml}</td>
-    </tr>`;
-  }).join('');
-  // Same atomic-block reasoning as _observationRatingsHtml above.
-  return `
-  <div style="margin:16px 0;page-break-inside:avoid;break-inside:avoid">
-    <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 6px">Class Teacher Observations</p>
-    <table style="width:100%;border-collapse:collapse">${rows}</table>
-  </div>`;
-}
-
 
 // Reported directly: "I need... the footer see" (a reference design's
 // prominent term-dates bar). closingDate/nextTermBegin already existed
@@ -1394,9 +1365,9 @@ function _renderSubjectPairedPdf(doc, s, images, isFirstPage) {
     rowY += 44 + 10;
   }
 
-  /* CLASS TEACHER OBSERVATIONS — pills, atomic (reviewer: "the selected
-     rating should be visually obvious"; "do not make the report look
-     like an incomplete paper form full of empty checkboxes"). Off
+  /* CLASS TEACHER OBSERVATIONS — checkbox grid (reverted 2026-10-29,
+     see _drawObservationRatingsPdf's own header comment for why the
+     pill design this comment used to defend was itself reverted). Off
      unless the school has turned it on and defined at least one
      category, same "zero trace when disabled" rule every other
      optional section here follows. */
@@ -1828,7 +1799,8 @@ function _renderMarksThenCommentsPdf(doc, s, images, isFirstPage) {
     });
   }
 
-  /* CLASS TEACHER OBSERVATIONS — pills, atomic. */
+  /* CLASS TEACHER OBSERVATIONS — checkbox grid, atomic (see this
+     block's other call site above for why "pills" is now stale). */
   const obsH = _measureObservationRatingsPdf(s);
   if (obsH) {
     ensureCommentsSpace(obsH);

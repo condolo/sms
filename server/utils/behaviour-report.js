@@ -169,6 +169,13 @@ function renderIncidentsReportPdf({
 
   let y = 116;
   function drawTable(headers, colWidths, rows, emptyMsg) {
+    // Reported directly ("you always leave a gap"): the data-row loop
+    // below already checked for page overflow, but the header row
+    // itself didn't — a long Staff Activity table (a school with many
+    // staff) could leave `y` near the bottom of the page, orphaning the
+    // Incident Log's own heading/header row at the very bottom of one
+    // page with its data starting fresh on the next. Checked here too.
+    if (y > doc.page.height - 80) { doc.addPage(); y = 36; }
     doc.font('Helvetica-Bold').fontSize(8);
     let x = 36;
     headers.forEach((h, i) => {
@@ -199,8 +206,17 @@ function renderIncidentsReportPdf({
     y += 10;
   }
 
-  doc.font('Helvetica-Bold').fontSize(10).text('Staff Activity - who logged what', 36, y);
-  y += 16;
+  // A section heading drawn right before its table needs the same
+  // overflow check drawTable now has for its own header row, or the
+  // heading itself can print at the very bottom of one page while the
+  // table it introduces starts fresh on the next.
+  function sectionHeading(text) {
+    if (y > doc.page.height - 80) { doc.addPage(); y = 36; }
+    doc.font('Helvetica-Bold').fontSize(10).fillColor('#000').text(text, 36, y);
+    y += 16;
+  }
+
+  sectionHeading('Staff Activity - who logged what');
   const staffColW = [PAGE_W * 0.3, PAGE_W * 0.2, PAGE_W * 0.15, PAGE_W * 0.1, PAGE_W * 0.12, PAGE_W * 0.13];
   drawTable(
     ['Staff', 'Role', 'Incidents Logged', 'Merits', 'Demerits', 'Net Points'],
@@ -209,8 +225,7 @@ function renderIncidentsReportPdf({
     'No incidents in this scope/period.'
   );
 
-  doc.font('Helvetica-Bold').fontSize(10).text('Incident Log', 36, y);
-  y += 16;
+  sectionHeading('Incident Log');
   const incColW = [PAGE_W * 0.1, PAGE_W * 0.2, PAGE_W * 0.15, PAGE_W * 0.1, PAGE_W * 0.2, PAGE_W * 0.08, PAGE_W * 0.17];
   drawTable(
     ['Date', 'Student', 'Class', 'Type', 'Category / Title', 'Points', 'Recorded By'],
