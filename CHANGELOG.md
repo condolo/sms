@@ -6,6 +6,33 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.235.0] - 2026-10-29 - feat(behaviour): filterable incident-log PDF export, with a per-staff activity tally
+
+Requested directly: "I need behaviour incidences to be able to be exported in pdf, can be filtered per whole school, per class, stream, include the name of the staff who entered/recorded the incidences... when downloading we need to know how each staff is using the system."
+
+**Confirmed, not assumed:** an old changelog entry from this project's early history (pre-"v5" numbering) described a "Generate Report" PDF + "Staff Activity log" for Behaviour — but neither exists anywhere in the current client code (`BehaviourPage.jsx`/`IncidentsTab.jsx` had zero `pdf`/`export`/`download` references) or server routes. It was removed or never carried forward through a later rewrite. This is a fresh build, not a restoration.
+
+### Added
+- **`GET /api/behaviour/incidents/export-pdf`** — same filters the on-screen list already exposes (`classId`, `type`, `status`, `severity`, `categoryId`, `dateFrom`, `dateTo`) plus a new `streamId` (resolved by joining the stream's current roster through `students`, since `behaviour_incidents` has no `streamId` of its own — the same "join, don't trust a denormalized field" posture used elsewhere for stream-scoped exports). No filters = whole school.
+- **Staff Activity tally** — the actual point of the request: every incident's `reportedBy` is resolved to the real staff member's name + role, then grouped into a per-staff table (incidents logged, merits, demerits, net points), sorted by volume. A principal can see at a glance, for example, that one teacher logged 22 of 48 incidents this term while another logged one — not buried in a flat list.
+- **`reportedByName`/`reportedByRole`** added to the existing `GET /api/behaviour/incidents` response too (one batched lookup per page, not per row) — the on-screen Incidents table now has a "Recorded By" column, and `streamId` filtering works there identically to the export.
+- Rendered through the same shared HTML+Puppeteer pipeline (`htmlToPdfBuffer`, `server/utils/html-to-pdf.js`) every other PDF in this app now uses — no new PDFKit code, one house style.
+- Client: `IncidentsTab.jsx` gains Class/Stream (cascading, same pattern as every other class+stream picker in this app) and date-range filters, plus an "Export PDF" button.
+
+**Gated to school leadership, not every `behaviour:*` holder:** `isManagement()` (admin/superadmin/principal/deputy_principal/hod) or the `discipline_committee` role specifically (confirmed it already gets full `behaviour:RCUD` by default — `server/utils/repairPermissions.js` — because it's the school's designated behaviour-oversight role). Deliberately NOT extended to the assigned Behaviour Officer bypass every other `behaviour:*` route gets (`behaviourAccess()`) — auditing how OTHER staff use the module is a leadership action, a different scope than the Officer's day-to-day job of operating it. A plain teacher, including one who is themself a prolific incident-logger, cannot pull this report.
+
+### Files
+- `server/utils/behaviour-report.js` (new) — `renderIncidentsReportHtml`.
+- `server/routes/behaviour.js` — new `GET /incidents/export-pdf` (registered before `GET /incidents/:id`, same registration-order reasoning as report-cards.js's `/bulk-pdf`); `GET /incidents` gains `streamId` filtering + `reportedByName`/`reportedByRole` resolution.
+- `client/src/pages/behaviour/components/IncidentsTab.jsx` — class/stream/date filters, Export PDF button, Recorded By column.
+- `client/src/api/client.js` — `behaviour.incidents.exportPdf`.
+- `server/__tests__/routes/behaviour-incidents-export-pdf.test.js` (new) — management gate (including `discipline_committee`), classId/streamId/date filtering, the staff-activity tally (including an unattributed-incident case), and `reportedByName` resolution on the plain list route.
+
+### Verified
+- Full Jest suite (3959 tests) passes.
+- Manual, real-data end-to-end render against live Trinitas data: 48 real incidents, 8 real staff members correctly resolved and tallied (one teacher logging 22 of 48 — exactly the kind of signal this report exists to surface).
+- Browser walkthrough against the local demo school, logged in as Demo Admin: class/stream cascading filters work, Export PDF returns `200 application/pdf`, no console errors from this feature's own requests.
+
 ## [v5.234.0] - 2026-10-29 - refactor(report-cards): every PDF download now prints the same HTML the browser's own Print button uses — one renderer, not two
 
 Direct follow-up to v5.230.0 (observation pills/wording/grading-scale parity) and the Kisha Bidali comparison that surfaced two more gaps (a full-page cover vs a compact one, Arial vs embedded premium type). Asked directly: "can we just use print only — Download also goes through HTML+Print — yes," after being told the real cost (a new headless-browser dependency, real added CPU/memory on this host's Render Starter plan).

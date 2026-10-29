@@ -397,6 +397,7 @@ export const behaviour = {
   incidents: {
     ..._resource('behaviour/incidents'),
     summary: (params) => _get('/behaviour/incidents/summary', params),
+    exportPdf: (params) => _downloadPdf('/behaviour/incidents/export-pdf', `behaviour-incidents-${new Date().toISOString().slice(0, 10)}.pdf`, params),
   },
   appeals: {
     list:    (params)       => _get('/behaviour/appeals', params),

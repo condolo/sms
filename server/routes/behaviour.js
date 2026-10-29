@@ -26,6 +26,9 @@ const { _model } = require('../utils/model');
 const { resolveAcademicPeriod } = require('../utils/academic-period');
 const { isYearArchived } = require('../utils/archival');
 const { getWorkflowConfig, saveWorkflowConfig, resolveStep } = require('../utils/workflow-config');
+const { isManagement } = require('../utils/subject-scope');
+const { htmlToPdfBuffer } = require('../utils/html-to-pdf');
+const { renderIncidentsReportHtml } = require('../utils/behaviour-report');
 
 const router = express.Router();
 const PLAN   = planGate('behaviour');
@@ -387,8 +390,9 @@ router.get('/incidents', authMiddleware, PLAN, MODGATE, behaviourAccess('read'),
     const { page, limit, skip } = parsePagination(req.query);
 
     const filter = { schoolId };
-    const _sid = strParam(req.query.studentId);
-    const _cid = strParam(req.query.classId);
+    const _sid   = strParam(req.query.studentId);
+    const _cid   = strParam(req.query.classId);
+    const _strmId = strParam(req.query.streamId);
     const _typ = strParam(req.query.type);
     const _st  = strParam(req.query.status);
     const _sev = strParam(req.query.severity);
@@ -414,13 +418,29 @@ router.get('/incidents', authMiddleware, PLAN, MODGATE, behaviourAccess('read'),
       filter.$or = [{ title: rx }, { description: rx }];
     }
 
+    // behaviour_incidents has no streamId of its own — resolve the
+    // stream's current roster instead, same join the PDF export below uses.
+    if (_strmId) {
+      const streamStudentIds = await tenantModel('students', tenantContext(req)).distinct('id', { schoolId, streamId: _strmId });
+      filter.studentId = filter.studentId ? filter.studentId : { $in: streamStudentIds };
+    }
+
     const Incidents = tenantModel('behaviour_incidents', tenantContext(req));
     const [docs, total] = await Promise.all([
       Incidents.find(filter).sort({ date: -1, createdAt: -1 }).skip(skip).limit(limit).select('-__v').lean(),
       Incidents.countDocuments(filter)
     ]);
 
-    return ok(res, docs, paginate(page, limit, total));
+    // Reported directly: show who recorded each incident, not just what
+    // happened — one lookup for the whole page, not one per row.
+    const reporterIds = [...new Set(docs.map(d => d.reportedBy).filter(Boolean))];
+    const reporterDocs = reporterIds.length
+      ? await tenantModel('users', tenantContext(req)).find({ schoolId, id: { $in: reporterIds } }).select('id name role').lean()
+      : [];
+    const reporterMap = Object.fromEntries(reporterDocs.map(u => [u.id, { name: u.name, role: u.role }]));
+    const docsWithReporter = docs.map(d => ({ ...d, reportedByName: reporterMap[d.reportedBy]?.name || null, reportedByRole: reporterMap[d.reportedBy]?.role || null }));
+
+    return ok(res, docsWithReporter, paginate(page, limit, total));
   } catch (err) { console.error('[behaviour/incidents GET]', err); return E.serverError(res); }
 });
 
@@ -475,6 +495,137 @@ router.get('/incidents/summary', authMiddleware, PLAN, MODGATE, behaviourAccess(
     ]);
     return ok(res, summary);
   } catch (err) { console.error('[behaviour/incidents/summary]', err); return E.serverError(res); }
+});
+
+/* GET /api/behaviour/incidents/export-pdf — filterable incident-log PDF
+   for school leadership, with a per-staff "who logged what" tally —
+   the whole point of the request: not just a copy of the on-screen
+   list, but a way to see how each staff member is actually using the
+   module. Registered here, BEFORE GET /incidents/:id, on purpose — the
+   same Express registration-order reasoning report-cards.js's own
+   /bulk-pdf comment documents (id='export-pdf' would otherwise be
+   swallowed as a snapshot id, 404, before this handler is ever
+   reached).
+
+   Management-only (not the Behaviour Officer bypass behaviourAccess()
+   grants everywhere else in this file) — auditing how OTHER staff use
+   the module is a leadership/oversight action, a different scope than
+   the Officer's day-to-day job of operating it. Same posture as
+   report-cards.js's bulk-pdf gate ("Bulk report downloads are for
+   school management"). */
+router.get('/incidents/export-pdf', authMiddleware, PLAN, MODGATE, rbac('behaviour', 'read'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    // discipline_committee gets full behaviour:RCUD by default
+    // (server/utils/repairPermissions.js) specifically because it's the
+    // school's designated behaviour-oversight role — same leadership
+    // posture as isManagement() here, just scoped to this one module
+    // rather than the whole school.
+    if (!isManagement(req) && req.jwtUser.role !== 'discipline_committee') {
+      return E.forbidden(res, 'Exporting the incident log is for school leadership.');
+    }
+
+    const ctx = tenantContext(req);
+    const filter = { schoolId };
+    const _cid = strParam(req.query.classId);
+    const _sid = strParam(req.query.streamId);
+    const _typ = strParam(req.query.type);
+    const _st  = strParam(req.query.status);
+    const _sev = strParam(req.query.severity);
+    const _cat = strParam(req.query.categoryId);
+    if (_cid) filter.classId    = _cid;
+    if (_typ) filter.type       = _typ;
+    if (_st)  filter.status     = _st;
+    if (_sev) filter.severity   = _sev;
+    if (_cat) filter.categoryId = _cat;
+
+    const _df = strParam(req.query.dateFrom);
+    const _dt = strParam(req.query.dateTo);
+    if (_df || _dt) {
+      filter.date = {};
+      if (_df) filter.date.$gte = _df;
+      if (_dt) filter.date.$lte = _dt;
+    }
+
+    // behaviour_incidents has no streamId of its own (see IncidentSchema)
+    // — resolve the stream's CURRENT roster instead, same "join through
+    // students, don't trust a denormalized/stale field" posture used
+    // elsewhere in this codebase for stream-scoped exports.
+    let streamName = null;
+    if (_sid) {
+      const streamStudentIds = await tenantModel('students', ctx).distinct('id', { schoolId, streamId: _sid });
+      filter.studentId = { $in: streamStudentIds };
+      const streamDoc = await tenantModel('streams', ctx).findOne({ schoolId, id: _sid }).select('name').lean();
+      streamName = streamDoc?.name || null;
+    }
+
+    let className = null;
+    if (_cid) {
+      const classDoc = await tenantModel('classes', ctx).findOne({ schoolId, id: _cid }).select('name').lean();
+      className = classDoc?.name || null;
+    }
+
+    // Capped, not paginated — this is a single downloadable document, not
+    // an infinite-scroll list. 3000 rows comfortably covers a full term
+    // for any real school; a request that would exceed it should narrow
+    // by class/stream/date instead of silently truncating without notice.
+    const EXPORT_LIMIT = 3000;
+    const incidents = await tenantModel('behaviour_incidents', ctx)
+      .find(filter).sort({ date: -1, createdAt: -1 }).limit(EXPORT_LIMIT).select('-__v').lean();
+
+    const [reporterDocs, classDocs, school, requester] = await Promise.all([
+      (() => {
+        const reporterIds = [...new Set(incidents.map(i => i.reportedBy).filter(Boolean))];
+        return reporterIds.length
+          ? tenantModel('users', ctx).find({ schoolId, id: { $in: reporterIds } }).select('id name role').lean()
+          : [];
+      })(),
+      (() => {
+        const classIds = [...new Set(incidents.map(i => i.classId).filter(Boolean))];
+        return classIds.length
+          ? tenantModel('classes', ctx).find({ schoolId, id: { $in: classIds } }).select('id name').lean()
+          : [];
+      })(),
+      _model('schools').findOne({ id: schoolId }, { name: 1, logoUrl: 1 }).lean().catch(() => null),
+      tenantModel('users', ctx).findOne({ schoolId, id: userId }).select('name').lean().catch(() => null),
+    ]);
+    const reporterMap  = Object.fromEntries(reporterDocs.map(u => [u.id, { name: u.name, role: u.role }]));
+    const classNameMap = Object.fromEntries(classDocs.map(c => [c.id, c.name]));
+
+    const staffActivity = {};
+    for (const inc of incidents) {
+      const key = inc.reportedBy || '__unattributed__';
+      if (!staffActivity[key]) {
+        staffActivity[key] = {
+          name: reporterMap[key]?.name || (key === '__unattributed__' ? 'Unattributed' : key),
+          role: reporterMap[key]?.role || '',
+          total: 0, merits: 0, demerits: 0, points: 0,
+        };
+      }
+      const row = staffActivity[key];
+      row.total += 1;
+      if (inc.type === 'merit')   row.merits   += 1;
+      if (inc.type === 'demerit') row.demerits += 1;
+      row.points += (inc.points || 0);
+    }
+    const staffRows = Object.values(staffActivity).sort((a, b) => b.total - a.total);
+
+    const scopeLabel = _sid ? `${className || 'Class'} · ${streamName || 'Stream'}`
+      : _cid ? (className || 'Class')
+      : 'Whole School';
+
+    const html = renderIncidentsReportHtml({
+      school, scopeLabel, dateFrom: _df, dateTo: _dt,
+      incidents, classNameMap, reporterMap, staffRows,
+      generatedByName: requester?.name || null,
+    });
+    const pdf = await htmlToPdfBuffer(html);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="behaviour-incidents-${new Date().toISOString().slice(0, 10)}.pdf"`);
+    res.setHeader('Content-Length', pdf.length);
+    res.send(pdf);
+  } catch (err) { console.error('[behaviour/incidents/export-pdf]', err); return E.serverError(res); }
 });
 
 router.get('/incidents/:id', authMiddleware, PLAN, MODGATE, behaviourAccess('read'), async (req, res) => {
