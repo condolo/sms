@@ -157,7 +157,7 @@ const EVENT_REGISTRY = {
 
   /* ── Behaviour ───────────────────────────────────────────── */
   behaviour_incident: {
-    label:       'Behaviour Incident Logged',
+    label:       'Student Wellbeing & Behaviour Record',
     desc:        'Sent to parents/guardians when a behaviour incident is recorded for their child',
     group:       'behaviour',
     audience:    ['parents'],

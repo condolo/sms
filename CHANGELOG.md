@@ -6,6 +6,35 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.243.0] - 2026-10-29 - fix(notifications): rename the alarmist "Behaviour Incident Logged" title to "Student Wellbeing & Behaviour Record"
+
+Reported directly, with a screenshot of a real parent's email (a routine +3 merit for "creative or innovative approach to a task"): "very alarmist... Can we kindly change it to 'Student Wellbeing & Behaviour Record'." Checked first whether this was already covered by the Message Templates feature (schools can self-edit 24 automated emails' wording via Settings, v5.215.0) — it's not: only the email's `subject`/`body` paragraph are template-customizable (`school.notificationTemplateOverrides`); the bold `<h2>` banner inside the email, the in-app notification's title, and the email-digest subject are three separate hardcoded strings outside that system, all still saying "incident" even on a school that had already customized the body text to softer wording.
+
+No per-school override field exists for these three strings, so renamed the platform default directly, consistently across all three — a merit award sounding like an "incident report" is an alarmist default for every school, not a Trinitas-specific preference.
+
+### Fixed
+- `server/utils/email.js` — the hardcoded email `<h2>` banner.
+- `server/routes/behaviour.js` — the in-app notification's `inAppSubject` and the email-digest's `emailDigestSubject`.
+- `server/config/notificationTemplates.js` — the template's own `label` (Settings UI row name) and `defaultSubject` (the email's actual Subject: line, which still said "Behaviour Incident" even though the default body already said "a behaviour record").
+- `server/utils/notif-settings.js` — the matching `label` in the notification-preferences registry (Settings' on/off toggle list).
+
+### Verified
+- `npx jest behaviour notif notification` — 21/21 suites, 129/129 tests; no test asserted the old string.
+
+## [v5.242.0] - 2026-10-29 - fix(parent-portal): the multi-child switcher never appeared on mobile at all
+
+Reported directly, by two separate parents in close succession — Purity Karwitha (investigated first; her account's 3 children are correctly linked in the database, a session/token-staleness explanation that turned out NOT to be the real bug for mobile users) and a second parent: "The drop down for accessing other learners is not there." The user's own hunch — "most likely a parent can't view another child when logged on mobile phone" — was exactly right.
+
+**Root cause:** the sidebar `<aside>` already correctly implements a mobile off-canvas drawer (`fixed`/`translate-x-0`/`mobileNavOpen`, toggled by its own `Open menu`/`Close menu` buttons) — the same single sidebar renders on both desktop and mobile, just slid off-screen on mobile until opened. But the multi-child switcher inside it (and its collapsed-sidebar icon variant) carried an extra, redundant `hidden lg:block` / `hidden lg:flex` — CSS that doesn't just restrict it to the desktop *layout* (which doesn't exist separately), it hides it below the `lg` breakpoint entirely, inside the mobile drawer too. Every other control in that same sidebar footer (Change Password, Support, Sign out) has no such gating and was always visible on mobile; only the child switcher had it.
+
+### Fixed
+- `client/src/pages/parent-portal/ParentDashboard.jsx` — removed `hidden lg:block` from the switcher's container and `hidden` from its collapsed-sidebar icon variant (kept `lg:flex`'s own `flex` display, just not gated to desktop-only).
+
+### Verified
+- `npx vite build` succeeds with no errors.
+- Live, end-to-end, on an emulated mobile viewport (375×812): opened the mobile drawer for the real demo parent account, confirmed the switcher ("Brian Onyango ⌄" / "2 children") is now visible and tappable — injected a second child into the account's own `/api/parent-portal/children` response via a client-side fetch override (no real data touched; verified by re-logging-in through the app's own client-side routing so the override survived the remount) — opened the dropdown (both children listed correctly) and tapped the second one, confirming the dashboard actually switches to show that child's data.
+- Purity Karwitha's database record remains independently confirmed correct (all 3 daughters linked) — this mobile fix and her case are the same underlying feature gap, not two different bugs.
+
 ## [v5.241.0] - 2026-10-29 - fix(deploy): pin PUPPETEER_CACHE_DIR so Chrome survives Render's build→runtime transition
 
 Direct follow-up to v5.238.0: the user sent the actual production server log, which settled the guesswork — `[report-cards/:id/pdf] Error: Could not find Chrome (ver. 149.0.7827.22)`. Not a missing-shared-library issue as v5.238.0 guessed; Puppeteer found no Chrome binary at all at runtime. Since v5.238.0's fallback was already in place, this meant every single download had silently been using the old PDFKit renderer in production, not just as the rare safety net it was designed to be.

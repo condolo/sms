@@ -700,9 +700,9 @@ async function _notifyGuardians(req, incident) {
     ctx, schoolId, eventKey: 'behaviour_incident',
     items: [{
       studentId: incident.studentId,
-      inAppSubject: `Behaviour incident logged for ${studentName}`,
+      inAppSubject: `Student Wellbeing & Behaviour Record — ${studentName}`,
       inAppBody:    `${incident.type} — ${incident.title}${incident.description ? `: ${incident.description}` : ''}`,
-      emailDigestSubject: `Behaviour incident — ${studentName}`,
+      emailDigestSubject: `Student Wellbeing & Behaviour Record — ${studentName}`,
       emailDigestBody:    `${incident.type}: ${incident.title}`,
       sendEmail: (recipient) => email.sendBehaviourIncidentAlert({
         recipientName: recipient.name, recipientEmail: recipient.email,

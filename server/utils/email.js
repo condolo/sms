@@ -776,7 +776,7 @@ async function sendBehaviourIncidentAlert({
     recipientName: recipientName || 'Parent/Guardian', studentName, schoolName,
   });
   const html = _wrap(`
-    <h2>${icon} Behaviour Incident Logged</h2>
+    <h2>${icon} Student Wellbeing & Behaviour Record</h2>
     ${bodyHtml}
     <div class="info">
       <p><strong>Type:</strong> ${type}</p>

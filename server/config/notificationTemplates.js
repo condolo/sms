@@ -286,10 +286,19 @@ const MESSAGE_TEMPLATES = {
   /* ── Behaviour ───────────────────────────────────────────── */
   behaviour_incident: {
     category: 'behaviour',
-    label: 'Behaviour Incident Logged',
+    // Reported directly (Trinitas): "Behaviour Incident Logged" read as
+    // alarmist for an everyday merit award, not just a demerit — renamed
+    // platform-wide (no per-school override field exists for just this
+    // wording) to "Student Wellbeing & Behaviour Record", matching the
+    // already-softer "a behaviour record was logged" language the default
+    // body text used underneath it. See the matching rename of the
+    // hardcoded email <h2> in utils/email.js and the in-app/digest
+    // subjects in routes/behaviour.js — all three previously said
+    // "incident" independently of this customizable template.
+    label: 'Student Wellbeing & Behaviour Record',
     desc: 'Sent to parents/guardians when a behaviour incident is recorded for their child.',
     placeholders: ['recipientName', 'studentName', 'schoolName'],
-    defaultSubject: 'Behaviour Incident — {{studentName}} — {{schoolName}}',
+    defaultSubject: 'Student Wellbeing & Behaviour Record — {{studentName}} — {{schoolName}}',
     defaultBody:
       'Dear {{recipientName}},\n\n' +
       'A behaviour record was logged for {{studentName}} at {{schoolName}}.',
