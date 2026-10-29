@@ -46,9 +46,18 @@ export default function ClassDetail() {
   });
   const cls = clsData?.data ?? null;
 
+  // Reported directly: deleting a stream (DELETE /:id soft-deletes to
+  // status:'inactive') appeared to do nothing — the confirm modal
+  // closed, but the stream "just appeared again". Root cause: this
+  // query never filtered by status at all, so the post-delete refetch
+  // (triggered by the mutation's own onSuccess below) faithfully
+  // re-fetched the now-inactive stream right along with every active
+  // one — the delete had actually succeeded; this screen just has no
+  // concept of "show inactive streams" to begin with, so it should
+  // never have been asking for them.
   const { data: streamData, isLoading: streamsLoading, isError: streamsError, refetch: refetchStreams } = useQuery({
-    queryKey: ['streams', { classId }],
-    queryFn:  () => streamsApi.list({ classId, limit: 200 }),
+    queryKey: ['streams', { classId, status: 'active' }],
+    queryFn:  () => streamsApi.list({ classId, status: 'active', limit: 200 }),
     staleTime: 60_000,
     enabled:  !!classId,
   });

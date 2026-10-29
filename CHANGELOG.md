@@ -6,6 +6,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.237.0] - 2026-10-29 - fix(classes): deleting a stream appeared to do nothing — it "just appeared again" because the list never excluded deleted streams
+
+Direct follow-up, same conversation: after the `studentCount` fix below, the specific symptom was narrowed further — "Stream EMERALD, Stream PEARL etc, has zero student. system shows it is deleting and nothing, they just appear again."
+
+**Confirmed, exact mechanism:** `DELETE /streams/:id` soft-deletes by setting `status: 'inactive'` — it was working correctly the whole time. But `ClassDetail.jsx`'s own stream query — `streamsApi.list({ classId, limit: 200 })` — never passed a `status` filter at all, and `GET /streams` only filters by status when the caller explicitly asks (`if (req.query.status) filter.status = req.query.status`). So the delete mutation's own `onSuccess` correctly invalidated and refetched the list — and the refetch faithfully brought back the now-`inactive` stream right alongside every active one, because this screen had no concept of "only show active streams" to filter it out. The delete genuinely succeeded every time; the screen just never knew how to hide what it had deleted.
+
+**Verified live, not just reasoned through:** created a real throwaway zero-student stream in a running local instance, deleted it, confirmed it is gone from the list and does not reappear (3 streams → 2 streams, staying at 2).
+
+**On RUBY/PEARL/EMERALD specifically:** checked these three directly against live Trinitas data before writing this up. They are NOT currently zero-student — KG's RUBY has 7 active students, PEARL has 12, EMERALD has 18, all genuinely `status: 'active'`, all real children currently enrolled. For these three specific streams, the system correctly refusing to delete them is the right behavior, not a bug — unless the on-screen card for these three is itself showing "0 students" (which would be a different, so-far-unconfirmed display bug worth checking directly, since it contradicts what's actually in the database). The `status`-filter bug above is real and fixed regardless, and fully explains the "shows deleting, then reappears" pattern for any stream that genuinely has none.
+
+### Fixed
+- `client/src/pages/classes/ClassDetail.jsx` — the stream list query now passes `status: 'active'`, matching the exact set of statuses this screen was ever meant to show (it has no "show inactive/deleted streams" toggle at all).
+
+### Verified
+- Full Jest suite unaffected (pure client-side query-key/params change, no server change this time) — re-ran regardless, still 371/371 suites green.
+- Manual, real end-to-end browser test: created a stream with 0 students, deleted it, confirmed it does not reappear after the post-delete refetch.
+- Checked RUBY/PEARL/EMERALD (KG, Trinitas) directly against live data before claiming this explains their case — it currently does not; they hold 7/12/18 real active students respectively.
+
 ## [v5.236.0] - 2026-10-29 - fix(classes,streams): "active student count" silently included inactive/transferred students, wrongly blocking a stream's Delete button with no explanation
 
 Reported directly: "am trying to delete a stream that has not students enrolled yet but the system doesn't even respond... when I click delete, it should delete and the system [should] communicate why not." Investigated as a possible global pattern per the report ("this I think is global").
