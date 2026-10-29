@@ -21,7 +21,9 @@ const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { isTimetablePublished, publishedReader } = require('../utils/timetable-publish');
 const { resolveCurrentPeriod } = require('./academic-config');
 const { _getMpesaConfig } = require('./mpesa');
-const { ok, E }          = require('../utils/response');
+const { createDirectMessage } = require('./messages');
+const { resolveMessageCategories, resolveOneCategory } = require('../utils/parent-message-recipients');
+const { ok, E, created } = require('../utils/response');
 // Weekly Snapshot's read logic is shared with weekly-snapshots.js's own
 // staff-facing routes — see that file's _findAuthorizedStudent header
 // comment for why this isn't reimplemented here.
@@ -416,6 +418,62 @@ router.get('/me', authMiddleware, PLAN, async (req, res) => {
     return ok(res, safe);
   } catch (err) {
     console.error('[student-portal GET /me]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ═══════════════════════════════════════════════════════════════
+   GET /api/student-portal/message-recipients
+   Student-safe compose: the categories a student can message are resolved
+   from their own class/stream data — subject teachers, class teacher,
+   discipline, administration — never another student or parent.
+   ═══════════════════════════════════════════════════════════════ */
+router.get('/message-recipients', authMiddleware, PLAN, async (req, res) => {
+  if (!_requireStudent(req, res)) return;
+  try {
+    const { studentId } = req.jwtUser;
+    const categories = await resolveMessageCategories(req, studentId);
+    // Never leak internal recipient userIds to the client — the key is
+    // enough to pick from, re-resolved server-side again on send.
+    return ok(res, categories.map(c => ({ key: c.key, label: c.label })));
+  } catch (err) {
+    console.error('[student-portal GET /message-recipients]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ═══════════════════════════════════════════════════════════════
+   POST /api/student-portal/messages
+   Body: { category, subject, body }
+   `category` is re-resolved server-side to actual staff userId(s) — a
+   student can never reach another student or parent through this route.
+   ═══════════════════════════════════════════════════════════════ */
+router.post('/messages', authMiddleware, PLAN, async (req, res) => {
+  if (!_requireStudent(req, res)) return;
+  try {
+    const { schoolId, userId, studentId } = req.jwtUser;
+    const { category, subject, body } = req.body;
+
+    if (!category || !subject?.trim() || !body?.trim()) {
+      return E.badRequest(res, 'category, subject, and body are required');
+    }
+
+    const recipientUserIds = await resolveOneCategory(req, studentId, category);
+    if (!recipientUserIds || recipientUserIds.length === 0) {
+      return E.badRequest(res, 'That recipient is no longer available — please pick another and try again.');
+    }
+
+    const senderUser = await tenantModel('users', tenantContext(req)).findOne({ id: userId, schoolId }).select('name email').lean();
+    const msg = await createDirectMessage(req, {
+      recipientUserIds,
+      subject: subject.trim(),
+      body: body.trim(),
+      senderName: senderUser?.name || senderUser?.email || 'Student',
+      senderRole: 'student',
+    });
+    return created(res, msg);
+  } catch (err) {
+    console.error('[student-portal POST /messages]', err);
     return E.serverError(res);
   }
 });

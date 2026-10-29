@@ -16,11 +16,11 @@ import {
   Download, GraduationCap, LogOut, AlertCircle,
   BookOpen, Lock, Bell, MessageSquare, Activity, Star,
   MapPin, Play, MonitorPlay, CalendarCheck, Menu, X, LifeBuoy,
-  KeyRound, Eye, EyeOff, Loader2,
+  KeyRound, Eye, EyeOff, Loader2, Send,
 } from 'lucide-react';
 import NotificationBell from '@/components/layout/NotificationBell.jsx';
 import FloatingHelp from '@/components/help/FloatingHelp.jsx';
-import { auth as authApi } from '@/api/client.js';
+import { auth as authApi, studentMessaging } from '@/api/client.js';
 
 /* ── API ────────────────────────────────────────────────────────── */
 const API_BASE = import.meta.env.VITE_API_BASE || '';
@@ -45,7 +45,13 @@ async function _fetch(path) {
 
 async function _downloadReport(rcId, label) {
   const res = await fetch(`${API_BASE}/api/report-cards/${rcId}/pdf`, { credentials: 'include' });
-  if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.error || 'Download failed'); }
+  if (!res.ok) {
+    // b.error is { code, message } — reading it directly rendered
+    // "[object Object]" so every failure looked the same. See the
+    // identical fix in ParentDashboard.jsx's helpers.
+    const b = await res.json().catch(() => ({}));
+    throw new Error(b.error?.message || b.message || `Download failed (HTTP ${res.status})`);
+  }
   const blob = await res.blob();
   const a    = document.createElement('a');
   a.href     = URL.createObjectURL(blob);
@@ -56,7 +62,10 @@ async function _downloadReport(rcId, label) {
 
 async function _downloadSnapshot(weekStart, label) {
   const res = await fetch(`${API_BASE}/api/student-portal/weekly-snapshot/${weekStart}/pdf`, { credentials: 'include' });
-  if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.error || 'Download failed'); }
+  if (!res.ok) {
+    const b = await res.json().catch(() => ({}));
+    throw new Error(b.error?.message || b.message || `Download failed (HTTP ${res.status})`);
+  }
   const blob = await res.blob();
   const a    = document.createElement('a');
   a.href     = URL.createObjectURL(blob);
@@ -170,6 +179,7 @@ function ChangePasswordModal({ open, currentPw, newPw, confirmPw, onCurrentChang
       <motion.div key="pw-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         className="fixed inset-0 bg-black/30 z-40" onClick={onClose} />
       <motion.div key="pw-dialog" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }}
+        role="dialog" aria-modal="true" aria-label="Change password"
         className="fixed inset-0 z-50 flex items-center justify-center p-4">
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm" onClick={e => e.stopPropagation()}>
           <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
@@ -232,6 +242,97 @@ function ChangePasswordModal({ open, currentPw, newPw, confirmPw, onCurrentChang
   );
 }
 
+/* Student compose modal — recipients are server-resolved categories
+   (subject teachers, class teacher, discipline, administration), never a
+   free-text address. Hoisted to top level so keystrokes in the textarea
+   never unmount it (same root-cause fix as ParentDashboard.jsx's
+   ComposeMessageModal — a function defined inside a render body gets a
+   new identity every render and would remount on each keystroke). */
+function ComposeMessageModal({ open, sent, recipientOptions, form, onFormChange, error, sending, onClose, onSend, primary }) {
+  if (!open) return null;
+  return (
+    <AnimatePresence>
+      <motion.div key="compose-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        className="fixed inset-0 bg-black/30 z-40" onClick={onClose} />
+      <motion.div key="compose-dialog" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }}
+        role="dialog" aria-modal="true" aria-label="New message"
+        className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md" onClick={e => e.stopPropagation()}>
+          <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+            <h3 className="text-sm font-semibold text-slate-900">New Message</h3>
+            <button onClick={onClose} className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100">
+              <X size={16} />
+            </button>
+          </div>
+
+          {sent ? (
+            <div className="px-5 py-8 text-center">
+              <CheckCircle size={28} className="text-emerald-500 mx-auto mb-2" />
+              <p className="text-sm font-medium text-slate-800">Message sent</p>
+              <button onClick={onClose} className="mt-4 text-[12px] font-semibold px-4 py-2 rounded-lg text-white" style={{ background: primary }}>
+                Done
+              </button>
+            </div>
+          ) : (
+            <div className="px-5 py-4 space-y-3">
+              <div>
+                <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">To</label>
+                {recipientOptions === null ? (
+                  <div className="h-9 rounded-lg bg-slate-100 animate-pulse mt-1" />
+                ) : recipientOptions.length === 0 ? (
+                  <p className="text-[12px] text-slate-400 mt-1">No one is set up to receive messages for you yet — contact the school office directly.</p>
+                ) : (
+                  <select
+                    className="w-full mt-1 text-[13px] border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1"
+                    value={form.category}
+                    onChange={e => onFormChange(f => ({ ...f, category: e.target.value }))}
+                  >
+                    <option value="">Select who to message…</option>
+                    {recipientOptions.map(opt => (
+                      <option key={opt.key} value={opt.key}>{opt.label}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Subject</label>
+                <input
+                  className="w-full mt-1 text-[13px] border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1"
+                  value={form.subject}
+                  onChange={e => onFormChange(f => ({ ...f, subject: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Message</label>
+                <textarea
+                  rows={4}
+                  className="w-full mt-1 text-[13px] border border-slate-200 rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-1"
+                  value={form.body}
+                  onChange={e => onFormChange(f => ({ ...f, body: e.target.value }))}
+                />
+              </div>
+              {error && <p className="text-[12px] text-red-600">{error}</p>}
+              <div className="flex justify-end gap-2 pt-1">
+                <button onClick={onClose} className="text-[12px] font-medium text-slate-500 px-3 py-2 rounded-lg hover:bg-slate-50">
+                  Cancel
+                </button>
+                <button
+                  onClick={onSend}
+                  disabled={sending || recipientOptions === null || recipientOptions.length === 0}
+                  className="flex items-center gap-1.5 text-[12px] font-semibold text-white px-4 py-2 rounded-lg disabled:opacity-50"
+                  style={{ background: primary }}
+                >
+                  <Send size={12} /> {sending ? 'Sending…' : 'Send'}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
 /* ══════════════════════════════════════════════════════════════════
    MAIN COMPONENT
    ══════════════════════════════════════════════════════════════════ */
@@ -259,6 +360,15 @@ export default function StudentDashboard() {
   const [pwSaving,    setPwSaving]    = useState(false);
   const [pwBanner,    setPwBanner]    = useState({ type: '', msg: '' });
 
+  // Student → teacher messaging — recipients are a server-resolved category
+  // list (never a free-text address). See server/utils/parent-message-recipients.js.
+  const [composeOpen,      setComposeOpen]      = useState(false);
+  const [composeSent,      setComposeSent]      = useState(false);
+  const [composeForm,      setComposeForm]      = useState({ category: '', subject: '', body: '' });
+  const [composeError,     setComposeError]     = useState('');
+  const [composeSending,   setComposeSending]   = useState(false);
+  const [recipientOptions, setRecipientOptions] = useState(null); // null = loading
+
   function handlePasswordChange(e) {
     e.preventDefault();
     if (!currentPw) { setPwBanner({ type: 'error', msg: 'Current password is required.' }); return; }
@@ -275,12 +385,53 @@ export default function StudentDashboard() {
       .finally(() => setPwSaving(false));
   }
 
-  /* ── Per-school branding — same pattern as Sidebar.jsx (admin shell) ── */
-  const authSchool      = session?.school;
+  /* ── Student → teacher messaging compose ─────────────────────────
+     Recipients come from GET /student-portal/message-recipients — the
+     server resolves the category to real staff userId(s) at send time,
+     so a student can only ever reach their subject teachers, class
+     teacher, discipline office, or administration. Never another
+     student, never a parent. */
+  function openCompose() {
+    setComposeForm({ category: '', subject: '', body: '' });
+    setComposeError('');
+    setComposeSent(false);
+    setComposeOpen(true);
+    setRecipientOptions(null);
+    studentMessaging.recipients()
+      .then(r => setRecipientOptions(r?.data ?? []))
+      .catch(() => setRecipientOptions([]));
+  }
+  function sendCompose() {
+    if (!composeForm.category) { setComposeError('Choose who to message'); return; }
+    if (!composeForm.subject.trim()) { setComposeError('Subject is required'); return; }
+    if (!composeForm.body.trim()) { setComposeError('Message is required'); return; }
+    setComposeSending(true);
+    setComposeError('');
+    studentMessaging.send({
+      category: composeForm.category,
+      subject:  composeForm.subject.trim(),
+      body:     composeForm.body.trim(),
+    })
+      .then(() => {
+        setComposeSent(true);
+        setComposeForm({ category: '', subject: '', body: '' });
+      })
+      .catch(err => setComposeError(err.message || 'Could not send — please try again.'))
+      .finally(() => setComposeSending(false));
+  }
+
+  /* ── Live per-school branding — same pattern as Sidebar.jsx (admin shell).
+     The session snapshot is only the fallback: it is frozen at login time,
+     so a school rename never showed until re-login, while the dashboard
+     payload (data.school.name, live-read server-side) was already on
+     screen below the header, visibly disagreeing with it. The spinner
+     guard above means `data` is always present by the time this renders,
+     so the live name wins in practice. ── */
+  const authSchool      = data?.school?.name ? data.school : session?.school;
   const { primary, accent } = useSchoolTheme();
   const schoolBrandName = authSchool?.name ?? 'Student Portal';
   const schoolInitial   = schoolBrandName.trim().charAt(0).toUpperCase() || 'M';
-  const schoolLogoUrl   = authSchool?.logoUrl ?? null;
+  const schoolLogoUrl   = authSchool?.logoUrl ?? session?.school?.logoUrl ?? null;
 
   /* ── Auth guard + fetch ── */
   useEffect(() => {
@@ -591,7 +742,7 @@ export default function StudentDashboard() {
           <h1 id="topbar-greeting" className="text-[14px] sm:text-[16px] font-bold text-slate-900 flex-1 min-w-0 truncate">
             {_greeting()}, {firstName} 👋
           </h1>
-          <span id="topbar-term-badge" className="hidden sm:inline text-[12px] font-medium text-slate-500 bg-slate-100 px-3 py-1 rounded-full whitespace-nowrap">
+          <span id="topbar-term-badge" className="inline text-[12px] font-medium text-slate-500 bg-slate-100 px-3 py-1 rounded-full whitespace-nowrap">
             {termLabel}
           </span>
           <NotificationBell myUserId={session?.user?.id} onSelect={() => scrollToSection('section-messages')} />
@@ -1128,14 +1279,24 @@ export default function StudentDashboard() {
                 <Bell size={14} className="text-amber-500" />
                 <h2 className="text-[13px] font-bold text-slate-900">Announcements</h2>
               </div>
-              {announcements?.length > 0 && (
-                <span
-                  id="announcements-count-badge"
-                  className="text-[11px] font-semibold text-amber-600 bg-amber-50 px-2.5 py-[5px] rounded-full"
+              <div className="flex items-center gap-2">
+                {announcements?.length > 0 && (
+                  <span
+                    id="announcements-count-badge"
+                    className="text-[11px] font-semibold text-amber-600 bg-amber-50 px-2.5 py-[5px] rounded-full"
+                  >
+                    {announcements.length} new
+                  </span>
+                )}
+                <button
+                  id="messages-new-btn"
+                  onClick={openCompose}
+                  disabled={composeSending}
+                  className="text-[11px] font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 px-3 py-[6px] rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {announcements.length} new
-                </span>
-              )}
+                  New Message
+                </button>
+              </div>
             </div>
             {!announcements?.length ? (
               <p id="announcements-empty" className="text-[12px] text-slate-400 text-center py-6">
@@ -1236,6 +1397,19 @@ export default function StudentDashboard() {
         banner={pwBanner} saving={pwSaving}
         onClose={() => setPwModalOpen(false)}
         onSubmit={handlePasswordChange}
+      />
+
+      <ComposeMessageModal
+        open={composeOpen}
+        sent={composeSent}
+        recipientOptions={recipientOptions}
+        form={composeForm}
+        onFormChange={setComposeForm}
+        error={composeError}
+        sending={composeSending}
+        onClose={() => setComposeOpen(false)}
+        onSend={sendCompose}
+        primary={primary}
       />
     </div>
   );
