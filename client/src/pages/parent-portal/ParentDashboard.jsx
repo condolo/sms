@@ -936,6 +936,29 @@ export default function ParentDashboard() {
           </div>
         </Card>
 
+        {/* Assignments — the Homework / Assignment mark per subject, from the
+            same published report-card snapshot as the grades above. Reported
+            directly: "assignments should be included with their score." */}
+        {d.subjectMarks?.some(s => s.assignmentScore != null) && (
+          <Card id="section-assignments">
+            <CardHeader
+              title="Assignments"
+              right={<span id="assignments-badge" className="text-[11px] font-semibold text-purple-600 bg-purple-50 px-2.5 py-[5px] rounded-full shrink-0">Homework</span>}
+            />
+            <div id="assignments-list" className="divide-y divide-slate-50">
+              {d.subjectMarks.filter(s => s.assignmentScore != null).map((sub, i) => (
+                <div key={`assign-${sub.subjectId ?? i}`} id={`assignment-${sub.subjectId ?? i}`} className="flex items-center gap-3 px-[18px] py-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[13px] font-medium text-slate-800 truncate">{sub.subjectName}</p>
+                    <p className="text-[11px] text-slate-400">Homework / Assignment</p>
+                  </div>
+                  <span className="text-[13px] font-bold text-slate-700">{Math.round(sub.assignmentScore)}%</span>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
+
         {/* Term-over-term trend — returned by the API (academicTrend) but
             previously rendered nowhere at all. */}
         {d.academicTrend?.length > 1 && (
