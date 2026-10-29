@@ -1479,9 +1479,16 @@ export default function ParentDashboard() {
 
         {/* User footer */}
         <div id="sidebar-footer" className="px-2 py-3 border-t" style={{ borderColor: '#292524' }}>
-          {/* Multi-child switcher */}
+          {/* Multi-child switcher — reported directly: "the drop down for
+              accessing other learners is not there" on mobile. This whole
+              <aside> already renders as an off-canvas drawer on mobile
+              (mobileNavOpen/translate-x, not a separate mobile layout), so
+              the extra `lg:block hidden` here wasn't scoping to desktop's
+              own sidebar — it was hiding the switcher inside the MOBILE
+              drawer too, the only place a phone user could ever reach it,
+              since the sidebar only exists in this one form. */}
           {children.length > 1 && !collapsed && (
-            <div className="relative mb-2 lg:block hidden">
+            <div className="relative mb-2">
               <button id="child-switcher-btn" onClick={() => setChildMenuOpen(o => !o)} className="w-full flex items-center gap-2 px-2.5 py-2 rounded-[7px] text-left transition-colors" style={{ background: '#292524' }}>
                 <div className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0" style={{ background: avatarGradient }}>
                   {_initials(activeChild?.name ?? '')}
@@ -1511,7 +1518,7 @@ export default function ParentDashboard() {
             <button
               onClick={() => setActiveChildId(children[(children.findIndex(c => c.id === activeChildId) + 1) % children.length].id)}
               title="Switch child"
-              className="hidden lg:flex w-full items-center justify-center mb-2 py-1.5 rounded-[7px] hover:bg-white/5"
+              className="flex w-full items-center justify-center mb-2 py-1.5 rounded-[7px] hover:bg-white/5"
             >
               <div className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold" style={{ background: avatarGradient }}>
                 {_initials(activeChild?.name ?? '')}
