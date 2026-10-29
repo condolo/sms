@@ -121,8 +121,8 @@ describe('GET /api/parent-portal/dashboard/:childId — subjectMarks (real marks
         id: 'rc_2', schoolId: SCHOOL_A, studentId: CHILD_1, status: 'published', superseded: false,
         academicYear: '2026', termNumber: 2, publishedAt: '2026-06-01', averageScore: 71,
         subjects: {
-          subj_eng:  { finalScore: 68, grade: 'B' },
-          subj_math: { finalScore: 74, grade: 'B+' },
+          subj_eng:  { finalScore: 68, grade: 'B',  breakdown: { CA: 70, HW: 55, MT: 72, ET: 75 } },
+          subj_math: { finalScore: 74, grade: 'B+', breakdown: { CA: 78, HW: 82, MT: 70, ET: 76 } },
         },
       },
       {
@@ -134,8 +134,21 @@ describe('GET /api/parent-portal/dashboard/:childId — subjectMarks (real marks
     const res = await supertest(buildApp()).get(`/api/parent-portal/dashboard/${CHILD_1}`);
     expect(res.status).toBe(200);
     expect(res.body.data.subjectMarks).toEqual([
-      { subjectId: 'subj_eng',  subjectName: 'English Language', finalScore: 68, grade: 'B' },
-      { subjectId: 'subj_math', subjectName: 'Mathematics',      finalScore: 74, grade: 'B+' },
+      { subjectId: 'subj_eng',  subjectName: 'English Language', finalScore: 68, grade: 'B',  assignmentScore: 55 },
+      { subjectId: 'subj_math', subjectName: 'Mathematics',      finalScore: 74, grade: 'B+', assignmentScore: 82 },
+    ]);
+  });
+
+  test('assignmentScore is null when a subject carries no HW breakdown (school does not use Homework)', async () => {
+    mockReportDocs = [{
+      id: 'rc_1', schoolId: SCHOOL_A, studentId: CHILD_1, status: 'published', superseded: false,
+      academicYear: '2026', termNumber: 1, publishedAt: '2026-01-01', averageScore: 60,
+      subjects: { subj_eng: { finalScore: 55, grade: 'C+', breakdown: { CA: 60, MT: 50, ET: 55 } } },
+    }];
+    const res = await supertest(buildApp()).get(`/api/parent-portal/dashboard/${CHILD_1}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.subjectMarks).toEqual([
+      { subjectId: 'subj_eng', subjectName: 'English Language', finalScore: 55, grade: 'C+', assignmentScore: null },
     ]);
   });
 
