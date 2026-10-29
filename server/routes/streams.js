@@ -26,6 +26,12 @@ const StreamSchema = z.object({
   classId:       z.string().min(1),
   name:          z.string().min(1).max(50).trim(),  // "A", "B", "East", "Red", etc.
   formTeacherId: z.string().optional(),
+  // Co-homeroom / assistant teacher (2026-10-29, direct request): same
+  // homeroom rights as formTeacherId everywhere — see scopeEngine.js's
+  // resolveHomeroomStreamIds, comment-scope.js's canWriteClassRemark,
+  // report-view-scope.js's canViewFullReport, and report-cards.js's
+  // class-teacher resolution, all widened to check this field too.
+  assistantFormTeacherId: z.string().optional(),
   room:          z.string().max(50).optional(),
   capacity:      z.number().int().min(1).max(500).optional(),
   status:        z.enum(['active', 'inactive']).default('active'),
@@ -114,8 +120,8 @@ router.get(
       Streams.countDocuments(filter),
     ]);
 
-    // Enrich with teacher names
-    const teacherIds = [...new Set(docs.map(d => d.formTeacherId).filter(Boolean))];
+    // Enrich with teacher names (both form teacher and assistant)
+    const teacherIds = [...new Set(docs.flatMap(d => [d.formTeacherId, d.assistantFormTeacherId]).filter(Boolean))];
     let teacherMap = {};
     if (teacherIds.length) {
       const Teachers = tenantModel('teachers', tenantContext(req));
@@ -153,8 +159,9 @@ router.get(
       return {
         ...d,
         id:           sid,
-        teacherName:  teacherMap[d.formTeacherId] ?? null,
-        studentCount: countMap[sid] ?? 0,
+        teacherName:          teacherMap[d.formTeacherId] ?? null,
+        assistantTeacherName: teacherMap[d.assistantFormTeacherId] ?? null,
+        studentCount:         countMap[sid] ?? 0,
       };
     });
 

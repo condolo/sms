@@ -748,7 +748,11 @@ router.post('/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
       rankings: config.rankingEnabled ? mergeRankings(r.studentId, { class: classRanks }) : {},
     }));
 
-    // Resolve class teacher name: student → stream (formTeacherId) → teacher name
+    // Resolve class teacher name(s): student → stream (formTeacherId /
+    // assistantFormTeacherId) → teacher name. Assistant/co-homeroom
+    // teacher (2026-10-29) is a second, independently-named role, not
+    // merged into one string — shown as its own line wherever the
+    // report renders a class teacher at all.
     const studentIds  = studentsWithRanks.map(s => s.studentId);
     const Students    = tenantModel('students', tenantContext(req));
     const Streams     = tenantModel('streams', tenantContext(req));
@@ -760,15 +764,16 @@ router.post('/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
 
     const streamIds = [...new Set(studentDocs.map(d => d.streamId).filter(Boolean))];
     const streamDocs = streamIds.length
-      ? await Streams.find({ schoolId, id: { $in: streamIds } }).select('id formTeacherId').lean()
+      ? await Streams.find({ schoolId, id: { $in: streamIds } }).select('id formTeacherId assistantFormTeacherId').lean()
       : [];
 
-    const teacherIds = [...new Set(streamDocs.map(d => d.formTeacherId).filter(Boolean))];
+    const teacherIds = [...new Set(streamDocs.flatMap(d => [d.formTeacherId, d.assistantFormTeacherId]).filter(Boolean))];
     const teacherDocs = teacherIds.length
       ? await Teachers.find({ schoolId, id: { $in: teacherIds } }).select('id title firstName lastName').lean()
       : [];
 
     const streamMap  = Object.fromEntries(streamDocs.map(d => [d.id, d.formTeacherId]));
+    const assistantStreamMap = Object.fromEntries(streamDocs.map(d => [d.id, d.assistantFormTeacherId]));
     const teacherMap = Object.fromEntries(teacherDocs.map(t => [
       t.id,
       [t.title, t.firstName, t.lastName].filter(Boolean).join(' '),
@@ -778,8 +783,14 @@ router.post('/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
     const students = studentsWithRanks.map(r => {
       const streamId       = studentStreamMap[r.studentId];
       const formTeacherId  = streamId ? streamMap[streamId] : null;
+      const assistantTeacherId = streamId ? assistantStreamMap[streamId] : null;
       const classTeacherName = formTeacherId ? (teacherMap[formTeacherId] ?? null) : null;
-      return { ...r, classTeacherId: formTeacherId ?? null, classTeacherName: classTeacherName ?? null };
+      const assistantClassTeacherName = assistantTeacherId ? (teacherMap[assistantTeacherId] ?? null) : null;
+      return {
+        ...r,
+        classTeacherId: formTeacherId ?? null, classTeacherName: classTeacherName ?? null,
+        assistantClassTeacherId: assistantTeacherId ?? null, assistantClassTeacherName: assistantClassTeacherName ?? null,
+      };
     });
 
     // A teacher sees their own subjects of each report; a form tutor sees their stream in full.

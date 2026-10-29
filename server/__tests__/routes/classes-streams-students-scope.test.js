@@ -39,6 +39,7 @@ function mockMatchesFilter(doc, filter) {
     // fallback lookup); the mock's docs store it as a plain string, so
     // compare both sides as strings.
     if (k === '_id' && v != null) return String(doc._id) === String(v);
+    if (k === '$or') return v.some(sub => mockMatchesFilter(doc, sub));
     if (v && typeof v === 'object' && !Array.isArray(v)) {
       if ('$in' in v) return v.$in.includes(doc[k]);
       return true;

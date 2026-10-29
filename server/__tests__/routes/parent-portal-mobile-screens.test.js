@@ -182,10 +182,14 @@ beforeEach(() => {
   mockSchoolDoc = { id: SCHOOL, name: 'Riverside Academy', logoUrl: null, systemEmail: 'office@riverside.school', mpesa: null };
 
   mockCollection('students', [
-    { id: CHILD,   schoolId: SCHOOL, firstName: 'Brian', lastName: 'Kamau', className: 'Grade 7A', classId: 'cls_7a', admissionNumber: 'ADM-120', photo: 'brian.jpg', status: 'active' },
-    { id: SIBLING, schoolId: SCHOOL, firstName: 'Joy',   lastName: 'Kamau', className: 'Grade 4B', classId: 'cls_4b', admissionNumber: 'ADM-121', photo: null, status: 'active' },
+    { id: CHILD,   schoolId: SCHOOL, firstName: 'Brian', lastName: 'Kamau', className: 'Grade 7A', classId: 'cls_7a', streamId: 'strm_7a', admissionNumber: 'ADM-120', photo: 'brian.jpg', status: 'active' },
+    { id: SIBLING, schoolId: SCHOOL, firstName: 'Joy',   lastName: 'Kamau', className: 'Grade 4B', classId: 'cls_4b', streamId: 'strm_4b', admissionNumber: 'ADM-121', photo: null, status: 'active' },
   ]);
-  mockCollection('classes', [{ id: 'cls_7a', schoolId: SCHOOL, formTeacherId: 'tch_1' }]);
+  mockCollection('classes', [{ id: 'cls_7a', schoolId: SCHOOL }]);
+  // Form/assistant teacher lives on the STREAM, not the class
+  // (classes.formTeacherId is a legacy, never-written field — fixed
+  // while adding assistant/co-homeroom support, 2026-10-29).
+  mockCollection('streams', [{ id: 'strm_7a', schoolId: SCHOOL, classId: 'cls_7a', formTeacherId: 'tch_1' }]);
   mockCollection('teachers', [{ id: 'tch_1', schoolId: SCHOOL, firstName: 'Otieno', lastName: 'Mwangi', title: 'Mrs.' }]);
   mockCollection('academic_years', []);
   mockCollection('attendance', []);

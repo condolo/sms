@@ -102,6 +102,7 @@ let mockExamsDocs;
 let mockAnnouncementDocs;
 let mockEventDocs;
 let mockClassDoc;
+let mockStreamDocs;
 let mockTeacherDocs;
 let mockBehaviourDocs;
 let mockLibraryLoanDocs;
@@ -129,6 +130,7 @@ jest.mock('../../utils/tenant-model', () => ({
     if (collection === 'announcements')     return mockCollection(mockAnnouncementDocs);
     if (collection === 'events')            return mockCollection(mockEventDocs);
     if (collection === 'classes')           return { findOne: jest.fn(() => mockChain(mockClassDoc ?? null)) };
+    if (collection === 'streams')           return mockCollection(mockStreamDocs);
     if (collection === 'teachers')          return mockCollection(mockTeacherDocs);
     if (collection === 'behaviour_incidents') return mockCollection(mockBehaviourDocs);
     if (collection === 'library_loans')     return mockCollection(mockLibraryLoanDocs);
@@ -276,7 +278,13 @@ beforeEach(() => {
   mockEventDocs = [
     { schoolId: SCHOOL_A, title: 'Sports Day', date: TODAY_ISO, category: 'sports' },
   ];
-  mockClassDoc = { id: CLASS_ID, schoolId: SCHOOL_A, name: 'Year 2', formTeacherId: 'tch_1' };
+  mockClassDoc = { id: CLASS_ID, schoolId: SCHOOL_A, name: 'Year 2' };
+  // Form/assistant teacher lives on the STREAM, not the class
+  // (classes.formTeacherId is a legacy, never-written field — fixed
+  // while adding assistant/co-homeroom support, 2026-10-29).
+  mockStreamDocs = [
+    { id: DIAMOND, schoolId: SCHOOL_A, classId: CLASS_ID, formTeacherId: 'tch_1' },
+  ];
   mockTeacherDocs = [
     { id: 'tch_1', schoolId: SCHOOL_A, firstName: 'Brown', lastName: 'Ms.', title: '', zoomPMILink: null, zoomPasscode: null, meetLink: null, userId: 'usr_tch_1' },
   ];
@@ -523,18 +531,32 @@ describe('GET /dashboard — today\'s timetable', () => {
    8. class teacher
    ══════════════════════════════════════════════════════════════ */
 describe('GET /dashboard — class teacher', () => {
-  test('form-teacher name is resolved from the class record', async () => {
+  test('form-teacher name is resolved from the student\'s stream record', async () => {
     const res = await supertest(buildApp()).get('/api/student-portal/dashboard');
     // mockTeacherDocs[0] has firstName:'Brown', lastName:'Ms.', title:''
     // The route builds: `${t.title ? t.title + ' ' : ''}${t.firstName} ${t.lastName}`.trim()
     // = 'Brown Ms.' — that is the expected output given the fixture.
     expect(res.body.data.classTeacher).toBe('Brown Ms.');
+    expect(res.body.data.assistantClassTeacher).toBeNull();
   });
 
-  test('no class record → classTeacher is null', async () => {
-    mockClassDoc = null;
+  test('no stream record → classTeacher is null', async () => {
+    mockStreamDocs = [];
     const res = await supertest(buildApp()).get('/api/student-portal/dashboard');
     expect(res.body.data.classTeacher).toBeNull();
+  });
+
+  test('assistant/co-homeroom teacher is resolved alongside the main form teacher', async () => {
+    mockStreamDocs = [
+      { id: DIAMOND, schoolId: SCHOOL_A, classId: CLASS_ID, formTeacherId: 'tch_1', assistantFormTeacherId: 'tch_2' },
+    ];
+    mockTeacherDocs = [
+      ...mockTeacherDocs,
+      { id: 'tch_2', schoolId: SCHOOL_A, firstName: 'Kamau', lastName: 'Mr.', title: '', userId: 'usr_tch_2' },
+    ];
+    const res = await supertest(buildApp()).get('/api/student-portal/dashboard');
+    expect(res.body.data.classTeacher).toBe('Brown Ms.');
+    expect(res.body.data.assistantClassTeacher).toBe('Kamau Mr.');
   });
 });
 

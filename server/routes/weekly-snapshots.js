@@ -30,6 +30,7 @@ const { moduleGate, isModuleEnabled } = require('../middleware/module-gate');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, E }             = require('../utils/response');
 const { forbiddenForSelfServiceRole } = require('../utils/self-service-scope');
+const { resolveHomeroomStreamIds } = require('../utils/scopeEngine');
 
 const router  = express.Router();
 const PLAN    = planGate('weekly_snapshot');
@@ -143,11 +144,22 @@ router.get('/my-classes', authMiddleware, PLAN, MODGATE, rbac('weekly_snapshot',
 
     const filter = { schoolId, status: 'active' };
     if (isTeacherOnly) {
-      filter.formTeacherId = req.jwtUser.userId ?? req.jwtUser.id;
+      // Form/assistant teacher lives on the STREAM (resolveHomeroomStreamIds
+      // already covers both, by the real teachers-collection id, not the
+      // userId this filter used to compare formTeacherId against directly
+      // — classes.formTeacherId is also a legacy, never-written field, so
+      // this fell through to zero classes for every teacher before this
+      // fix, fixed while adding assistant/co-homeroom support 2026-10-29).
+      const homeroomStreamIds = await resolveHomeroomStreamIds(req);
+      if (!homeroomStreamIds.length) return ok(res, []);
+      const homeroomStreams = await tenantModel('streams', tenantContext(req))
+        .find({ schoolId, id: { $in: homeroomStreamIds } }).select('classId').lean();
+      const classIds = [...new Set(homeroomStreams.map(s => s.classId).filter(Boolean))];
+      filter.id = { $in: classIds };
     }
 
     const docs = await tenantModel('classes', tenantContext(req))
-      .find(filter).sort({ name: 1 }).select('id name formTeacherId').lean();
+      .find(filter).sort({ name: 1 }).select('id name').lean();
 
     return ok(res, docs);
   } catch (err) {

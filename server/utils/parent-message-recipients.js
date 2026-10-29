@@ -63,18 +63,23 @@ async function resolveCategoriesForChild(req, studentId) {
 
   const categories = [];
 
-  // ── Class / Form Teacher — from the child's own stream, if any ──
+  // ── Class / Form Teacher — from the child's own stream, if any.
+  // Includes the assistant/co-homeroom teacher (2026-10-29, same rights)
+  // in the SAME category — one message reaches whichever of the two
+  // actually responds, rather than forcing the parent to guess or pick. ──
   if (student.streamId) {
     const stream = await tenantModel('streams', tenantContext(req))
-      .findOne({ schoolId, id: student.streamId }).select('formTeacherId name').lean();
-    if (stream?.formTeacherId) {
-      const formTeacher = await tenantModel('teachers', tenantContext(req))
-        .findOne({ schoolId, id: stream.formTeacherId }).select('userId firstName lastName').lean();
-      if (formTeacher?.userId) {
+      .findOne({ schoolId, id: student.streamId }).select('formTeacherId assistantFormTeacherId name').lean();
+    const homeroomTeacherIds = [stream?.formTeacherId, stream?.assistantFormTeacherId].filter(Boolean);
+    if (homeroomTeacherIds.length) {
+      const homeroomTeachers = await tenantModel('teachers', tenantContext(req))
+        .find({ schoolId, id: { $in: homeroomTeacherIds } }).select('userId firstName lastName').lean();
+      const recipientUserIds = homeroomTeachers.map(t => t.userId).filter(Boolean);
+      if (recipientUserIds.length) {
         categories.push({
           key: 'class_teacher',
           label: `Class Teacher (${stream.name ?? 'your child\'s stream'})`,
-          recipientUserIds: [formTeacher.userId],
+          recipientUserIds,
         });
       }
     }

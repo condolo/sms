@@ -173,7 +173,7 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
     const Exams         = tenantModel('exams', tenantContext(req));
     const Announcements = tenantModel('announcements', tenantContext(req));
     const Events        = tenantModel('events', tenantContext(req));
-    const Classes       = tenantModel('classes', tenantContext(req));
+    const Streams       = tenantModel('streams', tenantContext(req));
     const Teachers      = tenantModel('teachers', tenantContext(req));
     // 'timetable' — NOT 'timetable_slots'. See student-portal.js's
     // identical fix for the full reasoning: these are genuinely different,
@@ -404,7 +404,7 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
       upcomingExamsDocs,
       announcementsDocs,
       upcomingEventsDocs,
-      classDoc,
+      streamDoc,
       timetableSlots,
       nextDueInvoice,
       borrowedBooksDocs,
@@ -429,9 +429,12 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
         .sort({ date: 1 }).limit(4)
         .select('title date category').lean()
         .catch(() => []),
-      student.classId
-        ? Classes.findOne({ id: student.classId, schoolId })
-            .select('formTeacherId name').lean().catch(() => null)
+      // Form/assistant teacher lives on the STUDENT'S STREAM, not the class
+      // (classes.formTeacherId is a legacy, never-written field — fixed
+      // while adding assistant/co-homeroom support, 2026-10-29).
+      student.streamId
+        ? Streams.findOne({ id: student.streamId, schoolId })
+            .select('formTeacherId assistantFormTeacherId name').lean().catch(() => null)
         : null,
       // Unpublished timetables are not shown to parents (see utils/timetable-publish.js).
       student.classId && (await isTimetablePublished(schoolId))
@@ -455,12 +458,16 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
     const latestComment = bRecords[0] || null;
     const badgeLevel    = totalPoints >= 500 ? 'gold' : totalPoints >= 200 ? 'silver' : totalPoints >= 50 ? 'bronze' : null;
 
-    // Class teacher name
+    // Class teacher name(s) — main + assistant/co-homeroom teacher
     let classTeacher = null;
-    if (classDoc?.formTeacherId) {
-      const t = await Teachers.findOne({ id: classDoc.formTeacherId, schoolId })
-        .select('firstName lastName title').lean().catch(() => null);
-      if (t) classTeacher = `${t.title ? t.title + ' ' : ''}${t.firstName} ${t.lastName}`.trim();
+    let assistantClassTeacher = null;
+    const homeroomTeacherIds = [streamDoc?.formTeacherId, streamDoc?.assistantFormTeacherId].filter(Boolean);
+    if (homeroomTeacherIds.length) {
+      const ts = await Teachers.find({ id: { $in: homeroomTeacherIds }, schoolId })
+        .select('id firstName lastName title').lean().catch(() => []);
+      const nameById = Object.fromEntries(ts.map(t => [t.id, `${t.title ? t.title + ' ' : ''}${t.firstName} ${t.lastName}`.trim()]));
+      classTeacher           = nameById[streamDoc?.formTeacherId] ?? null;
+      assistantClassTeacher  = nameById[streamDoc?.assistantFormTeacherId] ?? null;
     }
 
     return ok(res, {
@@ -487,6 +494,7 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
       reportCards: reportCardsOut,
       academicTrend,
       classTeacher,
+      assistantClassTeacher,
       timetableToday:     timetableSlots,
       behaviourSummary:   { totalPoints, badgeLevel, latestReward, latestComment },
       upcomingExams:      upcomingExamsDocs,
@@ -766,16 +774,23 @@ router.get('/report/:childId', authMiddleware, PLAN, async (req, res) => {
       .filter(t => t.average != null);
 
     const student = await tenantModel('students', tenantContext(req))
-      .findOne({ id: childId, schoolId }).select('firstName lastName className classId').lean();
+      .findOne({ id: childId, schoolId }).select('firstName lastName className classId streamId').lean();
 
+    // Form/assistant teacher lives on the STUDENT'S STREAM, not the class
+    // (classes.formTeacherId is a legacy, never-written field — fixed
+    // while adding assistant/co-homeroom support, 2026-10-29).
     let classTeacher = null;
-    if (student?.classId) {
-      const classDoc = await tenantModel('classes', tenantContext(req))
-        .findOne({ id: student.classId, schoolId }).select('formTeacherId').lean().catch(() => null);
-      if (classDoc?.formTeacherId) {
-        const t = await tenantModel('teachers', tenantContext(req))
-          .findOne({ id: classDoc.formTeacherId, schoolId }).select('firstName lastName title').lean().catch(() => null);
-        if (t) classTeacher = `${t.title ? `${t.title} ` : ''}${t.firstName} ${t.lastName}`.trim();
+    let assistantClassTeacher = null;
+    if (student?.streamId) {
+      const streamDoc = await tenantModel('streams', tenantContext(req))
+        .findOne({ id: student.streamId, schoolId }).select('formTeacherId assistantFormTeacherId').lean().catch(() => null);
+      const homeroomTeacherIds = [streamDoc?.formTeacherId, streamDoc?.assistantFormTeacherId].filter(Boolean);
+      if (homeroomTeacherIds.length) {
+        const ts = await tenantModel('teachers', tenantContext(req))
+          .find({ id: { $in: homeroomTeacherIds }, schoolId }).select('id firstName lastName title').lean().catch(() => []);
+        const nameById = Object.fromEntries(ts.map(t => [t.id, `${t.title ? `${t.title} ` : ''}${t.firstName} ${t.lastName}`.trim()]));
+        classTeacher          = nameById[streamDoc?.formTeacherId] ?? null;
+        assistantClassTeacher = nameById[streamDoc?.assistantFormTeacherId] ?? null;
       }
     }
 
@@ -804,6 +819,7 @@ router.get('/report/:childId', authMiddleware, PLAN, async (req, res) => {
       subjects,
       trend,
       classTeacher,
+      assistantClassTeacher,
     });
   } catch (err) {
     console.error('[parent-portal GET /report]', err);

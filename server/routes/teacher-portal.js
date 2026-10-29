@@ -290,15 +290,25 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     }));
     const myClassesList = myClasses.filter(Boolean);
 
-    // ── Is this teacher a form/class teacher? ────────────────
+    // ── Is this teacher a form/class teacher (or assistant/co-homeroom
+    // teacher, 2026-10-29, same rights)? ─────────────────────
+    // Form/assistant teacher lives on the STREAM, not the class
+    // (classes.formTeacherId is a legacy, never-written field — this
+    // lookup always returned null before this fix, for every teacher).
     let formClass     = null;
+    let isAssistantFormTeacher = false;
     let formClassData = null;
-    const formClassDoc = classDocs.find(c => c.formTeacherId === teacherId)
-      || await Classes.findOne({ formTeacherId: teacherId, schoolId })
-          .select('id name').lean().catch(() => null);
+    const formStreamDoc = await Streams.findOne({
+      schoolId, $or: [{ formTeacherId: teacherId }, { assistantFormTeacherId: teacherId }],
+    }).select('id classId name formTeacherId assistantFormTeacherId').lean().catch(() => null);
+    const formClassDoc = formStreamDoc
+      ? (classDocs.find(c => c.id === formStreamDoc.classId)
+          || await Classes.findOne({ id: formStreamDoc.classId, schoolId }).select('id name').lean().catch(() => null))
+      : null;
 
     if (formClassDoc) {
       formClass = formClassDoc;
+      isAssistantFormTeacher = formStreamDoc?.assistantFormTeacherId === teacherId;
       const fcClassId = formClassDoc.id;
 
       const [fcStudents, fcPresentToday, fcAbsentToday, fcBehaviourAlerts, fcFeeAlerts] =
@@ -313,6 +323,7 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
       formClassData = {
         id:               fcClassId,
         name:             formClassDoc.name,
+        isAssistant:      isAssistantFormTeacher,
         totalStudents:    fcStudents,
         presentToday:     fcPresentToday,
         absentToday:      fcAbsentToday,

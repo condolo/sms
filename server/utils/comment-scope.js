@@ -16,10 +16,12 @@
      displays.
 
    • Class teacher remark (per student, per term):
-     only the stream's form teacher (streams.formTeacherId), and only for
-     the streams they are assigned. Assigning someone a stream as form
-     teacher gives them that stream's remarks — not the whole class.
-     Management roles keep the bypass.
+     only the stream's form teacher or assistant/co-homeroom teacher
+     (streams.formTeacherId / assistantFormTeacherId, same rights —
+     2026-10-29), and only for the streams they are assigned. Assigning
+     someone a stream as form (or assistant) teacher gives them that
+     stream's remarks — not the whole class. Management roles keep the
+     bypass. Both resolve through scopeEngine.js's resolveHomeroomStreamIds.
 
    • Principal remark: admin / superadmin only (same as the snapshot route).
 

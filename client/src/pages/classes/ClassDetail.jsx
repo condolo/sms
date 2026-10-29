@@ -275,6 +275,12 @@ export default function ClassDetail() {
                           <span className="truncate">{s.teacherName}</span>
                         </div>
                       )}
+                      {s.assistantTeacherName && (
+                        <div className="flex items-center gap-2 text-xs text-slate-400">
+                          <UserCheck size={12} className="shrink-0" />
+                          <span className="truncate">{s.assistantTeacherName} (Assistant)</span>
+                        </div>
+                      )}
                       {s.room && (
                         <div className="flex items-center gap-2 text-xs text-slate-500">
                           <Home size={12} className="shrink-0" />
@@ -469,7 +475,7 @@ function DeleteStreamModal({ stream, onClose, onConfirm, isLoading }) {
 }
 
 /* ── Add Stream Slide-Over ────────────────────────────────── */
-const EMPTY_STREAM = { name:'', formTeacherId:'', room:'', capacity:'', status:'active' };
+const EMPTY_STREAM = { name:'', formTeacherId:'', assistantFormTeacherId:'', room:'', capacity:'', status:'active' };
 
 function AddStreamSlideOver({ cls, onClose, onCreated }) {
   const [form, setForm] = useState(EMPTY_STREAM);
@@ -556,6 +562,17 @@ function AddStreamSlideOver({ cls, onClose, onCreated }) {
             </select>
           </FField>
 
+          <FField label="Assistant / Co-Homeroom Teacher" hint="Shares the form teacher's homeroom rights — attendance, class remark, full report access — for this stream.">
+            <select value={form.assistantFormTeacherId} onChange={e => set('assistantFormTeacherId', e.target.value)} className={iCls()}>
+              <option value="">No assistant assigned</option>
+              {teacherList.filter(t => (t.id ?? t._id) !== form.formTeacherId).map(t => (
+                <option key={t.id ?? t._id} value={t.id ?? t._id}>
+                  {t.title ? `${t.title} ` : ''}{t.firstName} {t.lastName}
+                </option>
+              ))}
+            </select>
+          </FField>
+
           <div className="grid grid-cols-2 gap-4">
             <FField label="Room">
               <input value={form.room} onChange={e => set('room', e.target.value)}
@@ -613,6 +630,7 @@ function EditStreamSlideOver({ stream, cls, onClose, onSaved }) {
   const [form, setForm] = useState({
     name:          stream.name          ?? '',
     formTeacherId: stream.formTeacherId ?? '',
+    assistantFormTeacherId: stream.assistantFormTeacherId ?? '',
     room:          stream.room          ?? '',
     capacity:      stream.capacity != null ? String(stream.capacity) : '',
     status:        stream.status        ?? 'active',
@@ -691,6 +709,17 @@ function EditStreamSlideOver({ stream, cls, onClose, onSaved }) {
             <select value={form.formTeacherId} onChange={e => set('formTeacherId', e.target.value)} className={iCls()}>
               <option value="">No teacher assigned</option>
               {teacherList.map(t => (
+                <option key={t.id ?? t._id} value={t.id ?? t._id}>
+                  {t.title ? `${t.title} ` : ''}{t.firstName} {t.lastName}
+                </option>
+              ))}
+            </select>
+          </FField>
+
+          <FField label="Assistant / Co-Homeroom Teacher" hint="Shares the form teacher's homeroom rights — attendance, class remark, full report access — for this stream.">
+            <select value={form.assistantFormTeacherId} onChange={e => set('assistantFormTeacherId', e.target.value)} className={iCls()}>
+              <option value="">No assistant assigned</option>
+              {teacherList.filter(t => (t.id ?? t._id) !== form.formTeacherId).map(t => (
                 <option key={t.id ?? t._id} value={t.id ?? t._id}>
                   {t.title ? `${t.title} ` : ''}{t.firstName} {t.lastName}
                 </option>

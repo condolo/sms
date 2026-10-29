@@ -313,10 +313,13 @@ function isClassInScope(req, module, classId, streamId) {
 
 /**
  * Resolve the streams where this caller is the designated form/homeroom
- * teacher (`streams.js`'s `formTeacherId`) — an administrative/pastoral
- * responsibility assigned independently of any subject-teaching
- * assignment in `teaching_assignments`. Returns `[]` for anyone without a
- * linked teacher record or with no homeroom streams — never throws.
+ * teacher (`streams.js`'s `formTeacherId`) — OR the assistant/co-homeroom
+ * teacher (`assistantFormTeacherId`, same rights, 2026-10-29 direct
+ * request: "main teacher of that particular stream and assistant"). An
+ * administrative/pastoral responsibility assigned independently of any
+ * subject-teaching assignment in `teaching_assignments`. Returns `[]` for
+ * anyone without a linked teacher record or with no homeroom streams —
+ * never throws.
  *
  * Deliberately NOT folded into scopeMiddleware.js's generic per-request
  * scope, which every stream-aware module (grades, assessment,
@@ -344,7 +347,7 @@ async function resolveHomeroomStreamIds(req) {
     const teacher = await resolveTeacher(userId, email, schoolId);
     if (!teacher) return [];
     const rows = await tenantModel('streams', { schoolId })
-      .find({ schoolId, formTeacherId: teacher.id })
+      .find({ schoolId, $or: [{ formTeacherId: teacher.id }, { assistantFormTeacherId: teacher.id }] })
       .select('id').lean();
     return rows.map(r => r.id);
   } catch (err) {

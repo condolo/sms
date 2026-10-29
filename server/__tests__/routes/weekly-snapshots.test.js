@@ -29,6 +29,7 @@ function mockChainObj(obj) {
 }
 function mockMatchesFilter(doc, filter) {
   return Object.entries(filter || {}).every(([k, v]) => {
+    if (k === '$or') return v.some(sub => mockMatchesFilter(doc, sub));
     if (v && typeof v === 'object' && '$in' in v) return v.$in.includes(doc[k]);
     return doc[k] === v;
   });
@@ -99,8 +100,20 @@ beforeEach(() => {
   mockCollections = {
     students: mockMakeCollection([mockStudentOwn(), mockStudentOther()]),
     classes: mockMakeCollection([
-      { id: 'cls_1', schoolId: SCHOOL_A, name: '5A', formTeacherId: 'usr_teacher_1', status: 'active' },
-      { id: 'cls_2', schoolId: SCHOOL_A, name: '5B', formTeacherId: 'usr_teacher_2', status: 'active' },
+      { id: 'cls_1', schoolId: SCHOOL_A, name: '5A', status: 'active' },
+      { id: 'cls_2', schoolId: SCHOOL_A, name: '5B', status: 'active' },
+    ]),
+    // Form/assistant teacher lives on the stream (resolveHomeroomStreamIds),
+    // resolved via the teacher's real id, not the userId directly —
+    // classes.formTeacherId above is deliberately absent now: it's a
+    // legacy, never-written field in production (2026-10-29 fix).
+    teachers: mockMakeCollection([
+      { id: 'tch_1', schoolId: SCHOOL_A, userId: 'usr_teacher_1' },
+      { id: 'tch_2', schoolId: SCHOOL_A, userId: 'usr_teacher_2' },
+    ]),
+    streams: mockMakeCollection([
+      { id: 'str_1', schoolId: SCHOOL_A, classId: 'cls_1', formTeacherId: 'tch_1' },
+      { id: 'str_2', schoolId: SCHOOL_A, classId: 'cls_2', formTeacherId: 'tch_2' },
     ]),
     weekly_snapshots: mockMakeCollection([mockSnapshot]),
   };

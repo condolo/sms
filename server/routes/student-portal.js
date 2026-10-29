@@ -81,7 +81,7 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
     const Exams         = tenantModel('exams', tenantContext(req));
     const Announcements = tenantModel('announcements', tenantContext(req));
     const Events        = tenantModel('events', tenantContext(req));
-    const Classes       = tenantModel('classes', tenantContext(req));
+    const Streams       = tenantModel('streams', tenantContext(req));
     const Teachers      = tenantModel('teachers', tenantContext(req));
     const LibraryLoans  = tenantModel('library_loans', tenantContext(req));
 
@@ -291,7 +291,7 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
       upcomingExamsDocs,
       announcementsDocs,
       upcomingEventsDocs,
-      classDoc,
+      streamDoc,
       nextDueInvoice,
       borrowedBooksDocs,
     ] = await Promise.all([
@@ -315,9 +315,12 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
         .sort({ date: 1 }).limit(4)
         .select('title date category').lean()
         .catch(() => []),
-      student.classId
-        ? Classes.findOne({ id: student.classId, schoolId })
-            .select('formTeacherId name').lean().catch(() => null)
+      // Form/assistant teacher lives on the STUDENT'S STREAM, not the class
+      // (classes.formTeacherId is a legacy, never-written field — fixed
+      // while adding assistant/co-homeroom support, 2026-10-29).
+      student.streamId
+        ? Streams.findOne({ id: student.streamId, schoolId })
+            .select('formTeacherId assistantFormTeacherId name').lean().catch(() => null)
         : null,
       FeeInvoices.findOne({ schoolId, studentId, balance: { $gt: 0 }, dueDate: { $gte: todayISO } })
         .sort({ dueDate: 1 }).select('dueDate').lean().catch(() => null),
@@ -333,12 +336,16 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
     const latestComment = bRecords[0] || null;
     const badgeLevel   = totalPoints >= 500 ? 'gold' : totalPoints >= 200 ? 'silver' : totalPoints >= 50 ? 'bronze' : null;
 
-    // Class teacher name
+    // Class teacher name(s) — main + assistant/co-homeroom teacher
     let classTeacher = null;
-    if (classDoc?.formTeacherId) {
-      const t = await Teachers.findOne({ id: classDoc.formTeacherId, schoolId })
-        .select('firstName lastName title').lean().catch(() => null);
-      if (t) classTeacher = `${t.title ? t.title + ' ' : ''}${t.firstName} ${t.lastName}`.trim();
+    let assistantClassTeacher = null;
+    const homeroomTeacherIds = [streamDoc?.formTeacherId, streamDoc?.assistantFormTeacherId].filter(Boolean);
+    if (homeroomTeacherIds.length) {
+      const ts = await Teachers.find({ id: { $in: homeroomTeacherIds }, schoolId })
+        .select('id firstName lastName title').lean().catch(() => []);
+      const nameById = Object.fromEntries(ts.map(t => [t.id, `${t.title ? t.title + ' ' : ''}${t.firstName} ${t.lastName}`.trim()]));
+      classTeacher          = nameById[streamDoc?.formTeacherId] ?? null;
+      assistantClassTeacher = nameById[streamDoc?.assistantFormTeacherId] ?? null;
     }
 
     return ok(res, {
@@ -398,6 +405,7 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
       timetableToday,
       reportCards: reportCardsOut,
       classTeacher,
+      assistantClassTeacher,
       behaviourSummary: { totalPoints, badgeLevel, latestReward, latestComment },
       upcomingExams:    upcomingExamsDocs,
       announcements:    announcementsDocs,

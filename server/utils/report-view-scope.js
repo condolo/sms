@@ -16,8 +16,10 @@
      rather than inventing a second "can see all report cards" key —
      a school that already trusted this person with whole-school
      assessment data has already made this exact call.
-   • A stream's form tutor sees that stream's reports in full
-     (form tutor = streams.formTeacherId for the caller's own streams).
+   • A stream's form tutor, or its assistant/co-homeroom teacher (same
+     rights, 2026-10-29), sees that stream's reports in full (form tutor =
+     streams.formTeacherId/assistantFormTeacherId for the caller's own
+     streams).
    • Any other teacher sees only the subjects they teach in that class:
      their marks and subject comments. Class remark, principal remark,
      ratings, totals, averages, GPA and rankings are not shown, since
