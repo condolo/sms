@@ -791,6 +791,15 @@ export const parentMessaging = {
   send:       (data)    => _post('/parent-portal/messages', data),
 };
 
+// Student-safe compose — recipients are a server-resolved category list
+// (never a free-text address); see server/utils/parent-message-recipients.js.
+// A student can only ever reach their own subject teachers, class teacher,
+// and school administration — never another student or parent.
+export const studentMessaging = {
+  recipients: ()   => _get('/student-portal/message-recipients'),
+  send:       (data) => _post('/student-portal/messages', data),
+};
+
 export const studentSubjects = {
   counts:   ()       => _get('/student-subjects/counts'),
   list:     (params) => _get('/student-subjects', params),

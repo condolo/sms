@@ -66,7 +66,13 @@ async function _fetch(path) {
 }
 async function _downloadRC(rcId, label) {
   const res = await fetch(`${API_BASE}/api/report-cards/${rcId}/pdf`, { credentials: 'include' });
-  if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.error || 'Download failed'); }
+  if (!res.ok) {
+    // The error body is { success:false, error:{ code, message } } — reading
+    // `b.error` directly rendered "[object Object]" to the parent, so a
+    // 403 fee-lock, a plan denial and a server crash all looked identical.
+    const b = await res.json().catch(() => ({}));
+    throw new Error(b.error?.message || b.message || `Download failed (HTTP ${res.status})`);
+  }
   const blob = await res.blob();
   const a    = document.createElement('a');
   a.href     = URL.createObjectURL(blob);
@@ -76,7 +82,10 @@ async function _downloadRC(rcId, label) {
 }
 async function _downloadSnapshot(childId, weekStart, label) {
   const res = await fetch(`${API_BASE}/api/parent-portal/weekly-snapshot/${childId}/${weekStart}/pdf`, { credentials: 'include' });
-  if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.error || 'Download failed'); }
+  if (!res.ok) {
+    const b = await res.json().catch(() => ({}));
+    throw new Error(b.error?.message || b.message || `Download failed (HTTP ${res.status})`);
+  }
   const blob = await res.blob();
   const a    = document.createElement('a');
   a.href     = URL.createObjectURL(blob);
@@ -232,6 +241,7 @@ function ComposeMessageModal({ open, mode, sent, recipientOptions, form, onFormC
       <motion.div key="compose-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         className="fixed inset-0 bg-black/30 z-40" onClick={onClose} />
       <motion.div key="compose-dialog" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }}
+        role="dialog" aria-modal="true" aria-label={mode === 'reply' ? 'Reply to message' : 'New message'}
         className="fixed inset-0 z-50 flex items-center justify-center p-4">
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md" onClick={e => e.stopPropagation()}>
           <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
@@ -336,6 +346,7 @@ function ChangePasswordModal({ open, currentPw, newPw, confirmPw, onCurrentChang
       <motion.div key="pw-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         className="fixed inset-0 bg-black/30 z-40" onClick={onClose} />
       <motion.div key="pw-dialog" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }}
+        role="dialog" aria-modal="true" aria-label="Change password"
         className="fixed inset-0 z-50 flex items-center justify-center p-4">
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm" onClick={e => e.stopPropagation()}>
           <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
@@ -455,14 +466,22 @@ export default function ParentDashboard() {
     try { return localStorage.getItem('parent-sidebar-collapsed') === 'true'; } catch { return false; }
   });
 
-  const parentName = session?.user?.name ?? session?.user?.firstName ?? '';
+  const [liveProfile, setLiveProfile] = useState(null);
 
-  /* ── Per-school branding — same pattern as Sidebar.jsx (admin shell) ── */
+  const parentName = liveProfile?.user?.name ?? session?.user?.name ?? session?.user?.firstName ?? '';
+
+  /* ── Per-school branding — same pattern as Sidebar.jsx (admin shell).
+     The session snapshot is only the FIRST-PAINT fallback: it is frozen at
+     login time, so a school renaming itself (or an office correcting a
+     parent's name) never showed until the parent logged out and back in,
+     while the server was already returning live values. /parent-portal/profile
+     answers with the LIVE user name, school name and logo, so the header
+     follows the school's actual state from the first load after a change. ── */
   const school          = session?.school;
   const { primary, accent } = useSchoolTheme();
-  const schoolBrandName = school?.name ?? 'Parent Portal';
+  const schoolBrandName = liveProfile?.school?.name ?? session?.school?.name ?? 'Parent Portal';
   const schoolInitial   = schoolBrandName.trim().charAt(0).toUpperCase() || 'M';
-  const schoolLogoUrl   = school?.logoUrl ?? null;
+  const schoolLogoUrl   = liveProfile?.school?.logoUrl ?? session?.school?.logoUrl ?? null;
   const avatarGradient  = `linear-gradient(135deg, ${primary}, ${accent})`;
 
   /* ── Which nav items does this school actually have switched on?
@@ -490,15 +509,20 @@ export default function ParentDashboard() {
     if (role !== 'parent' && role !== 'guardian') { navigate('/dashboard', { replace: true }); return; }
   }, []);
 
-  /* ── Load children list + family summary ── */
+  /* ── Load children list + family summary + LIVE identity ──
+     The profile call is what keeps the header honest: name, school name
+     and logo come from the database on every load instead of the login
+     snapshot. Non-fatal on its own — the session fallback still renders. */
   useEffect(() => {
     if (!session?.user) return;
     Promise.all([
       _fetch('/api/parent-portal/children'),
       _fetch('/api/parent-portal/family-summary').catch(() => null),
-    ]).then(([list, summary]) => {
+      _fetch('/api/parent-portal/profile').catch(() => null),
+    ]).then(([list, summary, profile]) => {
       setChildren(list);
       setFamilySummary(summary);
+      setLiveProfile(profile);
       if (list.length > 0) setActiveChildId(list[0].id);
       setLoadingList(false);
     }).catch(e => {
@@ -1561,7 +1585,7 @@ export default function ParentDashboard() {
           <h1 id="topbar-greeting" className="text-[14px] sm:text-[16px] font-bold text-slate-900 flex-1 min-w-0 truncate">
             {_greeting()}{parentName ? `, ${parentName.split(' ')[0]}` : ''} 👋
           </h1>
-          <span id="topbar-term-badge" className="hidden sm:inline text-[12px] font-medium text-slate-500 bg-slate-100 px-3 py-1 rounded-full whitespace-nowrap">{termLabel}</span>
+          <span id="topbar-term-badge" className="inline text-[12px] font-medium text-slate-500 bg-slate-100 px-3 py-1 rounded-full whitespace-nowrap">{termLabel}</span>
           <NotificationBell myUserId={session?.user?.id} onSelect={() => goToPage('messages')} />
           <div className="flex items-center gap-2 w-full sm:w-auto order-last sm:order-none">
             {mpesaEnabled && (
