@@ -103,6 +103,37 @@ async function htmlToPdfBuffer(html, { timeoutMs = 20_000 } = {}) {
   }
 }
 
+/**
+ * Render HTML via Puppeteer, falling back to a caller-supplied PDFKit
+ * renderer if Puppeteer itself cannot even launch. This is a real,
+ * well-documented failure mode on some minimal Linux hosts (Render's
+ * standard Node environment among them) — the downloaded Chromium
+ * binary needs system shared libraries (libatk-1.0.so.0, libnss3.so,
+ * etc.) the host doesn't provide, which `npm install` never catches
+ * (the binary downloads fine; it just can't RUN), and which no launch
+ * flag like --no-sandbox can work around — that flag addresses sandbox
+ * permissions, not a missing shared library. Reported directly, from a
+ * parent: "the report download feature is currently not working" —
+ * exactly what a silent launch failure in production would look like.
+ * A report-card download is business-critical; it must not hard-fail
+ * just because the newer, visually-consistent renderer can't run on
+ * this particular host — degrading to the older PDFKit design for
+ * that one request is far better than a 500, and costs nothing on a
+ * host where Puppeteer works fine (the fallback never fires there).
+ *
+ * @param {string} html
+ * @param {() => Promise<Buffer>} fallbackFn - builds the same report via PDFKit
+ * @returns {Promise<Buffer>}
+ */
+async function htmlToPdfBufferOrFallback(html, fallbackFn) {
+  try {
+    return await htmlToPdfBuffer(html);
+  } catch (err) {
+    console.error('[html-to-pdf] Puppeteer render failed — falling back to PDFKit:', err.message);
+    return fallbackFn();
+  }
+}
+
 /** Server shutdown hook — never leave a Chromium process orphaned. */
 async function closeBrowser() {
   if (_idleTimer) clearTimeout(_idleTimer);
@@ -133,4 +164,4 @@ async function mergePdfBuffers(buffers) {
   return Buffer.from(await merged.save());
 }
 
-module.exports = { htmlToPdfBuffer, closeBrowser, mergePdfBuffers };
+module.exports = { htmlToPdfBuffer, htmlToPdfBufferOrFallback, closeBrowser, mergePdfBuffers };

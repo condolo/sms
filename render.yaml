@@ -7,12 +7,31 @@ services:
     # renders every public marketing route to static HTML in dist/<route>/.
     # Without this, AI/search crawlers that don't execute JS only ever see
     # the empty SPA shell — see client/scripts/prerender.mjs for details.
-    buildCommand: npm install && cd client && npm install --legacy-peer-deps && npm run build:ssg
+    #
+    # Confirmed in production (server log): "[report-cards/:id/pdf] Error:
+    # Could not find Chrome (ver. 149.0.7827.22)" — report-card downloads
+    # were silently falling back to the old PDFKit renderer on every
+    # single request, not just as a rare safety net. Root cause: Puppeteer
+    # downloads Chrome to $HOME/.cache/puppeteer by default during `npm
+    # install`'s postinstall step, and on Render's native (non-Docker)
+    # Node runtime, $HOME at build time and $HOME for the running server
+    # process are not guaranteed to be the same cache — the build step
+    # (and this module's own client/scripts/prerender.mjs, which runs
+    # moments after `npm install` in the same build shell) sees the
+    # freshly-downloaded Chrome; the later-started server process doesn't.
+    # Pinning PUPPETEER_CACHE_DIR to a path inside the actual project
+    # checkout (which persists from build into the running service, unlike
+    # an arbitrary $HOME) makes both phases resolve the exact same Chrome
+    # binary. The explicit `browsers install` call is a redundant safety
+    # net in case a postinstall script is ever skipped.
+    buildCommand: npm install && npx puppeteer browsers install chrome && cd client && npm install --legacy-peer-deps && npm run build:ssg
     startCommand: node server/index.js
     healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
         value: production
+      - key: PUPPETEER_CACHE_DIR
+        value: /opt/render/project/src/.cache/puppeteer
       - key: MONGODB_URI
         sync: false          # Set manually in Render dashboard → Environment
       - key: JWT_SECRET
