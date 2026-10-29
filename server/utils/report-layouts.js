@@ -115,6 +115,33 @@ function _esc(str) {
   return String(str ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+/* Grading Scale table, restored 2026-10-29 — reported directly: "that's
+   how I wanted them to be... you changed the structure of the report
+   card for the grade scale." subject_paired/marks_then_comments had this
+   exact Grade/Range/Points/Description table until v5.170.0 (2026-10-08)
+   compressed it to a one-line grade+range strip to match that day's PDF
+   redesign; legacy_tabular's own copy (further below, untouched the
+   whole time) still has it, which is how its exact original markup was
+   recovered rather than rebuilt from memory. Shared here instead of
+   pasted into each layout, same posture as _observationRatingsHtml. */
+function _gradingScaleTableHtml(s) {
+  if (!s.gradingKey.length) return '';
+  const thS = `border:1px solid #cbd5e1;padding:5px 8px;background:${BRAND};color:#fff;font-size:9px;text-transform:uppercase;letter-spacing:.5px;text-align:center`;
+  const tdS = 'border:1px solid #e2e8f0;padding:5px 8px';
+  const tdC = `${tdS};text-align:center`;
+  const rows = s.gradingKey.map(b => `
+    <tr><td style="${tdC};font-weight:700">${_esc(b.grade)}</td><td style="${tdC}">${_esc(b.range)}</td>
+        <td style="${tdC}">${_esc(b.points)}</td><td style="${tdS}">${_esc(b.label)}</td></tr>`).join('');
+  return `
+  <div style="margin:0 0 12px;page-break-inside:avoid;break-inside:avoid">
+    <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">Grading Scale</p>
+    <table style="width:100%;border-collapse:collapse;font-size:10px;max-width:480px">
+      <thead><tr><th style="${thS}">Grade</th><th style="${thS}">Range</th><th style="${thS}">Points</th><th style="${thS};text-align:left">Description</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
+
 /* Class-teacher observation ratings grid (2026-09) — shared between the
    two "new" layouts (subject_paired, marks_then_comments); legacy_tabular
    is frozen and never renders it, same posture as every other RCE1
@@ -1010,20 +1037,28 @@ function _drawFlowBox(doc, x, y, width, blocks) {
 }
 
 /* ── RCE8 shared components — overall-performance anchor, observation
-   ratings (pills, not a checkbox grid), and one signer's sign-off block.
-   Each has a _measure.../_draw... pair so callers can ensureSpace() the
-   real height first, keeping the whole block atomic (never split across
-   a page boundary) exactly like _measureFlowBox/_drawFlowBox already do
-   for comment boxes. Used by both subject_paired and marks_then_comments
-   — legacy_tabular is untouched (frozen). ── */
+   ratings, and one signer's sign-off block. Each has a _measure.../
+   _draw... pair so callers can ensureSpace() the real height first,
+   keeping the whole block atomic (never split across a page boundary)
+   exactly like _measureFlowBox/_drawFlowBox already do for comment
+   boxes. Used by both subject_paired and marks_then_comments — legacy_
+   tabular is untouched (frozen).
+
+   The grading-scale portion and _drawObservationRatingsPdf below were
+   reverted 2026-10-29 back to the full Grade/Range/Points/Description
+   table and the Excellent/Good/Improve checkbox grid — reported
+   directly: "that's how I wanted them to be... you changed the
+   structure... which blocks really well [for the class teacher
+   marking]." The 2026-10-08 RCE8 compact-strip/pill redesign (and the
+   2026-10-28 change that unified HTML onto it) is superseded by this. ── */
 function _measureOverallPerformancePdf(doc, s, width) {
   _registerReportFonts(doc);
   const BOX_H = 70;
   let h = BOX_H + 14;
   if (s.gradingKey.length) {
-    const strip = s.gradingKey.map(b => `${b.grade} ${b.range}`).join('     ');
-    doc.font(FONTS.monoRegular).fontSize(9);
-    h += 12 + doc.heightOfString(strip, { width }) + 4;
+    // Heading + header row + one row per band, matching _drawOverall-
+    // PerformancePdf's table below.
+    h += 12 + 16 + s.gradingKey.length * 15 + 6;
   }
   return h;
 }
@@ -1054,43 +1089,65 @@ function _drawOverallPerformancePdf(doc, s, x, width, y) {
   if (s.gradingKey.length) {
     doc.fillColor(INK_SOFT).font(FONTS.sansSemibold).fontSize(8).text('GRADING SCALE', x, ny);
     ny += 12;
-    const strip = s.gradingKey.map(b => `${b.grade} ${b.range}`).join('     ');
-    doc.fillColor(INK_FAINT).font(FONTS.monoRegular).fontSize(9).text(strip, x, ny, { width });
-    ny += doc.heightOfString(strip, { width }) + 4;
+    // Full Grade/Range/Points/Description table, matching the HTML's
+    // own <table> (_gradingScaleTableHtml) exactly — see this block's
+    // own header comment above for why.
+    const colW = [width * 0.14, width * 0.26, width * 0.16, width * 0.44];
+    const headers = ['GRADE', 'RANGE', 'POINTS', 'DESCRIPTION'];
+    let hx = x;
+    doc.font(FONTS.sansSemibold).fontSize(7.5);
+    headers.forEach((label, i) => {
+      doc.rect(hx, ny, colW[i], 16).fill(BRAND);
+      doc.fillColor('#fff').text(label, hx, ny + 4, { width: colW[i], align: 'center' });
+      hx += colW[i];
+    });
+    ny += 16;
+    s.gradingKey.forEach(b => {
+      let cx = x;
+      const cells = [b.grade, b.range, String(b.points ?? ''), b.label];
+      cells.forEach((val, i) => {
+        doc.rect(cx, ny, colW[i], 15).stroke(RULE_SOFT);
+        doc.fillColor(INK).font(i === 0 ? FONTS.sansBold : FONTS.sansRegular).fontSize(8.5)
+           .text(String(val ?? ''), cx + 4, ny + 3, { width: colW[i] - 8, align: i < 3 ? 'center' : 'left' });
+        cx += colW[i];
+      });
+      ny += 15;
+    });
+    ny += 6;
   }
   return ny;
 }
 
 function _measureObservationRatingsPdf(s) {
   if (!s.comments.showObservationRatings || !s.comments.observationRatings.length) return 0;
-  return 16 + s.comments.observationRatings.length * 20 + 4;
+  return 16 + 12 + s.comments.observationRatings.length * 18 + 6;
 }
 
-// Each category shows its selected rating as a filled pill — obvious at
-// a glance — or "Not yet rated" in muted italic when null. Replaces the
-// old 3-column Excellent/Good/Improve checkbox table, whose empty boxes
-// read like an incomplete paper form when nothing was rated yet.
+// Bordered 3-column Excellent/Good/Improve checkbox grid, matching the
+// HTML's own _observationRatingsHtml — see this block's own header
+// comment above for why this replaced the pill design on 2026-10-29.
 function _drawObservationRatingsPdf(doc, s, x, width, y) {
   if (!s.comments.showObservationRatings || !s.comments.observationRatings.length) return y;
   _registerReportFonts(doc);
   doc.fillColor(INK_SOFT).font(FONTS.sansSemibold).fontSize(9).text('CLASS TEACHER OBSERVATIONS', x, y);
   y += 16;
-  doc.lineWidth(0.75).moveTo(x, y).lineTo(x + width, y).stroke(RULE_SOFT);
-  const ROW_H = 20;
+  const catW = width * 0.4;
+  const colW = (width - catW) / 3;
+  const LEVELS = ['excellent', 'good', 'improve'];
+  LEVELS.forEach((level, i) => {
+    doc.fillColor(INK_SOFT).font(FONTS.sansSemibold).fontSize(7).text(level.toUpperCase(), x + catW + i * colW, y, { width: colW, align: 'center' });
+  });
+  y += 12;
+  const ROW_H = 18;
   s.comments.observationRatings.forEach(({ category, rating }) => {
-    doc.fillColor(INK).font(FONTS.sansRegular).fontSize(10).text(category, x, y + 5, { width: width * 0.6 });
-    if (rating) {
-      const label = rating.charAt(0).toUpperCase() + rating.slice(1);
-      doc.font(FONTS.sansBold).fontSize(9);
-      const pillW = doc.widthOfString(label) + 20;
-      const pillX = x + width - pillW;
-      doc.roundedRect(pillX, y + 2, pillW, 15, 3).fill(BRAND_WASH);
-      doc.fillColor(BRAND).text(label, pillX, y + 6, { width: pillW, align: 'center' });
-    } else {
-      doc.fillColor(INK_FAINT).font(FONTS.sansItalic).fontSize(9).text('Not yet rated', x, y + 6, { width, align: 'right' });
-    }
+    doc.rect(x, y, width, ROW_H).stroke(RULE_SOFT);
+    doc.fillColor(INK).font(FONTS.sansRegular).fontSize(9).text(category, x + 4, y + 5, { width: catW - 8 });
+    LEVELS.forEach((level, i) => {
+      if (rating === level) {
+        doc.fillColor(BRAND).font(FONTS.sansBold).fontSize(10).text('X', x + catW + i * colW, y + 4, { width: colW, align: 'center' });
+      }
+    });
     y += ROW_H;
-    doc.lineWidth(0.5).moveTo(x, y - 1).lineTo(x + width, y - 1).stroke(RULE_SOFT);
   });
   return y + 6;
 }
@@ -1571,10 +1628,8 @@ function _renderSubjectPairedHtml(s) {
   </table>
   ${_assessmentKeyHtml(s)}
   ${s.attendance ? `<p style="font-size:11px;color:#475569;margin:0 0 12px"><b>Attendance:</b> ${_esc(s.attendance.text)}</p>` : ''}
-  ${s.gradingKey.length ? `
-  <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">Grading Scale</p>
-  <p style="font-size:10px;color:#64748b;font-family:monospace;margin:0 0 12px">${s.gradingKey.map(b => `${_esc(b.grade)} ${_esc(b.range)}`).join('&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;')}</p>` : ''}
-  ${_observationRatingsPillsHtml(s)}
+  ${_gradingScaleTableHtml(s)}
+  ${_observationRatingsHtml(s)}
   ${behHtml}
   ${_sportsAndTalentHtml(s)}
   ${_termDatesFooterHtml(s)}
@@ -1906,9 +1961,7 @@ function _renderMarksThenCommentsHtml(s) {
   ${s.resultsTable.rankingNote ? `<p style="font-size:9px;color:#64748b;margin:0 0 14px">${_esc(s.resultsTable.rankingNote)}</p>` : ''}
   ${_assessmentKeyHtml(s)}
   ${s.attendance ? `<p style="font-size:11px;color:#475569;margin:0 0 14px"><b>Attendance:</b> ${_esc(s.attendance.text)}</p>` : ''}
-  ${s.gradingKey.length ? `
-  <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">Grading Scale</p>
-  <p style="font-size:10px;color:#64748b;font-family:monospace;margin:0 0 12px">${s.gradingKey.map(b => `${_esc(b.grade)} ${_esc(b.range)}`).join('&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;')}</p>` : ''}
+  ${_gradingScaleTableHtml(s)}
 </div>`;
 
   // RCE4 — comments shown as a Subject | Teacher | Comment table (not
@@ -1982,7 +2035,7 @@ function _renderMarksThenCommentsHtml(s) {
 <div style="page-break-before:always">
   ${pageHeaderHtml('Teacher Comments')}
   ${subjectCommentsSectionHtml}
-  ${_observationRatingsPillsHtml(s)}
+  ${_observationRatingsHtml(s)}
   ${behHtml}
   ${_sportsAndTalentHtml(s)}
   ${_termDatesFooterHtml(s)}

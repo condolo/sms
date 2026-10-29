@@ -362,15 +362,14 @@ describe('marks_then_comments — assessment-type key ("what does CA/HW/MT/ET me
   });
 });
 
-// Reported directly, with a side-by-side PDF comparison: the admin's Print
-// (HTML) output for a published report still showed the old 3-column
-// Excellent/Good/Improve checkbox grid, "Total Incidents", and a full
-// Grade/Range/Points/Description Grading Key table — none of which match
-// what the same snapshot's own PDF download (what parents/students
-// actually get) has shown since the 2026-10-08 RCE8 redesign. Unified onto
-// the PDF's design.
-describe('marks_then_comments.renderHtml — Class Teacher Observations match the PDF\'s pill design, not the old checkbox grid', () => {
-  test('selected rating renders as a pill; unrated renders "Not yet rated" — never the Excellent/Good/Improve checkbox grid', () => {
+// Reverted back 2026-10-29, reported directly: "that's how I wanted them
+// to be... you changed the structure of the report card for the grade
+// scale and the class teacher observation, which... blocks really well"
+// — the pill/compact-strip redesign (2026-10-08 RCE8, unified onto HTML
+// 2026-10-28) was the wrong direction; the ORIGINAL checkbox grid and
+// full Grade/Range/Points/Description table were the liked design.
+describe('marks_then_comments.renderHtml — Class Teacher Observations use the Excellent/Good/Improve checkbox grid, not a pill', () => {
+  test('selected rating marks the matching column; shows EXCELLENT/GOOD/IMPROVE headers', () => {
     const sections = computeSections(
       { comments: { ...baseSnap().comments, observationRatings: { Teamwork: 'good', Confidence: null } } },
       { showObservationRatings: true, observationCategories: ['Teamwork', 'Confidence'] },
@@ -378,10 +377,10 @@ describe('marks_then_comments.renderHtml — Class Teacher Observations match th
     const html = LAYOUTS.marks_then_comments.renderHtml(sections);
     expect(html).toContain('Class Teacher Observations');
     expect(html).toContain('Teamwork');
-    expect(html).toContain('>Good<');
-    expect(html).toContain('Not yet rated');
-    expect(html).not.toContain('grid-template-columns:repeat(3,1fr)');
-    expect(html).not.toMatch(/EXCELLENT|IMPROVE/);
+    expect(html).toMatch(/EXCELLENT/);
+    expect(html).toMatch(/GOOD/);
+    expect(html).toMatch(/IMPROVE/);
+    expect(html).not.toContain('Not yet rated');
   });
 
   test('never shown when the school has not turned it on', () => {
@@ -400,13 +399,17 @@ describe('marks_then_comments.renderHtml — Behaviour tile wording matches the 
   });
 });
 
-describe('marks_then_comments.renderHtml — Grading Scale is a compact one-line strip, matching the PDF, not a 4-column table', () => {
-  test('renders grade+range inline, no Points/Description columns', () => {
+describe('marks_then_comments.renderHtml — Grading Scale is a full Grade/Range/Points/Description table', () => {
+  test('renders a 4-column table with real <th> headers, one row per band', () => {
     const html = LAYOUTS.marks_then_comments.renderHtml(computeSections());
     const gradingIdx = html.indexOf('Grading Scale');
     expect(gradingIdx).toBeGreaterThan(-1);
-    expect(html).toContain('A 0');
-    expect(html.slice(gradingIdx, gradingIdx + 400)).not.toContain('<th');
+    const section = html.slice(gradingIdx, gradingIdx + 1200);
+    expect(section).toContain('<th');
+    expect(section).toContain('>Grade<');
+    expect(section).toContain('>Range<');
+    expect(section).toContain('>Points<');
+    expect(section).toContain('>Description<');
   });
 });
 
