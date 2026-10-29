@@ -13,8 +13,15 @@
    Same mock harness as report-cards-kg.test.js (kg/generate, kg/publish)
    — reused verbatim so this file proves the preview routes build the
    exact same snap shape /kg/publish does, just unpersisted.
-   pdfkit itself is the REAL installed dependency (not mocked), same
-   convention as weekly-snapshots.test.js's own PDF route test.
+   RCE9 (2026-10-29): /kg/preview-pdf now prints the same HTML
+   /kg/preview-html returns, via html-to-pdf.js's shared headless-
+   Chromium instance, instead of a separate PDFKit renderer — see that
+   file's own header for why. html-to-pdf.js is mocked here (a real
+   Puppeteer launch is slow, and some of its dependencies are ESM-only,
+   which Jest's default transform can't parse) — rendering correctness
+   is covered by report-layouts-kindergarten.test.js's direct
+   renderHtml() assertions and a manual end-to-end Puppeteer render
+   against real data (see CHANGELOG).
    ============================================================ */
 
 const SCHOOL_A = 'school_A';
@@ -29,6 +36,9 @@ jest.mock('../../middleware/module-gate', () => ({ moduleGate: () => (_req, _res
 jest.mock('../../middleware/scopeMiddleware', () => ({ scopeMiddleware: (_req, _res, next) => next() }));
 jest.mock('../../utils/scopeEngine', () => ({ applyToFilter: jest.fn(), isClassInScope: jest.fn(() => true), resolveAttendanceScope: jest.fn(), resolveAssessmentScope: jest.fn(), resolveHomeroomStreamIds: jest.fn().mockResolvedValue([]) }));
 jest.mock('../../utils/archival', () => ({ isYearArchived: jest.fn(() => Promise.resolve(mockIsYearArchived)) }));
+jest.mock('../../utils/html-to-pdf', () => ({
+  htmlToPdfBuffer: jest.fn().mockResolvedValue(Buffer.from('%PDF-1.4 fake pdf for tests')),
+}));
 jest.mock('../../services/audit', () => ({ log: jest.fn() }));
 jest.mock('../../utils/notify-students', () => ({ notifyGuardiansForStudents: jest.fn().mockResolvedValue() }));
 jest.mock('../../utils/ranking', () => ({

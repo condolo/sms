@@ -42,6 +42,7 @@ const { getConfig: _getAssessmentConfig } = require('./assessment');
 const { KG_INDICATORS_TYPE } = require('./mark-submissions');
 const { resolveTemplate } = require('./report-card-templates');
 const { getLayout }       = require('../utils/report-layouts');
+const { htmlToPdfBuffer, mergePdfBuffers } = require('../utils/html-to-pdf');
 const { sectionIdForClass, resolveGradeScale } = require('../utils/grade-scale');
 const { isYearArchived } = require('../utils/archival');
 const { resolveRcTemplate } = require('../utils/rc-template-scale');
@@ -1523,31 +1524,17 @@ router.post('/kg/preview-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 're
     if (resolved.errorStatus) {
       return resolved.errorStatus === 404 ? E.notFound(res, resolved.errorMessage) : E.badRequest(res, resolved.errorMessage);
     }
-    const { sections, snap, school, config } = resolved;
+    const { sections, snap } = resolved;
 
-    let PDFDocument;
-    try { PDFDocument = require('pdfkit'); }
-    catch { return res.status(501).json({ error: 'pdfkit not installed. Run: npm install pdfkit' }); }
+    // RCE9 — same single HTML+Puppeteer pipeline the ordinary preview-pdf
+    // route now uses (see html-to-pdf.js).
+    const html = getLayout('kindergarten').renderHtml(sections);
+    const pdf  = await htmlToPdfBuffer(html);
 
-    const doc     = new PDFDocument({ margin: 40, size: 'A4' });
-    const buffers = [];
-    doc.on('data', chunk => buffers.push(chunk));
-    doc.on('end', () => {
-      const pdf = Buffer.concat(buffers);
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `inline; filename="kg-report-${snap.studentId}-draft.pdf"`);
-      res.setHeader('Content-Length', pdf.length);
-      res.send(pdf);
-    });
-
-    const pdfImages = await _fetchSignatureImages(snap);
-    pdfImages.studentPhoto = config.showStudentPhoto !== false
-      ? await _fetchImageBuf(snap.studentPhotoUrl).catch(() => null)
-      : null;
-    pdfImages.schoolLogo = await _fetchImageBuf(school?.logoUrl).catch(() => null);
-
-    getLayout('kindergarten').renderPdf(doc, sections, pdfImages, true);
-    doc.end();
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="kg-report-${snap.studentId}-draft.pdf"`);
+    res.setHeader('Content-Length', pdf.length);
+    res.send(pdf);
   } catch (err) {
     console.error('[report-cards/kg/preview-pdf]', err);
     return E.serverError(res);
@@ -1999,15 +1986,7 @@ router.get('/bulk-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), s
 
     const config = await _loadConfig(schoolId);
 
-    // Pre-fetch signature images once for the whole batch (same school for all snaps)
-    const firstSnap    = await tenantModel('report_card_snapshots', tenantContext(req)).findOne(filter).lean();
-    const bulkImages   = firstSnap ? await _fetchSignatureImages(firstSnap) : {};
-
-    let PDFDocument;
-    try { PDFDocument = require('pdfkit'); }
-    catch { return res.status(501).json({ error: 'pdfkit not installed. Run: npm install pdfkit' }); }
-
-    // Count first so we can return 404 before sending any headers
+    // Count first so we can return 404 before doing any real work
     const total = await tenantModel('report_card_snapshots', tenantContext(req)).countDocuments(filter);
     if (total === 0) return E.notFound(res, 'No published report cards found for this class/term');
 
@@ -2047,19 +2026,19 @@ router.get('/bulk-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), s
       school: bulkSchool, subjectTeacherNames: bulkSubjectTeacherNames, subjectNames: bulkSubjectNames,
       subjectTeacherCommentsEnabled: bulkCaConfig.subjectTeacherCommentsEnabled !== false,
     };
-    // RCE8 — same real-logo-or-fallback behavior as the single-PDF route,
-    // fetched once for the whole batch (same school for every student).
-    bulkImages.schoolLogo = await _fetchImageBuf(bulkSchool?.logoUrl).catch(() => null);
 
-    // Start streaming response now — headers sent before cursor begins
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="report-cards-class-${req.query.classId}.pdf"`);
-    res.setHeader('Transfer-Encoding', 'chunked');
-
-    const pdfDoc  = new PDFDocument({ margin: 40, size: 'A4', autoFirstPage: false });
-    pdfDoc.pipe(res);  // stream directly to response — no giant buffer accumulation
-
-    // Use Mongoose cursor — loads CHUNK_SIZE documents at a time, not all at once
+    // RCE9 — each student is printed through the exact same HTML+Puppeteer
+    // pipeline GET /:id/pdf uses (htmlToPdfBuffer), then every student's
+    // one-document PDF is merged into one (mergePdfBuffers, pdf-lib) —
+    // the equivalent of PDFKit's old page-by-page single document, now
+    // that each student's PDF is a finished browser print rather than a
+    // page drawn into a shared doc. Images are plain <img src="..."> URLs
+    // already baked into each student's HTML — no separate buffer
+    // fetching needed here. Rendered SEQUENTIALLY, not in parallel — this
+    // host's modest CPU/memory budget (already flagged elsewhere) can't
+    // safely run many headless-Chromium pages at once; a bulk export is
+    // an infrequent admin action, so trading some wall-clock time for
+    // staying within that budget is the right call here specifically.
     const CHUNK_SIZE = 10;
     const cursor = tenantModel('report_card_snapshots', tenantContext(req))
       .find(filter)
@@ -2067,18 +2046,15 @@ router.get('/bulk-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), s
       .batchSize(CHUNK_SIZE)
       .cursor();
 
+    const studentPdfBuffers = [];
     let chunkBuf = [];
 
     const processChunk = async (chunk) => {
-      const [attResults, photoBuffers, behaviourResults, deviationResults] = await Promise.all([
+      const [attResults, behaviourResults, deviationResults] = await Promise.all([
         Promise.all(chunk.map(s => s.attendanceSummary
           ? Promise.resolve(s.attendanceSummary)
           : attendanceSummary(schoolId, s.studentId, s.classId, s.termId, s.academicYearId)
         )),
-        // Fetch each student's photo individually — different per student
-        config.showStudentPhoto !== false
-          ? Promise.all(chunk.map(s => _fetchImageBuf(s.studentPhotoUrl).catch(() => null)))
-          : Promise.resolve(chunk.map(() => null)),
         // Genuinely per-student (each has their own merit/demerit history) —
         // bounded cost, same CHUNK_SIZE=10-at-a-time posture attendance
         // already uses above, not one query per student in the whole class.
@@ -2091,25 +2067,19 @@ router.get('/bulk-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), s
           : Promise.resolve(null)
         ))),
       ]);
-      chunk.forEach((snap, i) => {
+      for (let i = 0; i < chunk.length; i++) {
+        const snap = chunk[i];
         const isAdmin = ['admin', 'superadmin'].includes(role);
-        if (snap.financialBlock && req.query.force !== '1' && !isAdmin) return; // skip blocked
-        pdfDoc.addPage();
+        if (snap.financialBlock && req.query.force !== '1' && !isAdmin) continue; // skip blocked
         const studentExtra = {
           ...bulkExtraBase,
           behaviour:   behaviourResults[i],
           deviations:  computeTermDeviation(snap.subjects, deviationResults[i]?.subjects),
         };
-        // Every layout's renderPdf() calls `if (!isFirstPage) doc.addPage()`
-        // itself. This loop already adds the page above, so passing false
-        // here added a SECOND page — every student's report was preceded
-        // by a blank page, and the batch visibly diverged from the
-        // single-student download (which passes true on a fresh document).
-        // The flag means "the page is already open", which is exactly true
-        // after addPage(), for every student including the first.
-        _buildPDFPage(pdfDoc, snap, config, attResults[i], true,
-          { ...bulkImages, studentPhoto: photoBuffers[i] }, studentExtra);
-      });
+        const sections = _buildReportSections(snap, config, attResults[i], studentExtra);
+        const html     = getLayout(snap.layoutKey).renderHtml(sections);
+        studentPdfBuffers.push(await htmlToPdfBuffer(html));
+      }
     };
 
     // Iterate cursor, accumulate chunks, process when chunk is full
@@ -2122,10 +2092,15 @@ router.get('/bulk-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), s
     }
     if (chunkBuf.length > 0) await processChunk(chunkBuf);
 
-    pdfDoc.end();
+    if (studentPdfBuffers.length === 0) return E.notFound(res, 'No published report cards found for this class/term');
+
+    const merged = await mergePdfBuffers(studentPdfBuffers);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="report-cards-class-${req.query.classId}.pdf"`);
+    res.setHeader('Content-Length', merged.length);
+    res.send(merged);
   } catch (err) {
     console.error('[report-cards/bulk-pdf]', err);
-    // Headers may already be sent — can't send JSON error; just end the response
     if (!res.headersSent) return E.serverError(res);
     res.end();
   }
@@ -3116,31 +3091,25 @@ router.get('/:id/pdf', authMiddleware, PLAN, MODGATE, _pdfAccess, scopeMiddlewar
     // teacher's name just because it came from the PDF route.
     const extra = await _loadRenderExtras(req, schoolId, snap);
 
-    let PDFDocument;
-    try { PDFDocument = require('pdfkit'); }
-    catch { return res.status(501).json({ error: 'pdfkit not installed. Run: npm install pdfkit' }); }
+    // RCE9 — printed server-side through the exact same HTML this
+    // report's own GET /:id/html route returns (htmlToPdfBuffer, a
+    // shared headless-Chromium instance — see html-to-pdf.js's header),
+    // instead of a second, separately maintained PDFKit renderer. The
+    // two kept drifting apart in ways only caught by comparing two real
+    // downloads side by side (pills vs checkboxes, "Total" vs "Total
+    // Incidents", a full-page cover vs a compact one) — one renderer
+    // now, not two, so they structurally cannot drift again. Images
+    // (logo/photo/signatures) are plain <img src="..."> URLs already
+    // baked into this HTML; Chromium fetches them itself on render, no
+    // separate buffer-fetching needed here.
+    const sections = _buildReportSections(snap, config, attData, extra);
+    const html     = getLayout(snap.layoutKey).renderHtml(sections);
+    const pdf      = await htmlToPdfBuffer(html);
 
-    const doc     = new PDFDocument({ margin: 40, size: 'A4' });
-    const buffers = [];
-    doc.on('data', chunk => buffers.push(chunk));
-    doc.on('end', () => {
-      const pdf = Buffer.concat(buffers);
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `inline; filename="report-${snap.studentId}-v${snap.version || 1}.pdf"`);
-      res.setHeader('Content-Length', pdf.length);
-      res.send(pdf);
-    });
-
-    const pdfImages = await _fetchSignatureImages(snap);
-    pdfImages.studentPhoto = config.showStudentPhoto !== false
-      ? await _fetchImageBuf(snap.studentPhotoUrl).catch(() => null)
-      : null;
-    // RCE8 — the school's real logo, drawn by _drawCoverPdf when present;
-    // falls back to the same letter-avatar the HTML renderer already used
-    // when a school hasn't uploaded one.
-    pdfImages.schoolLogo = await _fetchImageBuf(extra.school?.logoUrl).catch(() => null);
-    _buildPDFPage(doc, snap, config, attData, true, pdfImages, extra);
-    doc.end();
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="report-${snap.studentId}-v${snap.version || 1}.pdf"`);
+    res.setHeader('Content-Length', pdf.length);
+    res.send(pdf);
   } catch (err) { console.error('[report-cards/:id/pdf]', err); return E.serverError(res); }
 });
 
@@ -3513,31 +3482,16 @@ router.post('/preview-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'
     const previewSectionId = classId ? await sectionIdForClass(schoolId, classId) : null;
     const { layoutKey } = await resolveTemplate(tenantContext(req), schoolId, previewSectionId);
 
-    let PDFDocument;
-    try { PDFDocument = require('pdfkit'); }
-    catch { return res.status(501).json({ error: 'pdfkit not installed. Run: npm install pdfkit' }); }
+    // RCE9 — same single HTML+Puppeteer pipeline GET /:id/pdf now uses
+    // (see html-to-pdf.js); images are plain <img src="..."> URLs already
+    // baked into this HTML, no separate buffer-fetching needed.
+    const html = getLayout(layoutKey).renderHtml(sections);
+    const pdf  = await htmlToPdfBuffer(html);
 
-    const doc     = new PDFDocument({ margin: 40, size: 'A4' });
-    const buffers = [];
-    doc.on('data', chunk => buffers.push(chunk));
-    doc.on('end', () => {
-      const pdf = Buffer.concat(buffers);
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `inline; filename="report-${student.studentId}-draft.pdf"`);
-      res.setHeader('Content-Length', pdf.length);
-      res.send(pdf);
-    });
-
-    // Same image set GET /:id/pdf fetches — sourced from the live school
-    // lookup above instead of a persisted snapshot, since a draft has none.
-    const pdfImages = await _fetchSignatureImages(schoolWithSignOff);
-    pdfImages.studentPhoto = config.showStudentPhoto !== false
-      ? await _fetchImageBuf(studentInfo?.photo).catch(() => null)
-      : null;
-    pdfImages.schoolLogo = await _fetchImageBuf(schoolWithSignOff.logoUrl).catch(() => null);
-
-    getLayout(layoutKey).renderPdf(doc, sections, pdfImages, true);
-    doc.end();
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="report-${student.studentId}-draft.pdf"`);
+    res.setHeader('Content-Length', pdf.length);
+    res.send(pdf);
   } catch (err) { console.error('[report-cards/preview-pdf]', err); return E.serverError(res); }
 });
 

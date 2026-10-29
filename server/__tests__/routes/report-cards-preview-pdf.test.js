@@ -9,10 +9,19 @@
    report-cards-html.test.js's own mocks, mirrored here) — only the
    adapter differs (renderPdf instead of renderHtml).
 
-   pdfkit itself is the REAL installed dependency (not mocked), same
-   convention as weekly-snapshots.test.js's own PDF route test — this
-   verifies a real, non-empty PDF comes back, not just that the route
-   didn't throw. All DB calls are mocked — no MongoDB required.
+   RCE9 (2026-10-29): this route now prints the same HTML
+   GET /:id/html/POST /preview-html return, via html-to-pdf.js's shared
+   headless-Chromium instance, instead of a separate PDFKit renderer —
+   see that file's own header for why. html-to-pdf.js is mocked here
+   (a real Puppeteer launch is slow, and some of its dependencies are
+   ESM-only, which Jest's default transform can't parse) — the actual
+   rendering correctness is covered by report-layouts-*.test.js's direct
+   renderHtml() assertions and by a manual end-to-end Puppeteer render
+   against real data (see CHANGELOG). What this test verifies is that
+   the route builds the right sections/HTML and returns a 200 with
+   application/pdf — not whether a real browser can render HTML, which
+   doesn't belong in a unit-test suite. All DB calls are mocked — no
+   MongoDB required.
    ============================================================ */
 'use strict';
 
@@ -34,6 +43,9 @@ jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => ne
 jest.mock('../../middleware/scopeMiddleware', () => ({ scopeMiddleware: (_req, _res, next) => next() }));
 jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) => next() }));
 jest.mock('../../utils/archival', () => ({ isYearArchived: jest.fn().mockResolvedValue(false) }));
+jest.mock('../../utils/html-to-pdf', () => ({
+  htmlToPdfBuffer: jest.fn().mockResolvedValue(Buffer.from('%PDF-1.4 fake pdf for tests')),
+}));
 
 jest.mock('../../utils/model', () => ({
   _model: jest.fn((col) => {

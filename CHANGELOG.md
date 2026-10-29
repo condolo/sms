@@ -6,6 +6,38 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.234.0] - 2026-10-29 - refactor(report-cards): every PDF download now prints the same HTML the browser's own Print button uses — one renderer, not two
+
+Direct follow-up to v5.230.0 (observation pills/wording/grading-scale parity) and the Kisha Bidali comparison that surfaced two more gaps (a full-page cover vs a compact one, Arial vs embedded premium type). Asked directly: "can we just use print only — Download also goes through HTML+Print — yes," after being told the real cost (a new headless-browser dependency, real added CPU/memory on this host's Render Starter plan).
+
+**What changed.** `server/utils/report-layouts.js` has kept two renderers per layout for every report card — a native PDFKit one and an HTML one — since RCE2. They do not just differ cosmetically; every comparison so far (checkbox grid vs pills, "Total" vs "Total Incidents", full table vs compact strip, full-page cover vs compact one, Arial vs embedded Lora/Work Sans/IBM Plex Mono) was a DIFFERENT gap, each only found by someone comparing two real downloads side by side. Patching each one as it surfaces was never going to end. The fix is structural: print the HTML server-side, the same way a browser's own "Save as PDF" would, through a single shared headless-Chromium instance (new `server/utils/html-to-pdf.js`, via `puppeteer`). There is now exactly one renderer per layout, not two — drift between "Download" and "Print" is no longer possible by construction, for any layout, including `legacy_tabular` and `kindergarten`.
+
+**Routes migrated** (PDFKit's `renderPdf()` calls replaced with `getLayout(layoutKey).renderHtml(sections)` → `htmlToPdfBuffer()`):
+- `GET /:id/pdf` — published-snapshot download (parent/student portal, admin single download).
+- `POST /preview-pdf`, `POST /kg/preview-pdf` — pre-publish draft downloads.
+- `GET /bulk-pdf` — admin's whole-class export. Each student is still rendered through the identical pipeline, then every student's one-document PDF is merged into one with `pdf-lib` (`mergePdfBuffers`) — the equivalent of PDFKit's old page-by-page shared document, now that each student's PDF is a finished browser print rather than a page drawn into one. Rendered **sequentially**, not in parallel, to stay within this host's modest CPU/memory budget.
+- `_buildPDFPage`/PDFKit's `renderPdf()` functions are left in place in `report-layouts.js` (still exercised directly by `report-layouts-*.test.js`'s unit tests) — nothing currently calls them from a route anymore, but removing them outright wasn't asked for here.
+
+**A real, known behavior change for `legacy_tabular` specifically:** its own PDFKit renderer never had a Grading Key or Behaviour section at all (deliberately frozen, minimal, pre-dating the template engine) — its HTML renderer always did. Any report still on this layout (predates the template engine, or never had one assigned) will now show MORE in its downloaded PDF than before, matching what Print already showed. Not reverted — this is the direct, expected consequence of "one renderer," not a separate decision.
+
+**Known, accepted costs — raised before building, not discovered after:**
+- **Latency**: ~3s per PDF with a warm browser (~6s on the very first request after a period of no downloads, since the browser is launched lazily and closed again after 5 minutes idle to avoid sitting in memory). The old PDFKit path was near-instant. This is the direct tradeoff that was explicitly accepted.
+- **Memory/CPU**: one headless-Chromium process now runs on the same Render Starter plan (0.5 CPU/512MB) already flagged elsewhere as tight — mitigated by lazy launch + idle-close, and by never rendering more than one page at a time.
+- **Bulk export timing**: a 40-student class is now ~40 sequential renders (~2 minutes), not near-instant. No request-timeout issue has been hit in testing (3 real students, verified end to end against live Trinitas data), but this has not been tested against this host's largest real class — flagged, not yet proven safe at that scale.
+- `puppeteer@25.1.0` (already a proven build-time dependency, used by `client/scripts/prerender.mjs`'s SSG step on this same Render target — same launch args reused here for that reason) and `pdf-lib` (pure JS, no native binary) added as root/runtime dependencies for the first time.
+
+### Files
+- `server/utils/html-to-pdf.js` (new) — `htmlToPdfBuffer`, `mergePdfBuffers`, `closeBrowser`.
+- `server/routes/report-cards.js` — 4 routes migrated; `_fetchSignatureImages`/`_fetchImageBuf`-based image-buffer fetching dropped from all of them (the HTML already carries plain `<img src="...">` URLs; Chromium fetches them itself on render).
+- `server/__tests__/routes/report-cards-preview-pdf.test.js`, `report-cards-kg-preview.test.js` — `html-to-pdf.js` mocked (a real Puppeteer launch is slow, and Jest's default transform can't parse some of its dependencies' ESM syntax); rendering correctness is covered by `report-layouts-*.test.js`'s direct `renderHtml()` assertions plus a manual end-to-end Puppeteer render against real Trinitas/Demo School data.
+- `package.json` / `package-lock.json` — `puppeteer`, `pdf-lib` added.
+
+### Verified
+- Full Jest suite (3918+ tests) passes.
+- Manual, real-data end-to-end render: Brian Onyango's published snapshot through `/:id/pdf`'s exact internal pipeline — correct multi-page output, correct colors/backgrounds, correct `@page` print margins via Chromium's `preferCSSPageSize`.
+- Manual, real-data bulk-merge test: 3 real published Demo School snapshots rendered sequentially and merged — correct page count (9 = 3 pages × 3 students), correct ordering, no duplication or interleaving.
+- A real bug caught by this manual testing before it shipped: `html-to-pdf.js`'s browser-reuse check called `browser.isConnected()`, which doesn't exist in `puppeteer@25.1.0` (it's the `.connected` property now) — every render after the first would have thrown. Fixed before any route used it.
+
 ## [v5.233.0] - 2026-10-28 - fix(email): every "Sign In" / "Open" button in an automated email could render as an invisible blank gap
 
 Reported directly, with a screenshot: a parent's welcome-credentials email showed School/Role/Email/Password correctly, but where the "Sign In Now →" button should have been was just empty space — "the system is sending the portal access login without the school URL/joining link... has been working, then just disappears."
