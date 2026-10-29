@@ -1050,6 +1050,31 @@ export default function StudentDashboard() {
                 </div>
               </div>
 
+              {/* Assignments — the Homework / Assignment mark per subject,
+                 from the same published report-card snapshot as My Grades.
+                 Reported directly: "assignments should be included with
+                 their score." Rendered only when a published report card
+                 actually carries an HW component. */}
+              {subjectMarks.some(s => s.assignmentScore != null) && (
+                <div id="section-assignments" className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden">
+                  <div className="px-[18px] py-3.5 border-b border-slate-100 flex items-center justify-between">
+                    <h2 className="text-[13px] font-bold text-slate-900">Assignments</h2>
+                    <span className="text-[11px] font-semibold text-purple-600 bg-purple-50 px-2.5 py-[5px] rounded-full">Homework</span>
+                  </div>
+                  <div id="assignments-list" className="divide-y divide-slate-50">
+                    {subjectMarks.filter(s => s.assignmentScore != null).map((sub, i) => (
+                      <div key={`assign-${sub.subjectId ?? i}`} id={`assignment-${sub.subjectId ?? i}`} className="flex items-center gap-3 px-[18px] py-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[13px] font-medium text-slate-800 truncate">{sub.subjectName}</p>
+                          <p className="text-[11px] text-slate-400">Homework / Assignment</p>
+                        </div>
+                        <span className="text-[13px] font-bold text-slate-700">{Math.round(sub.assignmentScore)}%</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* This Week's Snapshot — auto-generated every Saturday
                  (weekly-snapshot-cron.js). `latestWeek === undefined`
                  means "checked, none generated yet" vs. `null` = "still

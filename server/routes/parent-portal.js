@@ -372,6 +372,12 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
         subjectName: markSubjectNameMap[subjectId] || subjectId,
         finalScore:  latestSubjects[subjectId]?.finalScore ?? null,
         grade:       latestSubjects[subjectId]?.grade ?? null,
+        // Homework / Assignment mark — the HW component of the SAME published
+        // report-card snapshot (exactly the per-type column the report card
+        // itself already prints). Reported directly: "assignments should be
+        // included with their score." Never live Markbook data — this is the
+        // vetted, published breakdown, so it adds no new visibility.
+        assignmentScore: latestSubjects[subjectId]?.breakdown?.HW ?? null,
       }))
       .sort((a, b) => a.subjectName.localeCompare(b.subjectName));
     // The per-type breakdown stays internal to this computation — the
