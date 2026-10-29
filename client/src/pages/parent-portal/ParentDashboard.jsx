@@ -1647,7 +1647,22 @@ export default function ParentDashboard() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
               >
-                <ActivePageBody />
+                {/* Called as a plain function, not rendered as <ActivePageBody />.
+                    PAGE_BODIES/ActivePageBody are recomputed on every render of
+                    ParentDashboard (pointing at the also-freshly-declared Overview-
+                    Page/MessagesPage/etc. functions below), so a JSX element tag
+                    here would hand React a "different component type" every
+                    render — unmounting and remounting this page's entire subtree,
+                    ComposeMessageModal included, on every keystroke anywhere that
+                    touches ParentDashboard's state (confirmed directly: a single
+                    real keystroke in the Messages reply box replaced the textarea's
+                    DOM node and dropped browser focus to <body>, reported as "the
+                    keyboard keeps dropping/skipping"). None of these Page functions
+                    call hooks of their own, so calling one directly is exactly
+                    equivalent to inlining its JSX here — React then reconciles the
+                    actual elements it returns (ComposeMessageModal's own stable,
+                    hoisted reference included) instead of this unstable wrapper. */}
+                {ActivePageBody()}
               </motion.div>
             </AnimatePresence>
           )}

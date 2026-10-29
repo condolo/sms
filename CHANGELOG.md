@@ -6,6 +6,61 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.241.0] - 2026-10-29 - fix(deploy): pin PUPPETEER_CACHE_DIR so Chrome survives Render's build→runtime transition
+
+Direct follow-up to v5.238.0: the user sent the actual production server log, which settled the guesswork — `[report-cards/:id/pdf] Error: Could not find Chrome (ver. 149.0.7827.22)`. Not a missing-shared-library issue as v5.238.0 guessed; Puppeteer found no Chrome binary at all at runtime. Since v5.238.0's fallback was already in place, this meant every single download had silently been using the old PDFKit renderer in production, not just as the rare safety net it was designed to be.
+
+**Root cause:** Puppeteer caches its downloaded Chrome to `$HOME/.cache/puppeteer` by default. On Render's native (non-Docker) Node runtime, the build phase's `$HOME` and the running server process's `$HOME` are not guaranteed to be the same cache — the build step (and this repo's own `client/scripts/prerender.mjs`, which runs moments after `npm install` in the same build shell) sees the freshly-downloaded Chrome; the later-started server process doesn't.
+
+**Fix:** pin `PUPPETEER_CACHE_DIR` to a path inside the actual project checkout (`/opt/render/project/src/.cache/puppeteer`), which persists from build into the running service, so both phases resolve the identical Chrome binary. Added an explicit `npx puppeteer browsers install chrome` build step as a redundant safety net.
+
+### Fixed
+- `render.yaml` — `PUPPETEER_CACHE_DIR` env var added; `buildCommand` now explicitly installs Chrome.
+
+### Verified
+- Not verifiable from here without a live redeploy — no access to Render's dashboard/logs from this environment. If report-card downloads still fall back to PDFKit after this deploys, check Render's logs for the same "Could not find Chrome" line to confirm whether this fix took effect.
+
+## [v5.240.0] - 2026-10-29 - fix(parent-portal): reply/compose textarea dropped keystrokes and lost focus on every character typed
+
+Reported directly, from a parent's account: "i managed to log in with the new credentials but i cannot type a reply. The keyboard keeps dropping/skipping." Investigated as a possible recurrence of the exact keystroke-dropping bug already fixed once in this file (see `ComposeMessageModal`'s own header comment, dated 2026-10-28) — confirmed it was NOT that bug (that fix is real and still correctly in place), but a second, independent cause of the identical symptom that the first fix never reached.
+
+**Confirmed live, not just reasoned through:** logged in as the real demo parent account, opened Messages → New Message, and typed a single real keystroke into the message textarea. The DOM node backing the `<textarea>` was a *different* element afterward (`sameNode: false`) and browser focus had silently moved to `<body>` — exactly what a parent typing on a real keyboard would experience as "the keyboard keeps dropping/skipping," since every keystroke after the first would land on nothing until they noticed and re-clicked the field.
+
+**Root cause:** `ActivePageBody` (`ParentDashboard.jsx`) is computed fresh on every render — `const ActivePageBody = PAGE_BODIES[activePage] ?? OverviewPage`, where `PAGE_BODIES` maps to `OverviewPage`/`GradesPage`/`MessagesPage`/etc., each itself a `function` declared *inside* `ParentDashboard`'s own body (so also redeclared every render). It was then rendered as a JSX component tag, `<ActivePageBody />`. Since typing in the compose modal calls `setComposeForm` — state that lives in `ParentDashboard` — every keystroke re-rendered `ParentDashboard`, which handed `<ActivePageBody />` a *different function reference* each time. React treats a changed reference behind a capitalized JSX tag as a different component type, and unmounts + remounts that component's entire subtree — in this case, the whole active page, `ComposeMessageModal` included, on every single keystroke anywhere in the compose form.
+
+This is the same bug class as the `ComposeMessageModal`/`ChangePasswordModal` fix from 2026-10-28 (a function redefined inside a render body gets a new identity every render), but one level further up the tree than that fix reached — hoisting `ComposeMessageModal` itself didn't help, because its *parent* (`MessagesPage`, reached only through the unstable `ActivePageBody` wrapper) was still being torn down around it.
+
+**Fix:** call `ActivePageBody()` as a plain function instead of rendering it as `<ActivePageBody />`. Confirmed none of the ten nested `*Page` functions (`OverviewPage`, `GradesPage`, `MessagesPage`, etc.) call their own hooks — they're plain JSX-returning closures over `ParentDashboard`'s state/handlers — so calling one directly is exactly equivalent to inlining its JSX at that point, and sidesteps component-identity reconciliation entirely. `StudentDashboard.jsx` does not use this `ActivePageBody` pattern and was never affected.
+
+### Fixed
+- `client/src/pages/parent-portal/ParentDashboard.jsx` — `<ActivePageBody />` → `{ActivePageBody()}`.
+
+### Verified
+- Live repro against the real demo parent account (`parent@demo.msingi.io`): before the fix, a single real keystroke replaced the textarea's DOM node and dropped focus to `<body>` (confirmed via `document.activeElement`/node-identity checks), on both desktop and mobile viewport emulation. After the fix, the same test (plus a full 135-character continuous sentence) kept the same DOM node focused throughout, with zero dropped characters.
+- `npx vite build` succeeds with no errors.
+- No client-side test suite exists for this file in this project (server-side Jest is the project's automated-test layer; this component has none) — verification here is the live browser reproduction above.
+
+## [v5.239.0] - 2026-10-29 - fix(report-cards): restores the Grading Scale table and Class Teacher Observations checkbox grid for subject_paired/marks_then_comments, in both HTML and PDF
+
+Reported directly, with the exact downloaded PDF the user had been happy with: "that's how I wanted them to be... you changed the structure of the report card for the grade scale and the class teacher observation, which... blocks really well [for the class teacher marking]." Traced the full history before touching anything, since this is a direct reversal of a prior intentional change, not an obvious bug:
+
+- **v5.170.0** (2026-10-08, "premium institutional redesign") redesigned the *PDF only* for `subject_paired`/`marks_then_comments`: the 3-column Excellent/Good/Improve checkbox grid became a filled pill/"Not yet rated" list, and the full Grade/Range/Points/Description Grading Key table became a compact one-line grade+range strip. HTML (Print) was deliberately left on the older design at the time.
+- **v5.230.0** (2026-10-28) found Print and Download rendering differently for the same published snapshot and closed that gap by moving HTML onto the *newer* pill/compact-strip design to match the PDF — the opposite of what this report now says was actually wanted.
+- This entry reverses both of those: Grading Scale is a real table again (`<th>` headers: Grade/Range/Points/Description, one row per band), and Class Teacher Observations is the bordered Excellent/Good/Improve checkbox grid again — for both the PDF and HTML renderers of `subject_paired`/`marks_then_comments`, so Download and Print are finally identical in the direction the user actually wants. `legacy_tabular` was never touched by any of this (its own copy of both designs, frozen since before v5.170.0, is what the exact original markup was recovered from via `git show`).
+
+### Fixed
+- `server/utils/report-layouts.js`:
+  - New shared `_gradingScaleTableHtml(s)` (the `<table>` markup, recovered byte-for-byte from `legacy_tabular`'s own never-touched copy) — both HTML renderers now call it instead of building a one-line strip inline.
+  - `_measureOverallPerformancePdf`/`_drawOverallPerformancePdf`'s grading-scale portion redrawn as a bordered 4-column table (Grade/Range/Points/Description), matching the HTML exactly, using today's font/color tokens (not a literal copy of the pre-2026-10-08 PDFKit code, which predates the current embedded-font/atomic-block renderer).
+  - `_measureObservationRatingsPdf`/`_drawObservationRatingsPdf` redrawn as the bordered Excellent/Good/Improve checkbox grid (X in the selected column) instead of a pill per category — same token adaptation.
+  - Both HTML renderers' observation-ratings call site switched from `_observationRatingsPillsHtml` back to the pre-existing, unchanged `_observationRatingsHtml` (already shared with `legacy_tabular`, so no new HTML code needed there).
+
+### Verified
+- Updated `server/__tests__/report-layouts-subject-paired.test.js` and `report-layouts-marks-then-comments.test.js`, which had locked in the pill/strip design, to lock in the restored checkbox-grid/table design instead.
+- `npx jest report-layouts report-cards behaviour-incidents-export-pdf` — 30/30 suites, 411/411 tests.
+- Full Jest suite: 371/371 suites, 3964/3964 tests.
+- Direct, non-mocked reproduction against the real demo school's actual published snapshot for Fatima Al-Hassan (`marks_then_comments`, v6) via `_pdfKitFallback` — produced a correct PDF with the real bordered Grading Scale table and the real checkbox grid showing her actual recorded ratings (Engaged → Improve, Teamwork → Good, Confidence → Good, Responsibility → Excellent, Reflective → Improve, Innovative → Improve), visually confirmed via the Read tool.
+
 ## [v5.238.0] - 2026-10-29 - fix(report-cards): report-card PDF downloads now fall back to the old PDFKit renderer if Puppeteer can't launch on the host
 
 Reported directly, from a parent (school unconfirmed): "Report downloading failure: The report download feature is currently not working." This lands right after v5.234.0 switched every report-card PDF download over to a single shared Puppeteer/HTML renderer, so the most likely cause was investigated first.
