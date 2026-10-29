@@ -42,7 +42,7 @@ const { getConfig: _getAssessmentConfig } = require('./assessment');
 const { KG_INDICATORS_TYPE } = require('./mark-submissions');
 const { resolveTemplate } = require('./report-card-templates');
 const { getLayout }       = require('../utils/report-layouts');
-const { htmlToPdfBuffer, mergePdfBuffers } = require('../utils/html-to-pdf');
+const { htmlToPdfBuffer, htmlToPdfBufferOrFallback, mergePdfBuffers } = require('../utils/html-to-pdf');
 const { sectionIdForClass, resolveGradeScale } = require('../utils/grade-scale');
 const { isYearArchived } = require('../utils/archival');
 const { resolveRcTemplate } = require('../utils/rc-template-scale');
@@ -1524,12 +1524,15 @@ router.post('/kg/preview-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 're
     if (resolved.errorStatus) {
       return resolved.errorStatus === 404 ? E.notFound(res, resolved.errorMessage) : E.badRequest(res, resolved.errorMessage);
     }
-    const { sections, snap } = resolved;
+    const { sections, snap, school, config } = resolved;
+    snap.layoutKey = 'kindergarten'; // read by _pdfKitFallback's _buildPDFPage if Puppeteer can't run
 
     // RCE9 — same single HTML+Puppeteer pipeline the ordinary preview-pdf
-    // route now uses (see html-to-pdf.js).
+    // route now uses (see html-to-pdf.js); falls back to PDFKit if
+    // Puppeteer itself can't launch on this host.
     const html = getLayout('kindergarten').renderHtml(sections);
-    const pdf  = await htmlToPdfBuffer(html);
+    const pdf  = await htmlToPdfBufferOrFallback(html,
+      () => _pdfKitFallback(snap, config, null, { school }, school?.logoUrl, snap.studentPhotoUrl));
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="kg-report-${snap.studentId}-draft.pdf"`);
@@ -2078,7 +2081,8 @@ router.get('/bulk-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), s
         };
         const sections = _buildReportSections(snap, config, attResults[i], studentExtra);
         const html     = getLayout(snap.layoutKey).renderHtml(sections);
-        studentPdfBuffers.push(await htmlToPdfBuffer(html));
+        studentPdfBuffers.push(await htmlToPdfBufferOrFallback(html,
+          () => _pdfKitFallback(snap, config, attResults[i], studentExtra, bulkSchool?.logoUrl, snap.studentPhotoUrl)));
       }
     };
 
@@ -2939,6 +2943,32 @@ function _buildPDFPage(doc, snap, config, attendance, isFirstPage, images = {}, 
   getLayout(snap.layoutKey).renderPdf(doc, sections, images, isFirstPage);
 }
 
+/* RCE9 fallback — builds the exact PDF this snapshot would have
+   produced before the Puppeteer migration, via the still-present
+   PDFKit renderer. Used ONLY when htmlToPdfBufferOrFallback's
+   Puppeteer attempt throws (see that function's own header for why
+   this can happen on a real host even though it works everywhere in
+   testing) — a report-card download is business-critical and must not
+   hard-fail just because the newer renderer can't launch on this
+   particular host. Never called on the success path, so schools where
+   Puppeteer works fine pay nothing for this existing. */
+async function _pdfKitFallback(snap, config, attendance, extra, schoolLogoUrl, studentPhotoUrl) {
+  const PDFDocument = require('pdfkit');
+  const doc     = new PDFDocument({ margin: 40, size: 'A4' });
+  const buffers = [];
+  doc.on('data', chunk => buffers.push(chunk));
+  const images = await _fetchSignatureImages(snap);
+  images.studentPhoto = config.showStudentPhoto !== false
+    ? await _fetchImageBuf(studentPhotoUrl).catch(() => null)
+    : null;
+  images.schoolLogo = await _fetchImageBuf(schoolLogoUrl).catch(() => null);
+  const done = new Promise(resolve => doc.on('end', resolve));
+  _buildPDFPage(doc, snap, config, attendance, true, images, extra);
+  doc.end();
+  await done;
+  return Buffer.concat(buffers);
+}
+
 /* ── Portal roles bypass RBAC; the handler does ownership + fee checks ── */
 function _pdfAccess(req, res, next) {
   if (RESTRICTED_ROLES.includes(req.jwtUser?.role)) return next();
@@ -3101,10 +3131,14 @@ router.get('/:id/pdf', authMiddleware, PLAN, MODGATE, _pdfAccess, scopeMiddlewar
     // now, not two, so they structurally cannot drift again. Images
     // (logo/photo/signatures) are plain <img src="..."> URLs already
     // baked into this HTML; Chromium fetches them itself on render, no
-    // separate buffer-fetching needed here.
+    // separate buffer-fetching needed here. Falls back to PDFKit
+    // (_pdfKitFallback) if Puppeteer itself can't even launch on this
+    // host — see html-to-pdf.js's htmlToPdfBufferOrFallback for why
+    // that's a real, documented possibility, not a hypothetical one.
     const sections = _buildReportSections(snap, config, attData, extra);
     const html     = getLayout(snap.layoutKey).renderHtml(sections);
-    const pdf      = await htmlToPdfBuffer(html);
+    const pdf      = await htmlToPdfBufferOrFallback(html,
+      () => _pdfKitFallback(snap, config, attData, extra, extra.school?.logoUrl, snap.studentPhotoUrl));
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="report-${snap.studentId}-v${snap.version || 1}.pdf"`);
@@ -3481,12 +3515,15 @@ router.post('/preview-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'
     });
     const previewSectionId = classId ? await sectionIdForClass(schoolId, classId) : null;
     const { layoutKey } = await resolveTemplate(tenantContext(req), schoolId, previewSectionId);
+    snap.layoutKey = layoutKey; // read by _pdfKitFallback's _buildPDFPage if Puppeteer can't run
 
     // RCE9 — same single HTML+Puppeteer pipeline GET /:id/pdf now uses
     // (see html-to-pdf.js); images are plain <img src="..."> URLs already
-    // baked into this HTML, no separate buffer-fetching needed.
+    // baked into this HTML, no separate buffer-fetching needed. Falls
+    // back to PDFKit if Puppeteer itself can't launch on this host.
     const html = getLayout(layoutKey).renderHtml(sections);
-    const pdf  = await htmlToPdfBuffer(html);
+    const pdf  = await htmlToPdfBufferOrFallback(html,
+      () => _pdfKitFallback(snap, config, attData, { school: schoolWithSignOff, behaviour: beh ?? null, deviations: studentDeviations ?? null, subjectTeacherCommentsEnabled: subjectTeacherCommentsLive !== false, subjectNames, subjectTeacherNames }, schoolWithSignOff.logoUrl, studentInfo?.photo));
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="report-${student.studentId}-draft.pdf"`);
@@ -3817,6 +3854,7 @@ router._notifyReportCardsPublished = _notifyReportCardsPublished;
 router._normalizeGradeScaleBands = _normalizeGradeScaleBands;
 router._fetchImageBuf = _fetchImageBuf;
 router._buildPDFPage = _buildPDFPage;
+router._pdfKitFallback = _pdfKitFallback;
 router._loadRenderExtras = _loadRenderExtras;
 router._resolveDisplayNames = _resolveDisplayNames;
 router._computeReportSections = _computeReportSections;

@@ -38,6 +38,7 @@ jest.mock('../../utils/scopeEngine', () => ({ applyToFilter: jest.fn(), isClassI
 jest.mock('../../utils/archival', () => ({ isYearArchived: jest.fn(() => Promise.resolve(mockIsYearArchived)) }));
 jest.mock('../../utils/html-to-pdf', () => ({
   htmlToPdfBuffer: jest.fn().mockResolvedValue(Buffer.from('%PDF-1.4 fake pdf for tests')),
+  htmlToPdfBufferOrFallback: jest.fn((html, fallbackFn) => Promise.resolve(Buffer.from('%PDF-1.4 fake pdf for tests'))),
 }));
 jest.mock('../../services/audit', () => ({ log: jest.fn() }));
 jest.mock('../../utils/notify-students', () => ({ notifyGuardiansForStudents: jest.fn().mockResolvedValue() }));

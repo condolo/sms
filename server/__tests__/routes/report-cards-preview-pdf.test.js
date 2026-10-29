@@ -45,6 +45,7 @@ jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) =
 jest.mock('../../utils/archival', () => ({ isYearArchived: jest.fn().mockResolvedValue(false) }));
 jest.mock('../../utils/html-to-pdf', () => ({
   htmlToPdfBuffer: jest.fn().mockResolvedValue(Buffer.from('%PDF-1.4 fake pdf for tests')),
+  htmlToPdfBufferOrFallback: jest.fn((html, fallbackFn) => Promise.resolve(Buffer.from('%PDF-1.4 fake pdf for tests'))),
 }));
 
 jest.mock('../../utils/model', () => ({

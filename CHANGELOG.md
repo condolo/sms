@@ -6,6 +6,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.238.0] - 2026-10-29 - fix(report-cards): report-card PDF downloads now fall back to the old PDFKit renderer if Puppeteer can't launch on the host
+
+Reported directly, from a parent (school unconfirmed): "Report downloading failure: The report download feature is currently not working." This lands right after v5.234.0 switched every report-card PDF download over to a single shared Puppeteer/HTML renderer, so the most likely cause was investigated first.
+
+**The risk, confirmed via research, not yet confirmed via Render's own logs (no direct access to them from here):** on some minimal Linux hosts — Render's standard Node runtime among them — a downloaded Chromium binary installs fine but fails to *launch* at runtime, because it's missing system shared libraries (`libatk-1.0.so.0`, `libnss3.so`, etc.) that `npm install` never checks for and that no launch flag can work around (`--no-sandbox` addresses sandbox *permissions*, not a missing shared library). This is a well-documented Puppeteer-on-minimal-Linux failure mode, distinct from the sandbox-permission issue the existing `LAUNCH_ARGS` already guards against. The client's own SSG pre-render step uses the identical launch args successfully at *build* time, which is not proof the same binary can launch at *runtime* under Render's live container — this complaint is exactly what a silent launch failure there would look like.
+
+**Fix, not a revert:** rather than giving up the drift-proof HTML/Puppeteer renderer v5.234.0 was built to deliver, every report-card PDF route now tries Puppeteer first and falls back to the original PDFKit renderer only if Puppeteer itself throws. A report-card download is business-critical; degrading to the older (still fully correct, just previously drift-prone) PDFKit design for one request is far better than a 500, and this costs nothing on a host where Puppeteer works fine — the fallback path never fires there.
+
+**Verified directly:** the extracted `_pdfKitFallback` function was called standalone against a real student snapshot (Brian Onyango) and produced a correct, valid PDF (71,129 bytes, starts with `%PDF`, visually confirmed to render the full premium layout) in 449ms. A forced-failure test against a real (non-mocked) Puppeteer launch confirmed the try/catch correctly falls through to this path and logs `[html-to-pdf] Puppeteer render failed — falling back to PDFKit: <reason>`.
+
+**Not yet confirmed:** whether this was actually the parent's root cause — there's no access to Render's production logs from here. If this recurs, check Render's dashboard logs around the time of the complaint for lines like "Failed to launch the browser process", "cannot open shared object file", or `libatk`/`libnss` — that would confirm this exact failure mode; its absence would point elsewhere (e.g. a slow/timed-out render rather than a launch failure, or a client-side download issue).
+
+### Fixed
+- `server/utils/html-to-pdf.js` — new `htmlToPdfBufferOrFallback(html, fallbackFn)`: tries `htmlToPdfBuffer`, calls `fallbackFn()` on any thrown error instead of propagating a 500.
+- `server/routes/report-cards.js` — all four PDF routes (`GET /:id/pdf`, `POST /preview-pdf`, `POST /kg/preview-pdf`, `GET /bulk-pdf`) now call `htmlToPdfBufferOrFallback`, each passing a fallback closure that renders the same report via the pre-v5.234.0 PDFKit path (`_pdfKitFallback`, built from the already-existing `_buildPDFPage`).
+
+### Verified
+- `npx jest report-cards report-layouts behaviour-incidents-export-pdf` — 30/30 suites, 411/411 tests green (2 tests broke transiently when the fallback was first wired in, because their `html-to-pdf` mocks didn't yet export the new function — fixed by updating those mocks, not the route code).
+- Full Jest suite re-run after this change.
+- Direct, non-mocked call to `_pdfKitFallback` against live student data — valid PDF produced, visually confirmed correct.
+
 ## [v5.237.0] - 2026-10-29 - fix(classes): deleting a stream appeared to do nothing — it "just appeared again" because the list never excluded deleted streams
 
 Direct follow-up, same conversation: after the `studentCount` fix below, the specific symptom was narrowed further — "Stream EMERALD, Stream PEARL etc, has zero student. system shows it is deleting and nothing, they just appear again."
