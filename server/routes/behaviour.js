@@ -27,8 +27,8 @@ const { resolveAcademicPeriod } = require('../utils/academic-period');
 const { isYearArchived } = require('../utils/archival');
 const { getWorkflowConfig, saveWorkflowConfig, resolveStep } = require('../utils/workflow-config');
 const { isManagement } = require('../utils/subject-scope');
-const { htmlToPdfBuffer } = require('../utils/html-to-pdf');
-const { renderIncidentsReportHtml } = require('../utils/behaviour-report');
+const { htmlToPdfBufferOrFallback } = require('../utils/html-to-pdf');
+const { renderIncidentsReportHtml, renderIncidentsReportPdf } = require('../utils/behaviour-report');
 
 const router = express.Router();
 const PLAN   = planGate('behaviour');
@@ -614,12 +614,13 @@ router.get('/incidents/export-pdf', authMiddleware, PLAN, MODGATE, rbac('behavio
       : _cid ? (className || 'Class')
       : 'Whole School';
 
-    const html = renderIncidentsReportHtml({
+    const reportData = {
       school, scopeLabel, dateFrom: _df, dateTo: _dt,
       incidents, classNameMap, reporterMap, staffRows,
       generatedByName: requester?.name || null,
-    });
-    const pdf = await htmlToPdfBuffer(html);
+    };
+    const html = renderIncidentsReportHtml(reportData);
+    const pdf = await htmlToPdfBufferOrFallback(html, () => renderIncidentsReportPdf(reportData));
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="behaviour-incidents-${new Date().toISOString().slice(0, 10)}.pdf"`);

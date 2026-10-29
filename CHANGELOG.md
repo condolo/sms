@@ -6,6 +6,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.245.0] - 2026-10-29 - fix(behaviour): incident-log PDF download failed with "Internal server error"
+
+Reported directly: "I have tried to download the behaviour incidences and i got this error 'Internal server error'." Confirmed the exact mechanism before writing any code: `E.serverError(res)`'s default message is literally `'Internal server error'` (`server/utils/response.js`), and `GET /incidents/export-pdf`'s catch block calls it with no override — an exact string match, not a guess.
+
+**Root cause:** this route (built 2026-10-26, v5.235.0) called `htmlToPdfBuffer` directly, with no fallback — unlike all four report-card PDF routes, which got a Puppeteer-launch-failure fallback three days later (v5.238.0/v5.241.0, the same session that confirmed, from a real production log, that Chrome can fail to *launch* on this host even though the npm package downloads fine). This route was built in between those two fixes and never got the same protection — the second instance of the same bug class, not a new one.
+
+**Fix:** same pattern as the report-cards fix — `htmlToPdfBufferOrFallback`, with a new, genuinely new (this report never had a pre-Puppeteer PDFKit renderer to fall back to, unlike report-cards.js) `renderIncidentsReportPdf` in `behaviour-report.js`: a plain PDFKit table, not a pixel-match of the premium HTML design, used only when Puppeteer itself can't launch.
+
+Checked for any other route with this same exposure before closing this out: `report-cards.js`'s four PDF routes already go through the fallback wrapper exclusively (confirmed: no remaining direct `htmlToPdfBuffer(...)` call sites); this was the only other one.
+
+### Fixed
+- `server/utils/behaviour-report.js` — new `renderIncidentsReportPdf`, a PDFKit fallback renderer for the same data the HTML renderer takes.
+- `server/routes/behaviour.js` — `GET /incidents/export-pdf` now calls `htmlToPdfBufferOrFallback`.
+
+### Verified
+- `npx jest behaviour-incidents-export-pdf` — 10/10 tests (mock updated to export `htmlToPdfBufferOrFallback`, same fix needed for report-cards' tests three days ago).
+- Full Jest suite, run alone: 371/371 suites, 3965/3965 tests.
+- Direct, non-mocked call to the new `renderIncidentsReportPdf` with real-shaped data — valid PDF, correct table contents, correct totals; also checked the zero-incidents edge case doesn't crash. Caught and fixed one real bug in my own first draft during this check: the footer line was pinned to an absolute Y near the page's bottom margin, which pushed it onto a wasted, nearly-blank second page — moved it to flow after the last table instead.
+
 ## [v5.244.0] - 2026-10-29 - feat(classes): assistant / co-homeroom teacher for every stream, system-wide
 
 Direct request: "can the system allow co homeroom teacher, such that we have the main teacher of that particular stream and assistant? in KG section? or entire system whichever is easier." Investigated first — there's no KG-specific teacher-assignment logic to extend (KG uses the exact same `streams.formTeacherId` as every other section), so system-wide turned out to be the *simpler* path, not a bigger one: no new special-casing needed. Confirmed by direct choice: the assistant gets the **same homeroom rights** as the main form teacher (attendance, class-teacher remark, full report access), not a display-only label — matching the real request (a genuine co-teacher who can cover for the main one), and distinct from the existing, unrelated `assistantTeacherId` on `timetable.js`'s per-lesson slots (that one is deliberately display-only, grants no access — no naming conflict, two independent features for a similar human role).

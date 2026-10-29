@@ -60,9 +60,11 @@ jest.mock('../../utils/email', () => ({}));
 jest.mock('../../services/audit', () => ({ log: jest.fn() }));
 jest.mock('../../utils/html-to-pdf', () => ({
   htmlToPdfBuffer: jest.fn().mockResolvedValue(Buffer.from('%PDF-1.4 fake pdf for tests')),
+  htmlToPdfBufferOrFallback: jest.fn((html, fallbackFn) => Promise.resolve(Buffer.from('%PDF-1.4 fake pdf for tests'))),
 }));
 jest.mock('../../utils/behaviour-report', () => ({
   renderIncidentsReportHtml: jest.fn((args) => { lastHtmlArgs = args; return '<html>fake</html>'; }),
+  renderIncidentsReportPdf: jest.fn(() => Promise.resolve(Buffer.from('%PDF-1.4 fake pdf for tests'))),
 }));
 
 jest.mock('../../utils/model', () => ({

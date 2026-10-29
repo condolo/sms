@@ -133,4 +133,106 @@ const thS = `border:1px solid #cbd5e1;padding:5px 8px;background:${BRAND};color:
 const tdS = `border:1px solid #e2e8f0;padding:5px 8px;`;
 const tdC = `border:1px solid #e2e8f0;padding:5px 8px;text-align:center`;
 
-module.exports = { renderIncidentsReportHtml };
+/* Reported directly, production: "I have tried to download the
+   behaviour incidences and i got this error 'Internal server error'"
+   — this route (built 2026-10-26) called htmlToPdfBuffer directly, with
+   no fallback, unlike every report-card PDF route, which all got the
+   Puppeteer-launch-failure fallback (2026-10-29, see html-to-pdf.js's
+   own header for why Chrome can fail to launch on some hosts even
+   though the npm package installs fine). Same fix here: a plain, far
+   less polished PDFKit table — functional, not pixel-matching the HTML
+   above — used ONLY when Puppeteer itself can't even launch, exactly
+   the same posture report-cards.js's _pdfKitFallback takes. */
+function renderIncidentsReportPdf({
+  school, scopeLabel, dateFrom, dateTo, incidents, classNameMap, reporterMap, staffRows, generatedByName,
+}) {
+  const PDFDocument = require('pdfkit');
+  const doc = new PDFDocument({ margin: 36, size: 'A4', layout: 'landscape' });
+  const buffers = [];
+  doc.on('data', chunk => buffers.push(chunk));
+  const done = new Promise(resolve => doc.on('end', resolve));
+
+  const PAGE_W = doc.page.width - 72;
+  const schoolName = school?.name || 'School';
+  const rangeLabel = dateFrom || dateTo ? `${dateFrom || 'Start'} - ${dateTo || 'Today'}` : 'All dates';
+  const totalMerits   = incidents.filter(i => i.type === 'merit').length;
+  const totalDemerits = incidents.filter(i => i.type === 'demerit').length;
+  const netPoints     = incidents.reduce((s, i) => s + (i.points || 0), 0);
+
+  doc.fontSize(16).font('Helvetica-Bold').text(schoolName, 36, 36);
+  doc.fontSize(10).font('Helvetica').fillColor('#64748b').text('Behaviour Incidents Report', 36, 56);
+  doc.fontSize(9).text(`Scope: ${scopeLabel}   ·   Period: ${rangeLabel}   ·   Generated ${new Date().toLocaleString('en-GB')}${generatedByName ? ` by ${generatedByName}` : ''}`, 36, 72);
+  doc.fillColor('#000');
+
+  doc.fontSize(9).font('Helvetica-Bold')
+     .text(`Total Incidents: ${incidents.length}    Merits: ${totalMerits}    Demerits: ${totalDemerits}    Net Points: ${netPoints >= 0 ? '+' : ''}${netPoints}`, 36, 92);
+
+  let y = 116;
+  function drawTable(headers, colWidths, rows, emptyMsg) {
+    doc.font('Helvetica-Bold').fontSize(8);
+    let x = 36;
+    headers.forEach((h, i) => {
+      doc.rect(x, y, colWidths[i], 16).fill(BRAND);
+      doc.fillColor('#fff').text(h, x + 3, y + 4, { width: colWidths[i] - 6 });
+      x += colWidths[i];
+    });
+    doc.fillColor('#000');
+    y += 16;
+    doc.font('Helvetica').fontSize(8);
+    if (!rows.length) {
+      doc.rect(36, y, PAGE_W, 16).stroke('#e2e8f0');
+      doc.fillColor('#94a3b8').text(emptyMsg, 40, y + 4);
+      doc.fillColor('#000');
+      y += 16;
+      return;
+    }
+    for (const row of rows) {
+      if (y > doc.page.height - 50) { doc.addPage(); y = 36; }
+      x = 36;
+      row.forEach((cell, i) => {
+        doc.rect(x, y, colWidths[i], 16).stroke('#e2e8f0');
+        doc.text(String(cell ?? ''), x + 3, y + 4, { width: colWidths[i] - 6, ellipsis: true });
+        x += colWidths[i];
+      });
+      y += 16;
+    }
+    y += 10;
+  }
+
+  doc.font('Helvetica-Bold').fontSize(10).text('Staff Activity - who logged what', 36, y);
+  y += 16;
+  const staffColW = [PAGE_W * 0.3, PAGE_W * 0.2, PAGE_W * 0.15, PAGE_W * 0.1, PAGE_W * 0.12, PAGE_W * 0.13];
+  drawTable(
+    ['Staff', 'Role', 'Incidents Logged', 'Merits', 'Demerits', 'Net Points'],
+    staffColW,
+    staffRows.map(r => [r.name, r.role || '-', r.total, r.merits, r.demerits, `${r.points >= 0 ? '+' : ''}${r.points}`]),
+    'No incidents in this scope/period.'
+  );
+
+  doc.font('Helvetica-Bold').fontSize(10).text('Incident Log', 36, y);
+  y += 16;
+  const incColW = [PAGE_W * 0.1, PAGE_W * 0.2, PAGE_W * 0.15, PAGE_W * 0.1, PAGE_W * 0.2, PAGE_W * 0.08, PAGE_W * 0.17];
+  drawTable(
+    ['Date', 'Student', 'Class', 'Type', 'Category / Title', 'Points', 'Recorded By'],
+    incColW,
+    incidents.map(i => {
+      const reporter = reporterMap[i.reportedBy];
+      const reporterLabel = reporter ? `${reporter.name}${reporter.role ? ` (${reporter.role})` : ''}` : (i.reportedBy || 'Unattributed');
+      return [
+        i.date ? new Date(i.date).toLocaleDateString('en-GB') : '-',
+        i.studentName || i.studentId, classNameMap[i.classId] || '-', i.type || '-',
+        i.category || i.title || '-', `${(i.points || 0) >= 0 ? '+' : ''}${i.points ?? 0}`, reporterLabel,
+      ];
+    }),
+    'No incidents in this scope/period.'
+  );
+
+  if (y > doc.page.height - 50) { doc.addPage(); y = 36; }
+  doc.fontSize(7).fillColor('#94a3b8')
+     .text(`This report is computer-generated from ${schoolName}'s live Behaviour module data.`, 36, y, { width: PAGE_W, align: 'center' });
+
+  doc.end();
+  return done.then(() => Buffer.concat(buffers));
+}
+
+module.exports = { renderIncidentsReportHtml, renderIncidentsReportPdf };
