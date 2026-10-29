@@ -126,11 +126,23 @@ router.get(
       }
     }
 
-    // Student counts per stream (active only)
+    // Student counts per stream — active only, matching this exact
+    // meaning both this field's own name/comment always claimed AND
+    // what DELETE /streams/:id itself actually enforces below. Reported
+    // directly: a stream with zero ACTIVE students (safely deletable,
+    // confirmed server-side) still had its Delete button silently
+    // disabled client-side (ClassDetail.jsx gates on this studentCount),
+    // with no error or explanation, because a real student status this
+    // app uses ('inactive', 'transferred' — confirmed live) was never
+    // excluded by the old $nin:['withdrawn','graduated'] filter here,
+    // while the delete route's own guard was always the narrower,
+    // correct `status: 'active'`. Same inflated-count bug also leaked
+    // into every stream's capacity-fill display (ClassDetail.jsx reads
+    // this same field for that bar) — not just the delete gate.
     const streamIds = docs.map(d => d.id || d._id?.toString()).filter(Boolean);
     const Students  = tenantModel('students', tenantContext(req));
     const counts = await Students.aggregate([
-      { $match: { schoolId, streamId: { $in: streamIds }, status: { $nin: ['withdrawn', 'graduated'] } } },
+      { $match: { schoolId, streamId: { $in: streamIds }, status: 'active' } },
       { $group: { _id: '$streamId', count: { $sum: 1 } } },
     ]);
     const countMap = {};

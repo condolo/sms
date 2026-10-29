@@ -6,6 +6,31 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.236.0] - 2026-10-29 - fix(classes,streams): "active student count" silently included inactive/transferred students, wrongly blocking a stream's Delete button with no explanation
+
+Reported directly: "am trying to delete a stream that has not students enrolled yet but the system doesn't even respond... when I click delete, it should delete and the system [should] communicate why not." Investigated as a possible global pattern per the report ("this I think is global").
+
+**Confirmed, exact mechanism:** `ClassDetail.jsx`'s Delete-Stream confirm button is `disabled={isLoading || (stream.studentCount ?? 0) > 0}` — a deliberate, correct safety gate, but fed a WRONG number. `GET /api/streams`' `studentCount` aggregation matched `status: { $nin: ['withdrawn', 'graduated'] }` — its own comment already said "(active only)", and `DELETE /streams/:id`'s real enforcement always was `status: 'active'` — but the aggregation's actual filter never matched either. Confirmed against live production data that real student status values in this app include `active`, `graduated`, `inactive`, `transferred` — neither `inactive` nor `transferred` was excluded by the old `$nin` filter, so a stream holding only inactive/transferred students (zero genuinely active ones, correctly deletable server-side) still reported `studentCount > 0`, disabling the button with zero error, zero tooltip, zero network request — indistinguishable from "the system doesn't respond." The identical bug existed in `GET /api/classes`' own `studentCount` (same copy-pasted `$nin`), inflating every class's displayed enrollment count the same way, though it doesn't currently gate any button there.
+
+**Checked against live data before concluding this explains the report, not just assuming it:** swept every stream in production comparing the old vs. new count — zero streams are *currently* caught by this exact mismatch (none happen to hold inactive/transferred-only rosters right now), and all 9 streams with genuinely zero students of any status were already correctly showing `studentCount: 0` under both definitions. **This is a real, now-fixed bug, but very likely not the literal cause of the stream you're stuck on right now** — that one has a different, not-yet-identified cause. Please send the exact stream + class (+ school, if not Trinitas) so it can be checked directly; this fix stays in regardless, since the mismatch would otherwise affect the next stream that does hold an inactive/transferred roster.
+
+Separately, while investigating the "for subjects it was just archiving" half of the report: confirmed `DELETE /api/subjects/:id` has always only deactivated (`isActive: false`), never hard-deleted, and the Subjects & Departments catalog page's own confirm modal already correctly says "Deactivate Subject?", not "Delete" — but the per-row trash-can button that opens it had no tooltip at all (unlike the identical Department button right next to it, which already says "Deactivate department"), so the icon alone implied "delete" with nothing correcting that impression before the modal opened.
+
+### Fixed
+- `server/routes/streams.js` — `GET /` 's `studentCount` aggregation now matches `status: 'active'`, exactly matching `DELETE /:id`'s own enforcement and this field's own pre-existing "(active only)" comment.
+- `server/routes/classes.js` — `GET /` 's `studentCount` aggregation gets the identical fix, for the identical reason (same copy-pasted bug).
+- `client/src/pages/subjects/CatalogTab.jsx` — the per-row subject delete button now has `title="Deactivate subject"`, matching the sibling department button.
+
+### Files
+- `server/routes/streams.js`, `server/routes/classes.js` — `status: 'active'` fix.
+- `client/src/pages/subjects/CatalogTab.jsx` — delete-button tooltip.
+- `server/__tests__/routes/streams-student-count-active-only.test.js` (new) — locks in the fix for both routes: inactive/transferred students excluded, active ones counted, and the exact end-to-end scenario (a stream `GET /` reports as `studentCount: 0` is genuinely deletable via `DELETE /:id`, not silently blocked).
+
+### Verified
+- Full Jest suite (3964 tests) passes.
+- Confirmed live production server (`https://msingi.io`) is healthy and running the latest deployed code (the new Behaviour PDF export route responds `401 UNAUTHENTICATED`, not `404`) — ruling out "the whole site is broken by a recent deploy" as an explanation before looking for a narrower cause.
+- Swept all 55 streams in production for the exact old-vs-new count mismatch (see above) and for other anomalies (missing `name`/`id` fields — none found).
+
 ## [v5.235.0] - 2026-10-29 - feat(behaviour): filterable incident-log PDF export, with a per-staff activity tally
 
 Requested directly: "I need behaviour incidences to be able to be exported in pdf, can be filtered per whole school, per class, stream, include the name of the staff who entered/recorded the incidences... when downloading we need to know how each staff is using the system."

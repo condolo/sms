@@ -578,7 +578,7 @@ function DeptCard({ dept, subjects, canCreate, canEdit, canDelete, enrollCounts,
                                     the actual save. Now matches subjects:update/delete like every
                                     other action on this page. */}
                                 {canEdit   && <button onClick={() => onEditSubject(sub)} className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"><Pencil size={13} /></button>}
-                                {canDelete && <button onClick={() => onDeleteSubject(sub)} className="p-1 rounded text-slate-400 hover:text-red-500 hover:bg-red-50 transition"><Trash2 size={13} /></button>}
+                                {canDelete && <button onClick={() => onDeleteSubject(sub)} className="p-1 rounded text-slate-400 hover:text-red-500 hover:bg-red-50 transition" title="Deactivate subject"><Trash2 size={13} /></button>}
                               </>
                             )}
                           </div>

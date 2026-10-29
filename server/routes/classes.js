@@ -167,8 +167,14 @@ router.get(
         { $match: { classId: { $in: classIds }, schoolId, status: 'active' } },
         { $group: { _id: '$classId', count: { $sum: 1 } } },
       ]),
+      // 'active' only, matching the stream aggregation right above and
+      // DELETE /streams/:id's own guard (streams.js) — same inflated-
+      // count bug reported directly for streams (a real, live student
+      // status, 'inactive'/'transferred', was never excluded by the old
+      // $nin:['withdrawn','graduated'] filter), fixed in both places so
+      // a class's displayed student count can't drift from a stream's.
       Students.aggregate([
-        { $match: { classId: { $in: classIds }, schoolId, status: { $nin: ['withdrawn', 'graduated'] } } },
+        { $match: { classId: { $in: classIds }, schoolId, status: 'active' } },
         { $group: { _id: '$classId', count: { $sum: 1 } } },
       ]),
     ]);
