@@ -89,19 +89,20 @@ export default function PublicNav() {
       }`}
     >
       <div className="max-w-7xl mx-auto px-6 lg:px-8 h-16 flex items-center justify-between">
-        {/* Logo — a platform-admin-uploaded logo replaces the "M" wordmark once loaded */}
-        <Link to="/" className="flex items-center gap-2.5 group flex-shrink-0">
+        {/* Logo only — wordmark dropped per request; the logo now carries
+            the whole mark on its own, so it's sized up from the old
+            icon-plus-text lockup (h-7 -> h-11). */}
+        <Link to="/" className="flex items-center group flex-shrink-0" aria-label={branding?.platformName || 'Msingi — home'}>
           {branding?.logoUrl ? (
-            <img src={branding.logoUrl} alt="Msingi" className="h-7 w-auto max-w-[140px] object-contain" />
+            <img src={branding.logoUrl} alt={branding?.platformName || 'Msingi'} className="h-11 w-auto max-w-[180px] object-contain" />
           ) : (
             <div
-              className={`w-7 h-7 rounded-lg flex items-center justify-center text-white text-[10px] font-bold transition-colors ${branding?.primaryColor ? '' : 'bg-slate-900 group-hover:bg-indigo-600'}`}
+              className={`w-10 h-10 rounded-lg flex items-center justify-center text-white text-sm font-bold transition-colors ${branding?.primaryColor ? '' : 'bg-slate-900 group-hover:bg-indigo-600'}`}
               style={branding?.primaryColor ? { backgroundColor: branding.primaryColor } : undefined}
             >
               M
             </div>
           )}
-          <span className="text-base font-bold text-slate-900 tracking-tight">{branding?.platformName || 'Msingi'}</span>
         </Link>
 
         {/* Desktop nav */}
