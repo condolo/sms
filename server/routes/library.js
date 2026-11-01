@@ -342,9 +342,26 @@ router.post('/loans', rbac('library', 'create', 'issue'), async (req, res) => {
 
     const now = new Date().toISOString();
 
-    /* Create loan + decrement available atomically (best-effort in MongoDB without transactions) */
-    const [loan] = await Promise.all([
-      tenantModel('library_loans', tenantContext(req)).create({
+    // Claim a copy FIRST, atomically, and check the result — this guard is
+    // what actually prevents two concurrent issues of the last copy from
+    // both succeeding. The `available < 1` check above is only a fast
+    // local pre-check for the common (non-racing) case; on its own it did
+    // nothing to stop a race, because the loan record used to be created
+    // unconditionally in the same Promise.all regardless of whether this
+    // update actually matched anything — so a second borrower could end up
+    // with an 'active' loan for a copy that was never decremented from
+    // `available`, silently desyncing the shelf count from reality.
+    const claim = await tenantModel('library_books', tenantContext(req)).updateOne(
+      { id: data.bookId, schoolId, available: { $gt: 0 } },
+      { $inc: { available: -1 } }
+    );
+    if (claim.matchedCount === 0) {
+      return E.badRequest(res, 'No copies available for this book');
+    }
+
+    let loan;
+    try {
+      loan = await tenantModel('library_loans', tenantContext(req)).create({
         id:            uuidv4(),
         schoolId,
         bookId:        data.bookId,
@@ -361,12 +378,16 @@ router.post('/loans', rbac('library', 'create', 'issue'), async (req, res) => {
         finePaid:      false,
         createdBy:     userId,
         createdAt:     now,
-      }),
-      tenantModel('library_books', tenantContext(req)).updateOne(
-        { id: data.bookId, schoolId, available: { $gt: 0 } },
-        { $inc: { available: -1 } }
-      ),
-    ]);
+      });
+    } catch (loanErr) {
+      // The copy was already claimed above but the loan record failed to
+      // write — give the copy back rather than leave `available` short by
+      // one with no loan to account for it.
+      await tenantModel('library_books', tenantContext(req)).updateOne(
+        { id: data.bookId, schoolId }, { $inc: { available: 1 } }
+      );
+      throw loanErr;
+    }
     return created(res, loan.toObject ? loan.toObject() : loan);
   } catch (err) {
     console.error('[library/loans POST]', err);
@@ -396,25 +417,34 @@ router.patch('/loans/:id/return', rbac('library', 'update', 'issue'), async (req
     const finePerDay  = Number(req.body?.finePerDay ?? 10);   // default 10 currency units/day
     const fineAmount  = daysOverdue * finePerDay;
 
-    const [updated] = await Promise.all([
-      tenantModel('library_loans', tenantContext(req)).findOneAndUpdate(
-        { id: req.params.id, schoolId },
-        { $set: {
-            status:     'returned',
-            returnedAt,
-            daysOverdue,
-            fineAmount,
-            updatedBy:  userId,
-            updatedAt:  returnedAt,
-          }
-        },
-        { new: true }
-      ).lean(),
-      tenantModel('library_books', tenantContext(req)).updateOne(
-        { id: loan.bookId, schoolId },
-        { $inc: { available: 1 } }
-      ),
-    ]);
+    // Claim the loan atomically, re-checking the same still-out statuses
+    // just read above — this guard is what actually stops two concurrent
+    // "Return" clicks (or a double-submit) from both passing the earlier
+    // findOne check and both incrementing `available`, inflating the
+    // shelf count past the book's real total. Whichever write lands first
+    // flips the loan and wins; the other gets null back and is told it's
+    // already closed instead of silently double-crediting the book.
+    const updated = await tenantModel('library_loans', tenantContext(req)).findOneAndUpdate(
+      { id: req.params.id, schoolId, status: { $in: ['active', 'overdue'] } },
+      { $set: {
+          status:     'returned',
+          returnedAt,
+          daysOverdue,
+          fineAmount,
+          updatedBy:  userId,
+          updatedAt:  returnedAt,
+        }
+      },
+      { new: true }
+    ).lean();
+    if (!updated) {
+      return E.badRequest(res, 'This loan was already closed — refresh and check its current status.');
+    }
+
+    await tenantModel('library_books', tenantContext(req)).updateOne(
+      { id: loan.bookId, schoolId },
+      { $inc: { available: 1 } }
+    );
     return ok(res, updated);
   } catch (err) {
     console.error('[library/loans PATCH return]', err);
@@ -435,21 +465,28 @@ router.patch('/loans/:id/lost', rbac('library', 'update', 'issue'), async (req, 
 
     const lostAt = new Date().toISOString();
 
+    // Claim the loan atomically, re-checking the same still-out statuses
+    // just read above — without this, two concurrent "Mark Lost" clicks
+    // (or one for /return racing one for /lost) could both pass the
+    // earlier findOne check and both decrement `copies`, double-counting
+    // a single physical loss.
+    const updated = await tenantModel('library_loans', tenantContext(req)).findOneAndUpdate(
+      { id: req.params.id, schoolId, status: { $in: ['active', 'overdue'] } },
+      { $set: { status: 'lost', lostAt, updatedBy: userId, updatedAt: lostAt } },
+      { new: true }
+    ).lean();
+    if (!updated) {
+      return E.badRequest(res, 'This loan was already closed — refresh and check its current status.');
+    }
+
     /* Unlike a return, `available` is never restored — the copy that
        left the shelf is gone. `copies` is also decremented so the
        book's total inventory count reflects the permanent loss,
        rather than only ever looking "checked out" forever. */
-    const [updated] = await Promise.all([
-      tenantModel('library_loans', tenantContext(req)).findOneAndUpdate(
-        { id: req.params.id, schoolId },
-        { $set: { status: 'lost', lostAt, updatedBy: userId, updatedAt: lostAt } },
-        { new: true }
-      ).lean(),
-      tenantModel('library_books', tenantContext(req)).updateOne(
-        { id: loan.bookId, schoolId, copies: { $gt: 0 } },
-        { $inc: { copies: -1 } }
-      ),
-    ]);
+    await tenantModel('library_books', tenantContext(req)).updateOne(
+      { id: loan.bookId, schoolId, copies: { $gt: 0 } },
+      { $inc: { copies: -1 } }
+    );
     return ok(res, updated);
   } catch (err) {
     console.error('[library/loans PATCH lost]', err);

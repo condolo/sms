@@ -666,10 +666,33 @@ router.post('/requisitions/:id/fulfill', authMiddleware, PLAN, MODGATE, rbac('in
     const item  = await Items.findOne({ id: itemId, schoolId }).select('name unit quantity').lean();
     if (!item) return E.badRequest(res, 'Unknown itemId.');
 
+    const now = new Date().toISOString();
+
+    // Claim the requisition FIRST, atomically — this guard is what actually
+    // prevents two concurrent /fulfill calls (a double-click, or a client
+    // retry after a slow response) from both passing the plain status
+    // check above and both receiving stock. Before this fix, the status
+    // write at the end of this route had no guard of its own (just
+    // `{id, schoolId}`), so two racing requests could both increment the
+    // item's quantity and both write a 'receive' transaction for the same
+    // requisition — a real double-count, not a cosmetic duplicate. Same
+    // $gte/$gt-guard idiom POST /transactions already uses above, applied
+    // to `status` instead of `quantity`: whichever write lands first flips
+    // approved -> fulfilled and gets the doc back; every other concurrent
+    // request gets null and is rejected before touching stock at all.
+    const claimed = await Reqs.findOneAndUpdate(
+      { id: req.params.id, schoolId, status: 'approved' },
+      { $set: { status: 'fulfilled', itemId, itemName: item.name, fulfilledBy: userId, fulfilledAt: now } },
+      { new: true }
+    ).lean();
+    if (!claimed) {
+      return E.badRequest(res, 'This requisition was already fulfilled (or is no longer approved) — refresh and check its current status.');
+    }
+
     const delta = existing.quantity;
     const updatedItem = await Items.findOneAndUpdate(
       { id: itemId, schoolId },
-      { $inc: { quantity: delta }, $set: { updatedAt: new Date().toISOString() } },
+      { $inc: { quantity: delta }, $set: { updatedAt: now } },
       { new: true }
     ).lean();
 
@@ -681,27 +704,30 @@ router.post('/requisitions/:id/fulfill', authMiddleware, PLAN, MODGATE, rbac('in
         type: 'receive', quantity: existing.quantity, delta,
         reason: `Requisition ${existing.id} fulfilled`,
         requisitionId: existing.id,
-        date: new Date().toISOString().slice(0, 10),
-        performedBy: userId, createdAt: new Date().toISOString(),
+        date: now.slice(0, 10),
+        performedBy: userId, createdAt: now,
       });
     } catch (ledgerErr) {
+      // Compensate BOTH the stock increment above AND the requisition claim
+      // — a requisition whose stock move failed to log must not be left
+      // stuck 'fulfilled' with no way to retry (the claim guard above only
+      // matches status:'approved'), and the item's quantity must not stay
+      // inflated for a receipt that was never actually logged.
       await Items.updateOne({ id: itemId, schoolId }, { $inc: { quantity: -delta } });
+      await Reqs.updateOne(
+        { id: req.params.id, schoolId },
+        { $set: { status: 'approved' }, $unset: { fulfilledBy: '', fulfilledAt: '' } }
+      );
       throw ledgerErr;
     }
 
-    const doc = await Reqs.findOneAndUpdate(
-      { id: req.params.id, schoolId },
-      { $set: { status: 'fulfilled', itemId, itemName: item.name, fulfilledBy: userId, fulfilledAt: new Date().toISOString() } },
-      { new: true }
-    ).lean();
-
     AuditService.log({
       action: 'inventory.requisition_fulfilled', actor: req.jwtUser, schoolId,
-      target: { type: 'inventory_requisition', id: doc.id, label: item.name },
+      target: { type: 'inventory_requisition', id: claimed.id, label: item.name },
       details: { quantity: existing.quantity, transactionId: txnDoc.id, resultingQuantity: updatedItem.quantity }, req,
     });
 
-    return ok(res, doc);
+    return ok(res, claimed);
   } catch (err) { console.error('[inventory/requisitions POST /:id/fulfill]', err); return E.serverError(res); }
 });
 

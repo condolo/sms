@@ -69,6 +69,10 @@ function mockMakeFakeCollection(seed = []) {
       if (idx === -1) return Promise.resolve({ matchedCount: 0 });
       if (update.$inc) for (const [k, v] of Object.entries(update.$inc)) docs[idx][k] = (docs[idx][k] ?? 0) + v;
       if (update.$set) Object.assign(docs[idx], update.$set);
+      // $unset — needed by the fulfill-rollback path (inventory.js), which
+      // clears fulfilledBy/fulfilledAt when compensating a failed ledger
+      // write so a retry doesn't look like it was already fulfilled.
+      if (update.$unset) for (const k of Object.keys(update.$unset)) delete docs[idx][k];
       return Promise.resolve({ matchedCount: 1 });
     }),
   };
@@ -346,6 +350,43 @@ describe('POST /api/inventory/requisitions/:id/fulfill — Procurement receipt',
     mockJwtUser = { userId: 'usr_teacher', schoolId: SCHOOL_A, role: 'teacher', roles: ['teacher'], name: 'A Teacher' };
     const res = await supertest(buildApp()).post('/api/inventory/requisitions/r1/fulfill');
     expect(res.status).toBe(403);
+  });
+
+  // Race-condition guard: two concurrent /fulfill calls (a double-click, or
+  // a client retry after a slow response) used to both pass the plain
+  // findOne status check and both receive stock, since the status write at
+  // the end was unguarded (just {id, schoolId}). Fixed by claiming the
+  // requisition atomically (status:'approved' in the filter) BEFORE any
+  // stock move, so only one concurrent request can win. Jest can't run two
+  // requests truly concurrently, so this simulates the race by fulfilling
+  // once for real, then firing a second fulfill at the now-'fulfilled' doc.
+  test('fulfilling an already-fulfilled requisition is rejected, not double-counted', async () => {
+    mockReqs = mockMakeFakeCollection([{ id: 'r1', schoolId: SCHOOL_A, itemId: 'i1', quantity: 3, unit: 'pcs', status: 'approved' }]);
+
+    const first = await supertest(buildApp()).post('/api/inventory/requisitions/r1/fulfill');
+    expect(first.status).toBe(200);
+    expect(mockItems._docs()[0].quantity).toBe(13); // 10 + 3
+
+    const second = await supertest(buildApp()).post('/api/inventory/requisitions/r1/fulfill');
+    expect(second.status).toBe(400);
+    expect(mockItems._docs()[0].quantity).toBe(13); // not incremented a second time
+    expect(mockTxns._docs().length).toBe(1); // only one receive transaction was ever logged
+  });
+
+  test('a ledger write failure after the claim rolls the requisition back to approved and the item quantity back down', async () => {
+    mockReqs = mockMakeFakeCollection([{ id: 'r1', schoolId: SCHOOL_A, itemId: 'i1', quantity: 3, unit: 'pcs', status: 'approved' }]);
+    mockTxns.create.mockImplementationOnce(() => Promise.reject(new Error('ledger write failed')));
+
+    const res = await supertest(buildApp()).post('/api/inventory/requisitions/r1/fulfill');
+    expect(res.status).toBe(500);
+    expect(mockItems._docs()[0].quantity).toBe(10); // compensated back to its pre-fulfill value
+    expect(mockReqs._docs()[0].status).toBe('approved'); // not left stuck 'fulfilled' with no transaction behind it
+    expect(mockReqs._docs()[0].fulfilledAt).toBeUndefined();
+
+    // And now a real retry succeeds, proving the rollback didn't leave it stuck.
+    const retry = await supertest(buildApp()).post('/api/inventory/requisitions/r1/fulfill');
+    expect(retry.status).toBe(200);
+    expect(mockItems._docs()[0].quantity).toBe(13);
   });
 });
 

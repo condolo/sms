@@ -19,7 +19,13 @@ function mockChainObj(obj) {
 }
 function matchesFilter(doc, filter) {
   return Object.entries(filter || {}).every(([k, v]) => {
-    if (v && typeof v === 'object' && '$gt' in v) return (doc[k] ?? 0) > v.$gt;
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      if ('$gt' in v) return (doc[k] ?? 0) > v.$gt;
+      // $in — needed by the return/lost race-condition guards (library.js),
+      // which re-check status: { $in: ['active','overdue'] } atomically in
+      // the same findOneAndUpdate that was previously just {id, schoolId}.
+      if ('$in' in v) return v.$in.includes(doc[k]);
+    }
     return doc[k] === v;
   });
 }

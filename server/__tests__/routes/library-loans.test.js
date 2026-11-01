@@ -50,10 +50,26 @@ function makeFakeCollection(seed = []) {
     create:           jest.fn((doc) => { docs.push(doc); return Promise.resolve(doc); }),
     updateOne:        jest.fn((filter, update) => {
       const idx = docs.findIndex(d => matchesFilter(d, filter));
-      if (idx === -1) return Promise.resolve({ modifiedCount: 0 });
+      // matchedCount is what the atomic-guard fixes in library.js actually
+      // check (POST /loans, PATCH /return, PATCH /lost) — real MongoDB
+      // always returns it alongside modifiedCount; this mock previously
+      // only simulated modifiedCount, which would have silently made
+      // those guards look like they always succeeded.
+      if (idx === -1) return Promise.resolve({ matchedCount: 0, modifiedCount: 0 });
       const inc = update.$inc || {};
       for (const [k, v] of Object.entries(inc)) docs[idx][k] = (docs[idx][k] || 0) + v;
-      return Promise.resolve({ modifiedCount: 1 });
+      return Promise.resolve({ matchedCount: 1, modifiedCount: 1 });
+    }),
+    findOneAndUpdate: jest.fn((filter, update, opts = {}) => {
+      let idx = docs.findIndex(d => matchesFilter(d, filter));
+      if (idx === -1) {
+        if (!opts.upsert) return mockChainObj(null);
+        docs.push({ ...filter }); idx = docs.length - 1;
+      }
+      if (update.$inc) for (const [k, v] of Object.entries(update.$inc)) docs[idx][k] = (docs[idx][k] ?? 0) + v;
+      if (update.$set) Object.assign(docs[idx], update.$set);
+      if (!update.$inc && !update.$set) Object.assign(docs[idx], update);
+      return mockChainObj(docs[idx]);
     }),
   };
 }
@@ -184,5 +200,90 @@ describe('GET /loans — self-scoping for non-manage roles depends on a correct 
     const res = await supertest(buildApp()).get('/api/library/loans');
     expect(res.status).toBe(200);
     expect(res.body.data.length).toBe(1);
+  });
+});
+
+/* Race-condition guards — a concurrent double-submit (two clicks, or a
+   client retry) used to be able to slip past the plain findOne check each
+   of these routes does first, because the actual write that followed was
+   never re-guarded by the very condition just checked. Each case here
+   simulates "the state already changed out from under the second request"
+   directly (rather than real concurrency, which Jest can't exercise) and
+   asserts the second request is rejected, not silently double-processed. */
+describe('POST /loans — issuing the last copy is race-safe', () => {
+  test('two issues of a book with exactly 1 copy left: the second is rejected, available never goes negative', async () => {
+    mockBooks = makeFakeCollection([{ id: 'book_1', schoolId: SCHOOL_A, title: 'Physics', available: 1, copies: 1 }]);
+
+    const first = await supertest(buildApp()).post('/api/library/loans').send({
+      bookId: 'book_1', borrowerId: 'stu_1', borrowerType: 'student', dueDate,
+    });
+    expect(first.status).toBe(201);
+    expect(mockBooks._docs()[0].available).toBe(0);
+
+    // A second borrower racing for the same (now-exhausted) copy.
+    mockStudents = makeFakeCollection([
+      { id: 'stu_1', schoolId: SCHOOL_A, firstName: 'A', lastName: 'One' },
+      { id: 'stu_2', schoolId: SCHOOL_A, firstName: 'C', lastName: 'Three' },
+    ]);
+    const second = await supertest(buildApp()).post('/api/library/loans').send({
+      bookId: 'book_1', borrowerId: 'stu_2', borrowerType: 'student', dueDate,
+    });
+    expect(second.status).toBe(400);
+    expect(mockBooks._docs()[0].available).toBe(0); // not decremented past zero
+    expect(mockLoans._docs().filter(l => l.status === 'active').length).toBe(1); // only the first loan exists
+  });
+
+  test('a loan write failure after the copy was claimed gives the copy back (no permanent desync)', async () => {
+    mockBooks = makeFakeCollection([{ id: 'book_1', schoolId: SCHOOL_A, title: 'Physics', available: 1, copies: 1 }]);
+    mockLoans.create.mockImplementationOnce(() => Promise.reject(new Error('ledger write failed')));
+
+    const res = await supertest(buildApp()).post('/api/library/loans').send({
+      bookId: 'book_1', borrowerId: 'stu_1', borrowerType: 'student', dueDate,
+    });
+    expect(res.status).toBe(500);
+    expect(mockBooks._docs()[0].available).toBe(1); // compensated back, not left short
+  });
+});
+
+describe('PATCH /loans/:id/return and /loans/:id/lost are race-safe', () => {
+  async function issueOneLoan() {
+    const res = await supertest(buildApp()).post('/api/library/loans').send({
+      bookId: 'book_1', borrowerId: 'stu_1', borrowerType: 'student', dueDate,
+    });
+    return res.body.data.id;
+  }
+
+  test('returning the same loan twice only credits `available` once', async () => {
+    const loanId = await issueOneLoan();
+    expect(mockBooks._docs()[0].available).toBe(1); // started at 2, one issued
+
+    const first = await supertest(buildApp()).patch(`/api/library/loans/${loanId}/return`);
+    expect(first.status).toBe(200);
+    expect(mockBooks._docs()[0].available).toBe(2);
+
+    const second = await supertest(buildApp()).patch(`/api/library/loans/${loanId}/return`);
+    expect(second.status).toBe(400);
+    expect(mockBooks._docs()[0].available).toBe(2); // not incremented a second time
+  });
+
+  test('marking the same loan lost twice only debits `copies` once', async () => {
+    const loanId = await issueOneLoan();
+
+    const first = await supertest(buildApp()).patch(`/api/library/loans/${loanId}/lost`);
+    expect(first.status).toBe(200);
+    expect(mockBooks._docs()[0].copies).toBe(1); // started at 2
+
+    const second = await supertest(buildApp()).patch(`/api/library/loans/${loanId}/lost`);
+    expect(second.status).toBe(400);
+    expect(mockBooks._docs()[0].copies).toBe(1); // not decremented a second time
+  });
+
+  test('returning an already-lost loan is rejected, not double-processed', async () => {
+    const loanId = await issueOneLoan();
+    await supertest(buildApp()).patch(`/api/library/loans/${loanId}/lost`);
+
+    const res = await supertest(buildApp()).patch(`/api/library/loans/${loanId}/return`);
+    expect(res.status).toBe(400);
+    expect(mockBooks._docs()[0].available).toBe(1); // still just the pre-issue decrement, no return credit
   });
 });
