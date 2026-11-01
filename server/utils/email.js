@@ -62,6 +62,47 @@ function invalidateSmtpCache(schoolId) {
   _smtpCache.delete(schoolId);
 }
 
+/* ── Custom-SMTP outcome tracking ───────────────────────────
+   A school's custom SMTP can be fully configured and still never send a
+   single email — a wrong/expired credential, or the server's own
+   SMTP_ENCRYPTION_KEY no longer matching what the password was encrypted
+   with, both fail silently today: _sendAsSchool's fallback-to-platform
+   still returns success to the caller, and the only trace is a
+   console.error on the server that nobody (school admin or platform
+   admin) ever sees. This persists the outcome on the school doc so
+   Settings can show it instead of a badge that only means "a config was
+   saved once," never "emails are currently leaving through it."
+
+   Throttled per school — a broken custom SMTP fails on every single send,
+   and a school-wide announcement can mean hundreds of those in one batch;
+   writing the DB on every one of them would turn one bad credential into
+   a write storm. Once every 5 minutes is plenty for an admin-facing status. */
+const _smtpOutcomeThrottle = new Map(); // schoolId -> last-recorded Date.now()
+const SMTP_OUTCOME_THROTTLE_MS = 5 * 60 * 1000;
+
+async function _recordSmtpOutcome(schoolId, { ok, error } = {}) {
+  if (!schoolId) return;
+  const last = _smtpOutcomeThrottle.get(schoolId) || 0;
+  if (Date.now() - last < SMTP_OUTCOME_THROTTLE_MS) return;
+  _smtpOutcomeThrottle.set(schoolId, Date.now());
+
+  try {
+    const Schools = _model('schools');
+    if (ok) {
+      await Schools.updateOne({ id: schoolId }, {
+        $set:   { smtpLastSuccessAt: new Date().toISOString() },
+        $unset: { smtpLastError: 1, smtpLastErrorAt: 1 },
+      });
+    } else {
+      await Schools.updateOne({ id: schoolId }, {
+        $set: { smtpLastError: String(error?.message || error || 'Unknown error'), smtpLastErrorAt: new Date().toISOString() },
+      });
+    }
+  } catch (err) {
+    console.error(`[EMAIL] ⚠️ Failed to record SMTP outcome for school ${schoolId}: ${err.message}`);
+  }
+}
+
 /**
  * Resolve the transporter and From address for a school.
  * Returns { transporter, from } — always falls back to platform.
@@ -139,6 +180,7 @@ async function _resolveTransporter(schoolId, { schoolName, schoolEmail } = {}) {
     return result;
   } catch (err) {
     console.error(`[EMAIL] ⚠️ Failed to load custom SMTP for school ${schoolId}: ${err.message} — falling back to platform`);
+    _recordSmtpOutcome(schoolId, { ok: false, error: err }).catch(() => {});
     _smtpCache.set(schoolId, { value: platformResult, expiresAt: Date.now() + SMTP_CACHE_TTL });
     return platformResult;
   }
@@ -168,6 +210,7 @@ async function _send(to, subject, html, opts = {}) {
     return true;
   } catch (err) {
     console.error(`[EMAIL] ❌ Failed "${subject}" → ${to}: ${err.message}`);
+    if (opts.onFailure) opts.onFailure(err);
     return false;
   }
 }
@@ -195,12 +238,18 @@ async function _sendAsSchool(to, subject, html, { schoolName, schoolEmail, schoo
 
   const resolved = await _resolveTransporter(schoolId, { schoolName, schoolEmail });
 
+  let customError = null;
   const result = await _send(to, subject, html, {
     transporter: resolved.transporter,
     from:        resolved.from,
     replyTo:     resolved.replyTo,
     isCustom:    resolved.isCustom,
+    onFailure:   resolved.isCustom ? (err) => { customError = err; } : undefined,
   });
+
+  if (resolved.isCustom) {
+    _recordSmtpOutcome(schoolId, result ? { ok: true } : { ok: false, error: customError }).catch(() => {});
+  }
 
   /* If custom SMTP failed, retry once with platform SMTP */
   if (!result && resolved.isCustom && SMTP_READY) {

@@ -1778,7 +1778,10 @@ router.post('/school/smtp', authMiddleware, rbac('settings', 'update'), async (r
       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'SMTP password is required.' } });
     }
 
-    await Schools.updateOne({ id: schoolId }, { $set: update });
+    // A fresh save means "try again" — clear any previously-recorded
+    // failure so the Settings badge doesn't keep showing a stale error
+    // from before this fix, and let the next real send speak for itself.
+    await Schools.updateOne({ id: schoolId }, { $set: update, $unset: { smtpLastError: 1, smtpLastErrorAt: 1 } });
     emailUtil.invalidateSmtpCache(schoolId);
     // Details deliberately exclude smtpUser/smtpHost/password — audit_logs
     // isn't a secrets store, just a "something changed" trail.
@@ -1863,7 +1866,8 @@ router.delete('/school/smtp', authMiddleware, rbac('settings', 'update'), async 
       { id: req.jwtUser.schoolId },
       {
         $unset: { smtpEnabled:1, smtpHost:1, smtpPort:1, smtpSecure:1,
-                  smtpUser:1, smtpPassEnc:1, smtpFromName:1, smtpFromEmail:1 },
+                  smtpUser:1, smtpPassEnc:1, smtpFromName:1, smtpFromEmail:1,
+                  smtpLastError:1, smtpLastErrorAt:1, smtpLastSuccessAt:1 },
         $set:   { updatedAt: new Date().toISOString() },
       }
     );

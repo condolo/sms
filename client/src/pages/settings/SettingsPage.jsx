@@ -1643,7 +1643,13 @@ function SmtpCard({ school = {}, onSaved }) {
     onError: err => setToast({ ok: false, text: err?.message ?? 'Failed to remove.' }),
   });
 
-  const hasSavedConfig = !!(school.smtpHost && school.smtpUser && school.smtpPassSaved);
+  const hasSavedConfig   = !!(school.smtpHost && school.smtpUser && school.smtpPassSaved);
+  // A saved config only means a password exists — it says nothing about
+  // whether sends are actually leaving through it. smtpLastError is set
+  // the moment a real send fails and only clears on either a fresh save
+  // or a real send succeeding, so its presence means every email since
+  // that failure has been silently falling back to the platform sender.
+  const hasRecentFailure = hasSavedConfig && !!school.smtpLastError;
 
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
@@ -1654,11 +1660,31 @@ function SmtpCard({ school = {}, onSaved }) {
           <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Email & Custom SMTP</h3>
         </div>
         {hasSavedConfig && (
-          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
-            <CheckCircle2 size={10} /> Custom SMTP active
-          </span>
+          hasRecentFailure ? (
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-red-700 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">
+              <AlertTriangle size={10} /> Falling back to platform
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
+              <CheckCircle2 size={10} /> Custom SMTP active
+            </span>
+          )
         )}
       </div>
+
+      {hasRecentFailure && (
+        <div className="flex items-start gap-2 text-xs bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-red-700">
+          <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
+          <div>
+            <p className="font-medium">Your custom SMTP failed on its last attempted send — emails have been going out via the Msingi platform instead, not your own address.</p>
+            <p className="mt-0.5 text-red-600">
+              {school.smtpLastError}
+              {school.smtpLastErrorAt ? ` · ${new Date(school.smtpLastErrorAt).toLocaleString()}` : ''}
+            </p>
+            <p className="mt-1 text-red-600">Use "Send Test Email" below after checking your host/port/credentials — it will clear once a real send succeeds.</p>
+          </div>
+        </div>
+      )}
 
       {/* Toast */}
       <AnimatePresence>

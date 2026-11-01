@@ -6,6 +6,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.249.0] - 2026-11-01 - fix(email): custom-SMTP failures were silent — schools "sending as themselves" could be falling back to the platform account with no trace
+
+Reported directly: individual schools' communications to parents were still arriving from the platform's own SMTP account instead of the school's, even though their Settings page showed "Custom SMTP active."
+
+**Audit findings, confirmed against the live database:**
+- 3 real schools (Mascit Lab Academy, Trinitas International School, Trinity International School) have custom SMTP fully configured and enabled, each authenticating `smtp.gmail.com` with their own school-domain mailbox — not the platform's.
+- `_sendAsSchool`'s existing design (`server/utils/email.js`) already falls back to the platform SMTP account whenever a school's custom SMTP fails — a wrong/expired credential, Gmail rejecting a non-App-Password login, or the server's `SMTP_ENCRYPTION_KEY` no longer matching what a password was encrypted with (that env var is set directly on Render, outside `render.yaml`'s tracked blueprint, and isn't present at all in this repo's local `.env`). Every one of those is a legitimate, expected fallback *path* — the bug is that it was completely silent.
+- The Settings "Custom SMTP active" badge only ever checked that a host/user/password had been *saved* once — never whether real sends were currently succeeding through it. A credential that stopped working the day after it was saved would show green forever, while every subsequent email for that school quietly went out from the platform's own Gmail account instead, with nothing recorded anywhere — not an audit-log entry, not a banner, nothing beyond an ephemeral `console.error` on the server that neither the school admin nor the platform admin would ever see.
+
+**Fix — make the fallback visible, not quieter:**
+- `_sendAsSchool` now records the real outcome of every custom-SMTP attempt on the school document itself: `smtpLastError` + `smtpLastErrorAt` on a genuine send failure (decrypt failure, auth rejection, connection failure — whatever `nodemailer` actually threw), and `smtpLastSuccessAt` (clearing any prior error) the moment a custom-SMTP send succeeds again. Throttled to once every 5 minutes per school so a broken credential failing on every message of a school-wide announcement doesn't turn into a write storm.
+- Settings → Email & Custom SMTP now shows a red "Falling back to platform" badge with the actual error and timestamp instead of a badge that only ever meant "a config was saved once." Saving new credentials clears the stale error immediately so the badge doesn't show yesterday's problem after today's fix; removing custom SMTP entirely also clears it.
+- Scope note: `systemEmail` still has no Settings UI field (same gap as the Oct 26 incident) and `email.js`'s own comment claims custom SMTP is "Standard plan+" with nothing in `settings.js` actually enforcing that — neither is what was reported here, both left as-is.
+- **Still needs a human to confirm on Render directly** (not checkable from this environment): whether `SMTP_ENCRYPTION_KEY` currently matches what those 3 schools' passwords were encrypted with. If it doesn't, the very next real send will now surface that as a visible, timestamped error on their Settings page instead of silently vanishing.
+
+**Files:** `server/utils/email.js`, `server/routes/settings.js`, `client/src/pages/settings/SettingsPage.jsx`, `server/__tests__/email-smtp-outcome.test.js` (new).
+
+---
+
 ## [v5.248.0] - 2026-11-01 - fix(transport): seat-capacity race condition — route assignments had NO atomic guard at all, not even a partial one
 
 Direct follow-up to v5.247.0's inventory/library audit, which flagged this as a related-but-different gap rather than fixing it inline: `transport_routes` has no stored occupancy counter at all — every capacity check (`POST /assignments`, `POST /assignments/bulk`) derived the current seat count live via `countDocuments()`/`.find().length`, then wrote the new assignment(s) unconditionally with nothing tying the write back to that read. Worse than the library/inventory gaps fixed in v5.247.0: those at least had a partial `{available: {$gt: 0}}`-style guard on the stock side even though the record-creation side wasn't tied to it; transport's assignment-creation had no guard whatsoever. Two concurrent assigns for a route's last seat (or a bulk assign racing a single assign) could both pass the check and both succeed, silently overfilling the route with no trace of the conflict.
