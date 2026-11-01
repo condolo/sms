@@ -7,9 +7,27 @@
    ============================================================ */
 'use strict';
 
+// Minimal aggregation-expression evaluator — only what POST /assignments/
+// bulk's atomic seat-claim guard actually sends ($lt/$lte comparing a field
+// reference, optionally wrapped in $ifNull/$add, against another field or
+// a literal), not a general-purpose $expr implementation.
+function evalExprValue(doc, v) {
+  if (typeof v === 'string' && v.startsWith('$')) return doc[v.slice(1)];
+  if (v && typeof v === 'object' && !Array.isArray(v)) {
+    if ('$ifNull' in v) { const [ref, def] = v.$ifNull; const val = evalExprValue(doc, ref); return val == null ? def : val; }
+    if ('$add' in v) return v.$add.reduce((sum, x) => sum + evalExprValue(doc, x), 0);
+  }
+  return v;
+}
+function evalExpr(doc, expr) {
+  if ('$lt'  in expr) { const [a, b] = expr.$lt;  return evalExprValue(doc, a) <  evalExprValue(doc, b); }
+  if ('$lte' in expr) { const [a, b] = expr.$lte; return evalExprValue(doc, a) <= evalExprValue(doc, b); }
+  return false;
+}
 function mockMakeCollection(seed = []) {
   const docs = seed.map(d => ({ ...d }));
   const matches = (doc, filter) => Object.entries(filter || {}).every(([k, v]) => {
+    if (k === '$expr') return evalExpr(doc, v);
     if (v && typeof v === 'object' && !Array.isArray(v)) {
       if ('$in' in v) return v.$in.includes(doc[k]);
     }
@@ -21,6 +39,13 @@ function mockMakeCollection(seed = []) {
     find:     (filter) => chain(docs.filter(d => matches(d, filter))),
     findOne:  (filter) => chain(docs.find(d => matches(d, filter)) || null),
     insertMany: jest.fn(async (list) => { docs.push(...list.map(d => ({ ...d }))); return list; }),
+    updateOne: jest.fn((filter, update) => {
+      const idx = docs.findIndex(d => matches(d, filter));
+      if (idx === -1) return Promise.resolve({ matchedCount: 0 });
+      if (update.$inc) for (const [k, v] of Object.entries(update.$inc)) docs[idx][k] = (docs[idx][k] ?? 0) + v;
+      if (update.$set) Object.assign(docs[idx], update.$set);
+      return Promise.resolve({ matchedCount: 1 });
+    }),
   };
 }
 
@@ -130,6 +155,42 @@ describe('POST /api/transport/assignments/bulk', () => {
     expect(res.status).toBe(400);
     expect(res.body.error.message).toMatch(/Only 1 seat left/);
     expect(mockStores.transport_assignments.insertMany).not.toHaveBeenCalled();
+  });
+
+  // Race-condition guard: the atomic occupied/capacity claim is the real
+  // gate; the active.length-based check above it is only a fast pre-check
+  // for a friendly message in the common case. These exercise the claim
+  // itself, not the pre-check.
+  test('the atomic claim blocks even when the active.length pre-check alone would have allowed it (simulates a concurrent claim already landed)', async () => {
+    // occupied=2/capacity=2 (already full per the authoritative counter)
+    // but zero active transport_assignments are seeded — standing in for
+    // another request's bulk-assign that already claimed both seats via
+    // the atomic $inc, whose insertMany this snapshot can't see yet. The
+    // old countDocuments()-only check would have said "2 seats free" and
+    // let this request through too, double-booking the route.
+    seed({ routes: [{ ...ZONE_A, capacity: 2, occupied: 2 }], assignments: [] });
+    const res = await supertest(buildApp()).post('/api/transport/assignments/bulk')
+      .send({ routeId: 'r_a', fareType: 'one_way', students: pick('stu1') });
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toMatch(/Only 0 seats left/);
+    expect(mockStores.transport_assignments.insertMany).not.toHaveBeenCalled();
+  });
+
+  test('a successful bulk assign increments occupied by exactly the number created', async () => {
+    seed({ routes: [{ ...ZONE_A, capacity: 5, occupied: 0 }] });
+    const res = await supertest(buildApp()).post('/api/transport/assignments/bulk')
+      .send({ routeId: 'r_a', fareType: 'one_way', students: pick('stu1', 'stu2') });
+    expect(res.status).toBe(200);
+    expect(mockStores.transport_routes._docs()[0].occupied).toBe(2);
+  });
+
+  test('an insertMany failure after the claim gives all claimed seats back', async () => {
+    seed({ routes: [{ ...ZONE_A, capacity: 5, occupied: 0 }] });
+    mockStores.transport_assignments.insertMany.mockImplementationOnce(() => Promise.reject(new Error('write failed')));
+    const res = await supertest(buildApp()).post('/api/transport/assignments/bulk')
+      .send({ routeId: 'r_a', fareType: 'one_way', students: pick('stu1', 'stu2') });
+    expect(res.status).toBe(500);
+    expect(mockStores.transport_routes._docs()[0].occupied).toBe(0); // compensated back, not left inflated
   });
 
   test('a student who is not an active student of this school is refused', async () => {

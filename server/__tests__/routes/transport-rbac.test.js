@@ -26,8 +26,26 @@ function mockChainObj(obj) {
   const c = { select: () => c, lean: () => Promise.resolve(obj) };
   return c;
 }
+// Minimal aggregation-expression evaluator — only what the atomic
+// occupied/capacity seat-claim guards in transport.js actually send
+// ($lt/$lte comparing a field reference, optionally wrapped in
+// $ifNull/$add, against another field or a literal).
+function evalExprValue(doc, v) {
+  if (typeof v === 'string' && v.startsWith('$')) return doc[v.slice(1)];
+  if (v && typeof v === 'object' && !Array.isArray(v)) {
+    if ('$ifNull' in v) { const [ref, def] = v.$ifNull; const val = evalExprValue(doc, ref); return val == null ? def : val; }
+    if ('$add' in v) return v.$add.reduce((sum, x) => sum + evalExprValue(doc, x), 0);
+  }
+  return v;
+}
+function evalExpr(doc, expr) {
+  if ('$lt'  in expr) { const [a, b] = expr.$lt;  return evalExprValue(doc, a) <  evalExprValue(doc, b); }
+  if ('$lte' in expr) { const [a, b] = expr.$lte; return evalExprValue(doc, a) <= evalExprValue(doc, b); }
+  return false;
+}
 function matchesFilter(doc, filter) {
   return Object.entries(filter || {}).every(([k, v]) => {
+    if (k === '$expr') return evalExpr(doc, v);
     if (v && typeof v === 'object' && !Array.isArray(v)) {
       if ('$gt' in v) return (doc[k] ?? 0) > v.$gt;
     }
@@ -53,6 +71,13 @@ function makeFakeCollection(seed = []) {
       const idx = docs.findIndex(d => matchesFilter(d, filter));
       if (idx === -1) return mockChainObj(null);
       return mockChainObj(docs.splice(idx, 1)[0]);
+    }),
+    updateOne: jest.fn((filter, update) => {
+      const idx = docs.findIndex(d => matchesFilter(d, filter));
+      if (idx === -1) return Promise.resolve({ matchedCount: 0 });
+      if (update.$inc) for (const [k, v] of Object.entries(update.$inc)) docs[idx][k] = (docs[idx][k] ?? 0) + v;
+      if (update.$set) Object.assign(docs[idx], update.$set);
+      return Promise.resolve({ matchedCount: 1 });
     }),
     aggregate: jest.fn(() => Promise.resolve([])),
   };
@@ -181,5 +206,54 @@ describe('DELETE /assignments/:id — delete requires assign-management access',
   test('admin can delete an assignment', async () => {
     const res = await supertest(buildApp()).delete('/api/transport/assignments/a1');
     expect(res.status).toBe(200);
+  });
+
+  test('deleting an active assignment frees its seat on the route', async () => {
+    mockRoutes = makeFakeCollection([{ id: 'r1', schoolId: SCHOOL_A, name: 'Route 1', capacity: 5, occupied: 3 }]);
+    const res = await supertest(buildApp()).delete('/api/transport/assignments/a1');
+    expect(res.status).toBe(200);
+    expect(mockRoutes._docs()[0].occupied).toBe(2);
+  });
+
+  test('deleting an already-inactive assignment does not touch occupied (it was never counted)', async () => {
+    mockAssignments = makeFakeCollection([{ id: 'a1', schoolId: SCHOOL_A, studentId: 'stu_1', routeId: 'r1', status: 'inactive' }]);
+    mockRoutes = makeFakeCollection([{ id: 'r1', schoolId: SCHOOL_A, name: 'Route 1', capacity: 5, occupied: 3 }]);
+    const res = await supertest(buildApp()).delete('/api/transport/assignments/a1');
+    expect(res.status).toBe(200);
+    expect(mockRoutes._docs()[0].occupied).toBe(3);
+  });
+});
+
+describe('PATCH /assignments/:id — status changes move a seat (dead in the client UI today, but a live authenticated route)', () => {
+  test('reactivating a closed assignment onto a full route is refused, and occupied is untouched', async () => {
+    mockAssignments = makeFakeCollection([{ id: 'a1', schoolId: SCHOOL_A, studentId: 'stu_1', routeId: 'r1', status: 'inactive' }]);
+    mockRoutes = makeFakeCollection([{ id: 'r1', schoolId: SCHOOL_A, name: 'Route 1', capacity: 2, occupied: 2 }]);
+    const res = await supertest(buildApp()).patch('/api/transport/assignments/a1').send({ status: 'active' });
+    expect(res.status).toBe(400);
+    expect(mockRoutes._docs()[0].occupied).toBe(2);
+  });
+
+  test('reactivating a closed assignment with a free seat claims it', async () => {
+    mockAssignments = makeFakeCollection([{ id: 'a1', schoolId: SCHOOL_A, studentId: 'stu_1', routeId: 'r1', status: 'inactive' }]);
+    mockRoutes = makeFakeCollection([{ id: 'r1', schoolId: SCHOOL_A, name: 'Route 1', capacity: 2, occupied: 1 }]);
+    const res = await supertest(buildApp()).patch('/api/transport/assignments/a1').send({ status: 'active' });
+    expect(res.status).toBe(200);
+    expect(mockRoutes._docs()[0].occupied).toBe(2);
+  });
+
+  test('deactivating an active assignment frees its seat', async () => {
+    mockAssignments = makeFakeCollection([{ id: 'a1', schoolId: SCHOOL_A, studentId: 'stu_1', routeId: 'r1', status: 'active' }]);
+    mockRoutes = makeFakeCollection([{ id: 'r1', schoolId: SCHOOL_A, name: 'Route 1', capacity: 2, occupied: 2 }]);
+    const res = await supertest(buildApp()).patch('/api/transport/assignments/a1').send({ status: 'inactive' });
+    expect(res.status).toBe(200);
+    expect(mockRoutes._docs()[0].occupied).toBe(1);
+  });
+
+  test('editing a field other than status does not touch occupied', async () => {
+    mockAssignments = makeFakeCollection([{ id: 'a1', schoolId: SCHOOL_A, studentId: 'stu_1', routeId: 'r1', status: 'active', notes: '' }]);
+    mockRoutes = makeFakeCollection([{ id: 'r1', schoolId: SCHOOL_A, name: 'Route 1', capacity: 2, occupied: 1 }]);
+    const res = await supertest(buildApp()).patch('/api/transport/assignments/a1').send({ notes: 'changed pickup' });
+    expect(res.status).toBe(200);
+    expect(mockRoutes._docs()[0].occupied).toBe(1);
   });
 });

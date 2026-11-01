@@ -128,6 +128,7 @@ router.post('/routes', rbac('transport', 'create', 'manage'), async (req, res) =
       id:        uuidv4(),
       schoolId,
       ...data,
+      occupied:  0, // server-maintained seat counter — see POST/PATCH /assignments and DELETE below
       createdBy: userId,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -227,46 +228,72 @@ router.post('/assignments', rbac('transport', 'create', 'assign'), async (req, r
     const { data, error } = _validate(AssignmentSchema, req.body);
     if (error) return E.validation(res, error);
 
+    const ctx    = tenantContext(req);
+    const Routes = tenantModel('transport_routes', ctx);
+
     /* Validate route exists */
-    const route = await tenantModel('transport_routes', tenantContext(req)).findOne({ id: data.routeId, schoolId }).lean();
+    const route = await Routes.findOne({ id: data.routeId, schoolId }).lean();
     if (!route) return E.notFound(res, 'Route not found');
 
     /* Check student not already actively assigned to same route */
-    const existing = await tenantModel('transport_assignments', tenantContext(req)).findOne({
+    const existing = await tenantModel('transport_assignments', ctx).findOne({
       schoolId, routeId: data.routeId, studentId: data.studentId, status: 'active',
     }).lean();
     if (existing) return E.conflict(res, 'Student is already assigned to this route');
 
-    /* Capacity check — soft warning; still allow if capacity not set */
-    if (route.capacity) {
-      const currentCount = await tenantModel('transport_assignments', tenantContext(req)).countDocuments({
-        schoolId, routeId: data.routeId, status: 'active',
-      });
-      if (currentCount >= route.capacity) {
-        return E.badRequest(res, `Route is at full capacity (${route.capacity} students)`);
-      }
+    // Claim a seat FIRST, atomically, and check the result — this guard is
+    // what actually prevents two concurrent assigns of the last seat from
+    // both succeeding. Before this fix, capacity was checked via a plain
+    // countDocuments() read and the assignment was then created
+    // unconditionally — two racing requests could both pass the check and
+    // both create an 'active' assignment, overfilling the route with no
+    // trace of the conflict. `$expr` compares `occupied` and `capacity` as
+    // fields of the same document (both change together, nothing to race
+    // against); `$ifNull` covers an older seeded route's unset `occupied`
+    // defaulting to 0 (a one-time backfill sets every existing route's
+    // `occupied` to its real current count before this guard ships, so
+    // that default is never actually relied on for a route with existing
+    // passengers). A route with no capacity set keeps the prior "always
+    // allow" behavior but still tracks `occupied` for bookkeeping.
+    const claim = route.capacity
+      ? await Routes.updateOne(
+          { id: data.routeId, schoolId, $expr: { $lt: [{ $ifNull: ['$occupied', 0] }, '$capacity'] } },
+          { $inc: { occupied: 1 } }
+        )
+      : await Routes.updateOne({ id: data.routeId, schoolId }, { $inc: { occupied: 1 } });
+    if (claim.matchedCount === 0) {
+      return E.badRequest(res, `Route is at full capacity (${route.capacity} students)`);
     }
 
     const now = new Date().toISOString();
-    const doc = await tenantModel('transport_assignments', tenantContext(req)).create({
-      id:           uuidv4(),
-      schoolId,
-      routeId:      data.routeId,
-      routeName:    route.name,
-      studentId:    data.studentId,
-      studentName:  data.studentName,
-      studentClass: data.studentClass,
-      pickupStop:   data.pickupStop,
-      direction:    data.direction,
-      fareType:     data.fareType,
-      startDate:    data.startDate ?? now.slice(0, 10),
-      endDate:      data.endDate   ?? null,
-      notes:        data.notes,
-      status:       'active',
-      createdBy:    userId,
-      createdAt:    now,
-      updatedAt:    now,
-    });
+    let doc;
+    try {
+      doc = await tenantModel('transport_assignments', ctx).create({
+        id:           uuidv4(),
+        schoolId,
+        routeId:      data.routeId,
+        routeName:    route.name,
+        studentId:    data.studentId,
+        studentName:  data.studentName,
+        studentClass: data.studentClass,
+        pickupStop:   data.pickupStop,
+        direction:    data.direction,
+        fareType:     data.fareType,
+        startDate:    data.startDate ?? now.slice(0, 10),
+        endDate:      data.endDate   ?? null,
+        notes:        data.notes,
+        status:       'active',
+        createdBy:    userId,
+        createdAt:    now,
+        updatedAt:    now,
+      });
+    } catch (createErr) {
+      // The seat was already claimed above but the assignment record
+      // failed to write — give the seat back rather than leave `occupied`
+      // inflated with no assignment to account for it.
+      await Routes.updateOne({ id: data.routeId, schoolId }, { $inc: { occupied: -1 } });
+      throw createErr;
+    }
     return created(res, doc.toObject ? doc.toObject() : doc);
   } catch (err) {
     console.error('[transport/assignments POST]', err);
@@ -301,8 +328,9 @@ router.post('/assignments/bulk', rbac('transport', 'create', 'assign'), async (r
     const { data, error } = _validate(BulkAssignmentSchema, req.body);
     if (error) return E.validation(res, error);
     const ctx = tenantContext(req);
+    const Routes = tenantModel('transport_routes', ctx);
 
-    const route = await tenantModel('transport_routes', ctx).findOne({ id: data.routeId, schoolId }).lean();
+    const route = await Routes.findOne({ id: data.routeId, schoolId }).lean();
     if (!route) return E.notFound(res, 'Route not found');
     if (!(route.fares ?? []).some(f => f.fareType === data.fareType)) {
       return E.badRequest(res, `This route has no ${data.fareType === 'one_way' ? 'one-way' : 'two-way'} fare. Set it on the route first.`);
@@ -330,11 +358,38 @@ router.post('/assignments/bulk', rbac('transport', 'create', 'assign'), async (r
       toCreate.push(s);
     }
 
+    if (toCreate.length === 0) {
+      return ok(res, { created: 0, skipped });
+    }
+
+    // Claim all `n` seats at once, atomically, and check the result — the
+    // $expr guard compares occupied+n against capacity as a single
+    // document condition, so this request (or a single /assignments call,
+    // or another concurrent bulk call) racing for the same remaining seats
+    // can't all succeed. The `active.length`-based check that used to be
+    // the only gate here is kept below, but only as a fast pre-check for a
+    // friendly "Only N seats left" message in the common (non-racing)
+    // case — this $expr claim is what actually enforces it.
+    const n = toCreate.length;
     if (route.capacity) {
-      const seatsLeft = Math.max(route.capacity - active.length, 0);
-      if (toCreate.length > seatsLeft) {
-        return E.badRequest(res, `Only ${seatsLeft} seat${seatsLeft === 1 ? '' : 's'} left on this route (capacity ${route.capacity}), but ${toCreate.length} student${toCreate.length === 1 ? ' is' : 's are'} to be added.`);
+      const preCheckSeatsLeft = Math.max(route.capacity - active.length, 0);
+      if (n > preCheckSeatsLeft) {
+        return E.badRequest(res, `Only ${preCheckSeatsLeft} seat${preCheckSeatsLeft === 1 ? '' : 's'} left on this route (capacity ${route.capacity}), but ${n} student${n === 1 ? ' is' : 's are'} to be added.`);
       }
+    }
+    const claim = route.capacity
+      ? await Routes.updateOne(
+          { id: data.routeId, schoolId, $expr: { $lte: [{ $add: [{ $ifNull: ['$occupied', 0] }, n] }, '$capacity'] } },
+          { $inc: { occupied: n } }
+        )
+      : await Routes.updateOne({ id: data.routeId, schoolId }, { $inc: { occupied: n } });
+    if (claim.matchedCount === 0) {
+      // Occupied moved since the active.length snapshot above (another
+      // request claimed seats in between) — re-derive the real number
+      // left for an accurate message rather than repeating the stale one.
+      const nowOccupied = (await Routes.findOne({ id: data.routeId, schoolId }).select('occupied').lean())?.occupied ?? active.length;
+      const seatsLeft = Math.max(route.capacity - nowOccupied, 0);
+      return E.badRequest(res, `Only ${seatsLeft} seat${seatsLeft === 1 ? '' : 's'} left on this route (capacity ${route.capacity}), but ${n} student${n === 1 ? ' is' : 's are'} to be added.`);
     }
 
     const now = new Date().toISOString();
@@ -357,7 +412,17 @@ router.post('/assignments/bulk', rbac('transport', 'create', 'assign'), async (r
       createdAt:    now,
       updatedAt:    now,
     }));
-    if (docs.length) await Assignments.insertMany(docs);
+    try {
+      await Assignments.insertMany(docs);
+    } catch (insertErr) {
+      // The seats were already claimed above but the batch failed to
+      // write — give all `n` seats back rather than leave `occupied`
+      // inflated with no assignments behind them. Same whole-batch
+      // compensation style POST /assignments above and inventory.js/
+      // library.js use for their own ledger-write failures.
+      await Routes.updateOne({ id: data.routeId, schoolId }, { $inc: { occupied: -n } });
+      throw insertErr;
+    }
 
     AuditService.log({ action: 'transport.assignments_bulk_created', actor: req.jwtUser, schoolId, target: { type: 'route', id: data.routeId, label: route.name }, details: { fareType: data.fareType, created: docs.length, skipped: skipped.length }, req });
     return ok(res, { created: docs.length, skipped });
@@ -371,8 +436,9 @@ router.post('/assignments/bulk', rbac('transport', 'create', 'assign'), async (r
 router.patch('/assignments/:id', rbac('transport', 'update', 'assign'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
+    const ctx = tenantContext(req);
 
-    const existing = await tenantModel('transport_assignments', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
+    const existing = await tenantModel('transport_assignments', ctx).findOne({ id: req.params.id, schoolId }).lean();
     if (!existing) return E.notFound(res, 'Assignment not found');
 
     const allowed = ['pickupStop', 'direction', 'endDate', 'notes', 'status', 'studentName', 'studentClass'];
@@ -380,10 +446,38 @@ router.patch('/assignments/:id', rbac('transport', 'update', 'assign'), async (r
     for (const k of allowed) {
       if (req.body[k] !== undefined) update[k] = req.body[k];
     }
+
+    // Not reachable from the client UI today (only assignBulk/remove are
+    // wired up there), but this is still a live, authenticated API route
+    // that accepts an arbitrary `status`, including re-activating a
+    // closed assignment — without the same seat bookkeeping POST
+    // /assignments and DELETE below do, that would both silently bypass
+    // capacity on reactivation and desync `occupied` on deactivation.
+    const wasActive    = existing.status === 'active';
+    const willBeActive = update.status !== undefined ? update.status === 'active' : wasActive;
+    const Routes = tenantModel('transport_routes', ctx);
+    if (!wasActive && willBeActive) {
+      const route = await Routes.findOne({ id: existing.routeId, schoolId }).lean();
+      const claim = route?.capacity
+        ? await Routes.updateOne(
+            { id: existing.routeId, schoolId, $expr: { $lt: [{ $ifNull: ['$occupied', 0] }, '$capacity'] } },
+            { $inc: { occupied: 1 } }
+          )
+        : await Routes.updateOne({ id: existing.routeId, schoolId }, { $inc: { occupied: 1 } });
+      if (claim.matchedCount === 0) {
+        return E.badRequest(res, `Route is at full capacity (${route?.capacity} students)`);
+      }
+    } else if (wasActive && !willBeActive) {
+      await Routes.updateOne(
+        { id: existing.routeId, schoolId, occupied: { $gt: 0 } },
+        { $inc: { occupied: -1 } }
+      );
+    }
+
     update.updatedBy = userId;
     update.updatedAt = new Date().toISOString();
 
-    const doc = await tenantModel('transport_assignments', tenantContext(req)).findOneAndUpdate(
+    const doc = await tenantModel('transport_assignments', ctx).findOneAndUpdate(
       { id: req.params.id, schoolId },
       { $set: update },
       { new: true }
@@ -399,9 +493,22 @@ router.patch('/assignments/:id', rbac('transport', 'update', 'assign'), async (r
 router.delete('/assignments/:id', rbac('transport', 'delete', 'assign'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
+    const ctx = tenantContext(req);
 
-    const doc = await tenantModel('transport_assignments', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId }).lean();
+    const doc = await tenantModel('transport_assignments', ctx).findOneAndDelete({ id: req.params.id, schoolId }).lean();
     if (!doc) return E.notFound(res, 'Assignment not found');
+
+    // Free the seat this assignment held — only if it was actually active
+    // (an already-inactive assignment was never counted in `occupied`).
+    // Guarded against going negative, same posture as library.js's
+    // `copies: {$gt: 0}` guard.
+    if (doc.status === 'active') {
+      await tenantModel('transport_routes', ctx).updateOne(
+        { id: doc.routeId, schoolId, occupied: { $gt: 0 } },
+        { $inc: { occupied: -1 } }
+      );
+    }
+
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) {
     console.error('[transport/assignments DELETE]', err);
