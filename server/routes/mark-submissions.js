@@ -42,6 +42,12 @@ const { _model } = require('../utils/model');
 const { isManagement } = require('../utils/subject-scope');
 const { isElective, canTeachElective, isInCurriculum } = require('../utils/elective-scope');
 const { restrictToTaught, taughtPairs } = require('../utils/teaching-scope');
+const { resolveRcTemplate } = require('../utils/rc-template-scale');
+// assessment.js has no dependency on this file (confirmed — no circular
+// require), so this reuses its already-exported getConfig directly: the
+// exact same "fetch or seed this school's customTypes" helper assessment.js's
+// own /marks write routes validate assessmentType against (see below).
+const { getConfig } = require('./assessment');
 
 const router = express.Router();
 const PLAN   = planGate('mark_submissions');
@@ -255,6 +261,45 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), async 
     // curriculum, for every role including management.
     if (!(await isInCurriculum(req, data.classId, data.subjectId))) {
       return E.badRequest(res, 'This subject is not part of this class\'s curriculum.');
+    }
+
+    // Audit finding (2026-11): assessmentType was a bare non-empty string
+    // with no enum/shape check at all — a caller could submit, say,
+    // assessmentType: "kg_indicators:anything" for an ordinary numeric
+    // class and it would be silently routed to indicator_marks locking
+    // (_isKgAssessmentType/_markCollectionAndFilter above) instead of
+    // assessment_marks, or submit a numeric type the school never
+    // configured. Two branches, mirroring the two things this string is
+    // allowed to mean:
+    const isKgType = _isKgAssessmentType(data.assessmentType);
+    if (isKgType) {
+      // The KG_INDICATORS_TYPE sentinel (bare, or ':cycle' suffixed) is
+      // only valid for a class/subject actually on indicator-based entry —
+      // same resolveRcTemplate check indicator-marks.js's own write routes
+      // enforce before ever writing a real indicator_definitions/
+      // indicator_marks row for a {classId,subjectId} pair.
+      const kgTemplate = await resolveRcTemplate(schoolId, data.classId);
+      if (!kgTemplate || !(kgTemplate.subjects ?? []).some(s => s.subjectId === data.subjectId)) {
+        return E.badRequest(res, 'This class/subject is not assigned a Kindergarten/competency template — Kindergarten indicator marks cannot be submitted for it.');
+      }
+      const encodedCycle = data.assessmentType === KG_INDICATORS_TYPE ? null : data.assessmentType.slice(KG_INDICATORS_TYPE.length + 1);
+      if (encodedCycle) {
+        const kgCfg = await getConfig(schoolId, data.academicYearId || null);
+        const validCycles = new Set(kgCfg.customTypes.map(t => t.key));
+        if (!validCycles.has(encodedCycle)) {
+          return E.badRequest(res, `Invalid cycle "${encodedCycle}". Configured types: ${[...validCycles].join(', ')}`);
+        }
+      }
+    } else {
+      // Same validation, same error shape, assessment.js's own /marks and
+      // /marks/bulk routes already apply against a number before letting
+      // it reach assessment_marks — this is the one write path into that
+      // collection (via mark_submissions' state machine) that never had it.
+      const cfg = await getConfig(schoolId, data.academicYearId || null);
+      const validKeys = new Set(cfg.customTypes.map(t => t.key));
+      if (!validKeys.has(data.assessmentType)) {
+        return E.badRequest(res, `Invalid assessment type "${data.assessmentType}". Configured types: ${[...validKeys].join(', ')}`);
+      }
     }
 
     // A teacher whose assignment is for one stream submits that stream. A whole-class

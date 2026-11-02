@@ -399,6 +399,20 @@ router.get('/definitions', authMiddleware, PLAN, MODGATE, rbac('grades', 'read')
     if (!classId || !subjectId || !termNumber) {
       return E.badRequest(res, 'classId, subjectId and termNumber are required');
     }
+
+    // Audit finding (2026-11): this route checked only the coarse
+    // grades:read permission — any staff account holding it could read
+    // another teacher's indicator TEXT (not scores, but still real
+    // curriculum content) for ANY class/subject in the school just by
+    // supplying arbitrary classId/subjectId query params, with no per-
+    // class teaching check at all. _indicatorManageDenial is the exact
+    // same {curriculum + (elective-teach OR management OR teaching_
+    // assignment)} gate every write route below it already enforces for
+    // this collection — reusing it here for the read closes the gap with
+    // no new scoping path to maintain.
+    const readDenial = await _indicatorManageDenial(req, classId, subjectId);
+    if (readDenial) return E.forbidden(res, readDenial);
+
     // Default (no ?cycle=) matches only the legacy/default cycle — see
     // IndicatorMarkSchema's own comment on `cycle`.
     const filter = {

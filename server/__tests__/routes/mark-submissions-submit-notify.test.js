@@ -70,6 +70,13 @@ jest.mock('../../utils/tenant-model', () => ({
     if (collection === 'subjects') return { findOne: () => mockChain({ id: 'subj_eng', name: 'English Language' }) };
     if (collection === 'users')    return { find: () => mockChain(mockUsersDocs) };
     if (collection === 'messages') return { create: (doc) => { mockMessagesCreate(doc); return Promise.resolve(doc); } };
+    // Enum validation (2026-11, mark-submissions.js's POST / submit route):
+    // a numeric submission's assessmentType must be one of the school's
+    // configured customTypes (assessment.js's exported getConfig) — this
+    // file's VALID_SUBMIT uses 'MT', one of the defaults.
+    if (collection === 'assessment_config') {
+      return { findOne: () => mockChain({ customTypes: [{ key: 'CA' }, { key: 'HW' }, { key: 'MT' }, { key: 'ET' }] }) };
+    }
     return { findOne: () => mockChain(null), find: () => mockChain([]) };
   }),
   tenantContext: jest.fn((req) => ({ schoolId: req.jwtUser.schoolId })),
@@ -123,6 +130,15 @@ describe('POST /api/mark-submissions — reviewer notification', () => {
     expect(res.status).toBe(201);
     expect(mockSubmissionsCreate).toHaveBeenCalledTimes(1);
     expect(mockMessagesCreate).not.toHaveBeenCalled();
+  });
+
+  // Audit finding (2026-11): assessmentType had no enum validation — a
+  // type the school never configured (not in assessment_config.customTypes)
+  // must be rejected before a submission is ever created.
+  test('an unconfigured assessmentType is rejected, never creates a submission', async () => {
+    const res = await supertest(buildApp()).post('/api/mark-submissions').send({ ...VALID_SUBMIT, assessmentType: 'NOT_A_REAL_TYPE' });
+    expect(res.status).toBe(400);
+    expect(mockSubmissionsCreate).not.toHaveBeenCalled();
   });
 
   test('a notification failure never blocks the submission itself', async () => {

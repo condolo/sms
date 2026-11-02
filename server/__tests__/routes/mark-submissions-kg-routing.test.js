@@ -103,6 +103,27 @@ jest.mock('../../utils/tenant-model', () => ({
     if (collection === 'subjects') return { findOne: () => mockChain({ name: 'Science' }) };
     if (collection === 'users')    return { find: () => mockChain([]) };
     if (collection === 'messages') return { create: () => Promise.resolve({}) };
+    // Enum/shape validation (2026-11, mark-submissions.js's POST / submit
+    // route): a KG submission must resolve to a real competency template
+    // for the class/subject (resolveRcTemplate), and a numeric submission's
+    // assessmentType must be one of the school's configured customTypes
+    // (assessment.js's exported getConfig) — both now checked before a
+    // submit is accepted. This file's cls_kg1/subj_science pairing is the
+    // KG fixture every test here submits against; cls_001/subj_eng (the
+    // numeric fixture) submits assessmentType 'CA', one of the defaults.
+    if (collection === 'rc_templates') {
+      // Only cls_kg1/subj_science resolves to a real competency template —
+      // a KG-sentinel submission for any other class must be rejected (see
+      // the new 'rejected' describe block below).
+      return {
+        findOne: (filter) => mockChain(
+          filter?.classIds === 'cls_kg1' ? { id: 'tpl_kg1', subjects: [{ subjectId: 'subj_science' }] } : null
+        ),
+      };
+    }
+    if (collection === 'assessment_config') {
+      return { findOne: () => mockChain({ customTypes: [{ key: 'CA' }, { key: 'HW' }, { key: 'MT' }, { key: 'ET' }] }) };
+    }
     return { findOne: () => mockChain(null), find: () => mockChain([]) };
   }),
   tenantContext: jest.fn((req) => ({ schoolId: req.jwtUser.schoolId })),
@@ -183,6 +204,26 @@ describe('POST /api/mark-submissions — KG completeness check reads indicator_m
     mockIndicatorMarksDocs = []; // nobody scored yet
 
     const res = await supertest(buildApp()).post('/api/mark-submissions').send(KG_KEY);
+    expect(res.status).toBe(400);
+    expect(mockSubDoc).toBeNull();
+  });
+});
+
+// Audit finding (2026-11): assessmentType had no enum/shape validation at
+// all — a caller could submit the KG sentinel for a class that is NOT on
+// indicator-based entry (which would then route completeness checks and
+// locking at indicator_marks instead of assessment_marks for an ordinary
+// numeric class), or submit a numeric assessmentType the school never
+// configured.
+describe('POST /api/mark-submissions — assessmentType is now validated, not trusted as-is', () => {
+  test('rejects the KG sentinel for a class with no competency template', async () => {
+    const res = await supertest(buildApp()).post('/api/mark-submissions').send({ ...KG_KEY, classId: 'cls_not_kg' });
+    expect(res.status).toBe(400);
+    expect(mockSubDoc).toBeNull();
+  });
+
+  test('rejects a numeric assessmentType the school has not configured', async () => {
+    const res = await supertest(buildApp()).post('/api/mark-submissions').send({ ...NUM_KEY, assessmentType: 'NOT_A_REAL_TYPE' });
     expect(res.status).toBe(400);
     expect(mockSubDoc).toBeNull();
   });

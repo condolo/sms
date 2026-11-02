@@ -142,6 +142,28 @@ describe('GET /definitions', () => {
     const res = await supertest(buildApp(TEACHER_ASSIGNED)).get('/api/indicator-marks/definitions').query({ classId: 'classA' });
     expect(res.status).toBe(400);
   });
+
+  // Audit finding (2026-11): this route checked only the coarse
+  // grades:read permission — no per-class teaching check at all, so any
+  // staff holder of grades:read could read another teacher's indicator
+  // text for an arbitrary class/subject just by supplying the query
+  // params directly.
+  test('a teacher not assigned to this subject/class is forbidden, even with grades:read', async () => {
+    mockIndicatorDefinitions = [
+      { id: 'ind1', schoolId: SCHOOL_A, classId: 'classA', subjectId: 'subj_science', termNumber: 2, order: 1, text: 'A' },
+    ];
+    const res = await supertest(buildApp(TEACHER_UNASSIGNED)).get('/api/indicator-marks/definitions').query({ classId: 'classA', subjectId: 'subj_science', termNumber: 2 });
+    expect(res.status).toBe(403);
+  });
+
+  test('management can still read without a teaching_assignments row', async () => {
+    mockIndicatorDefinitions = [
+      { id: 'ind1', schoolId: SCHOOL_A, classId: 'classA', subjectId: 'subj_science', termNumber: 2, order: 1, text: 'A' },
+    ];
+    const res = await supertest(buildApp(ADMIN)).get('/api/indicator-marks/definitions').query({ classId: 'classA', subjectId: 'subj_science', termNumber: 2 });
+    expect(res.status).toBe(200);
+    expect(res.body.data.map(d => d.id)).toEqual(['ind1']);
+  });
 });
 
 describe('POST /definitions', () => {

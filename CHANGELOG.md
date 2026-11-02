@@ -6,6 +6,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.255.0] - 2026-11-02 - fix(grades,security): close the two RBAC/validation gaps v5.254.0's audit flagged but deliberately left open
+
+Direct follow-up request: v5.254.0's audit flagged `mark_submissions.assessmentType` having no enum validation and `GET /indicator-marks/definitions` having only coarse `grades:read` as **pre-existing** gaps, out of that audit's scope, and left both unfixed. Asked explicitly to close both now.
+
+**`mark_submissions.assessmentType` enum/shape validation** (`server/routes/mark-submissions.js`'s `POST /`, the submit route): accepted any non-empty string, so a caller could submit an `assessmentType` the school never configured, or the KG sentinel (`kg_indicators[:cycle]`) for a class that isn't actually on indicator-based entry — which would have silently routed that submission's completeness check and lock/unlock operations at `indicator_marks` instead of `assessment_marks`. Now validated on two branches before anything else runs:
+- A KG-sentinel `assessmentType` must resolve (`resolveRcTemplate`) to a real competency template with this subject assigned — same guard `indicator-marks.js`'s own write routes already enforce before ever touching `indicator_definitions`/`indicator_marks`. An encoded cycle suffix (`:ET` etc.) must also be one of the school's configured `assessment_config.customTypes[].key` values.
+- An ordinary numeric `assessmentType` must be one of those same configured `customTypes` keys — the exact check `assessment.js`'s own `/marks` and `/marks/bulk` write routes already apply before a mark reaches `assessment_marks`; this was the one write path into that collection (via `mark_submissions`' state machine) that never had it. Reuses `assessment.js`'s already-exported `getConfig` directly rather than duplicating the lookup.
+
+**`GET /indicator-marks/definitions` per-class teaching check** (`server/routes/indicator-marks.js`): previously gated on coarse `grades:read` alone — any staff account holding that permission could read another teacher's indicator TEXT (not scores, but real curriculum content) for an arbitrary class/subject just by supplying the query params directly, with no check that the caller teaches or manages that pair. Now runs the same `_indicatorManageDenial` gate (curriculum membership + elective-teach-or-management-or-`teaching_assignments` match) every write route on this collection already enforces — one existing check, reused for the read, no new scoping path introduced.
+
+**Files:** `server/routes/mark-submissions.js`, `server/routes/indicator-marks.js`; test fixtures updated in `server/__tests__/routes/mark-submissions-kg-routing.test.js` and `server/__tests__/routes/mark-submissions-submit-notify.test.js` (added `rc_templates`/`assessment_config` mocks the new validation now reads); new regression tests in both those files plus `server/__tests__/routes/indicator-definitions.test.js`. Full suite: 376/376 suites, 4031/4031 tests (one pre-existing, unrelated timing flake in `report-cards-ir.test.js` confirmed passing in isolation).
+
+---
+
 ## [v5.254.0] - 2026-11-02 - fix(report-cards): CRITICAL — the independently-visible-cycle feature would have 500'd on its very first real use
 
 User-requested audit of the four most recent builds (v5.250.0–v5.253.0: the Mid-Term/End-of-Term report-card cycle feature, its Kindergarten extension, and the Assessment Analytics breakdowns), run as three independent, parallel re-verifications — tenancy isolation, RBAC/scope-escalation, and cross-module breakage — rather than re-asserting what shipping already claimed.
