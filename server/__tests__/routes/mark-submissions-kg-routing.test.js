@@ -40,6 +40,11 @@ function mockChain(result) {
 function mockMatchFilter(doc, filter) {
   return Object.entries(filter || {}).every(([k, v]) => {
     if (k === '$or') return v.some(sub => mockMatchFilter(doc, sub));
+    // Real Mongo semantics: {k: null} matches an explicit null AND a
+    // missing field — needed for `cycle`, which _markCollectionAndFilter
+    // now always includes and is absent on every doc seeded before that
+    // field existed.
+    if (v === null) return doc[k] === null || doc[k] === undefined;
     if (v && typeof v === 'object' && !Array.isArray(v)) {
       if ('$exists' in v) return v.$exists ? (k in doc && doc[k] !== undefined) : (!(k in doc) || doc[k] === undefined);
       if ('$in' in v) return v.$in.some(x => x === doc[k] || (x == null && doc[k] == null));

@@ -54,7 +54,7 @@ function _yearFilterPart(academicYearId) {
  * the caller should fall back to the ordinary numeric pipeline in that
  * case, not treat it as an error.
  */
-async function computeKgReport(ctx, schoolId, classId, studentId, termNumber, academicYearId, scale) {
+async function computeKgReport(ctx, schoolId, classId, studentId, termNumber, academicYearId, scale, cycle = null) {
   const template = await resolveRcTemplate(schoolId, classId);
   if (!template) return null;
 
@@ -63,9 +63,12 @@ async function computeKgReport(ctx, schoolId, classId, studentId, termNumber, ac
   // Fetched once for the whole class/term here (not per-subject), then
   // grouped below — same "resolve once per batch" discipline `scale`
   // already follows.
+  // `cycle` (2026-11) — optional, same {cycle: null} default-matches-
+  // missing convention as the numeric path's report-card cycle. Omitted
+  // = the original single-set-of-marks-per-term behavior, unchanged.
   const [marks, allDefs] = await Promise.all([
-    tenantModel('indicator_marks', ctx).find({ schoolId, studentId, classId, termNumber }).lean(),
-    tenantModel('indicator_definitions', ctx).find({ schoolId, classId, termNumber, ..._yearFilterPart(academicYearId) }).lean(),
+    tenantModel('indicator_marks', ctx).find({ schoolId, studentId, classId, termNumber, cycle: cycle || null }).lean(),
+    tenantModel('indicator_definitions', ctx).find({ schoolId, classId, termNumber, cycle: cycle || null, ..._yearFilterPart(academicYearId) }).lean(),
   ]);
   const markByIndicator = Object.fromEntries(marks.map(m => [`${m.subjectId}::${m.indicatorId}`, m]));
   const defsBySubject = {};

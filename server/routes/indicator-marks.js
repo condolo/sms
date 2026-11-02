@@ -94,6 +94,14 @@ const IndicatorMarkSchema = z.object({
   termNumber:     z.number().int().min(1).max(3),
   academicYearId: z.string().nullish(),
   isPublished:    z.boolean().default(true),
+  // `cycle` (2026-11) — optional, one of the school's configured
+  // assessment-type keys (e.g. 'MT'/'ET'). Omitted = the original,
+  // single-set-of-marks-per-term behavior, unchanged. An explicit cycle
+  // keeps that cycle's marks (and the class-wide lock/publish operations
+  // that touch them) completely independent of any other cycle's — see
+  // report-cards.js's PublishSchema comment for the full mechanism this
+  // reuses.
+  cycle:          z.string().max(50).trim().optional(),
 });
 
 const BulkIndicatorMarkSchema = z.object({
@@ -113,6 +121,9 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), scopeMidd
     if (req.query.subjectId)  filter.subjectId  = req.query.subjectId;
     if (req.query.templateId) filter.templateId = req.query.templateId;
     if (req.query.termNumber) filter.termNumber = Number(req.query.termNumber);
+    // Default (no ?cycle=) matches only the legacy/default cycle — see
+    // IndicatorMarkSchema's own comment on `cycle`.
+    filter.cycle = req.query.cycle ? String(req.query.cycle) : null;
     Object.assign(filter, _yearFilterPart(req.query.academicYearId));
 
     // Same data-scope posture as assessment.js's GET /marks — a plain
@@ -214,12 +225,12 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), as
     // Indicator identity/maxScore now comes from indicator_definitions
     // (teacher-managed, per class+subject+term), not the template —
     // see this file's header, 2026-10-19.
-    const defKeys = [...new Set(marks.map(d => `${d.classId}::${d.subjectId}::${d.termNumber}::${d.academicYearId || ''}`))];
+    const defKeys = [...new Set(marks.map(d => `${d.classId}::${d.subjectId}::${d.termNumber}::${d.academicYearId || ''}::${d.cycle || ''}`))];
     const maxScoreByIndicator = {};
     for (const key of defKeys) {
-      const [classId, subjectId, termNumber, academicYearId] = key.split('::');
+      const [classId, subjectId, termNumber, academicYearId, cycle] = key.split('::');
       const defs = await tenantModel('indicator_definitions', tenantContext(req)).find({
-        schoolId, classId, subjectId, termNumber: Number(termNumber), ..._yearFilterPart(academicYearId || null),
+        schoolId, classId, subjectId, termNumber: Number(termNumber), cycle: cycle || null, ..._yearFilterPart(academicYearId || null),
       }).select('id maxScore').lean();
       for (const def of defs) maxScoreByIndicator[`${key}::${def.id}`] = def.maxScore ?? 10;
     }
@@ -228,7 +239,7 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), as
       if (!template || template.id !== d.templateId) {
         return E.badRequest(res, `Template "${d.templateId}" is not the assigned Kindergarten template for class "${d.classId}".`);
       }
-      const key = `${d.classId}::${d.subjectId}::${d.termNumber}::${d.academicYearId || ''}`;
+      const key = `${d.classId}::${d.subjectId}::${d.termNumber}::${d.academicYearId || ''}::${d.cycle || ''}`;
       const maxScore = maxScoreByIndicator[`${key}::${d.indicatorId}`];
       if (maxScore === undefined) {
         return E.badRequest(res, `Unknown indicator "${d.indicatorId}" — add it in the Markbook first.`);
@@ -272,6 +283,7 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), as
         indicatorId:    d.indicatorId,
         termNumber:     d.termNumber,
         academicYearId: d.academicYearId || null,
+        cycle:          d.cycle || null,
       })),
     }).lean();
     if (lockedSample) {
@@ -284,7 +296,7 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), as
     for (const d of marks) {
       const filter = {
         schoolId, studentId: d.studentId, subjectId: d.subjectId, indicatorId: d.indicatorId,
-        termNumber: d.termNumber, ..._yearFilterPart(d.academicYearId || null),
+        termNumber: d.termNumber, cycle: d.cycle || null, ..._yearFilterPart(d.academicYearId || null),
       };
       const existing = await Marks.findOne(filter).lean();
       const streamId = streamByStudent[d.studentId] ?? null;
@@ -301,7 +313,7 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), as
         const doc = {
           id: uuidv4(), schoolId, studentId: d.studentId, classId: d.classId, streamId,
           subjectId: d.subjectId, templateId: d.templateId, indicatorId: d.indicatorId,
-          bandId: d.bandId ?? null, score: d.score, termNumber: d.termNumber,
+          bandId: d.bandId ?? null, score: d.score, termNumber: d.termNumber, cycle: d.cycle || null,
           academicYearId: d.academicYearId || null, isPublished: d.isPublished,
           createdAt: now, updatedAt: now, createdBy: userId, updatedBy: userId,
         };
@@ -333,6 +345,8 @@ const IndicatorDefinitionSchema = z.object({
   text:           z.string().min(1).max(400).trim(),
   maxScore:       z.number().min(1).max(1000).default(10),
   order:          z.number().int().min(0).optional(),
+  // See IndicatorMarkSchema's own comment on `cycle`.
+  cycle:          z.string().max(50).trim().optional(),
 });
 
 /** Whether the caller may manage (add/edit/delete) this class+subject's
@@ -362,27 +376,35 @@ async function _indicatorManageDenial(req, classId, subjectId) {
 /** Whether this class+subject+term's indicator marks are already
  *  locked (post-publish) — the structure feeding a frozen mark set
  *  must freeze too, same posture the numeric Markbook's assessment
- *  types have via schedule-entry locking. */
-async function _indicatorsLocked(req, schoolId, classId, subjectId, termNumber, academicYearId) {
+ *  types have via schedule-entry locking.
+ *  `cycle` (2026-11) scopes this to the SAME cycle only — a lock on
+ *  Mid-Term's marks must never block editing/entering End-Term's
+ *  indicators or marks. */
+async function _indicatorsLocked(req, schoolId, classId, subjectId, termNumber, academicYearId, cycle = null) {
   const locked = await tenantModel('indicator_marks', tenantContext(req)).findOne({
-    schoolId, classId, subjectId, termNumber, isLocked: true, ..._yearFilterPart(academicYearId || null),
+    schoolId, classId, subjectId, termNumber, cycle: cycle || null, isLocked: true, ..._yearFilterPart(academicYearId || null),
   }).lean();
   return !!locked;
 }
 
 /**
  * GET /api/indicator-marks/definitions
- * List indicators for one class+subject+term — what the Markbook
- * renders and scores against.
+ * List indicators for one class+subject+term(+cycle) — what the
+ * Markbook renders and scores against.
  */
 router.get('/definitions', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const { classId, subjectId, termNumber, academicYearId } = req.query;
+    const { classId, subjectId, termNumber, academicYearId, cycle } = req.query;
     if (!classId || !subjectId || !termNumber) {
       return E.badRequest(res, 'classId, subjectId and termNumber are required');
     }
-    const filter = { schoolId, classId, subjectId, termNumber: Number(termNumber), ..._yearFilterPart(academicYearId) };
+    // Default (no ?cycle=) matches only the legacy/default cycle — see
+    // IndicatorMarkSchema's own comment on `cycle`.
+    const filter = {
+      schoolId, classId, subjectId, termNumber: Number(termNumber),
+      cycle: cycle ? String(cycle) : null, ..._yearFilterPart(academicYearId),
+    };
     const docs = await tenantModel('indicator_definitions', tenantContext(req)).find(filter)
       .sort({ order: 1, createdAt: 1 }).limit(200).lean();
     return ok(res, docs);
@@ -422,18 +444,18 @@ router.post('/definitions', authMiddleware, PLAN, MODGATE, rbac('grades', 'creat
       return E.badRequest(res, 'This class/subject is not assigned a Kindergarten/competency template — add it in Kindergarten Templates first.');
     }
 
-    if (await _indicatorsLocked(req, schoolId, d.classId, d.subjectId, d.termNumber, d.academicYearId)) {
+    if (await _indicatorsLocked(req, schoolId, d.classId, d.subjectId, d.termNumber, d.academicYearId, d.cycle)) {
       return E.forbidden(res, 'Indicators are locked — the report card for this term has been published. Ask an administrator to unlock it for a correction.');
     }
 
     const existingCount = await tenantModel('indicator_definitions', tenantContext(req)).countDocuments({
-      schoolId, classId: d.classId, subjectId: d.subjectId, termNumber: d.termNumber, ..._yearFilterPart(d.academicYearId || null),
+      schoolId, classId: d.classId, subjectId: d.subjectId, termNumber: d.termNumber, cycle: d.cycle || null, ..._yearFilterPart(d.academicYearId || null),
     });
 
     const now = new Date().toISOString();
     const doc = {
       id: uuidv4(), schoolId, classId: d.classId, subjectId: d.subjectId,
-      termNumber: d.termNumber, academicYearId: d.academicYearId || null,
+      termNumber: d.termNumber, academicYearId: d.academicYearId || null, cycle: d.cycle || null,
       text: d.text, maxScore: d.maxScore, order: d.order ?? existingCount,
       createdAt: now, updatedAt: now, createdBy: userId, updatedBy: userId,
     };
@@ -450,6 +472,7 @@ const CopyFromSectionSchema = z.object({
   subjectId:      z.string().min(1),
   termNumber:     z.number().int().min(1).max(3),
   academicYearId: z.string().nullish(),
+  cycle:          z.string().max(50).trim().optional(),
 });
 
 /**
@@ -485,7 +508,7 @@ router.post('/definitions/copy-from-section', authMiddleware, PLAN, MODGATE, rba
     if (!parsed.success) {
       return E.validation(res, parsed.error.issues.map(i => ({ field: i.path.join('.'), message: i.message })));
     }
-    const { classId, subjectId, termNumber, academicYearId } = parsed.data;
+    const { classId, subjectId, termNumber, academicYearId, cycle } = parsed.data;
 
     if (academicYearId && await isYearArchived(schoolId, academicYearId)) {
       return E.badRequest(res, 'This academic year is locked — indicators cannot be added or modified.');
@@ -507,15 +530,17 @@ router.post('/definitions/copy-from-section', authMiddleware, PLAN, MODGATE, rba
       return E.badRequest(res, 'This class/subject is not assigned a Kindergarten/competency template — add it in Kindergarten Templates first.');
     }
 
-    if (await _indicatorsLocked(req, schoolId, classId, subjectId, termNumber, academicYearId)) {
+    if (await _indicatorsLocked(req, schoolId, classId, subjectId, termNumber, academicYearId, cycle)) {
       return E.forbidden(res, 'Indicators are locked — the report card for this term has been published. Ask an administrator to unlock it for a correction.');
     }
 
     const Defs = tenantModel('indicator_definitions', tenantContext(req));
 
-    // Never overwrite real input — only ever fills a genuinely blank list.
+    // Never overwrite real input — only ever fills a genuinely blank list
+    // (within THIS cycle — a sibling class's copy must never leak into a
+    // different cycle than the one the teacher is actually working in).
     const alreadyHas = await Defs.countDocuments({
-      schoolId, classId, subjectId, termNumber, ..._yearFilterPart(academicYearId || null),
+      schoolId, classId, subjectId, termNumber, cycle: cycle || null, ..._yearFilterPart(academicYearId || null),
     });
     if (alreadyHas > 0) return ok(res, { copied: 0, reason: 'destination already has indicators' });
 
@@ -527,21 +552,22 @@ router.post('/definitions/copy-from-section', authMiddleware, PLAN, MODGATE, rba
     const siblingIds = siblingClasses.map(c => c.id);
     if (siblingIds.length === 0) return ok(res, { copied: 0, reason: 'no sibling classes in this section' });
 
-    // Strictly the same subject + term(+year) — never a different subject's
-    // indicators, never a different term's. Earliest-created sibling set
-    // wins as the source, so the first teacher to type these in for the
-    // section becomes the one everyone else's blank list pre-fills from.
+    // Strictly the same subject + term(+year) + CYCLE — never a different
+    // subject's indicators, never a different term's or cycle's. Earliest-
+    // created sibling set wins as the source, so the first teacher to type
+    // these in for the section becomes the one everyone else's blank list
+    // pre-fills from.
     const candidates = await Defs.find({
-      schoolId, classId: { $in: siblingIds }, subjectId, termNumber, ..._yearFilterPart(academicYearId || null),
+      schoolId, classId: { $in: siblingIds }, subjectId, termNumber, cycle: cycle || null, ..._yearFilterPart(academicYearId || null),
     }).sort({ createdAt: 1 }).lean();
-    if (candidates.length === 0) return ok(res, { copied: 0, reason: 'no sibling indicators yet for this subject/term' });
+    if (candidates.length === 0) return ok(res, { copied: 0, reason: 'no sibling indicators yet for this subject/term/cycle' });
 
     const sourceClassId = candidates[0].classId;
     const sourceDefs = candidates.filter(d => d.classId === sourceClassId);
 
     const now = new Date().toISOString();
     const copies = sourceDefs.map((d, i) => ({
-      id: uuidv4(), schoolId, classId, subjectId, termNumber, academicYearId: academicYearId || null,
+      id: uuidv4(), schoolId, classId, subjectId, termNumber, academicYearId: academicYearId || null, cycle: cycle || null,
       text: d.text, maxScore: d.maxScore, order: d.order ?? i,
       createdAt: now, updatedAt: now, createdBy: userId, updatedBy: userId,
     }));
@@ -549,6 +575,137 @@ router.post('/definitions/copy-from-section', authMiddleware, PLAN, MODGATE, rba
     return ok(res, { copied: copies.length, sourceClassId });
   } catch (err) {
     console.error('[indicator-marks POST/definitions/copy-from-section]', err);
+    return E.serverError(res);
+  }
+});
+
+const CopyFromCycleSchema = z.object({
+  classId:        z.string().min(1),
+  subjectId:      z.string().min(1),
+  termNumber:     z.number().int().min(1).max(3),
+  academicYearId: z.string().nullish(),
+  cycle:          z.string().max(50).trim().optional(),
+});
+
+/**
+ * POST /api/indicator-marks/definitions/copy-from-cycle
+ *
+ * Direct request, 2026-11: schools starting a second assessment cycle
+ * within the same term (Mid-Term, then End-of-Term) need the End-Term
+ * Markbook to open with the Mid-Term indicator list as an editable
+ * starting point, not blank — the competency content taught rarely
+ * changes between the two checkpoints of the same term, only the
+ * scores do.
+ *
+ * Does one of two genuinely different things, in this order:
+ *
+ * 1. ADOPT (relabel in place, not copy) any UNCLAIMED legacy data for
+ *    this class+subject+term — rows with no `cycle` field at all,
+ *    which is exactly what every indicator/mark entered before this
+ *    feature existed looks like. The Kindergarten Markbook already
+ *    required picking an Assessment (e.g. "MT") before this route
+ *    existed, so every already-entered indicator/mark was, in the
+ *    teacher's own terms, entered "under" whichever assessment was
+ *    selected at the time — just never recorded. The FIRST cycle to
+ *    touch that unclaimed legacy bucket after this ships adopts it by
+ *    relabelling the existing rows' `cycle` field in place (both
+ *    indicator_definitions AND indicator_marks, together) — not by
+ *    copying. This is deliberate and load-bearing: a copy would create
+ *    NEW indicator ids that the teacher's already-entered marks don't
+ *    reference, making every real score they already typed appear to
+ *    vanish the moment they next open this class/subject under that
+ *    cycle. Relabelling changes no ids, so every existing mark stays
+ *    exactly where it is, just now explicitly tagged.
+ *
+ * 2. Otherwise (the legacy bucket was already adopted by a different
+ *    cycle, or there was never any legacy data at all): COPY — exactly
+ *    `copy-from-section`'s own contract (see its header), except the
+ *    source is a DIFFERENT CYCLE of the SAME class+subject+term(+year)
+ *    instead of a sibling class. Copies are brand-new rows with their
+ *    own id, owned by the destination cycle — editing or deleting them
+ *    afterward never touches the source cycle's rows, nor anything
+ *    already frozen into a published report from it. Marks are
+ *    deliberately NOT copied here (unlike the adopt path) — a new
+ *    cycle's scores start blank; only the indicator text carries over.
+ *
+ * Deliberately a no-op (200, copied:0/adopted:0), never an error, when
+ * the destination cycle already has indicators (never overwrites real
+ * teacher input) or there is nothing anywhere yet to adopt or copy —
+ * the client calls this automatically whenever a class/subject/term/
+ * cycle's indicator list loads empty.
+ */
+router.post('/definitions/copy-from-cycle', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const parsed = CopyFromCycleSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return E.validation(res, parsed.error.issues.map(i => ({ field: i.path.join('.'), message: i.message })));
+    }
+    const { classId, subjectId, termNumber, academicYearId, cycle } = parsed.data;
+
+    if (academicYearId && await isYearArchived(schoolId, academicYearId)) {
+      return E.badRequest(res, 'This academic year is locked — indicators cannot be added or modified.');
+    }
+    if (!(await isInCurriculum(req, classId, subjectId))) {
+      return E.badRequest(res, 'This subject is not part of this class\'s curriculum — add it in Curriculum first.');
+    }
+    const denial = await _indicatorManageDenial(req, classId, subjectId);
+    if (denial) return E.forbidden(res, denial);
+
+    const template = await resolveRcTemplate(schoolId, classId);
+    if (!template || !(template.subjects ?? []).some(s => s.subjectId === subjectId)) {
+      return E.badRequest(res, 'This class/subject is not assigned a Kindergarten/competency template — add it in Kindergarten Templates first.');
+    }
+
+    if (await _indicatorsLocked(req, schoolId, classId, subjectId, termNumber, academicYearId, cycle)) {
+      return E.forbidden(res, 'Indicators are locked — the report card for this term has been published. Ask an administrator to unlock it for a correction.');
+    }
+
+    const Defs = tenantModel('indicator_definitions', tenantContext(req));
+    const Marks = tenantModel('indicator_marks', tenantContext(req));
+    const destCycle = cycle || null;
+
+    // Never overwrite real input — only ever fills (or adopts into) a
+    // genuinely blank destination cycle.
+    const alreadyHas = await Defs.countDocuments({
+      schoolId, classId, subjectId, termNumber, cycle: destCycle, ..._yearFilterPart(academicYearId || null),
+    });
+    if (alreadyHas > 0) return ok(res, { copied: 0, adopted: 0, reason: 'destination cycle already has indicators' });
+
+    // ── Step 1: adopt unclaimed legacy data, if any (see header) ──
+    const legacyFilter = { schoolId, classId, subjectId, termNumber, cycle: null, ..._yearFilterPart(academicYearId || null) };
+    const legacyDefCount = await Defs.countDocuments(legacyFilter);
+    if (legacyDefCount > 0) {
+      const now = new Date().toISOString();
+      await Defs.updateMany(legacyFilter, { $set: { cycle: destCycle, updatedAt: now, updatedBy: userId } });
+      await Marks.updateMany(legacyFilter, { $set: { cycle: destCycle } });
+      return ok(res, { copied: 0, adopted: legacyDefCount });
+    }
+
+    // ── Step 2: no legacy left unclaimed — genuine copy from another
+    //    cycle. Most-recently-updated cycle wins as the source — the
+    //    cycle most recently worked on is the one a teacher starting a
+    //    new cycle almost always means to build from.
+    const candidates = await Defs.find({
+      schoolId, classId, subjectId, termNumber,
+      cycle: { $ne: destCycle },
+      ..._yearFilterPart(academicYearId || null),
+    }).sort({ updatedAt: -1 }).lean();
+    if (candidates.length === 0) return ok(res, { copied: 0, adopted: 0, reason: 'no other cycle has indicators yet for this subject/term' });
+
+    const sourceCycle = candidates[0].cycle ?? null;
+    const sourceDefs = candidates.filter(d => (d.cycle ?? null) === sourceCycle);
+
+    const now = new Date().toISOString();
+    const copies = sourceDefs.map((d, i) => ({
+      id: uuidv4(), schoolId, classId, subjectId, termNumber, academicYearId: academicYearId || null, cycle: destCycle,
+      text: d.text, maxScore: d.maxScore, order: d.order ?? i,
+      createdAt: now, updatedAt: now, createdBy: userId, updatedBy: userId,
+    }));
+    await Defs.insertMany(copies);
+    return ok(res, { copied: copies.length, adopted: 0, sourceCycle });
+  } catch (err) {
+    console.error('[indicator-marks POST/definitions/copy-from-cycle]', err);
     return E.serverError(res);
   }
 });
@@ -565,7 +722,7 @@ router.put('/definitions/:id', authMiddleware, PLAN, MODGATE, rbac('grades', 'up
 
     const denial = await _indicatorManageDenial(req, existing.classId, existing.subjectId);
     if (denial) return E.forbidden(res, denial);
-    if (await _indicatorsLocked(req, schoolId, existing.classId, existing.subjectId, existing.termNumber, existing.academicYearId)) {
+    if (await _indicatorsLocked(req, schoolId, existing.classId, existing.subjectId, existing.termNumber, existing.academicYearId, existing.cycle)) {
       return E.forbidden(res, 'Indicators are locked — the report card for this term has been published. Ask an administrator to unlock it for a correction.');
     }
 
@@ -603,10 +760,13 @@ router.delete('/definitions/:id', authMiddleware, PLAN, MODGATE, rbac('grades', 
 
     const denial = await _indicatorManageDenial(req, existing.classId, existing.subjectId);
     if (denial) return E.forbidden(res, denial);
-    if (await _indicatorsLocked(req, schoolId, existing.classId, existing.subjectId, existing.termNumber, existing.academicYearId)) {
+    if (await _indicatorsLocked(req, schoolId, existing.classId, existing.subjectId, existing.termNumber, existing.academicYearId, existing.cycle)) {
       return E.forbidden(res, 'Indicators are locked — the report card for this term has been published. Ask an administrator to unlock it for a correction.');
     }
 
+    // Scoped by indicatorId alone, which is already cycle-specific (a
+    // copied indicator gets its own fresh id — see copy-from-cycle), so
+    // this naturally never counts a different cycle's marks.
     const markCount = await tenantModel('indicator_marks', tenantContext(req)).countDocuments({ schoolId, indicatorId: req.params.id });
     if (markCount > 0) {
       return E.badRequest(res, `Cannot delete — ${markCount} student score${markCount === 1 ? '' : 's'} already recorded against this indicator. Remove those scores first.`);

@@ -1407,7 +1407,7 @@ router.post('/kg/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'
     const { schoolId } = req.jwtUser;
     const { data, error } = _validate(GenerateSchema, req.body);
     if (error) return E.validation(res, error);
-    const { classId, termId, termNumber: termNum, academicYearId, studentId } = data;
+    const { classId, termId, termNumber: termNum, academicYearId, studentId, cycle } = data;
     const ctx = tenantContext(req);
     const scope = await _resolveTermScope(schoolId, ctx, { academicYearId, termId, termNumber: termNum });
 
@@ -1421,7 +1421,7 @@ router.post('/kg/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'
     // returns (_loadCycleLabel's own comment) — KG never read it, so a
     // school running Mid-Term then End-Term KG reports had no way to tell
     // the two apart on the printed report.
-    const cycleLabel = await _loadCycleLabel(schoolId, classId, termNum, scope.academicYearId);
+    const cycleLabel = await _loadCycleLabel(schoolId, classId, termNum, scope.academicYearId, cycle);
 
     const reportSectionId = await sectionIdForClass(schoolId, classId);
     const scale = await resolveGradeScale(schoolId, reportSectionId, null);
@@ -1431,7 +1431,7 @@ router.post('/kg/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'
     const targets = studentId ? students.filter(s => s.id === studentId) : students;
 
     const reports = await Promise.all(targets.map(async stu => {
-      const kg = await computeKgReport(ctx, schoolId, classId, stu.id, termNum, scope.academicYearId, scale);
+      const kg = await computeKgReport(ctx, schoolId, classId, stu.id, termNum, scope.academicYearId, scale, cycle);
       return {
         studentId:        stu.id,
         studentName:       `${stu.firstName} ${stu.lastName}`.trim(),
@@ -1449,7 +1449,7 @@ router.post('/kg/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'
       };
     }));
 
-    return ok(res, { generated: reports.length, templateId: template.id, templateName: template.name, reportLabel: cycleLabel || null, students: reports });
+    return ok(res, { generated: reports.length, templateId: template.id, templateName: template.name, reportLabel: cycleLabel || null, cycle: cycle || null, students: reports });
   } catch (err) {
     console.error('[report-cards/kg/generate]', err);
     return E.serverError(res);
@@ -1483,7 +1483,7 @@ const KgPreviewSchema = GenerateSchema.extend({ studentId: z.string().min(1) });
 
 async function _resolveKgPreview(req, data) {
   const { schoolId } = req.jwtUser;
-  const { classId, termId, termNumber: termNum, academicYearId, studentId } = data;
+  const { classId, termId, termNumber: termNum, academicYearId, studentId, cycle } = data;
   const ctx = tenantContext(req);
   const scope = await _resolveTermScope(schoolId, ctx, { academicYearId, termId, termNumber: termNum });
 
@@ -1494,7 +1494,7 @@ async function _resolveKgPreview(req, data) {
   // See /kg/generate's own comment — same cycle label, needed here too since
   // preview-html/preview-pdf render through _computeKgReportSections exactly
   // like the published PDF does, not through the client's own card component.
-  const cycleLabel = await _loadCycleLabel(schoolId, classId, termNum, scope.academicYearId);
+  const cycleLabel = await _loadCycleLabel(schoolId, classId, termNum, scope.academicYearId, cycle);
 
   const reportSectionId = await sectionIdForClass(schoolId, classId);
   const scale = await resolveGradeScale(schoolId, reportSectionId, null);
@@ -1504,10 +1504,10 @@ async function _resolveKgPreview(req, data) {
   const stu = students.find(s => s.id === studentId);
   if (!stu) return { errorStatus: 404, errorMessage: 'Student not found in this class, or not currently active.' };
 
-  const kg = await computeKgReport(ctx, schoolId, classId, stu.id, termNum, scope.academicYearId, scale);
+  const kg = await computeKgReport(ctx, schoolId, classId, stu.id, termNum, scope.academicYearId, scale, cycle);
 
   const draft = await tenantModel('report_card_draft_comments', ctx)
-    .findOne({ schoolId, studentId: stu.id, termNumber: termNum }).lean();
+    .findOne({ schoolId, studentId: stu.id, termNumber: termNum, cycle: cycle || null }).lean();
 
   const { className, academicYear } = await _resolveDisplayNames(schoolId, ctx, { classId, academicYearId: scope.academicYearId, termId: scope.termId });
 
@@ -1537,6 +1537,7 @@ async function _resolveKgPreview(req, data) {
     overallBandLabel: kg?.overallBandLabel ?? null,
     kgDisplay: template.display ?? {},
     reportLabel: cycleLabel || null,
+    cycle: cycle || null,
     comments: _resolveSnapComments(null, {
       ...draft,
       classTeacherName: draft?.classTeacherName || (stu.streamId ? classTeacherByStream[stu.streamId] : '') || '',
@@ -1609,7 +1610,7 @@ router.post('/kg/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
   const {
     classId, termId, termNumber: termNum, academicYearId,
     className: clientClassName, termName: clientTermName, academicYear: clientAcademicYear,
-    schoolName,
+    schoolName, cycle,
   } = data;
   const now     = new Date().toISOString();
   const batchId = uuidv4();
@@ -1654,7 +1655,7 @@ router.post('/kg/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
     // Same cycle label the numeric /publish freezes onto its snapshot (see
     // its own comment) — never read here before, so a Mid-Term KG report
     // and the End-of-Term one that supersedes it were visually identical.
-    const cycleLabel = await _loadCycleLabel(schoolId, classId, termNum, scope.academicYearId);
+    const cycleLabel = await _loadCycleLabel(schoolId, classId, termNum, scope.academicYearId, cycle);
 
     const reportSectionId = await sectionIdForClass(schoolId, classId);
     const scale = await resolveGradeScale(schoolId, reportSectionId, null);
@@ -1670,13 +1671,16 @@ router.post('/kg/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
     }
 
     const studentIds = students.map(s => s.id);
+    // `cycle` scoping — same mechanism as the numeric /publish (see
+    // PublishSchema's own comment): a locked/published Mid-Term KG
+    // snapshot is never found or superseded by an End-Term publish.
     const existingSnaps = await tenantModel('report_card_snapshots', ctx).find({
-      schoolId, classId, termId: scope.termId, academicYearId: scope.academicYearId, superseded: { $ne: true },
+      schoolId, classId, termId: scope.termId, academicYearId: scope.academicYearId, cycle: cycle || null, superseded: { $ne: true },
     }).lean();
     const existingMap = Object.fromEntries(existingSnaps.map(s => [s.studentId, s]));
 
     const draftDocs = await tenantModel('report_card_draft_comments', ctx)
-      .find({ schoolId, studentId: { $in: studentIds }, termNumber: termNum }).lean();
+      .find({ schoolId, studentId: { $in: studentIds }, termNumber: termNum, cycle: cycle || null }).lean();
     const draftByStudent = Object.fromEntries(draftDocs.map(d => [d.studentId, d]));
 
     let blockedStudentIds = new Set();
@@ -1696,7 +1700,7 @@ router.post('/kg/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
 
     for (const stu of students) {
       try {
-        const kg = await computeKgReport(ctx, schoolId, classId, stu.id, termNum, scope.academicYearId, scale);
+        const kg = await computeKgReport(ctx, schoolId, classId, stu.id, termNum, scope.academicYearId, scale, cycle);
         const prev = existingMap[stu.id];
         const draft = draftByStudent[stu.id];
         const newId = uuidv4();
@@ -1736,6 +1740,7 @@ router.post('/kg/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
           overallBandLabel: kg?.overallBandLabel ?? null,
           kgDisplay:     template.display ?? {},
           reportLabel:   cycleLabel || null,
+          cycle:         cycle || null,
 
           comments: _resolveSnapComments(prev, draft),
           // Comments lock the same way marks do — see the identical field
@@ -1805,12 +1810,20 @@ router.post('/kg/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
     try {
       const yearFilter = _lockYearFilterPart(scope.academicYearId);
       const IndicatorMarks = tenantModel('indicator_marks', ctx);
-      const lockFilter = { schoolId, classId, termNumber: termNum, ...yearFilter };
+      // `cycle` (2026-11): scoped so locking End-Term never re-touches (or
+      // double-counts into mark_submissions) Mid-Term's already-locked
+      // marks — see PublishSchema's own comment for the full mechanism.
+      const lockFilter = { schoolId, classId, termNumber: termNum, cycle: cycle || null, ...yearFilter };
       const combos = await IndicatorMarks.find(lockFilter).select('subjectId streamId').lean();
       // Deduped by subjectId alone — see _lockSubmissionCombos for why
-      // streamId isn't part of mark_submissions' real identity.
+      // streamId isn't part of mark_submissions' real identity. The cycle
+      // is encoded INTO assessmentType (rather than added as its own
+      // field) specifically to avoid widening mark_submissions' live
+      // UNIQUE index (mksub_composite) — see mark-submissions.js's
+      // _markCollectionAndFilter for the matching decode.
+      const comboAssessmentType = cycle ? `${KG_INDICATORS_TYPE}:${cycle}` : KG_INDICATORS_TYPE;
       const distinctCombos = [...new Map(
-        combos.map(c => [c.subjectId, { ...c, assessmentType: KG_INDICATORS_TYPE, instance: 1 }])
+        combos.map(c => [c.subjectId, { ...c, assessmentType: comboAssessmentType, instance: 1 }])
       ).values()];
 
       await IndicatorMarks.updateMany(lockFilter, { $set: { isLocked: true, lockedAt: now } });

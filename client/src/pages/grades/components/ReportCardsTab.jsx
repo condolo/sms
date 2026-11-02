@@ -275,8 +275,8 @@ export default function ReportCardsTab() {
 
   // Kindergarten pipeline — same selector state, a different endpoint.
   const { data: kgGenerateData, isLoading: isKgGenerating, isError: isKgError, error: kgError, refetch: refetchKg } = useQuery({
-    queryKey: ['reportCards', 'kg', 'generate', { classId, termNum, yearId }],
-    queryFn:  () => reportCardsApi.kg.generate({ classId, termNumber: Number(termNum), academicYearId: yearId || undefined }),
+    queryKey: ['reportCards', 'kg', 'generate', { classId, termNum, yearId, cycle }],
+    queryFn:  () => reportCardsApi.kg.generate({ classId, termNumber: Number(termNum), academicYearId: yearId || undefined, cycle: cycle || undefined }),
     enabled:  canQuery && isKgClass,
     staleTime: 60_000,
   });
@@ -419,18 +419,18 @@ export default function ReportCardsTab() {
   // has no studentId/streamId narrowing, so the stream filter below is a
   // view-only convenience and must never look like it scopes this.
   const { mutate: publishBatch, isPending: isPublishing } = useMutation({
-    // `cycle` only for the numeric path — the Kindergarten pipeline
-    // doesn't carry it yet (its underlying indicator_marks has no
-    // per-cycle data separation to publish independently; flagged as a
-    // separate follow-up, not silently half-wired here).
+    // `cycle` (2026-11) — now carried by both pipelines. The Kindergarten
+    // Markbook (IndicatorMarkbook.jsx) derives its own cycle from the
+    // same Assessment picker the numeric Markbook already has, so
+    // /kg/publish reading the same selector here keeps the two in sync.
     mutationFn: (override = {}) => (isKgClass ? reportCardsApi.kg.publish : reportCardsApi.publish)({
       classId, termNumber: Number(termNum), academicYearId: yearId || undefined,
-      ...(isKgClass ? {} : { cycle: cycle || undefined }),
+      cycle: cycle || undefined,
       ...override,
     }),
     onSuccess: () => {
       setPublishError('');
-      qc.invalidateQueries({ queryKey: ['reportCards', 'snapshots', { classId, termNum, yearId }] });
+      qc.invalidateQueries({ queryKey: ['reportCards', 'snapshots', { classId, termNum, yearId, cycle }] });
     },
     onError: (err) => setPublishError(err?.message ?? 'Publish failed'),
   });
@@ -731,15 +731,13 @@ ${docs.map(h => `<div>${_bodyOf(h)}</div>`).join('\n')}
             options={yearsList.map(y => ({ value: y.id ?? y._id, label: y.name ?? y.year }))}
             placeholder={currentPeriod.academicYear ? `Current (${currentPeriod.academicYear})` : 'Current year'}
           />
-          {!isKgClass && (
-            <SelField
-              label="Report Cycle"
-              value={cycle}
-              onChange={async v => { if (!(await saveBeforeSwitch())) return; setCycle(v); }}
-              options={schoolCustomTypes.map(t => ({ value: t.key, label: t.label || t.key }))}
-              placeholder="Whole Term (default)"
-            />
-          )}
+          <SelField
+            label="Report Cycle"
+            value={cycle}
+            onChange={async v => { if (!(await saveBeforeSwitch())) return; setCycle(v); }}
+            options={schoolCustomTypes.map(t => ({ value: t.key, label: t.label || t.key }))}
+            placeholder="Whole Term (default)"
+          />
           {canQuery && isManagementRole && (
             <div className="flex flex-col gap-1">
               <div className="flex gap-2">
@@ -875,7 +873,7 @@ ${docs.map(h => `<div>${_bodyOf(h)}</div>`).join('\n')}
             <p className="text-xs text-amber-700">
               Publishing will lock every mark entry in the Markbook for <strong>{className || 'this class'}</strong> — Term {termNum}{displayAcademicYear && ` · ${displayAcademicYear}`} — teachers will no longer be able to edit them, and these report cards become visible to students and parents immediately. Only an admin can unlock marks afterward for a correction.
             </p>
-            {!isKgClass && cycle && (
+            {cycle && (
               <p className="text-xs text-amber-700">
                 This publishes under the <strong>{schoolCustomTypes.find(t => t.key === cycle)?.label || cycle}</strong> cycle — a new, independently-visible report alongside whatever is already published under a different cycle for this term. It does not replace or hide any other cycle's report.
               </p>
@@ -956,6 +954,7 @@ ${docs.map(h => `<div>${_bodyOf(h)}</div>`).join('\n')}
               draftComment={commentsMap?.[student.studentId]}
               onSaveComment={(data) => saveComment({ studentId: student.studentId, data })}
               snapshot={snapshotsMap?.[student.studentId] ?? null}
+              cycle={cycle}
             />
           ))}
         </div>

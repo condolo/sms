@@ -100,7 +100,7 @@ function Toast({ msg, type, onDismiss }) {
 /* ── Per-student slide-over ─────────────────────────────────── */
 function StudentIndicatorSlideOver({
   student, indicators, bands, bandOnly, existingMarks,
-  classId, subjectId, streamId, templateId, termNumber, academicYearId,
+  classId, subjectId, streamId, templateId, termNumber, academicYearId, cycle,
   onClose, onSaved, onError,
 }) {
   const [rows, setRows] = useState(() => {
@@ -143,7 +143,7 @@ function StudentIndicatorSlideOver({
           // Band-only: no score sent at all — the server resolves it
           // from the band. Numeric mode: unchanged.
           ...(bandOnly ? {} : { score: Number(rows[ind.id].score) }),
-          termNumber, academicYearId: academicYearId || undefined,
+          termNumber, academicYearId: academicYearId || undefined, cycle: cycle || undefined,
         }));
       if (marks.length === 0) return Promise.resolve({ data: { saved: 0 } });
       return api.bulkSave(marks);
@@ -376,7 +376,7 @@ function IndicatorManager({ indicators, bandOnly, disabled, onAdd, onSave, onDel
 /* ── Main panel ──────────────────────────────────────────────── */
 export default function IndicatorMarkbook({
   classId, subjectId, streamId, students, template, templateSubject,
-  termNumber, academicYearId, isLocked, className, subjectName,
+  termNumber, academicYearId, isLocked, className, subjectName, cycle,
 }) {
   const qc = useQueryClient();
   const [toast, setToast] = useState(null);
@@ -388,8 +388,8 @@ export default function IndicatorMarkbook({
   // Indicator TEXT is teacher-managed per class+subject+term (2026-10-19)
   // — NOT read off the template any more. See this file's own header.
   const { data: indicatorDefsData } = useQuery({
-    queryKey: ['indicator-definitions', { classId, subjectId, termNumber, academicYearId }],
-    queryFn:  () => api.definitions.list({ classId, subjectId, termNumber, academicYearId: academicYearId || undefined }),
+    queryKey: ['indicator-definitions', { classId, subjectId, termNumber, academicYearId, cycle }],
+    queryFn:  () => api.definitions.list({ classId, subjectId, termNumber, academicYearId: academicYearId || undefined, cycle: cycle || undefined }),
     enabled:  !!classId && !!subjectId,
     staleTime: 15_000,
   });
@@ -399,8 +399,8 @@ export default function IndicatorMarkbook({
   );
 
   const { data: marksData, isLoading } = useQuery({
-    queryKey: ['indicator-marks', { classId, subjectId, termNumber, academicYearId }],
-    queryFn:  () => api.list({ classId, subjectId, termNumber, academicYearId: academicYearId || undefined }),
+    queryKey: ['indicator-marks', { classId, subjectId, termNumber, academicYearId, cycle }],
+    queryFn:  () => api.list({ classId, subjectId, termNumber, academicYearId: academicYearId || undefined, cycle: cycle || undefined }),
     enabled:  !!classId && !!subjectId,
     staleTime: 15_000,
   });
@@ -416,11 +416,15 @@ export default function IndicatorMarkbook({
   // mark_submissions — same collection/state-machine the numeric Markbook
   // uses, keyed by the KG sentinel assessmentType instead of a real CA/
   // HW/MT/ET type+instance. Natural key here has no instance at all.
+  // `cycle` (2026-11) encoded directly into the assessmentType sent here
+  // — see server/routes/mark-submissions.js's _markCollectionAndFilter
+  // for why (avoids widening mark_submissions' live unique index).
+  const kgAssessmentType = cycle ? `${KG_INDICATORS_TYPE}:${cycle}` : KG_INDICATORS_TYPE;
   const { data: submissionData } = useQuery({
-    queryKey: ['markSubmissions', 'kg', { classId, subjectId, streamId, termNumber, academicYearId }],
+    queryKey: ['markSubmissions', 'kg', { classId, subjectId, streamId, termNumber, academicYearId, cycle }],
     queryFn:  () => markSubmissionsApi.list({
       classId, subjectId, streamId: streamId || undefined, termNumber,
-      assessmentType: KG_INDICATORS_TYPE, academicYearId: academicYearId || undefined,
+      assessmentType: kgAssessmentType, academicYearId: academicYearId || undefined,
     }),
     enabled: !!classId && !!subjectId,
     staleTime: 15_000,
@@ -437,7 +441,8 @@ export default function IndicatorMarkbook({
      Teacher-owned now — see this file's header. Mutations share the
      indicator-definitions query key so the list and every open
      slide-over stay in sync without a manual refetch call. */
-  const defsQueryKey = ['indicator-definitions', { classId, subjectId, termNumber, academicYearId }];
+  const defsQueryKey = ['indicator-definitions', { classId, subjectId, termNumber, academicYearId, cycle }];
+  const marksQueryKey = ['indicator-marks', { classId, subjectId, termNumber, academicYearId, cycle }];
 
   /* ── Pre-fill a blank class/subject/term from a sibling class in the
      same section (2026-10-24, direct request) — some schools model
@@ -449,12 +454,22 @@ export default function IndicatorMarkbook({
      when there's nothing to copy, so a genuinely first-ever indicator
      set still shows the normal empty state untouched. ── */
   const copyAttempted = useRef(new Set());
-  const { mutate: copyFromSection } = useMutation({
-    mutationFn: () => api.definitions.copyFromSection({ classId, subjectId, termNumber, academicYearId: academicYearId || undefined }),
+  // Across cycles (Mid-Term → End-of-Term), not sibling classes — see
+  // /definitions/copy-from-cycle's own header for the adopt-vs-copy
+  // mechanics. A successful ADOPT also relabels existing indicator_marks
+  // in place, so the marks query is invalidated too — otherwise a
+  // teacher's already-entered scores would stay invisible under the new
+  // cycle until an unrelated refresh happened to refetch them.
+  const { mutate: copyFromCycle } = useMutation({
+    mutationFn: () => api.definitions.copyFromCycle({ classId, subjectId, termNumber, academicYearId: academicYearId || undefined, cycle: cycle || undefined }),
     onSuccess: (res) => {
-      if (res?.data?.copied > 0) {
+      const { copied = 0, adopted = 0 } = res?.data ?? {};
+      if (adopted > 0) {
         qc.invalidateQueries({ queryKey: defsQueryKey });
-        setToast({ msg: `Pre-filled ${res.data.copied} indicator${res.data.copied === 1 ? '' : 's'} from another class in this section — edit as needed for this class.`, type: 'success' });
+        qc.invalidateQueries({ queryKey: marksQueryKey });
+      } else if (copied > 0) {
+        qc.invalidateQueries({ queryKey: defsQueryKey });
+        setToast({ msg: `Pre-filled ${copied} indicator${copied === 1 ? '' : 's'} from another assessment cycle — edit as needed; scores start blank for this cycle.`, type: 'success' });
       }
     },
     // Silent failure — this is a convenience pre-fill, not a required
@@ -463,15 +478,15 @@ export default function IndicatorMarkbook({
   useEffect(() => {
     if (entryClosed || !classId || !subjectId || !indicatorDefsData) return;
     if (indicators.length > 0) return;
-    const key = `${classId}|${subjectId}|${termNumber}|${academicYearId || ''}`;
+    const key = `${classId}|${subjectId}|${termNumber}|${academicYearId || ''}|${cycle || ''}`;
     if (copyAttempted.current.has(key)) return;
     copyAttempted.current.add(key);
-    copyFromSection();
+    copyFromCycle();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [classId, subjectId, termNumber, academicYearId, indicatorDefsData, indicators.length, entryClosed]);
+  }, [classId, subjectId, termNumber, academicYearId, cycle, indicatorDefsData, indicators.length, entryClosed]);
 
   const { mutate: addIndicator, isPending: addingIndicator } = useMutation({
-    mutationFn: (data) => api.definitions.create({ classId, subjectId, termNumber, academicYearId: academicYearId || undefined, ...data }),
+    mutationFn: (data) => api.definitions.create({ classId, subjectId, termNumber, academicYearId: academicYearId || undefined, cycle: cycle || undefined, ...data }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: defsQueryKey }); },
     onError:   err => setToast({ msg: err?.message ?? 'Failed to add indicator.', type: 'error' }),
   });
@@ -585,7 +600,7 @@ export default function IndicatorMarkbook({
             bandOnly={bandOnly}
             existingMarks={marksByStudent[openStudentId] ?? {}}
             classId={classId} subjectId={subjectId} streamId={streamId}
-            templateId={template.id} termNumber={termNumber} academicYearId={academicYearId}
+            templateId={template.id} termNumber={termNumber} academicYearId={academicYearId} cycle={cycle}
             onClose={() => setOpenStudentId(null)}
             onSaved={() => {
               qc.invalidateQueries({ queryKey: ['indicator-marks'] });

@@ -326,4 +326,38 @@ describe('POST /kg/publish', () => {
     expect(res.status).toBe(201);
     expect(mockSnapshots[0].reportLabel).toBeNull();
   });
+
+  test('cycle (2026-11): publishing under an explicit new cycle leaves a different (including cycle-less) live KG snapshot byte-for-byte untouched', async () => {
+    // Simulates a real already-published Mid-Term KG report — exactly
+    // what existed before this feature shipped, with no `cycle` field.
+    mockSnapshots = [{
+      id: 'snap_legacy', version: 1, schoolId: SCHOOL_A, studentId: 's1',
+      classId: 'classKG', termId: 't2', termNumber: 2, academicYearId: 'year1',
+      status: 'published', superseded: false, commentsLocked: true,
+      comments: { classTeacherRemark: 'Original Mid-Term remark — must survive untouched.' },
+    }];
+    const legacyBefore = { ...mockSnapshots[0] };
+
+    const res = await supertest(buildApp(ADMIN)).post('/api/report-cards/kg/publish').send(genBody({ cycle: 'ET' }));
+    expect(res.status).toBe(201);
+
+    expect(mockSnapshots.find(s => s.id === 'snap_legacy')).toEqual(legacyBefore);
+    expect(mockSnapshots).toHaveLength(2);
+    const etSnap = mockSnapshots.find(s => s.id !== 'snap_legacy');
+    expect(etSnap.cycle).toBe('ET');
+    expect(etSnap.supersedesId).toBeNull();
+    expect(etSnap.version).toBe(1);
+  });
+
+  test('cycle (2026-11): re-publishing the SAME explicit cycle still only supersedes its own previous version', async () => {
+    await supertest(buildApp(ADMIN)).post('/api/report-cards/kg/publish').send(genBody({ cycle: 'ET' }));
+    const firstEtId = mockSnapshots.find(s => s.cycle === 'ET').id;
+
+    await supertest(buildApp(ADMIN)).post('/api/report-cards/kg/publish').send(genBody({ cycle: 'ET' }));
+    expect(mockSnapshots).toHaveLength(2);
+    expect(mockSnapshots.find(s => s.id === firstEtId).superseded).toBe(true);
+    const secondEt = mockSnapshots.find(s => s.id !== firstEtId);
+    expect(secondEt.version).toBe(2);
+    expect(secondEt.supersedesId).toBe(firstEtId);
+  });
 });

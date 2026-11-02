@@ -6,6 +6,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.252.0] - 2026-11-02 - feat(indicator-marks): Kindergarten competency entry gets independent Mid-Term/End-of-Term cycles too
+
+Direct follow-up to v5.251.0, which deliberately excluded Kindergarten: "schools that do report card comments per assessment, the system should allow" — KG teachers are now starting End-Term indicator entry, and `indicator_marks`/`indicator_definitions` had zero per-cycle separation at all (one competency-band record per `{classId, subjectId, termNumber}`, full stop).
+
+**The real design question, caught before building**: the Kindergarten Markbook already *requires* picking an Assessment (the same CA/MT/ET picker the numeric Markbook uses — `ExamsPage.jsx`'s `selectedEntry`) before a teacher can enter anything, but the KG component never read or stored which one was selected. Naively wiring `cycle = selectedEntry.assessmentType` straight through would have made every already-entered Mid-Term score *appear* to vanish the instant this shipped: existing `indicator_marks`/`indicator_definitions` rows have no `cycle` field at all (they predate it), so a query newly filtered to `cycle: 'MT'` would find nothing, even though `'MT'` is literally the only assessment that has ever existed to enter them under.
+
+**Fixed with an adopt-then-copy rule**, not just a copy:
+- `POST /indicator-marks/definitions/copy-from-cycle` (new) first checks for *unclaimed* legacy data (no `cycle` field) for the class/subject/term. If found, it **adopts it in place** — relabels the existing `indicator_definitions` AND `indicator_marks` rows' `cycle` field via `updateMany`, same ids, same documents. No copy, no new rows — every already-entered score survives exactly where it is, now just explicitly tagged. This is the step that makes the whole feature safe: the *first* cycle a school touches after this ships always adopts, never duplicates.
+- Only once the legacy bucket has already been adopted by one cycle does a *different* cycle get the `copy-from-section`-style behavior: brand-new, independent rows copied from the most-recently-updated other cycle — indicator **text** carries over, scores do not (a new cycle's marks start blank, by design — confirmed with the user: "give another empty fields or retained indicators... can be deleted and edited, when edited doesn't affect the previous assessment").
+- Mirrors the existing `copy-from-section` convention exactly (same guards, same "never overwrite real input" posture, same client-side auto-fire the moment a cycle's indicator list loads empty) — just adding the adopt step first.
+
+**`mark_submissions`' lock/moderation state also needed to separate per cycle, without touching its live UNIQUE index** (`mksub_composite` on `{schoolId,classId,subjectId,termNumber,assessmentType,instance}`) — KG submissions have always used a fixed sentinel `assessmentType: 'kg_indicators'` (indicator marks have no real assessmentType/instance of their own) purely to route moderation to `indicator_marks` instead of `assessment_marks`. Widening that index was exactly the kind of migration risk this whole effort has avoided, so the cycle is encoded directly into the string instead — `kg_indicators:ET` — and decoded back out in the one place (`_markCollectionAndFilter`) that needs to know. Uniqueness is preserved per cycle automatically, with zero index change.
+
+**Files:** `server/routes/indicator-marks.js` (`cycle` on both schemas, every route; new `copy-from-cycle`), `server/utils/kg-report.js` (`computeKgReport` takes `cycle`), `server/routes/report-cards.js` (`/kg/generate`, `_resolveKgPreview`, `/kg/publish` — including its auto-lock step's `lockFilter`/assessmentType encoding), `server/routes/mark-submissions.js` (`_markCollectionAndFilter` decode), `client/src/pages/exams/components/IndicatorMarkbook.jsx` (`cycle` prop, threaded into every query/mutation, `copyFromCycle` auto-fire replacing `copyFromSection`), `client/src/pages/exams/ExamsPage.jsx` (passes `cycle={selectedEntry.assessmentType}` — no new selector UI needed, the existing Assessment picker already decides it), `client/src/pages/grades/components/{ReportCardsTab,KgStudentReportCard}.jsx` (Report Cycle selector un-gated for KG classes; `cycle` threaded into `kg.generate`/`kg.publish`/preview calls).
+
+**Tests:** new `indicator-definitions-copy-from-cycle.test.js` (5 cases — adopt preserves ids and marks, never re-adopts, copy excludes marks, edits/deletes on a copy never touch the source, a locked source never blocks a new cycle) and 2 new cases in `report-cards-kg-publish` covering the identical byte-for-byte-untouched guarantee v5.251.0's numeric tests proved. Fixed the same latent `{field: null}`-matches-missing gap this exposed in 5 more existing test files' simplified Mongo mocks. Full suite: 375/375 suites, 4013/4013 tests.
+
+**Scope note, unchanged from v5.251.0:** the Kindergarten Report Cards screen (`/kg/generate`/`/kg/publish`) now *does* get the same independently-visible-cycle treatment the numeric path has — decided explicitly with the user this round, closing the gap v5.251.0 had deliberately left open.
+
+---
+
 ## [v5.251.0] - 2026-11-02 - feat(report-cards): independently-visible report-card cycles — Mid-Term and End-of-Term no longer supersede each other
 
 Direct follow-up to v5.250.0's cycle-label audit, re-raised explicitly: "schools that do report card comments per assessment, the system should allow and be aware... we already have data in the system and this must be protected."

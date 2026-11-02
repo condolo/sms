@@ -39,7 +39,7 @@ function gradeColor(grade) {
 
 const KgStudentReportCard = forwardRef(function KgStudentReportCard({
   student, classId, academicYearId, className, termNum, academicYear,
-  draftComment, onSaveComment, snapshot,
+  draftComment, onSaveComment, snapshot, cycle,
 }, ref) {
   const display = student.display ?? {};
   const showScore = display.showScore !== false;
@@ -105,7 +105,7 @@ const KgStudentReportCard = forwardRef(function KgStudentReportCard({
       const { data } = snapshot?.id
         ? await reportCardsApi.html(snapshot.id)
         : await reportCardsApi.kg.previewHtml({
-            classId, studentId: student.studentId, termNumber: termNum, academicYearId,
+            classId, studentId: student.studentId, termNumber: termNum, academicYearId, cycle: cycle || undefined,
           });
       const w = window.open('', '_blank', 'width=1200,height=900');
       if (!w) return;
@@ -128,7 +128,7 @@ const KgStudentReportCard = forwardRef(function KgStudentReportCard({
         await reportCardsApi.pdf(snapshot.id);
       } else {
         await reportCardsApi.kg.previewPdf({
-          classId, studentId: student.studentId, termNumber: termNum, academicYearId,
+          classId, studentId: student.studentId, termNumber: termNum, academicYearId, cycle: cycle || undefined,
         });
       }
     } catch (err) {

@@ -1239,6 +1239,10 @@ export const indicatorMarks = {
     // server/routes/indicator-marks.js's own header for the full
     // "pre-filled, then independent" reasoning.
     copyFromSection: (data) => _post('/indicator-marks/definitions/copy-from-section', data),
+    // Same contract, but across CYCLES (Mid-Term/End-of-Term) of the same
+    // class+subject+term instead of across sibling classes — see that
+    // route's own header for the adopt-vs-copy mechanics.
+    copyFromCycle: (data) => _post('/indicator-marks/definitions/copy-from-cycle', data),
   },
 };
 

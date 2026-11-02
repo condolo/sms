@@ -1434,6 +1434,12 @@ function MarkbookTab({ years }) {
           isLocked={selectedEntry?.isLocked ?? false}
           className={selectedClassName}
           subjectName={selectedSubjectName}
+          // The same Assessment picker above already decides which
+          // sitting (CA/MT/ET) a numeric teacher is entering marks for —
+          // the Kindergarten Markbook now carries that same choice all
+          // the way down (2026-11), so Mid-Term and End-of-Term
+          // competency entry coexist instead of overwriting each other.
+          cycle={selectedEntry.assessmentType}
         />
       ) : (
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">

@@ -65,12 +65,29 @@ const KG_INDICATORS_TYPE = 'kg_indicators';
 // route already built inline before this helper existed — only the KG
 // branch is new. indicator_marks has no instance field (one template per
 // class/subject, not per-sitting), so that key segment is simply dropped.
+//
+// `cycle` (2026-11): indicator_marks gained a real `cycle` field so
+// Mid-Term and End-Term competency marks can coexist, but mark_submissions'
+// own `mksub_composite` index is a live UNIQUE index over
+// {schoolId,classId,subjectId,termNumber,assessmentType,instance} — adding
+// `cycle` to it would be exactly the kind of index migration this whole
+// feature has avoided. Instead the cycle is encoded directly into the
+// `assessmentType` string (report-cards.js's /kg/publish builds it as
+// `${KG_INDICATORS_TYPE}:${cycle}`), so uniqueness is preserved per cycle
+// automatically with no index change, and decoded back out here — the one
+// place that needs to know about it.
+function _isKgAssessmentType(assessmentType) {
+  return assessmentType === KG_INDICATORS_TYPE || !!assessmentType?.startsWith(`${KG_INDICATORS_TYPE}:`);
+}
+
 function _markCollectionAndFilter(sub, extra = {}) {
-  if (sub.assessmentType === KG_INDICATORS_TYPE) {
+  if (_isKgAssessmentType(sub.assessmentType)) {
+    const cycle = sub.assessmentType === KG_INDICATORS_TYPE ? null : sub.assessmentType.slice(KG_INDICATORS_TYPE.length + 1);
     return {
       collection: 'indicator_marks',
       filter: {
         schoolId: sub.schoolId, classId: sub.classId, subjectId: sub.subjectId, termNumber: sub.termNumber,
+        cycle: cycle || null,
         ...(sub.streamId ? { streamId: sub.streamId } : {}),
         ...extra,
       },
@@ -261,7 +278,7 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), async 
     // Snapshot current marks for audit trail — Kindergarten indicator
     // marks live in a different collection/shape (see
     // _markCollectionAndFilter above), same natural-key convention.
-    const isKg = data.assessmentType === KG_INDICATORS_TYPE;
+    const isKg = _isKgAssessmentType(data.assessmentType);
     const { collection: markCollection, filter: markFilter } = _markCollectionAndFilter(
       { ...data, schoolId },
       data.academicYearId ? { academicYearId: data.academicYearId } : {},
