@@ -556,6 +556,8 @@ Go to **Report Cards → Generate & Publish**, pick the class and term exactly a
 
 The published report shows, per subject, every indicator with its band and score, a subject average, and an overall average/grade — rendered through its own dedicated layout (not reused from the numeric templates), available as PDF and HTML, with the same authenticity verification (QR code / reportId) every other Msingi report card has. For a band-only subject, the subject-average and (if the template itself is band-only) the overall-average lines show the nearest band's label instead of a percentage, and the numeric grading-scale legend is omitted wherever every figure on the page is band-only — there's nothing numeric left for it to explain.
 
+**Labelling a Mid-Term vs. End-of-Term report *(2026-11)*.** If your school runs more than one assessment cycle within the same term (e.g. a Mid-Term assessment, then an End-of-Term one), the generator screen has a small **report label** field — type "Mid-Term Report" (or whatever you call it) and click **Save label** before generating. It replaces the generic "Term X" text on the printed report header, and it's remembered per class/term/year, so re-publishing later under a new label (e.g. "End of Term Report") never changes what already-published reports say. This works the same way for a Kindergarten/competency class as for a numeric one.
+
 ### Things worth knowing
 
 - **A class can be moved between the two systems** by changing which template (if any) is assigned to it — but do this only between terms/report cycles, since marks already entered under one model don't convert to the other.

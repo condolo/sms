@@ -72,6 +72,7 @@ let mockIndicatorDefinitions = [];
 let mockSnapshots = [];
 let mockDraftComments = [];
 let mockPublishBatches = [];
+let mockCycleLabels = [];
 let mockSchool = { id: SCHOOL_A, name: 'Test School', houses: [] };
 
 function mockMatches(doc, filter) {
@@ -144,7 +145,8 @@ jest.mock('../../utils/tenant-model', () => ({
       rc_templates: mockRcTemplates, indicator_marks: mockIndicatorMarks,
       indicator_definitions: mockIndicatorDefinitions,
       report_card_snapshots: mockSnapshots, report_card_draft_comments: mockDraftComments,
-      publish_batches: mockPublishBatches, invoices: [], academic_years: [],
+      publish_batches: mockPublishBatches, report_card_cycle_labels: mockCycleLabels,
+      invoices: [], academic_years: [],
     };
     return mockCollFor(map[collection] ?? []);
   },
@@ -205,6 +207,7 @@ beforeEach(() => {
   mockSnapshots = [];
   mockDraftComments = [];
   mockPublishBatches = [];
+  mockCycleLabels = [];
   mockSchool = { id: SCHOOL_A, name: 'Test School', houses: [] };
 });
 
@@ -236,6 +239,18 @@ describe('POST /kg/generate', () => {
   test('a subject with no marks at all has a null average, not zero', async () => {
     const res = await supertest(buildApp(ADMIN)).post('/api/report-cards/kg/generate').send(genBody());
     expect(res.body.data.students[0].subjects[0].subjectAvgPct).toBeNull();
+  });
+
+  test('returns the saved Mid-Term/End-of-Term cycle label for this class/term/year — previously never read for KG', async () => {
+    mockCycleLabels = [{ id: 'lbl1', schoolId: SCHOOL_A, classId: 'classKG', termNumber: 2, academicYearId: 'year1', label: 'Mid-Term Report' }];
+    const res = await supertest(buildApp(ADMIN)).post('/api/report-cards/kg/generate').send(genBody());
+    expect(res.status).toBe(200);
+    expect(res.body.data.reportLabel).toBe('Mid-Term Report');
+  });
+
+  test('reportLabel is null when no cycle label has been saved', async () => {
+    const res = await supertest(buildApp(ADMIN)).post('/api/report-cards/kg/generate').send(genBody());
+    expect(res.body.data.reportLabel).toBeNull();
   });
 });
 
@@ -285,5 +300,26 @@ describe('POST /kg/publish', () => {
     expect(first.superseded).toBe(true);
     expect(second.version).toBe(2);
     expect(second.supersedesId).toBe(firstId);
+  });
+
+  test('freezes the saved cycle label onto the published snapshot, so a re-publish under a different label does not retroactively relabel the superseded one', async () => {
+    mockCycleLabels = [{ id: 'lbl1', schoolId: SCHOOL_A, classId: 'classKG', termNumber: 2, academicYearId: 'year1', label: 'Mid-Term Report' }];
+    await supertest(buildApp(ADMIN)).post('/api/report-cards/kg/publish').send(genBody());
+    const midTermSnap = mockSnapshots[0];
+    expect(midTermSnap.reportLabel).toBe('Mid-Term Report');
+
+    mockCycleLabels[0].label = 'End of Term Report';
+    await supertest(buildApp(ADMIN)).post('/api/report-cards/kg/publish').send(genBody());
+    expect(mockSnapshots).toHaveLength(2);
+    const endTermSnap = mockSnapshots.find(s => s.id !== midTermSnap.id);
+    expect(endTermSnap.reportLabel).toBe('End of Term Report');
+    // The superseded Mid-Term version keeps its own frozen label.
+    expect(mockSnapshots.find(s => s.id === midTermSnap.id).reportLabel).toBe('Mid-Term Report');
+  });
+
+  test('reportLabel is null when no cycle label has been saved', async () => {
+    const res = await supertest(buildApp(ADMIN)).post('/api/report-cards/kg/publish').send(genBody());
+    expect(res.status).toBe(201);
+    expect(mockSnapshots[0].reportLabel).toBeNull();
   });
 });

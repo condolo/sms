@@ -1391,6 +1391,12 @@ router.post('/kg/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'
     }
     if (!termNum) return E.badRequest(res, 'termNumber is required.');
 
+    // Same Mid-Term/End-of-Term cycle label the numeric /generate already
+    // returns (_loadCycleLabel's own comment) — KG never read it, so a
+    // school running Mid-Term then End-Term KG reports had no way to tell
+    // the two apart on the printed report.
+    const cycleLabel = await _loadCycleLabel(schoolId, classId, termNum, scope.academicYearId);
+
     const reportSectionId = await sectionIdForClass(schoolId, classId);
     const scale = await resolveGradeScale(schoolId, reportSectionId, null);
     if (!scale) return E.badRequest(res, _noScaleMessage(classId));
@@ -1417,7 +1423,7 @@ router.post('/kg/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'
       };
     }));
 
-    return ok(res, { generated: reports.length, templateId: template.id, templateName: template.name, students: reports });
+    return ok(res, { generated: reports.length, templateId: template.id, templateName: template.name, reportLabel: cycleLabel || null, students: reports });
   } catch (err) {
     console.error('[report-cards/kg/generate]', err);
     return E.serverError(res);
@@ -1459,6 +1465,11 @@ async function _resolveKgPreview(req, data) {
   if (!template) return { errorStatus: 400, errorMessage: 'This class has no Kindergarten template assigned — use the ordinary Generate & Publish instead.' };
   if (!termNum) return { errorStatus: 400, errorMessage: 'termNumber is required.' };
 
+  // See /kg/generate's own comment — same cycle label, needed here too since
+  // preview-html/preview-pdf render through _computeKgReportSections exactly
+  // like the published PDF does, not through the client's own card component.
+  const cycleLabel = await _loadCycleLabel(schoolId, classId, termNum, scope.academicYearId);
+
   const reportSectionId = await sectionIdForClass(schoolId, classId);
   const scale = await resolveGradeScale(schoolId, reportSectionId, null);
   if (!scale) return { errorStatus: 400, errorMessage: _noScaleMessage(classId) };
@@ -1499,6 +1510,7 @@ async function _resolveKgPreview(req, data) {
     overallBandOnly:  kg?.overallBandOnly ?? false,
     overallBandLabel: kg?.overallBandLabel ?? null,
     kgDisplay: template.display ?? {},
+    reportLabel: cycleLabel || null,
     comments: _resolveSnapComments(null, {
       ...draft,
       classTeacherName: draft?.classTeacherName || (stu.streamId ? classTeacherByStream[stu.streamId] : '') || '',
@@ -1613,6 +1625,11 @@ router.post('/kg/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
       return E.badRequest(res, 'termNumber is required.');
     }
 
+    // Same cycle label the numeric /publish freezes onto its snapshot (see
+    // its own comment) — never read here before, so a Mid-Term KG report
+    // and the End-of-Term one that supersedes it were visually identical.
+    const cycleLabel = await _loadCycleLabel(schoolId, classId, termNum, scope.academicYearId);
+
     const reportSectionId = await sectionIdForClass(schoolId, classId);
     const scale = await resolveGradeScale(schoolId, reportSectionId, null);
     if (!scale) {
@@ -1692,6 +1709,7 @@ router.post('/kg/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
           overallBandOnly:  kg?.overallBandOnly ?? false,
           overallBandLabel: kg?.overallBandLabel ?? null,
           kgDisplay:     template.display ?? {},
+          reportLabel:   cycleLabel || null,
 
           comments: _resolveSnapComments(prev, draft),
           // Comments lock the same way marks do — see the identical field

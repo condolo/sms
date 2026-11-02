@@ -6,6 +6,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.250.0] - 2026-11-02 - fix(report-cards): Kindergarten reports never carried the Mid-Term/End-of-Term label — and nobody could actually set it for either template
+
+Audit requested directly ahead of End-Term: with Trinitas and other schools about to run a second, End-of-Term assessment on top of an already-published Mid-Term one, is the system ready — for both the regular numeric template and the Kindergarten/competency one?
+
+**Audit findings:**
+- The numeric Markbook architecture is sound: CA/MT/ET coexist as independent, weighted data (`assessment_marks` scoped by `{classId, subjectId, termNumber, assessmentType, instance}`), so entering End-Term marks never overwrites Mid-Term's. Live-confirmed against Trinitas: 97 Mid-Term `mark_submissions` are correctly `locked` (auto-locked when Mid-Term report cards were published) and scoped only to `type=MT` — End-Term entry is unaffected. One required manual step remains outstanding for them: no `assessment_schedule` entry exists yet for End Term, so the exam office must open that window (directly, or by creating an End-of-Term exam) before teachers see it in the Markbook.
+- **Real gap, Kindergarten-only**: `indicator_marks`/`kg-report.js` have no `assessmentType`/`instance` concept at all — there is exactly one competency-band record per `{classId, subjectId, termNumber}` for the whole term, so Mid-Term and End-Term competency entry would overwrite the same rows (unlike the numeric path).
+- **Fixed in this change**: the "cycle label" feature (`report_card_cycle_labels` — lets a report print "Mid-Term Report" / "End of Term Report" instead of a generic "Term X", and survives a republish) was built for the numeric template only. `/kg/generate`, `/kg/preview-html`/`/kg/preview-pdf`, and `/kg/publish` never called `_loadCycleLabel` at all, even though the shared cover renderer (`_renderCoverHtml`/`_drawCoverPdf`, reused by all three layouts) was already able to print it. A Kindergarten report had no way to say which cycle it was.
+- **Separately found while fixing it — the actual reason nobody had used this feature yet**: the query/mutation hooks to save a cycle label existed in `ReportCardsTab.jsx`, but no input or "Save" button was ever rendered anywhere in the client. The feature was unusable end-to-end for every school, numeric or Kindergarten, since it shipped — live-confirmed by Trinitas having zero saved labels despite running a Mid-Term cycle.
+
+**Fix:**
+- `server/routes/report-cards.js`: `/kg/generate` and `_resolveKgPreview` (backing `/kg/preview-html`/`/kg/preview-pdf`) now fetch the saved label and return/render `reportLabel`; `/kg/publish` freezes it onto the versioned snapshot the same way the numeric `/publish` already does — a later re-label never retroactively changes an already-published, superseded report.
+- `client/src/pages/grades/components/ReportCardsTab.jsx`: added the missing label input + Save button to the report-card generator screen (gated to whoever can publish report cards), wired to the pre-existing `GET/PUT /report-cards/cycle-label` endpoints. Works for both templates.
+- 9 new tests across `report-cards-kg.test.js`/`report-cards-kg-preview.test.js`, including one asserting the label actually renders in the generated HTML in place of "Term X". Full suite: 373/373 suites, 3999/3999 tests.
+
+**Scope note:** building a genuine coexisting Mid-Term/End-Term data model for the Kindergarten Markbook (mirroring the numeric path's `assessmentType`) is a larger change, not done here — flagged to the user as a real gap, not fixed.
+
+**Files:** `server/routes/report-cards.js`, `client/src/pages/grades/components/ReportCardsTab.jsx`, `server/__tests__/routes/report-cards-kg.test.js`, `server/__tests__/routes/report-cards-kg-preview.test.js`.
+
+---
+
 ## [v5.249.0] - 2026-11-01 - fix(email): custom-SMTP failures were silent — schools "sending as themselves" could be falling back to the platform account with no trace
 
 Reported directly: individual schools' communications to parents were still arriving from the platform's own SMTP account instead of the school's, even though their Settings page showed "Custom SMTP active."

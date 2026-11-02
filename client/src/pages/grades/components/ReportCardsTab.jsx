@@ -4,7 +4,7 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useBlocker } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ClipboardList, FileText, Send, CheckCircle, Loader2, Lock, Printer } from 'lucide-react';
+import { AlertTriangle, ClipboardList, FileText, Send, CheckCircle, Loader2, Lock, Printer, Tag } from 'lucide-react';
 import {
   assessment as assessmentApi,
   classes as classesApi,
@@ -750,6 +750,33 @@ ${docs.map(h => `<div>${_bodyOf(h)}</div>`).join('\n')}
             </div>
           )}
         </div>
+        {/* "Just a label" — the Mid-Term/End-of-Term tag shown in place of
+            "Term X" on the report card header (report-cards.js's
+            _loadCycleLabel). Per {class, term, year}, survives a republish
+            without needing to be retyped. Works for a Kindergarten class
+            too, same endpoint, now also read by /kg/generate and
+            /kg/publish — a school running Mid-Term then End-of-Term KG
+            reports can label each one distinctly. */}
+        {canQuery && canPublishReportCards && (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Tag size={14} className="text-slate-400 shrink-0" />
+            <input
+              type="text"
+              value={labelDraft}
+              onChange={e => setLabelDraft(e.target.value)}
+              placeholder={`e.g. "Mid-Term Report" — leave blank to just show "Term ${termNum || 'X'}"`}
+              maxLength={60}
+              className="flex-1 min-w-[220px] px-3 py-1.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+            <button
+              onClick={() => saveCycleLabel()}
+              disabled={savingLabel || labelDraft === savedCycleLabel}
+              className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-700 text-sm font-medium hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {savingLabel ? <Loader2 size={14} className="animate-spin" /> : labelSaved ? 'Saved' : 'Save label'}
+            </button>
+          </div>
+        )}
         {/* Published / locked state of the selected class + term. Reported
             directly: "will the UI show the class was published and locked?"
             Until now the only signal was a small report-ID chip on each

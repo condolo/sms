@@ -79,6 +79,7 @@ let mockIndicatorDefinitions = [];
 let mockSnapshots = [];
 let mockDraftComments = [];
 let mockPublishBatches = [];
+let mockCycleLabels = [];
 let mockSchool = { id: SCHOOL_A, name: 'Test School', houses: [] };
 
 function mockMatches(doc, filter) {
@@ -144,7 +145,8 @@ jest.mock('../../utils/tenant-model', () => ({
       rc_templates: mockRcTemplates, indicator_marks: mockIndicatorMarks,
       indicator_definitions: mockIndicatorDefinitions,
       report_card_snapshots: mockSnapshots, report_card_draft_comments: mockDraftComments,
-      publish_batches: mockPublishBatches, invoices: [], academic_years: [],
+      publish_batches: mockPublishBatches, report_card_cycle_labels: mockCycleLabels,
+      invoices: [], academic_years: [],
     };
     return mockCollFor(map[collection] ?? []);
   },
@@ -195,6 +197,7 @@ beforeEach(() => {
   mockSnapshots = [];
   mockDraftComments = [];
   mockPublishBatches = [];
+  mockCycleLabels = [];
   mockSchool = { id: SCHOOL_A, name: 'Test School', houses: [] };
 });
 
@@ -227,6 +230,14 @@ describe('POST /kg/preview-html', () => {
   test('404s for a student not in this class (or not active)', async () => {
     const res = await supertest(buildApp(ADMIN)).post('/api/report-cards/kg/preview-html').send(previewBody({ studentId: 'stu_ghost' }));
     expect(res.status).toBe(404);
+  });
+
+  test('prints the saved cycle label in place of "Term X" — the same header text /kg/publish will freeze onto the real snapshot', async () => {
+    mockCycleLabels = [{ id: 'lbl1', schoolId: SCHOOL_A, classId: 'classKG', termNumber: 2, academicYearId: 'year1', label: 'Mid-Term Report' }];
+    const res = await supertest(buildApp(ADMIN)).post('/api/report-cards/kg/preview-html').send(previewBody());
+    expect(res.status).toBe(200);
+    expect(res.body.data.html).toContain('Mid-Term Report');
+    expect(res.body.data.html).not.toContain('Term 2');
   });
 
   test('400s cleanly when the class has no resolved Kindergarten template', async () => {
