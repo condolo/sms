@@ -6,6 +6,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.254.0] - 2026-11-02 - fix(report-cards): CRITICAL — the independently-visible-cycle feature would have 500'd on its very first real use
+
+User-requested audit of the four most recent builds (v5.250.0–v5.253.0: the Mid-Term/End-of-Term report-card cycle feature, its Kindergarten extension, and the Assessment Analytics breakdowns), run as three independent, parallel re-verifications — tenancy isolation, RBAC/scope-escalation, and cross-module breakage — rather than re-asserting what shipping already claimed.
+
+**Tenancy and RBAC both came back clean.** Every new query goes through `tenantModel()`, which structurally enforces `schoolId` from the JWT regardless of what any new query param contains — confirmed by reading the wrapper itself, not assumed. The new `cycle`/`streamId`/`studentSubjectId` params were traced through every lock-check and scope-filter call site; none bypass an existing permission gate. Two narrow, **pre-existing** (not introduced by this session) gaps were flagged for a separate follow-up, not fixed here: `mark_submissions`' `assessmentType` has no enum/config validation (predates this session, the new string-encoding only widened the shape of an already-open gap, not its severity), and `GET /indicator-marks/definitions` has no per-class teaching check beyond coarse `grades:read`.
+
+**Cross-module dependency check found one critical, live-breaking bug**, caught before any school hit it in production: `report_card_draft_comments`' unique index (`server/utils/indexes.js`) was never updated alongside v5.251.0's `cycle` field. It was still `unique` on exactly `{schoolId, studentId, termNumber}` — the OLD one-comment-per-term model. The whole point of the shipped feature is a SECOND document for the same student+term under a different `cycle`. The very first time any school actually saved an End-of-Term comment for a student who already had a Mid-Term one, `PUT /draft-comments/:studentId` would have thrown a real MongoDB `E11000` duplicate-key error and 500'd — invisible to the full Jest suite the whole time, because every mock collection in this codebase's tests has no concept of unique-index enforcement at all.
+
+**Fixed the only safe way this codebase's own `ensureIndexes()` supports**: `createIndex()` with the SAME name but a DIFFERENT key spec is silently skipped (treated as "already exists, no action needed") — editing the key in place would have been a no-op against a live database. Instead, following the exact precedent already set for `bell_schedules`'s own prior migration: the old index (`rcdc_student_term`) is explicitly dropped via `DROP_INDEXES`, and a new one (`rcdc_student_term_cycle`, key `{schoolId,studentId,termNumber,cycle}`) replaces it under its own name. `ensureIndexes()` already runs on every server startup (`server/index.js`), so this self-applies on the next deploy — no manual migration script needed. **Added the first test coverage this file has ever had**, specifically guarding against this exact regression class recurring (for this collection and, generically, for any future index-key change that forgets a matching drop).
+
+**Two smaller, real gaps also found and fixed in the same pass** (both: a second published cycle for the same term rendering indistinguishably from the first, outside the two places already fixed in v5.251.0):
+- Growth Profile's "Recent published report cards" list and publish notifications (in-app + email) both read/rendered `termName` only, never the already-persisted `reportLabel` — so a guardian with both a Mid-Term and an End-of-Term notification for the same student/term got two identically-worded messages with no way to tell them apart.
+
+**Files:** `server/utils/indexes.js`, `server/routes/growth-profile.js`, `client/src/pages/growth-profile/sections/AcademicSection.jsx`, `server/routes/report-cards.js` (`_notifyReportCardsPublished`), new `server/__tests__/indexes-migration-safety.test.js`, +2 cases in `server/__tests__/routes/report-cards-notify.test.js`. Full suite: 376/376 suites, 4026/4026 tests.
+
+---
+
 ## [v5.253.0] - 2026-11-02 - feat(analytics): Assessment Analytics gains per-stream and per-student breakdowns
 
 Direct follow-up to an audit requested earlier: a school asked for (1) subject analysis per class then per stream, (2) student analysis per class per subject, (3) general school performance per subject, (4) overall school performance per class then per stream. (3) was already built; this closes (1), (2), (4) — confirmed against the live code first, no assumptions.

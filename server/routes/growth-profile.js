@@ -187,7 +187,7 @@ router.get('/:studentId/academic', authMiddleware, PLAN, MODGATE, rbac('growth_p
       })
         .sort({ publishedAt: -1 })
         .limit(3)
-        .select('id version classId className termId termName academicYearId academicYear totalScore averageScore gpa rankings publishedAt')
+        .select('id version classId className termId termName academicYearId academicYear totalScore averageScore gpa rankings publishedAt reportLabel cycle')
         .lean(),
     ]);
 

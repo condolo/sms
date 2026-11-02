@@ -172,7 +172,11 @@ export default function AcademicSection({ studentId }) {
                 <div key={r.id} className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-slate-50 border border-slate-100">
                   <div>
                     <p className="text-sm font-medium text-slate-700">
-                      {r.termName || r.academicYear || 'Report Card'}
+                      {/* reportLabel disambiguates two independently-
+                          published cycles (e.g. Mid-Term vs End-of-Term)
+                          for the same term, which would otherwise both
+                          render as the identical "Term 2". */}
+                      {r.reportLabel || r.termName || r.academicYear || 'Report Card'}
                     </p>
                     <p className="text-xs text-slate-400 mt-0.5">{fmtDate(r.publishedAt)}</p>
                   </div>

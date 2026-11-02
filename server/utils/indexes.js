@@ -47,16 +47,30 @@ const INDEXES = [
       { key: { key: 1 }, name: 'rcc_key', unique: true },
     ],
   },
-  /* ── report_card_draft_comments (RC5) ────────────────────────
-     One doc per student/term — PUT /draft-comments/:studentId's own
-     upsert key ({schoolId,studentId,termNumber}), now also the batch-
-     read key POST /publish uses to seed a first-ever snapshot's
+  /* ── report_card_draft_comments (RC5, extended 2026-11 for `cycle`) ──
+     One doc per student/term/CYCLE — PUT /draft-comments/:studentId's
+     own upsert key ({schoolId,studentId,termNumber,cycle}), now also the
+     batch-read key POST /publish uses to seed a first-ever snapshot's
      comments (docs/audits/REPORT_CARD_COMMENT_LIFECYCLE_REVIEW.md
-     "Recommendation 1"). Had no index block at all before this. */
+     "Recommendation 1"). `cycle` (e.g. 'MT'/'ET', null for the default/
+     legacy single-report-per-term path) lets a Mid-Term and an
+     End-of-Term comment coexist for the same student+term — see
+     report-cards.js's PublishSchema comment for the full mechanism.
+     Caught in a post-ship audit, not before: the ORIGINAL index below
+     (rcdc_student_term, unique on {schoolId,studentId,termNumber} only)
+     would have thrown a live E11000 duplicate-key error the first time
+     any school actually saved a second cycle's comment for a student who
+     already had one for that term — exactly the workflow this feature
+     exists for. Dropped via DROP_INDEXES below; this index REPLACES it
+     under a new name (same precedent as bell_schedules' own migration
+     just above — a same-named createIndex with a different key spec is
+     silently skipped by ensureIndexes, not auto-migrated, so the old
+     name must be dropped and a new one created, never just edited in
+     place). */
   {
     col: 'report_card_draft_comments',
     indexes: [
-      { key: { schoolId: 1, studentId: 1, termNumber: 1 }, name: 'rcdc_student_term', unique: true },
+      { key: { schoolId: 1, studentId: 1, termNumber: 1, cycle: 1 }, name: 'rcdc_student_term_cycle', unique: true },
     ],
   },
 
@@ -1075,6 +1089,11 @@ const DROP_INDEXES = [
   { col: 'teachers', name: 'teachers_school_email' },
   // Earlier bell schedule design: one schedule per (school, section). Replaced by the indexes below.
   { col: 'bell_schedules', name: 'bs_school_section' },
+  // Pre-`cycle` design: one draft-comment doc per {schoolId,studentId,
+  // termNumber}, full stop. Replaced by rcdc_student_term_cycle above —
+  // see that block's own comment for why this HAD to be a drop, not an
+  // in-place edit of the same index name.
+  { col: 'report_card_draft_comments', name: 'rcdc_student_term' },
 ];
 
 /**
@@ -1144,4 +1163,8 @@ async function ensureIndexes() {
   return results;
 }
 
-module.exports = { ensureIndexes };
+// INDEXES/DROP_INDEXES also exported (read-only, for tests) — the
+// 2026-11 audit that caught rcdc_student_term's missing `cycle` found
+// this file had zero test coverage at all, which is exactly how a
+// same-named index silently skipping its own migration slipped through.
+module.exports = { ensureIndexes, INDEXES, DROP_INDEXES };

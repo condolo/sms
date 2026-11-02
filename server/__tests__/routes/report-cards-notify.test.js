@@ -54,3 +54,27 @@ test('an empty batch never calls the fan-out helper', async () => {
   await router._notifyReportCardsPublished(req, []);
   expect(mockNotify).not.toHaveBeenCalled();
 });
+
+// Audit finding (2026-11): a guardian whose child has two independently-
+// published cycles (Mid-Term, then End-of-Term) for the same term used
+// to get two identically-worded "Term 2" notifications, with no way to
+// tell from the text that these were two different reports.
+test('reportLabel disambiguates the message when present, instead of the generic term name', async () => {
+  const req = { jwtUser: { schoolId: SCHOOL }, tenantContext: {} };
+  const snaps = [
+    { studentId: 'stu_1', studentName: 'Jane Doe', termName: 'Term 2', reportLabel: 'End of Term Report', academicYear: '2026' },
+  ];
+  await router._notifyReportCardsPublished(req, snaps);
+  const item = mockNotify.mock.calls[0][0].items[0];
+  expect(item.inAppBody).toContain('End of Term Report');
+  expect(item.inAppBody).not.toContain('Term 2\'s'); // the generic form must not also appear
+  expect(item.emailDigestBody).toContain('End of Term Report');
+});
+
+test('falls back to termName exactly as before when no reportLabel is set', async () => {
+  const req = { jwtUser: { schoolId: SCHOOL }, tenantContext: {} };
+  const snaps = [{ studentId: 'stu_1', studentName: 'Jane Doe', termName: 'Term 2', academicYear: '2026' }];
+  await router._notifyReportCardsPublished(req, snaps);
+  const item = mockNotify.mock.calls[0][0].items[0];
+  expect(item.inAppBody).toContain('Term 2');
+});

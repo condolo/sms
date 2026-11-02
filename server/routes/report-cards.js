@@ -1873,18 +1873,26 @@ async function _notifyReportCardsPublished(req, snaps) {
 
   await notifyGuardiansForStudents({
     ctx, schoolId, eventKey: 'report_published',
-    items: snaps.map(snap => ({
-      studentId: snap.studentId,
-      inAppSubject: `Report card published for ${snap.studentName}`,
-      inAppBody:    `${snap.termName || 'This term'}'s report card for ${snap.studentName} is now available.`,
-      emailDigestSubject: `Report card published — ${snap.studentName}`,
-      emailDigestBody:    `${snap.termName || 'This term'}'s report card is now available.`,
-      sendEmail: (recipient) => email.sendReportCardPublishedAlert({
-        recipientName: recipient.name, recipientEmail: recipient.email,
-        studentName: snap.studentName, termName: snap.termName, academicYear: snap.academicYear,
-        schoolName, schoolEmail, schoolId,
-      }),
-    })),
+    items: snaps.map(snap => {
+      // `reportLabel` (e.g. "Mid-Term Report"/"End of Term Report")
+      // disambiguates two independently-published cycles for the same
+      // term — without it, a guardian who gets both notifications sees
+      // identically-worded "Term 2" messages with no way to tell they're
+      // two different reports, not a duplicate or a correction.
+      const periodLabel = snap.reportLabel || snap.termName || 'This term';
+      return {
+        studentId: snap.studentId,
+        inAppSubject: `Report card published for ${snap.studentName}`,
+        inAppBody:    `${periodLabel}'s report card for ${snap.studentName} is now available.`,
+        emailDigestSubject: `Report card published — ${snap.studentName}`,
+        emailDigestBody:    `${periodLabel}'s report card is now available.`,
+        sendEmail: (recipient) => email.sendReportCardPublishedAlert({
+          recipientName: recipient.name, recipientEmail: recipient.email,
+          studentName: snap.studentName, termName: snap.reportLabel || snap.termName, academicYear: snap.academicYear,
+          schoolName, schoolEmail, schoolId,
+        }),
+      };
+    }),
   });
 }
 
