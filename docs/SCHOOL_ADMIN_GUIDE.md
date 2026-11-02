@@ -436,6 +436,8 @@ If you want emails to come from your own domain — e.g. `noreply@greenwood.ke` 
 
 > ✅ Msingi always **falls back to the platform sender** if your SMTP server is unreachable, so you will never miss a critical email even during an outage on your mail server.
 
+> ℹ️ **If your custom SMTP fails, you'll now see it.** The Email/SMTP card's badge turns red — **"Falling back to platform"** — with the specific error and when it last happened, the moment a real send fails. Before this, a failing custom SMTP looked identical to a working one (both showed a plain green "active" badge) because every failed send still succeeded silently through the platform sender. The badge goes back to green automatically the next time a send through your own server succeeds — click **Send Test Email** below after fixing your host/port/credentials to clear it immediately.
+
 ### Using Gmail as your school SMTP
 
 If your school email runs on Google Workspace (Gmail):

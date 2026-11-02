@@ -2069,6 +2069,12 @@ _sendAsSchool(to, subject, html, { schoolId })
 
 Cache is per-school with a 60-minute TTL. Call `invalidateSmtpCache(schoolId)` after saving or deleting SMTP config to force a fresh transporter on the next send.
 
+**Outcome tracking (v5.249.0).** The custom-SMTP → platform fallback above used to be completely silent — a school could have fully valid-looking config and still have every send quietly going out through the platform account on a bad credential or a `SMTP_ENCRYPTION_KEY` mismatch, with no record anywhere. `_sendAsSchool` now calls `_recordSmtpOutcome(schoolId, { ok, error })` on every attempted custom-SMTP send:
+- **Success** → `$set: { smtpLastSuccessAt }`, `$unset: { smtpLastError, smtpLastErrorAt }` on the `schools` doc.
+- **Failure** → `$set: { smtpLastError, smtpLastErrorAt }`, leaving the overall send to still complete via the platform-fallback retry.
+
+Writes are throttled per school via a module-level `_smtpOutcomeThrottle` map (`SMTP_OUTCOME_THROTTLE_MS = 5 * 60 * 1000`) — only rate-limiting, not a value cache — so a broken credential failing on every send in a bulk batch doesn't turn into a write storm. `POST /school/smtp` (save) and `DELETE /school/smtp` (remove) both clear `smtpLastError`/`smtpLastErrorAt` (and `smtpLastSuccessAt` on remove) so the Settings UI doesn't show a stale failure after a fresh save. The Settings → School Profile → Email/SMTP card reads these fields directly: `hasRecentFailure = hasSavedConfig && !!school.smtpLastError` swaps the green "Custom SMTP active" badge for a red "Falling back to platform" one with the actual error and timestamp. See `server/__tests__/email-smtp-outcome.test.js`.
+
 ### Exported Functions (13 total)
 
 | Function | When sent | Recipients |
