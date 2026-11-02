@@ -6,6 +6,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.257.0] - 2026-11-02 - fix(analytics): drop the class/stream "Concern" badge added in v5.256.0 — it blended across subjects and produced a meaningless signal
+
+Self-review, prompted directly: "is this deeply and clean built, or shallow with gaps a small wind would betray?" Re-examining v5.256.0's own code (not just re-asserting it) found one real design flaw: `classes[].concern`/`streams[].concern` applied the SAME subject-shaped threshold (mean < 60%, or ≥30% of scores < 50%) at a grain where it doesn't mean the same thing — `byClass`/`byStream` both group by `classId`/`streamId` ALONE, blending every subject's scores together first. A class with one genuinely weak subject among several strong ones could dodge the flag on the blended average; a class with a few mediocre-but-fine subjects could trip it for no real reason. The source report (Trinitas' own Mid-Term Analysis) never flags at the whole-class/whole-stream grain either — only (subject) or (subject, class), which `subjectsOfConcern` already covers correctly.
+
+**Fix: removed `concern`/`belowShare` from `classes`/`streams` rows and the "Concern" badge from the Performance by Class table entirely.** `subjects[].concern` (school-wide, blended across classes — the same grain the source report's own Subject Ranking Table "Status" column uses) and the `subjectsOfConcern`/`learnersOfConcern` rollups are untouched — they were correct and are the parts that actually mirror the methodology.
+
+**Also confirmed, by direct question**: `streamId` has full server-side filter support in `_buildAnalyticsReport` (`qStreamId` narrows `baseFilter.streamId`, same ordering/scoping discipline as `classId`) — but no client control in `AssessmentAnalyticsPage.jsx` ever sends it. It's reachable only via a direct API call, not from the UI. Not a bug (the "Performance by Stream" table already shows every stream within a selected class, which is a different thing — a breakdown, not a single-stream filter) — just confirmed and left as-is, since narrowing the whole report to one stream hasn't been asked for.
+
+**Files:** `server/routes/assessment.js`, `client/src/pages/reports/AssessmentAnalyticsPage.jsx`. Full suite: 376/376 suites, 4044/4044 tests (one pre-existing, unrelated flake in `settings-audit.test.js`, confirmed passing in isolation).
+
+---
+
 ## [v5.256.0] - 2026-11-02 - feat(analytics): Assessment Analytics gains automatic "Subjects of Concern" and "Learners of Concern" flagging
 
 Prompted by a direct comparison against a real school's own hand-built Mid-Term Examination Analysis report (Trinitas International School, 56 slides). Audit: the underlying mechanics (mean exclusion of ABS/EXM/missing, per-subject/class/stream/student breakdowns, PDF/CSV export) were already closely matched. What was missing was the one thing that actually makes that report useful to a Head of School — automatic concern flagging, not just sorted lists. Built to the source report's own stated methodology, as named constants (deliberately independent of the school-configurable `passMark`, since these are a fixed editorial convention, not something anyone asked to make configurable):

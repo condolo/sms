@@ -491,7 +491,7 @@ export default function AssessmentAnalyticsPage() {
   const classRows = classesRaw.map(c => ({
     classId: c.classId, className: c.className,
     count: c.current.count, avgPct: c.current.avgPct, passRate: c.current.passRate,
-    delta: c.delta, belowShare: c.belowShare, concern: c.concern,
+    delta: c.delta,
   }));
   // Streams: only ever populated server-side once a class is selected
   // (see _buildAnalyticsReport — bare stream names are ambiguous across
@@ -820,7 +820,6 @@ export default function AssessmentAnalyticsPage() {
             rows={classRows} idKey="classId" nameKey="className" nameLabel="Class"
             compareTo={compareTo} sort={classSort} setSort={setClassSort}
             emptyHint="No assessment marks recorded yet for this period."
-            concernKey="concern"
           />
 
           <SubjectsOfConcernTable rows={concernRows} sort={concernSort} setSort={setConcernSort} />

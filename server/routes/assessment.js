@@ -2057,14 +2057,20 @@ async function _buildAnalyticsReport(req) {
   const subjectNameMap = Object.fromEntries(subjectDocs.map(s => [s.id, s.name]));
   const prevBySubject = Object.fromEntries(previousAgg.bySubject.map(r => [r.subjectId, r]));
 
-  // Subject/Class/Stream "of concern" at their own grain — mirrors the
-  // deck's own Subject Ranking Table "Status" column: a subject (or a
-  // class, or a stream) whose mean is below SUBJECT_CONCERN_MEAN_FLOOR, or
-  // whose share of scores under CONCERN_SCORE_FLOOR is at or above
-  // SUBJECT_CONCERN_SHARE_PCT, is flagged. Independent of the school-wide
-  // subjectsOfConcern rollup below (which flags at the finer {class,
-  // subject} grain) — this is the cheap inline badge on the tables already
-  // rendered for every row.
+  // Subject "of concern" — mirrors the source report's own Subject Ranking
+  // Table "Status" column exactly: a subject (school-wide mean, blended
+  // across every class that takes it) whose mean is below
+  // SUBJECT_CONCERN_MEAN_FLOOR, or whose share of scores under
+  // CONCERN_SCORE_FLOOR is at or above SUBJECT_CONCERN_SHARE_PCT, is
+  // flagged. Deliberately NOT applied at the class or stream grain
+  // (removed after review, 2026-11): blending every subject's scores
+  // together before testing the SAME subject-shaped threshold produces a
+  // meaningless signal — a class with one genuinely weak subject among
+  // several strong ones could dodge the flag on the average alone, or a
+  // class with several mediocre-but-fine subjects could trip it. The
+  // source report never flags at the whole-class/whole-stream grain
+  // either — only (subject) or (subject, class), which `subjectsOfConcern`
+  // below covers correctly.
   const _isConcern = (cur) => cur.avgPct < SUBJECT_CONCERN_MEAN_FLOOR || (cur.belowShare ?? 0) >= SUBJECT_CONCERN_SHARE_PCT;
 
   const subjects = currentAgg.bySubject
@@ -2118,8 +2124,6 @@ async function _buildAnalyticsReport(req) {
         current:   { avgPct: cur.avgPct, count: cur.count, passRate: cur.passRate },
         previous:  prev ? { avgPct: prev.avgPct, count: prev.count, passRate: prev.passRate } : null,
         delta:     prev ? Math.round((cur.avgPct - prev.avgPct) * 10) / 10 : null,
-        belowShare: cur.belowShare ?? 0,
-        concern:    _isConcern(cur),
       };
     })
     .sort((a, b) => a.current.avgPct - b.current.avgPct); // weakest class first
@@ -2178,8 +2182,6 @@ async function _buildAnalyticsReport(req) {
           current:  { avgPct: cur.avgPct, count: cur.count, passRate: cur.passRate },
           previous: prev ? { avgPct: prev.avgPct, count: prev.count, passRate: prev.passRate } : null,
           delta:    prev ? Math.round((cur.avgPct - prev.avgPct) * 10) / 10 : null,
-          belowShare: cur.belowShare ?? 0,
-          concern:    _isConcern(cur),
         };
       })
       .sort((a, b) => a.current.avgPct - b.current.avgPct); // weakest stream first
