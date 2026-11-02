@@ -251,6 +251,8 @@ export default function AssessmentAnalyticsPage() {
   const [subjectSort, setSubjectSort] = useState({ col: 'subject', dir: 'asc' });
   const [classSort,   setClassSort]   = useState({ col: 'className', dir: 'asc' });
   const [enrollSort,  setEnrollSort]  = useState({ col: 'gap', dir: 'desc' });
+  const [streamSort,  setStreamSort]  = useState({ col: 'stream', dir: 'asc' });
+  const [studentSort, setStudentSort] = useState({ col: 'avgPct', dir: 'asc' });
   const [exportingPdf, setExportingPdf] = useState(false);
   const [pdfError,     setPdfError]     = useState('');
   // Year/term — left blank by default so the server picks "now" the same
@@ -272,17 +274,26 @@ export default function AssessmentAnalyticsPage() {
   const selectedYear = years.find(y => (y.id ?? y._id) === yearId);
   const yearTerms = selectedYear?.terms ?? [];
 
-  // subjectId is deliberately NOT sent to the server — it doesn't affect
-  // scope/RBAC (unlike classId), so narrowing to one subject is done
+  // subjectId is deliberately NOT sent to the server as the general
+  // `subjectId` scope param — it doesn't affect scope/RBAC (unlike
+  // classId), so narrowing the Subjects table to one subject is done
   // client-side below. That also keeps the subject dropdown's own option
   // list from collapsing to whichever one subject is currently selected.
+  //
+  // `studentSubjectId` is a SEPARATE field, sent only once both a class
+  // and a subject are picked — it drives the new per-student breakdown
+  // only, computed server-side from its own subject-scoped aggregation
+  // (see server/routes/assessment.js's _buildAnalyticsReport), and never
+  // touches the Subjects table's own query above.
+  const studentSubjectId = classId && subjectId ? subjectId : undefined;
   const { data: raw, isLoading } = useQuery({
-    queryKey: ['assessment', 'analytics', { classId, compareTo, yearId, termNumber }],
+    queryKey: ['assessment', 'analytics', { classId, compareTo, yearId, termNumber, studentSubjectId }],
     queryFn:  () => assessmentApi.analytics({
       classId:        classId || undefined,
       compareTo,
       academicYearId: yearId     || undefined,
       termNumber:     termNumber || undefined,
+      studentSubjectId,
     }),
     select:   r => r?.data ?? r,
     staleTime: 5 * 60_000,
@@ -318,6 +329,30 @@ export default function AssessmentAnalyticsPage() {
     count: c.current.count, avgPct: c.current.avgPct, passRate: c.current.passRate,
     delta: c.delta,
   }));
+  // Streams: only ever populated server-side once a class is selected
+  // (see _buildAnalyticsReport — bare stream names are ambiguous across
+  // classes/grades otherwise), so `streamsRaw` is naturally [] whenever
+  // classId is blank.
+  const streamsRaw = data.streams ?? [];
+  const streamRows = streamsRaw.map(s => ({
+    streamId: s.streamId, stream: s.stream,
+    count: s.current.count, avgPct: s.current.avgPct, passRate: s.current.passRate,
+    delta: s.delta,
+  }));
+  // Students: only populated server-side once BOTH classId and the
+  // subject dropdown (sent as studentSubjectId above) are set.
+  const studentsRaw = data.students ?? [];
+  const studentRows = studentsRaw.map(s => ({
+    studentId: s.studentId,
+    // Admission number folded into the name cell (disambiguates same-
+    // named students) rather than adding a column BreakdownTable (a
+    // shared, generic component) doesn't otherwise have.
+    studentName: s.admissionNo ? `${s.studentName} (${s.admissionNo})` : s.studentName,
+    count: s.current.count, avgPct: s.current.avgPct, passRate: s.current.passRate,
+    delta: s.delta,
+  }));
+  const selectedSubjectName = subjectOptions.find(s => s.id === subjectId)?.name ?? '';
+  const selectedClassName = availableClasses.find(c => c.id === classId)?.name ?? '';
 
   const overallAvg  = data.overall?.avgPct  ?? 0;
   const overallPass = data.overall?.passRate ?? 0;
@@ -335,16 +370,22 @@ export default function AssessmentAnalyticsPage() {
 
   function exportCSV() {
     const date = new Date().toISOString().slice(0, 10);
-    _downloadCSV(
-      [
-        ['Subject', 'Entries', 'Average %', 'Change', 'Pass Rate %'],
-        ...subjectRows.map(r => [r.subject, r.count, r.avgPct, r.delta ?? '—', r.passRate]),
+    const rows = [
+      ['Subject', 'Entries', 'Average %', 'Change', 'Pass Rate %'],
+      ...subjectRows.map(r => [r.subject, r.count, r.avgPct, r.delta ?? '—', r.passRate]),
+      [],
+      ['Class', 'Entries', 'Average %', 'Change', 'Pass Rate %'],
+      ...classRows.map(r => [r.className, r.count, r.avgPct, r.delta ?? '—', r.passRate]),
+    ];
+    // Only present once a class is selected — see streamRows' own comment.
+    if (streamRows.length) {
+      rows.push(
         [],
-        ['Class', 'Entries', 'Average %', 'Change', 'Pass Rate %'],
-        ...classRows.map(r => [r.className, r.count, r.avgPct, r.delta ?? '—', r.passRate]),
-      ],
-      `assessment_analytics_${date}.csv`
-    );
+        ['Stream', 'Entries', 'Average %', 'Change', 'Pass Rate %'],
+        ...streamRows.map(r => [r.stream, r.count, r.avgPct, r.delta ?? '—', r.passRate]),
+      );
+    }
+    _downloadCSV(rows, `assessment_analytics_${date}.csv`);
   }
 
   async function exportPdf() {
@@ -585,6 +626,34 @@ export default function AssessmentAnalyticsPage() {
             compareTo={compareTo} sort={classSort} setSort={setClassSort}
             emptyHint="No assessment marks recorded yet for this period."
           />
+
+          {/* Only shown once a class is selected — see streamRows' own
+              comment (bare stream names are ambiguous across classes). */}
+          {classId && (
+            <div>
+              <BreakdownTable
+                title={`Performance by Stream — ${selectedClassName || 'selected class'}`}
+                rows={streamRows} idKey="streamId" nameKey="stream" nameLabel="Stream"
+                compareTo={compareTo} sort={streamSort} setSort={setStreamSort}
+                emptyHint="No assessment marks recorded yet for this class/period."
+              />
+              <p className="text-xs text-slate-400 mt-1.5 px-1">
+                "No Stream" covers every student whose class has no stream structure at all — it isn't about any particular subject.
+              </p>
+            </div>
+          )}
+
+          {/* Only shown once BOTH a class and a subject are selected — a
+              per-student average with no subject scope would blend
+              unrelated subjects together. */}
+          {classId && subjectId && (
+            <BreakdownTable
+              title={`Student Performance — ${selectedSubjectName || 'selected subject'} in ${selectedClassName || 'selected class'}`}
+              rows={studentRows} idKey="studentId" nameKey="studentName" nameLabel="Student"
+              compareTo={compareTo} sort={studentSort} setSort={setStudentSort}
+              emptyHint="No assessment marks recorded yet for this student/subject/period."
+            />
+          )}
 
           <EnrollmentCoverageTable classes={enrollmentClasses} sort={enrollSort} setSort={setEnrollSort} />
         </>

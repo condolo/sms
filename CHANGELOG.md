@@ -6,6 +6,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.253.0] - 2026-11-02 - feat(analytics): Assessment Analytics gains per-stream and per-student breakdowns
+
+Direct follow-up to an audit requested earlier: a school asked for (1) subject analysis per class then per stream, (2) student analysis per class per subject, (3) general school performance per subject, (4) overall school performance per class then per stream. (3) was already built; this closes (1), (2), (4) — confirmed against the live code first, no assumptions.
+
+**Two real findings from re-reading the actual aggregation before touching it:**
+- `streamId` is denormalized from the *student's own* field onto every mark (see `students.js`), independent of subject — null whenever that student's class has no stream structure at all. A stream breakdown therefore separates "students in streamed classes" from "students in unstreamed classes," not "stream-taught subjects" from "whole-class subjects." Labelled explicitly as **"No Stream"** rather than left blank, since for most schools it's the largest bucket, not a rare gap.
+- `subjectId` has always been deliberately client-side-only in `AssessmentAnalyticsPage.jsx` (never sent to the server) specifically so the Subjects table's own filter dropdown never collapses to one entry once a subject is picked. The new per-student breakdown genuinely needs subject-scoped marks (otherwise one student's "average" blends unrelated subjects) — so it uses a **separate** query param, `studentSubjectId`, rather than reusing `subjectId` and risking that regression. Proven directly with a test: sending `studentSubjectId` leaves the Subjects table's own subject list completely untouched.
+
+**Security**: confirmed by reading `scopeEngine.js` directly (not assumed) — `assessment` is already `streamAware: true` in `MODULE_SCOPE`, so a stream-scoped teacher's `baseFilter` was already correctly narrowed to their own stream(s) before this change; the new `byStream` facet inherits that for free. Added an explicit test proving it (a stream-scoped teacher's breakdown never contains a different stream's real data) rather than relying on inherited-by-assumption.
+
+**What shipped:**
+- `server/routes/assessment.js`: `_aggregateAnalyticsPeriod`'s already-generic `_byDimension()` helper gained two more facet branches (`byStream`, `byStudent`) at zero extra query cost (same `$match`-ed documents). `_buildAnalyticsReport` returns `streams` only once a `classId` is selected (bare stream names are ambiguous across grades otherwise) and `students` only once both `classId` and the new `studentSubjectId` param are set — the latter via a genuinely separate, subject-scoped aggregation call, never touching the shared `baseFilter` the Subjects/Classes tables read from. `GET /analytics/export.pdf` gained the matching "Average Score % by Stream" chart + "Performance by Stream" table, honoring this file's own stated invariant ("the exported PDF can never show different numbers than the screen") — gated the same way the screen is. The per-student table is deliberately **not** in the PDF/CSV exports — a narrower, situational drill-down, a stated scope decision, not a silent gap.
+- `client/src/pages/reports/AssessmentAnalyticsPage.jsx`: reuses the existing, already dimension-agnostic `BreakdownTable` component as-is for both new sections (no new table component written). "Performance by Stream" appears once a class is picked; "Student Performance — {subject} in {class}" once a class *and* subject are both picked. `exportCSV()` gained a third block for the stream table.
+
+**Tests**: 7 new cases in `assessment-analytics.test.js` (empty-unless-gated for both dimensions; real name resolution; weakest-first sort; the "No Stream" bucket; the stream-scope security proof; the subject-isolation proof for `studentSubjectId`) and 1 new smoke test in `assessment-analytics-pdf.test.js`. Full suite: 375/375 suites, 4021/4021 tests.
+
+**Files:** `server/routes/assessment.js`, `client/src/pages/reports/AssessmentAnalyticsPage.jsx`, `server/__tests__/routes/assessment-analytics.test.js`, `server/__tests__/routes/assessment-analytics-pdf.test.js`.
+
+---
+
 ## [v5.252.0] - 2026-11-02 - feat(indicator-marks): Kindergarten competency entry gets independent Mid-Term/End-of-Term cycles too
 
 Direct follow-up to v5.251.0, which deliberately excluded Kindergarten: "schools that do report card comments per assessment, the system should allow" — KG teachers are now starting End-Term indicator entry, and `indicator_marks`/`indicator_definitions` had zero per-cycle separation at all (one competency-band record per `{classId, subjectId, termNumber}`, full stop).

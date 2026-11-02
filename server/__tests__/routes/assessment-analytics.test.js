@@ -97,6 +97,13 @@ function mockFakeMarksAggregate(pipeline) {
   const bySubject = bySubjectIds.map(subjectId => ({ subjectId, ...summarize(matched.filter(d => d.subjectId === subjectId)) }));
   const byClassIds = [...new Set(matched.map(d => d.classId))];
   const byClass = byClassIds.map(classId => ({ classId, ...summarize(matched.filter(d => d.classId === classId)) }));
+  // streamId groups together (Mongo groups `null` as its own bucket, same
+  // as any other value) — `?? null` here only normalises `undefined` on
+  // a fixture that never set the field at all to match that behavior.
+  const byStreamIds = [...new Set(matched.map(d => d.streamId ?? null))];
+  const byStream = byStreamIds.map(streamId => ({ streamId, ...summarize(matched.filter(d => (d.streamId ?? null) === streamId)) }));
+  const byStudentIds = [...new Set(matched.map(d => d.studentId))];
+  const byStudent = byStudentIds.map(studentId => ({ studentId, ...summarize(matched.filter(d => d.studentId === studentId)) }));
   const overall = summarize(matched);
 
   const scores = matched.map(d => d.rawScore);
@@ -115,10 +122,11 @@ function mockFakeMarksAggregate(pipeline) {
     }))
     .filter(b => b.count > 0);
 
-  return Promise.resolve([{ bySubject, byClass, distribution, overall: overallFull ? [overallFull] : [] }]);
+  return Promise.resolve([{ bySubject, byClass, byStream, byStudent, distribution, overall: overallFull ? [overallFull] : [] }]);
 }
 
 let mockAssignmentRows = [];
+let mockStudentDocs = [];
 jest.mock('../../utils/tenant-model', () => ({
   tenantModel: jest.fn((collection) => {
     if (collection === 'academic_years')   return { find: () => mockChainArr(mockYears) };
@@ -127,6 +135,7 @@ jest.mock('../../utils/tenant-model', () => ({
     if (collection === 'subjects')         return { find: (filter) => mockChainArr(mockSubjectDocs.filter(d => mockMatchesFilter(d, filter))) };
     if (collection === 'classes')          return { find: (filter) => mockChainArr(mockClassDocs.filter(d => mockMatchesFilter(d, filter))) };
     if (collection === 'streams')          return { find: (filter) => mockChainArr(mockStreamDocs.filter(d => mockMatchesFilter(d, filter))) };
+    if (collection === 'students')         return { find: (filter) => mockChainArr(mockStudentDocs.filter(d => mockMatchesFilter(d, filter))) };
     if (collection === 'teaching_assignments') return { find: (filter) => mockChainArr(mockAssignmentRows.filter(d => mockMatchesFilter(d, filter))) };
     return { find: () => mockChainArr([]), findOne: () => mockChainObj(null) };
   }),
@@ -153,7 +162,7 @@ const CLASSES = [{ id: 'cls_a', name: 'Form 1A', schoolId: SCHOOL }, { id: 'cls_
 const SUBJECTS = [{ id: 'sub_math', name: 'Mathematics', schoolId: SCHOOL }, { id: 'sub_eng', name: 'English', schoolId: SCHOOL }];
 
 function mark(overrides = {}) {
-  return { schoolId: SCHOOL, isPublished: true, academicYearId: 'ay_2026', termNumber: 2, classId: 'cls_a', subjectId: 'sub_math', rawScore: 70, ...overrides };
+  return { schoolId: SCHOOL, isPublished: true, academicYearId: 'ay_2026', termNumber: 2, classId: 'cls_a', subjectId: 'sub_math', studentId: 'stu_1', streamId: null, rawScore: 70, ...overrides };
 }
 
 beforeEach(() => {
@@ -166,6 +175,7 @@ beforeEach(() => {
   mockClassDocs = CLASSES;
   mockSubjectDocs = SUBJECTS;
   mockStreamDocs = [];
+  mockStudentDocs = [];
   mockMarkDocs = [
     mark({ subjectId: 'sub_math', classId: 'cls_a', rawScore: 80 }),
     mark({ subjectId: 'sub_math', classId: 'cls_a', rawScore: 60 }),
@@ -405,5 +415,123 @@ describe('GET /api/assessment/analytics — a class that predates the UUID-`id` 
     expect(res.status).toBe(200);
     const legacy = res.body.data.classes.find(c => c.classId === LEGACY_CLASS_ID);
     expect(legacy.className).toBe('Legacy Form 3');
+  });
+});
+
+describe('GET /api/assessment/analytics — streams (2026-11)', () => {
+  test('streams is empty when no classId is selected — bare stream names are ambiguous across classes', async () => {
+    const res = await supertest(buildApp()).get('/api/assessment/analytics').query({ academicYearId: 'ay_2026', termNumber: 2, compareTo: 'none' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.streams).toEqual([]);
+  });
+
+  test('once a class is selected, breaks down by stream with real names resolved', async () => {
+    mockStreamDocs = [
+      { id: 'str_a', name: 'Stream A', classId: 'cls_a', schoolId: SCHOOL },
+      { id: 'str_b', name: 'Stream B', classId: 'cls_a', schoolId: SCHOOL },
+    ];
+    mockMarkDocs = [
+      mark({ streamId: 'str_a', rawScore: 90 }),
+      mark({ streamId: 'str_a', rawScore: 70 }),
+      mark({ streamId: 'str_b', rawScore: 50 }),
+    ];
+    const res = await supertest(buildApp()).get('/api/assessment/analytics').query({ classId: 'cls_a', academicYearId: 'ay_2026', termNumber: 2, compareTo: 'none' });
+    expect(res.status).toBe(200);
+    const streamA = res.body.data.streams.find(s => s.streamId === 'str_a');
+    const streamB = res.body.data.streams.find(s => s.streamId === 'str_b');
+    expect(streamA).toMatchObject({ stream: 'Stream A' });
+    expect(streamA.current.avgPct).toBe(80); // (90+70)/2
+    expect(streamB).toMatchObject({ stream: 'Stream B' });
+    expect(streamB.current.avgPct).toBe(50);
+    expect(res.body.data.streams[0].streamId).toBe('str_b'); // weakest stream first
+  });
+
+  test('a class with no stream structure at all shows one "No Stream" bucket, not blank or hidden', async () => {
+    mockStreamDocs = []; // cls_a has no streams configured
+    mockMarkDocs = [mark({ streamId: null, rawScore: 60 }), mark({ streamId: null, rawScore: 80 })];
+    const res = await supertest(buildApp()).get('/api/assessment/analytics').query({ classId: 'cls_a', academicYearId: 'ay_2026', termNumber: 2, compareTo: 'none' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.streams).toHaveLength(1);
+    expect(res.body.data.streams[0]).toMatchObject({ streamId: null, stream: 'No Stream' });
+    expect(res.body.data.streams[0].current.avgPct).toBe(70);
+  });
+
+  test('a stream-scoped teacher never sees another stream\'s data in the breakdown', async () => {
+    // Same scope shape as the existing "stream-only-scoped teacher" block
+    // above — a compulsory-subject-per-stream assignment, no whole-class
+    // grant. ScopeEngine.applyToFilter (assessment is streamAware)
+    // narrows baseFilter.streamId to this caller's own stream(s) BEFORE
+    // _aggregateAnalyticsPeriod ever runs — this proves the new byStream
+    // facet actually inherits that, not just assumes it does.
+    mockJwtUser = { userId: 'usr_teacher', schoolId: SCHOOL, role: 'teacher', roles: ['teacher'] };
+    mockScope = { level: 'assigned', classIds: [], streamIds: ['str_a'] };
+    // restrictToTaught (teaching-scope.js) separately narrows to the
+    // {class,subject[,stream]} pairs this teacher actually teaches —
+    // without this row it would zero out everything via its own
+    // impossible-match fallback, which would make this test pass for
+    // the wrong reason (nothing readable at all) rather than proving
+    // the stream-scoping itself is what's doing the narrowing.
+    mockAssignmentRows = [{ schoolId: SCHOOL, teacherId: 'usr_teacher', classId: 'cls_a', subjectId: 'sub_math', streamId: 'str_a' }];
+    mockStreamDocs = [
+      { id: 'str_a', name: 'Stream A', classId: 'cls_a', schoolId: SCHOOL },
+      { id: 'str_b', name: 'Stream B', classId: 'cls_a', schoolId: SCHOOL },
+    ];
+    mockMarkDocs = [
+      mark({ streamId: 'str_a', rawScore: 90 }),
+      mark({ streamId: 'str_b', rawScore: 10 }), // a different stream's real data
+    ];
+    const res = await supertest(buildApp()).get('/api/assessment/analytics').query({ classId: 'cls_a', academicYearId: 'ay_2026', termNumber: 2, compareTo: 'none' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.streams.map(s => s.streamId)).toEqual(['str_a']);
+    expect(res.body.data.streams[0].current.avgPct).toBe(90);
+  });
+});
+
+describe('GET /api/assessment/analytics — per-student breakdown (2026-11)', () => {
+  beforeEach(() => {
+    mockStudentDocs = [
+      { id: 'stu_1', schoolId: SCHOOL, firstName: 'Amara', lastName: 'Osei', admissionNumber: 'ADM-001' },
+      { id: 'stu_2', schoolId: SCHOOL, firstName: 'Brian', lastName: 'Kiptoo', admissionNumber: 'ADM-002' },
+    ];
+  });
+
+  test('students is empty unless BOTH classId and studentSubjectId are given', async () => {
+    const onlyClass = await supertest(buildApp()).get('/api/assessment/analytics').query({ classId: 'cls_a', academicYearId: 'ay_2026', termNumber: 2, compareTo: 'none' });
+    expect(onlyClass.body.data.students).toEqual([]);
+
+    const onlySubject = await supertest(buildApp()).get('/api/assessment/analytics').query({ studentSubjectId: 'sub_math', academicYearId: 'ay_2026', termNumber: 2, compareTo: 'none' });
+    expect(onlySubject.body.data.students).toEqual([]);
+  });
+
+  test('once both are given, breaks down by student for that one subject, with real names resolved', async () => {
+    mockMarkDocs = [
+      mark({ studentId: 'stu_1', subjectId: 'sub_math', rawScore: 90 }),
+      mark({ studentId: 'stu_2', subjectId: 'sub_math', rawScore: 40 }),
+      // A different subject for stu_1 — must NOT blend into their math average.
+      mark({ studentId: 'stu_1', subjectId: 'sub_eng', rawScore: 10 }),
+    ];
+    const res = await supertest(buildApp()).get('/api/assessment/analytics').query({
+      classId: 'cls_a', studentSubjectId: 'sub_math', academicYearId: 'ay_2026', termNumber: 2, compareTo: 'none',
+    });
+    expect(res.status).toBe(200);
+    const amara = res.body.data.students.find(s => s.studentId === 'stu_1');
+    expect(amara).toMatchObject({ studentName: 'Amara Osei', admissionNo: 'ADM-001' });
+    expect(amara.current.avgPct).toBe(90); // only the math mark — the English 10 is excluded
+    expect(amara.current.count).toBe(1);
+    expect(res.body.data.students[0].studentId).toBe('stu_2'); // weakest student first (40 vs 90)
+  });
+
+  test('sending studentSubjectId never narrows the Subjects table itself (which must keep listing every subject)', async () => {
+    mockMarkDocs = [
+      mark({ studentId: 'stu_1', subjectId: 'sub_math', rawScore: 90 }),
+      mark({ studentId: 'stu_1', subjectId: 'sub_eng', classId: 'cls_a', rawScore: 50 }),
+    ];
+    const res = await supertest(buildApp()).get('/api/assessment/analytics').query({
+      classId: 'cls_a', studentSubjectId: 'sub_math', academicYearId: 'ay_2026', termNumber: 2, compareTo: 'none',
+    });
+    expect(res.status).toBe(200);
+    // Both subjects still present — studentSubjectId must not leak into
+    // the shared baseFilter the Subjects table's own aggregation uses.
+    expect(res.body.data.subjects.map(s => s.subjectId).sort()).toEqual(['sub_eng', 'sub_math']);
   });
 });

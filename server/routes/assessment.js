@@ -1820,7 +1820,7 @@ const _DISTRIBUTION_BOUNDARIES = [0, 40, 50, 60, 70, 80, 90, 101];
 const _DISTRIBUTION_LABELS     = ['0–39', '40–49', '50–59', '60–69', '70–79', '80–89', '90–100'];
 
 async function _aggregateAnalyticsPeriod(Marks, baseFilter, academicYearId, termNumber, passMark) {
-  if (!academicYearId || !termNumber) return { bySubject: [], byClass: [], distribution: [], overall: null };
+  if (!academicYearId || !termNumber) return { bySubject: [], byClass: [], byStream: [], byStudent: [], distribution: [], overall: null };
   // rawScore is null for a non-present mark state (ABS/MIS/EXM/INC — see
   // POST /marks: "non-present mark state carries no score, nulled server-
   // side"), a real and expected value, not a data error. Live-confirmed
@@ -1848,6 +1848,21 @@ async function _aggregateAnalyticsPeriod(Marks, baseFilter, academicYearId, term
     { $facet: {
         bySubject: _byDimension('subjectId'),
         byClass:   _byDimension('classId'),
+        // `streamId` is denormalized from the STUDENT's own field onto
+        // every mark (see students.js) — null whenever that student's
+        // class has no stream structure at all, regardless of subject.
+        // Cheap to always compute here (same already-matched documents,
+        // no extra query); the caller decides whether it's meaningful to
+        // return (see _buildAnalyticsReport — only once a specific class
+        // is selected, since bare stream names are ambiguous across
+        // classes/grades otherwise).
+        byStream:  _byDimension('streamId'),
+        // Per-student — only meaningful once the caller has ALSO scoped
+        // to one subject (a bare per-student average would blend
+        // unrelated subjects together), which _buildAnalyticsReport
+        // enforces by only reading this facet off a SEPARATE, subject-
+        // scoped call, never off the main unscoped one.
+        byStudent: _byDimension('studentId'),
         distribution: [
           { $bucket: { groupBy: '$rawScore', boundaries: _DISTRIBUTION_BOUNDARIES, output: { count: { $sum: 1 } } } },
         ],
@@ -1892,7 +1907,11 @@ async function _aggregateAnalyticsPeriod(Marks, baseFilter, academicYearId, term
     .map(b => ({ band: _DISTRIBUTION_LABELS[_DISTRIBUTION_BOUNDARIES.indexOf(b._id)] ?? String(b._id), count: b.count }))
     .sort((a, b) => _DISTRIBUTION_LABELS.indexOf(a.band) - _DISTRIBUTION_LABELS.indexOf(b.band));
 
-  return { bySubject: result?.bySubject ?? [], byClass: result?.byClass ?? [], distribution, overall };
+  return {
+    bySubject: result?.bySubject ?? [], byClass: result?.byClass ?? [],
+    byStream: result?.byStream ?? [], byStudent: result?.byStudent ?? [],
+    distribution, overall,
+  };
 }
 
 /* Shared builder — both the JSON (/analytics) and the PDF
@@ -1905,7 +1924,7 @@ async function _aggregateAnalyticsPeriod(Marks, baseFilter, academicYearId, term
 async function _buildAnalyticsReport(req) {
   const { schoolId } = req.jwtUser;
   const ctx = tenantContext(req);
-  const { classId: qClassId, subjectId, academicYearId: qYearId, termNumber: qTermNumber } = req.query;
+  const { classId: qClassId, subjectId, streamId: qStreamId, studentSubjectId, academicYearId: qYearId, termNumber: qTermNumber } = req.query;
   const compareTo = ['previousTerm', 'previousYear', 'none'].includes(req.query.compareTo)
     ? req.query.compareTo : 'previousTerm';
 
@@ -1952,7 +1971,7 @@ async function _buildAnalyticsReport(req) {
     return {
       scope: isWholeSchoolView ? 'whole_school' : 'assigned',
       currentPeriod: null, previousPeriod: null, passMark,
-      overall: null, distribution: [], subjects: [], classes: [], availableClasses: [],
+      overall: null, distribution: [], subjects: [], classes: [], streams: [], students: [], availableClasses: [],
     };
   }
 
@@ -1964,6 +1983,10 @@ async function _buildAnalyticsReport(req) {
      rejected (replaced with an impossible match), not silently widened. */
   const baseFilter = { schoolId, isPublished: true };
   if (qClassId) baseFilter.classId = qClassId;
+  // Same reasoning/ordering as qClassId just above — applied before
+  // ScopeEngine so an out-of-scope stream request is rejected outright,
+  // never silently widened to "every stream."
+  if (qStreamId) baseFilter.streamId = qStreamId;
   if (grantedWholeSchool) {
     // Explicit override — the class/section scope ScopeEngine would
     // otherwise apply (and restrictToTaught's further narrowing to only
@@ -1980,7 +2003,7 @@ async function _buildAnalyticsReport(req) {
   const Marks = tenantModel('assessment_marks', ctx);
   const [currentAgg, previousAgg] = await Promise.all([
     _aggregateAnalyticsPeriod(Marks, baseFilter, currentYearId, currentTermNumber, passMark),
-    previous ? _aggregateAnalyticsPeriod(Marks, baseFilter, previous.year.id ?? String(previous.year._id), previous.termNumber, passMark) : Promise.resolve({ bySubject: [], byClass: [], distribution: [], overall: null }),
+    previous ? _aggregateAnalyticsPeriod(Marks, baseFilter, previous.year.id ?? String(previous.year._id), previous.termNumber, passMark) : Promise.resolve({ bySubject: [], byClass: [], byStream: [], byStudent: [], distribution: [], overall: null }),
   ]);
 
   // Resolve subject display names for everything either period touched
@@ -2071,6 +2094,77 @@ async function _buildAnalyticsReport(req) {
     classDocs = await tenantModel('classes', ctx).find(classesFilter).select('id name').lean();
   }
 
+  // Performance by stream — only meaningful once a specific class is
+  // selected: a bare stream name like "A" or "Stream 1" is ambiguous
+  // across different classes/grades, so this is a drill-down INTO one
+  // class, not a flat cross-school list. Security note: `baseFilter`
+  // was already correctly narrowed to this caller's own stream(s) (if
+  // any) by ScopeEngine.applyToFilter above — `assessment` is
+  // `streamAware` — so this facet inherits that scoping for free; it
+  // does not need its own RBAC check.
+  const NO_STREAM_KEY = '__no_stream__';
+  let streams = [];
+  if (qClassId) {
+    const streamDocs = await tenantModel('streams', ctx).find({ schoolId, classId: qClassId }).select('id name').lean();
+    const streamNameMap = Object.fromEntries(streamDocs.map(s => [s.id, s.name]));
+    const prevByStream = Object.fromEntries(previousAgg.byStream.map(r => [r.streamId ?? NO_STREAM_KEY, r]));
+    streams = currentAgg.byStream
+      .map(cur => {
+        const prev = prevByStream[cur.streamId ?? NO_STREAM_KEY] ?? null;
+        return {
+          streamId: cur.streamId ?? null,
+          // `streamId` is null for every mark belonging to a student
+          // whose class has NO stream structure at all (see students.js)
+          // — a large, real bucket for most schools, not a rare gap, so
+          // it gets an explicit label rather than showing blank.
+          stream:   cur.streamId ? (streamNameMap[cur.streamId] || cur.streamId) : 'No Stream',
+          current:  { avgPct: cur.avgPct, count: cur.count, passRate: cur.passRate },
+          previous: prev ? { avgPct: prev.avgPct, count: prev.count, passRate: prev.passRate } : null,
+          delta:    prev ? Math.round((cur.avgPct - prev.avgPct) * 10) / 10 : null,
+        };
+      })
+      .sort((a, b) => a.current.avgPct - b.current.avgPct); // weakest stream first
+  }
+
+  // Performance by student — only meaningful once scoped to BOTH a
+  // class and a single subject (a bare per-student average would blend
+  // unrelated subjects). Deliberately a SEPARATE aggregation call
+  // against {...baseFilter, subjectId: studentSubjectId} rather than
+  // reusing the main currentAgg/previousAgg above — those must stay
+  // subject-UNSCOPED so the Subjects table (and its own filter dropdown)
+  // never collapses to one entry; see the client's own comment on why
+  // plain `subjectId` is never sent server-side for that purpose.
+  let students = [];
+  if (qClassId && studentSubjectId) {
+    const studentFilter = { ...baseFilter, subjectId: studentSubjectId };
+    const [studentCurrentAgg, studentPreviousAgg] = await Promise.all([
+      _aggregateAnalyticsPeriod(Marks, studentFilter, currentYearId, currentTermNumber, passMark),
+      previous
+        ? _aggregateAnalyticsPeriod(Marks, studentFilter, previous.year.id ?? String(previous.year._id), previous.termNumber, passMark)
+        : Promise.resolve({ byStudent: [] }),
+    ]);
+    const allStudentIds = new Set([...studentCurrentAgg.byStudent.map(r => r.studentId), ...studentPreviousAgg.byStudent.map(r => r.studentId)]);
+    const studentDocs = allStudentIds.size
+      ? await tenantModel('students', ctx).find({ schoolId, id: { $in: [...allStudentIds] } }).select('id firstName lastName admissionNumber').lean()
+      : [];
+    const studentInfoMap = Object.fromEntries(studentDocs.map(s => [s.id, s]));
+    const prevByStudent = Object.fromEntries(studentPreviousAgg.byStudent.map(r => [r.studentId, r]));
+    students = studentCurrentAgg.byStudent
+      .map(cur => {
+        const info = studentInfoMap[cur.studentId];
+        const prev = prevByStudent[cur.studentId] ?? null;
+        return {
+          studentId:   cur.studentId,
+          studentName: info ? `${info.firstName} ${info.lastName}`.trim() : cur.studentId,
+          admissionNo: info?.admissionNumber || '',
+          current:     { avgPct: cur.avgPct, count: cur.count, passRate: cur.passRate },
+          previous:    prev ? { avgPct: prev.avgPct, count: prev.count, passRate: prev.passRate } : null,
+          delta:       prev ? Math.round((cur.avgPct - prev.avgPct) * 10) / 10 : null,
+        };
+      })
+      .sort((a, b) => a.current.avgPct - b.current.avgPct); // weakest student first
+  }
+
   return {
     scope:            isWholeSchoolView ? 'whole_school' : 'assigned',
     currentPeriod:    _periodLabel({ year: currentYear, termNumber: currentTermNumber }),
@@ -2080,6 +2174,8 @@ async function _buildAnalyticsReport(req) {
     distribution:     currentAgg.distribution,
     subjects,
     classes,
+    streams,
+    students,
     availableClasses: classDocs.map(c => ({ id: c.id ?? String(c._id), name: c.name })),
   };
 }
@@ -2375,6 +2471,42 @@ router.get('/analytics/export.pdf', authMiddleware, PLAN, MODGATE, rbac('grades'
       emptyText: 'No assessment marks recorded yet for this period.',
     });
     y += 10;
+
+    // ── Average Score % by Stream / Performance by Stream ──────
+    // Only present when the report was requested for a specific class
+    // (see _buildAnalyticsReport — bare stream names are ambiguous
+    // across classes/grades otherwise) — same gating as the on-screen
+    // section, so this never shows different numbers than the screen.
+    if (report.streams.length) {
+      doc.font('Helvetica-Bold').fontSize(10).fillColor('#1e293b').text('Average Score % by Stream', margin, y);
+      y = doc.y + 6;
+      const sortedStreams = [...report.streams].sort((a, b) => a.current.avgPct - b.current.avgPct);
+      y = _drawPdfBarChart(doc, {
+        x: margin, y, width: contentW, margin,
+        data: sortedStreams.map(s => ({ label: s.stream, value: s.current.avgPct })),
+        colorFor: () => '#3b82f6',
+      });
+      y += 10;
+
+      doc.font('Helvetica-Bold').fontSize(10).fillColor('#1e293b').text('Performance by Stream', margin, y);
+      y = doc.y + 2;
+      doc.font('Helvetica').fontSize(7.5).fillColor('#94a3b8')
+        .text('"No Stream" covers every student whose class has no stream structure at all, not a particular subject.', margin, y, { width: contentW });
+      y = doc.y + 6;
+      y = _drawAnalyticsTable(doc, {
+        x: margin, y, width: contentW, margin,
+        columns: [
+          { label: 'STREAM',   w: contentW * 0.32, value: r => sanitisePdfStr(r.stream) },
+          { label: 'ENTRIES',  w: contentW * 0.15, value: r => r.current.count, align: 'right' },
+          { label: 'AVG %',    w: contentW * 0.17, value: r => `${r.current.avgPct}%`, align: 'right', color: r => pctColor(r.current.avgPct) },
+          { label: 'CHANGE',   w: contentW * 0.17, value: r => r.delta == null ? '—' : `${r.delta > 0 ? '+' : ''}${r.delta}%`, align: 'right' },
+          { label: 'PASS RATE', w: contentW * 0.19, value: r => `${r.current.passRate}%`, align: 'right' },
+        ],
+        rows: report.streams,
+        emptyText: 'No assessment marks recorded yet for this period.',
+      });
+      y += 10;
+    }
 
     // ── Subject Enrollment Coverage by Class ───────────────────
     const enrollmentRows = (enrollment.classes ?? []).flatMap(c =>

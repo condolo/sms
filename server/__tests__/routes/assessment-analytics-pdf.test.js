@@ -36,7 +36,7 @@ let mockJwtUser;
 let mockScope; // null = unrestricted
 let mockSchoolDoc;
 let mockYears, mockAcademicConfigDoc, mockMarkDocs, mockSubjectDocs, mockClassDocs;
-let mockClassSubjectDocs, mockStudentDocs, mockStudentSubjectDocs;
+let mockClassSubjectDocs, mockStudentDocs, mockStudentSubjectDocs, mockStreamDocs;
 
 function mockChainArr(arr) { return { sort: () => mockChainArr(arr), select: () => mockChainArr(arr), lean: () => Promise.resolve(arr) }; }
 function mockChainObj(obj) { return { select: () => mockChainObj(obj), lean: () => Promise.resolve(obj) }; }
@@ -65,11 +65,13 @@ function mockFakeMarksAggregate(pipeline) {
   }
   const bySubject = [...new Set(matched.map(d => d.subjectId))].map(subjectId => ({ subjectId, ...summarize(matched.filter(d => d.subjectId === subjectId)) }));
   const byClass   = [...new Set(matched.map(d => d.classId))].map(classId => ({ classId, ...summarize(matched.filter(d => d.classId === classId)) }));
+  const byStream  = [...new Set(matched.map(d => d.streamId ?? null))].map(streamId => ({ streamId, ...summarize(matched.filter(d => (d.streamId ?? null) === streamId)) }));
+  const byStudent = [...new Set(matched.map(d => d.studentId))].map(studentId => ({ studentId, ...summarize(matched.filter(d => d.studentId === studentId)) }));
   const overall = summarize(matched);
   const scores = matched.map(d => d.rawScore);
   const overallFull = overall ? { ...overall, minScore: scores.length ? Math.min(...scores) : null, maxScore: scores.length ? Math.max(...scores) : null, stdDev: 0, scores } : null;
   const distribution = _DIST_BOUNDARIES.slice(0, -1).map((b, i) => ({ _id: b, count: matched.filter(d => d.rawScore >= b && d.rawScore < _DIST_BOUNDARIES[i + 1]).length })).filter(x => x.count > 0);
-  return Promise.resolve([{ bySubject, byClass, distribution, overall: overallFull ? [overallFull] : [] }]);
+  return Promise.resolve([{ bySubject, byClass, byStream, byStudent, distribution, overall: overallFull ? [overallFull] : [] }]);
 }
 
 function mockFakeStudentSubjectsAggregate(pipeline) {
@@ -91,6 +93,7 @@ jest.mock('../../utils/tenant-model', () => ({
     if (collection === 'assessment_marks')  return { aggregate: (p) => mockFakeMarksAggregate(p) };
     if (collection === 'subjects')          return { find: (f) => mockChainArr(mockSubjectDocs.filter(d => mockMatches(d, f))) };
     if (collection === 'classes')           return { find: (f) => mockChainArr(mockClassDocs.filter(d => mockMatches(d, f))) };
+    if (collection === 'streams')           return { find: (f) => mockChainArr((mockStreamDocs ?? []).filter(d => mockMatches(d, f))) };
     if (collection === 'class_subjects')    return { find: (f) => mockChainArr(mockClassSubjectDocs.filter(d => mockMatches(d, f))) };
     if (collection === 'students')          return { find: (f) => mockChainArr(mockStudentDocs.filter(d => mockMatches(d, f))) };
     if (collection === 'student_subjects')  return {
@@ -153,6 +156,7 @@ beforeEach(() => {
     { schoolId: SCHOOL, classId: 'cls_a', studentId: 'stu_1', subjectId: 'sub_math' },
     // stu_2 missing from compulsory Math — a real gap the PDF should flag.
   ];
+  mockStreamDocs = [];
 });
 
 describe('GET /api/assessment/analytics/export.pdf', () => {
@@ -187,5 +191,21 @@ describe('GET /api/assessment/analytics/export.pdf', () => {
       .query({ academicYearId: 'ay_2026', termNumber: 2, compareTo: 'none' });
     expect(res.status).toBe(200);
     expect(res.headers['content-type']).toBe('application/pdf');
+  });
+
+  // (2026-11) Requesting the PDF for a specific class now renders the
+  // "Performance by Stream" section too (the screen's own invariant:
+  // "the exported PDF can never show different numbers than the
+  // screen"). Same non-empty-buffer assertion depth as the rest of this
+  // file — deep PDFKit content isn't practical to assert on directly.
+  test('requesting a specific class also renders without error when stream data exists', async () => {
+    mockStreamDocs = [{ id: 'str_a', name: 'Stream A', classId: 'cls_a', schoolId: SCHOOL }];
+    mockMarkDocs = mockMarkDocs.map(m => ({ ...m, streamId: 'str_a' }));
+    const res = await supertest(buildApp())
+      .get('/api/assessment/analytics/export.pdf')
+      .query({ classId: 'cls_a', academicYearId: 'ay_2026', termNumber: 2, compareTo: 'none' });
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toBe('application/pdf');
+    expect(res.body.length).toBeGreaterThan(0);
   });
 });
