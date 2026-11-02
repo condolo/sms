@@ -297,20 +297,20 @@ async function _loadCaConfig(schoolId) {
    most schools issue more than one report per term (a Mid-Term progress
    report, then a full End-of-Term one), but the report card only ever
    showed "Academic Year X · Term Y" — no way to say WHICH of those this
-   is. Deliberately scoped down for now: one editable label per
-   {class, term, year}, shown in place of "Term Y" wherever that already
-   appears, with no change to publish/supersede semantics — publishing a
-   second report for the same class/term/year still replaces the first
-   one exactly as it does today. Stored as its own setting (not part of
-   the snapshot until generate/publish freezes it onto one) specifically
-   so it survives a republish without needing to be retyped — "the system
-   is aware this is the Mid-Term report even if it is republished" was
-   the direct requirement. A later "two independently-visible reports per
-   term" feature is a separate, larger change to that supersede logic,
-   not implied by this one. */
-async function _loadCycleLabel(schoolId, classId, termNumber, academicYearId) {
+   is. Originally scoped to one editable label per {class, term, year}
+   with no effect on publish/supersede semantics.
+   (2026-11) Extended, not replaced: `cycle` is now a real, optional,
+   structural key (one of the school's configured assessment-type keys,
+   e.g. 'MT'/'ET') threaded through this label, report_card_draft_comments,
+   and report_card_snapshots' own supersede lookup — see PublishSchema's
+   own comment for the full mechanism. Omitted `cycle` (`null`) is the
+   original, unchanged behavior: Mongo's `{cycle: null}` matches both an
+   explicit null AND a missing field, so every pre-existing label/draft/
+   snapshot row (which has no `cycle` field at all) keeps matching exactly
+   as before — this is additive, not a migration. */
+async function _loadCycleLabel(schoolId, classId, termNumber, academicYearId, cycle = null) {
   const doc = await tenantModel('report_card_cycle_labels', { schoolId }).findOne({
-    schoolId, classId, termNumber: Number(termNumber), academicYearId: academicYearId || null,
+    schoolId, classId, termNumber: Number(termNumber), academicYearId: academicYearId || null, cycle: cycle || null,
   }).lean();
   return doc?.label || '';
 }
@@ -424,12 +424,20 @@ function _resolveSnapComments(prev, draft) {
 const RESTRICTED_ROLES = ['parent', 'student', 'guardian'];
 
 /* ── Validation ─────────────────────────────────────────────── */
+// `cycle` (2026-11) — optional, one of the school's own configured
+// assessment-type keys (e.g. 'MT'/'ET'). Omitted = the default/legacy
+// single-report-per-term behavior, byte-for-byte unchanged. An explicit
+// value creates/targets an independent lineage that never supersedes or
+// is superseded by a different cycle's report for the same class/term/
+// year — see _loadCycleLabel's neighbourhood and the supersede-lookup
+// filters below for the full mechanism.
 const GenerateSchema = z.object({
   classId:        z.string().min(1),
   termId:         z.string().optional(),
   termNumber:     z.number().int().min(1).max(3).optional(),
   academicYearId: z.string().optional(),
   studentId:      z.string().optional(),
+  cycle:          z.string().max(50).trim().optional(),
 });
 
 const PublishSchema = z.object({
@@ -444,6 +452,7 @@ const PublishSchema = z.object({
   skipModerationCheck: z.boolean().default(false),
   // Required when skipModerationCheck is true
   skipReason:      z.string().max(500).optional(),
+  cycle:           z.string().max(50).trim().optional(),
 });
 
 const CommentSchema = z.object({
@@ -468,6 +477,7 @@ const CommentSchema = z.object({
 // plain text inputs, not date pickers).
 const DraftCommentBodySchema = z.object({
   termNumber:         z.union([z.string(), z.number()]),
+  cycle:              z.string().max(50).trim().optional(),
   classTeacherName:   z.string().max(200).optional(),
   classTeacherRemark: z.string().max(1000).optional(),
   sportsAndTalent:    z.string().max(1000).optional(),
@@ -659,14 +669,15 @@ const CycleLabelSchema = z.object({
   termNumber:     z.union([z.string(), z.number()]),
   academicYearId: z.string().optional(),
   label:          z.string().max(60).trim().optional().default(''),
+  cycle:          z.string().max(50).trim().optional(),
 });
 
 router.get('/cycle-label', authMiddleware, PLAN, MODGATE, rbac('report_cards', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const { classId, termNumber, academicYearId } = req.query;
+    const { classId, termNumber, academicYearId, cycle } = req.query;
     if (!classId || !termNumber) return E.badRequest(res, 'classId and termNumber are required');
-    const label = await _loadCycleLabel(schoolId, String(classId), termNumber, academicYearId ? String(academicYearId) : null);
+    const label = await _loadCycleLabel(schoolId, String(classId), termNumber, academicYearId ? String(academicYearId) : null, cycle ? String(cycle) : null);
     return ok(res, { label });
   } catch (err) {
     console.error('[report-cards/cycle-label GET]', err);
@@ -680,7 +691,7 @@ router.put('/cycle-label', authMiddleware, PLAN, MODGATE, rbac('report_cards', '
     const { data, error } = _validate(CycleLabelSchema, req.body);
     if (error) return E.validation(res, error);
     const doc = await tenantModel('report_card_cycle_labels', tenantContext(req)).findOneAndUpdate(
-      { schoolId, classId: data.classId, termNumber: Number(data.termNumber), academicYearId: data.academicYearId || null },
+      { schoolId, classId: data.classId, termNumber: Number(data.termNumber), academicYearId: data.academicYearId || null, cycle: data.cycle || null },
       { $set: { label: data.label, updatedBy: userId, updatedAt: new Date() }, $setOnInsert: { id: uuidv4(), schoolId, createdAt: new Date() } },
       { upsert: true, new: true }
     ).lean();
@@ -700,7 +711,7 @@ router.post('/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
     const { data, error } = _validate(GenerateSchema, req.body);
     if (error) return E.validation(res, error);
 
-    const { classId, termId, termNumber: termNum, academicYearId, studentId } = data;
+    const { classId, termId, termNumber: termNum, academicYearId, studentId, cycle } = data;
     const ctx = tenantContext(req);
     // classId alone can't disambiguate which academic year — resolve the
     // real year/term before aggregating exam/legacy-grade data (see
@@ -710,7 +721,7 @@ router.post('/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
     const [config, caConfig, cycleLabel] = await Promise.all([
       _loadConfig(schoolId),
       _loadCaConfig(schoolId),
-      _loadCycleLabel(schoolId, classId, termNum, scope.academicYearId),
+      _loadCycleLabel(schoolId, classId, termNum, scope.academicYearId, cycle),
     ]);
 
     // aggregateUnmoderatedMarks/"provisional" REMOVED 2026-10-13 — workflow
@@ -803,6 +814,7 @@ router.post('/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
         assessmentWeights: _convertCustomTypesToWeights(caConfig.customTypes),
         customTypes: caConfig.customTypes ?? null,
         reportLabel: cycleLabel || null,
+        cycle: cycle || null,
         // Always the exact bands used to grade this response's subjects —
         // never null, normalised to one shape regardless of whether they
         // came from grade_boundaries or the academic_config fallback (Audit
@@ -838,7 +850,7 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
   const {
     classId, termId, termNumber: termNum, academicYearId,
     className: clientClassName, termName: clientTermName, academicYear: clientAcademicYear,
-    schoolName, skipModerationCheck, skipReason,
+    schoolName, skipModerationCheck, skipReason, cycle,
   } = data;
   const now     = new Date().toISOString();
   const batchId = uuidv4();
@@ -884,7 +896,7 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
       _loadConfig(schoolId),
       _loadCaConfig(schoolId),
       _loadPublicationPolicy(schoolId),
-      _loadCycleLabel(schoolId, classId, termNum, scope.academicYearId),
+      _loadCycleLabel(schoolId, classId, termNum, scope.academicYearId, cycle),
     ]);
 
     const activeWeights = _convertCustomTypesToWeights(caConfig.customTypes);
@@ -927,9 +939,16 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
       : {};
 
     // ── Step 5: Load existing live snapshots (for versioning) ─
+    // `cycle` (2026-11) scopes this to the SAME cycle only — Mongo's
+    // {cycle: null} matches both an explicit null and a missing field, so
+    // a default (no-cycle) publish still finds/supersedes exactly what it
+    // always did, while an explicit cycle (e.g. 'ET') can never match a
+    // different cycle's (or a pre-existing, cycle-less) live snapshot —
+    // see PublishSchema's own comment for the full mechanism.
     const existingSnaps = await tenantModel('report_card_snapshots', tenantContext(req)).find({
       schoolId, classId,
       termId: scope.termId, academicYearId: scope.academicYearId,
+      cycle: cycle || null,
       superseded: { $ne: true },
     }).lean();
     const existingMap = Object.fromEntries(existingSnaps.map(s => [s.studentId, s]));
@@ -976,7 +995,7 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
     const draftCommentsMap = {};
     if (studentIds.length && termNum != null) {
       const draftDocs = await tenantModel('report_card_draft_comments', tenantContext(req))
-        .find({ schoolId, studentId: { $in: studentIds }, termNumber: termNum }).lean();
+        .find({ schoolId, studentId: { $in: studentIds }, termNumber: termNum, cycle: cycle || null }).lean();
       for (const d of draftDocs) draftCommentsMap[d.studentId] = d;
     }
 
@@ -1112,6 +1131,13 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
           // republish picks up whatever the setting says NOW rather than
           // whatever it said when the previous version was published.
           reportLabel:    cycleLabel || null,
+          // `cycle` (2026-11) — deliberately outside _hashSnapshot's
+          // allowlist too, same reasoning as reportLabel just above: this
+          // is the structural key Step 5's supersede lookup already
+          // matched on to find `prev`, so it's already correct by the time
+          // we get here; recording it in the hash would retroactively
+          // invalidate every report published before this field existed.
+          cycle:          cycle || null,
 
           // Immutable config snapshot — use active (CA-system-aware) weights and schema
           gradingSchema:          activeSchema,
@@ -1889,6 +1915,14 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), scopeMidd
     if (req.query.academicYearId) filter.academicYearId = req.query.academicYearId;
     if (req.query.studentId)      filter.studentId      = req.query.studentId;
     if (req.query.status)         filter.status         = req.query.status;
+    // Default (no ?cycle=) matches only the legacy/default cycle, same
+    // unconditional-default posture as `superseded` just above — every
+    // pre-existing row has no `cycle` field and Mongo's {cycle: null}
+    // matches both null and missing, so this is the exact same result
+    // set a caller got before `cycle` existed. `?cycle=all` is the
+    // explicit escape hatch for a listing that genuinely wants every
+    // cycle mixed together.
+    if (req.query.cycle !== 'all') filter.cycle = req.query.cycle ? String(req.query.cycle) : null;
 
     // Data scope. This route had none at all before — any grades:read
     // holder (e.g. a teacher, or a restricted role that somehow held that
@@ -1998,6 +2032,12 @@ router.get('/bulk-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), s
 
     const filter = {
       schoolId, classId: req.query.classId,
+      // Default (no ?cycle=) matches only the legacy/default cycle — see
+      // PublishSchema's own comment on `cycle` for the full mechanism.
+      // Without this, once a class has two coexisting cycles' reports,
+      // an un-migrated caller would start silently getting both merged
+      // into one PDF instead of the one it always got.
+      cycle: req.query.cycle ? String(req.query.cycle) : null,
       superseded: { $ne: true }, status: 'published',
     };
     if (req.query.termId)         filter.termId         = req.query.termId;
@@ -2157,6 +2197,11 @@ router.get('/draft-comments', authMiddleware, PLAN, MODGATE, rbac('report_cards'
       filter.studentId = { $in: rosterIds };
     }
     if (req.query.termNumber) filter.termNumber = Number(req.query.termNumber);
+    // Default (no ?cycle=) matches only the legacy/default cycle — same
+    // {cycle: null} convention as everywhere else cycle was added, so an
+    // un-migrated caller keeps seeing exactly what it always saw, never a
+    // mix of a different cycle's drafts.
+    filter.cycle = req.query.cycle ? String(req.query.cycle) : null;
     const docs = await tenantModel('report_card_draft_comments', tenantContext(req)).find(filter).lean();
     return ok(res, await scopeDraftCommentsForCaller(req, docs));
   } catch (err) {
@@ -3580,10 +3625,16 @@ router.post('/preview-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'
    locked/unlocked directly: it tracks whichever published snapshot (if
    any) exists for this studentId+termNumber, the same way assessment_
    marks.isLocked tracks its own schedule/submission state rather than
-   storing a second copy of the decision. */
-async function _publishedCommentsLockFor(schoolId, ctx, studentId, termNumber) {
+   storing a second copy of the decision.
+   `cycle` (2026-11): scoped to the SAME cycle only, same {cycle: null}
+   convention as everywhere else — a lock on one cycle's published report
+   (e.g. Mid-Term) never blocks a different cycle's (e.g. End-of-Term)
+   still-unpublished draft. A brand-new cycle's draft is never locked in
+   the first place, since nothing has been published under it yet — no
+   admin unlock step is needed to start writing it. */
+async function _publishedCommentsLockFor(schoolId, ctx, studentId, termNumber, cycle = null) {
   const snap = await tenantModel('report_card_snapshots', ctx)
-    .findOne({ schoolId, studentId, termNumber: Number(termNumber), superseded: { $ne: true }, commentsLocked: true })
+    .findOne({ schoolId, studentId, termNumber: Number(termNumber), cycle: cycle || null, superseded: { $ne: true }, commentsLocked: true })
     .select('id').lean();
   return !!snap;
 }
@@ -3597,11 +3648,11 @@ router.put('/draft-comments/:studentId', authMiddleware, PLAN, MODGATE, rbac('re
     if (!req.body?.termNumber) return E.badRequest(res, 'termNumber is required');
     const { data: validated, error: validationError } = _validate(DraftCommentBodySchema, req.body);
     if (validationError) return E.validation(res, validationError);
-    const { termNumber, classTeacherName, classTeacherRemark,
+    const { termNumber, cycle, classTeacherName, classTeacherRemark,
             sportsAndTalent, principalName, principalRemark, closingDate, nextTermBegin,
             subjectComments, observationRatings } = validated;
 
-    if (await _publishedCommentsLockFor(schoolId, tenantContext(req), studentId, termNumber)) {
+    if (await _publishedCommentsLockFor(schoolId, tenantContext(req), studentId, termNumber, cycle)) {
       return E.forbidden(res, 'Comments are locked — the report card for this term has been published. Ask an admin to unlock it for a correction.');
     }
 
@@ -3630,7 +3681,7 @@ router.put('/draft-comments/:studentId', authMiddleware, PLAN, MODGATE, rbac('re
     // needed to send classId correctly in the first place.
     const classId = placement.classId;
     const existing = await tenantModel('report_card_draft_comments', tenantContext(req))
-      .findOne({ schoolId, studentId, termNumber: Number(termNumber) }).lean();
+      .findOne({ schoolId, studentId, termNumber: Number(termNumber), cycle: cycle || null }).lean();
 
     // Reported directly (2026-10-15), traced to a real, silent data-loss
     // path: GET /draft-comments (scopeDraftCommentsForCaller) strips this
@@ -3693,6 +3744,7 @@ router.put('/draft-comments/:studentId', authMiddleware, PLAN, MODGATE, rbac('re
     const setFields = {
       schoolId, studentId, classId,
       termNumber:         Number(termNumber),
+      cycle:              cycle || null,
       classTeacherName:   classTeacherName   ?? '',
       classTeacherRemark: classTeacherRemark ?? '',
       sportsAndTalent:    sportsAndTalent    ?? '',
@@ -3706,7 +3758,7 @@ router.put('/draft-comments/:studentId', authMiddleware, PLAN, MODGATE, rbac('re
     if (observationRatings !== undefined) setFields.observationRatings = observationRatings;
 
     const doc = await tenantModel('report_card_draft_comments', tenantContext(req)).findOneAndUpdate(
-      { schoolId, studentId, termNumber: Number(termNumber) },
+      { schoolId, studentId, termNumber: Number(termNumber), cycle: cycle || null },
       { $set: setFields },
       { upsert: true, new: true }
     ).lean();
@@ -3722,10 +3774,13 @@ router.put('/draft-comments/:studentId/subject/:subjectId', authMiddleware, PLAN
   try {
     const { schoolId, userId: updatedBy } = req.jwtUser;
     const { studentId, subjectId } = req.params;
-    const { termNumber, comment } = req.body;
+    const { termNumber, comment, cycle } = req.body;
     if (!termNumber) return E.badRequest(res, 'termNumber is required');
     if (typeof comment !== 'string') return E.badRequest(res, 'comment must be a string');
     if (comment.length > 1000) return E.badRequest(res, 'comment must be 1000 characters or fewer');
+    if (cycle !== undefined && (typeof cycle !== 'string' || cycle.length > 50)) {
+      return E.badRequest(res, 'cycle must be a string of 50 characters or fewer');
+    }
 
     // Same rights as marks: the caller must teach this subject in this student's stream.
     // Class and stream come from the student record, never from the request body.
@@ -3768,15 +3823,16 @@ router.put('/draft-comments/:studentId/subject/:subjectId', authMiddleware, PLAN
     // schedule lock any more (2026-10-11) — see comment-scope.js's header.
     // The DIFFERENT, publish-based lock added 2026-10-18 still applies
     // here (see _publishedCommentsLockFor above).
-    if (await _publishedCommentsLockFor(schoolId, tenantContext(req), studentId, termNumber)) {
+    if (await _publishedCommentsLockFor(schoolId, tenantContext(req), studentId, termNumber, cycle)) {
       return E.forbidden(res, 'Comments are locked — the report card for this term has been published. Ask an admin to unlock it for a correction.');
     }
 
     const doc = await tenantModel('report_card_draft_comments', tenantContext(req)).findOneAndUpdate(
-      { schoolId, studentId, termNumber: Number(termNumber) },
+      { schoolId, studentId, termNumber: Number(termNumber), cycle: cycle || null },
       { $set: {
           schoolId, studentId, classId,
           termNumber: Number(termNumber),
+          cycle: cycle || null,
           [`subjectComments.${subjectId}`]: comment,
           updatedBy,
           updatedAt: new Date(),
@@ -3804,20 +3860,23 @@ router.patch('/draft-comments/:studentId/advance', authMiddleware, PLAN, MODGATE
   try {
     const { schoolId, userId, name, role } = req.jwtUser;
     const { studentId } = req.params;
-    const { classId, termNumber, remark } = req.body;
+    const { classId, termNumber, remark, cycle } = req.body;
     if (!termNumber) return E.badRequest(res, 'termNumber is required');
     if (typeof remark !== 'string' || !remark.trim()) return E.badRequest(res, 'remark is required');
+    if (cycle !== undefined && (typeof cycle !== 'string' || cycle.length > 50)) {
+      return E.badRequest(res, 'cycle must be a string of 50 characters or fewer');
+    }
 
     const ctx = tenantContext(req);
     const config = await getWorkflowConfig(ctx, schoolId, REPORT_COMMENT_WORKFLOW_KEY);
     if (!config) return E.badRequest(res, 'No report-comment approval chain is configured for this school');
 
-    if (await _publishedCommentsLockFor(schoolId, ctx, studentId, termNumber)) {
+    if (await _publishedCommentsLockFor(schoolId, ctx, studentId, termNumber, cycle)) {
       return E.forbidden(res, 'Comments are locked — the report card for this term has been published. Ask an admin to unlock it for a correction.');
     }
 
     const Draft = tenantModel('report_card_draft_comments', ctx);
-    const existing = await Draft.findOne({ schoolId, studentId, termNumber: Number(termNumber) }).lean();
+    const existing = await Draft.findOne({ schoolId, studentId, termNumber: Number(termNumber), cycle: cycle || null }).lean();
     const stepOrder = existing?.currentStepOrder ?? 1;
 
     if (stepOrder > config.steps.length) {
@@ -3842,8 +3901,8 @@ router.patch('/draft-comments/:studentId/advance', authMiddleware, PLAN, MODGATE
     }].sort((a, b) => a.stepOrder - b.stepOrder);
 
     const doc = await Draft.findOneAndUpdate(
-      { schoolId, studentId, termNumber: Number(termNumber) },
-      { $set: { schoolId, studentId, classId: classId ?? existing?.classId, termNumber: Number(termNumber), reportRemarks, currentStepOrder: nextStepOrder, updatedBy: userId, updatedAt: new Date() } },
+      { schoolId, studentId, termNumber: Number(termNumber), cycle: cycle || null },
+      { $set: { schoolId, studentId, classId: classId ?? existing?.classId, termNumber: Number(termNumber), cycle: cycle || null, reportRemarks, currentStepOrder: nextStepOrder, updatedBy: userId, updatedAt: new Date() } },
       { upsert: true, new: true }
     ).lean();
 

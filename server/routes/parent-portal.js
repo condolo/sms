@@ -266,7 +266,7 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
       Reports.find({
         schoolId, studentId: childId, status: 'published', superseded: { $ne: true },
       }).sort({ publishedAt: -1 }).limit(6)
-        .select('id academicYear termName termNumber totalScore averageScore gpa rankings status publishedAt version termId academicYearId subjects')
+        .select('id academicYear termName termNumber totalScore averageScore gpa rankings status publishedAt version termId academicYearId subjects reportLabel cycle')
         .lean(),
       student.classId
         ? Coverage.distinct('subjectId', { schoolId, classId: student.classId, academicYear, $or: coverageStreamOr })
@@ -740,7 +740,7 @@ router.get('/report/:childId', authMiddleware, PLAN, async (req, res) => {
     const cards = await Reports.find({ schoolId, studentId: childId, status: 'published', superseded: { $ne: true } })
       .sort({ publishedAt: -1 })
       .limit(6)
-      .select('id academicYear termName termNumber totalScore averageScore gpa rankings publishedAt subjects classTeacherRemark principalRemark')
+      .select('id academicYear termName termNumber totalScore averageScore gpa rankings publishedAt subjects classTeacherRemark principalRemark reportLabel cycle')
       .lean();
 
     const latest = cards[0] || null;

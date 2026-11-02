@@ -249,7 +249,7 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
     const reportCards = await Reports.find({
       schoolId, studentId, status: 'published', superseded: { $ne: true },
     }).sort({ publishedAt: -1 }).limit(6)
-      .select('id academicYear termName termNumber totalScore averageScore gpa rankings status publishedAt version termId academicYearId subjects')
+      .select('id academicYear termName termNumber totalScore averageScore gpa rankings status publishedAt version termId academicYearId subjects reportLabel cycle')
       .lean();
 
     // ── Real per-subject marks — the one place this dashboard can show an

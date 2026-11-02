@@ -996,7 +996,9 @@ export default function StudentDashboard() {
                         <p id="dl-error-msg" className="text-[11px] text-red-600">{dlError}</p>
                       )}
                       {reportCards.map(rc => {
-                        const label = `${rc.academicYear}-T${rc.termNumber}`;
+                        // Disambiguates two independently-published reports
+                        // for the same term (e.g. Mid-Term vs End-of-Term).
+                        const label = rc.reportLabel ? `${rc.academicYear} · ${rc.reportLabel}` : `${rc.academicYear}-T${rc.termNumber}`;
                         const busy  = downloading === rc.id;
                         return (
                           <div

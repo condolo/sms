@@ -40,6 +40,11 @@ function mockChainObj(obj) { return { select: () => mockChainObj(obj), lean: () 
 function mockMatchesFilter(doc, filter) {
   return Object.entries(filter || {}).every(([k, v]) => {
     if (k === '$or') return v.some(sub => mockMatchesFilter(doc, sub));
+    // Real Mongo semantics: {k: null} matches an explicit null AND a
+    // missing field — needed for `cycle`, which GET / now always filters
+    // by (default null) and is absent on every doc seeded before that
+    // field existed.
+    if (v === null) return doc[k] === null || doc[k] === undefined;
     if (v && typeof v === 'object' && !Array.isArray(v)) {
       if ('$in' in v) return v.$in.includes(doc[k]);
       if ('$ne' in v) return doc[k] !== v.$ne;

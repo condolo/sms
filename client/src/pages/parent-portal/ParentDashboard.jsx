@@ -995,7 +995,10 @@ export default function ParentDashboard() {
               <div className="grid sm:grid-cols-2 gap-2.5">
                 {d.reportCards.map(rc => {
                   const rcId = rc.id ?? rc._id?.toString();
-                  const lbl  = `${rc.academicYear}-T${rc.termNumber}`;
+                  // Disambiguates two independently-published reports for
+                  // the same term (e.g. Mid-Term vs End-of-Term) — without
+                  // this, both would render as the identical "2026-T2".
+                  const lbl  = rc.reportLabel ? `${rc.academicYear} · ${rc.reportLabel}` : `${rc.academicYear}-T${rc.termNumber}`;
                   const busy = downloading === rcId;
                   return (
                     <div key={`rc-${rcId}`} id={`report-card-${rcId}`} className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-slate-200 bg-slate-50">

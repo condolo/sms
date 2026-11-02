@@ -33,6 +33,14 @@ export default function ReportCardsTab() {
   // same posture as AssessmentAnalyticsPage's own year picker, but
   // explicitly reachable to review or publish a past year's term.
   const [yearId, setYearId] = useState('');
+  // Report cycle (2026-11) — '' means "Whole Term" (the original,
+  // unchanged single-report-per-term behavior). An explicit value (one of
+  // the school's own configured assessment-type keys, e.g. 'MT'/'ET')
+  // scopes generate/publish/comments/status to an INDEPENDENT report
+  // lineage that never supersedes or is superseded by a different cycle's
+  // report for this same class/term/year — see report-cards.js's
+  // PublishSchema comment for the full mechanism.
+  const [cycle, setCycle] = useState('');
   const qc = useQueryClient();
   const currentPeriod = useCurrentAcademicPeriod();
 
@@ -235,13 +243,24 @@ export default function ReportCardsTab() {
     select: (res) => Object.fromEntries((res?.data ?? []).map(s => [s.id ?? s._id, s])),
   });
 
+  // School-wide assessment types (CA/MT/ET/...) — populates the Report
+  // Cycle selector below. Independent of class/term so the selector works
+  // even before a class is picked, unlike generateData's own customTypes
+  // (which only arrives after a successful generate).
+  const { data: assessmentConfigData } = useQuery({
+    queryKey: ['assessment', 'config'],
+    queryFn:  () => assessmentApi.getConfig(),
+    staleTime: 5 * 60_000,
+  });
+  const schoolCustomTypes = assessmentConfigData?.data?.customTypes ?? DEFAULT_CUSTOM_TYPES;
+
   const canQuery   = !!(classId && termNum);
   const canQueryNumeric = canQuery && !isKgClass;
   const prevTermNum = canQueryNumeric && Number(termNum) > 1 ? Number(termNum) - 1 : null;
 
   const { data: generateData, isLoading: isGenerating, isError, error, refetch } = useQuery({
-    queryKey: ['reportCards', 'generate', { classId, termNum, yearId }],
-    queryFn:  () => reportCardsApi.generate({ classId, termNumber: Number(termNum), academicYearId: yearId || undefined }),
+    queryKey: ['reportCards', 'generate', { classId, termNum, yearId, cycle }],
+    queryFn:  () => reportCardsApi.generate({ classId, termNumber: Number(termNum), academicYearId: yearId || undefined, cycle: cycle || undefined }),
     enabled:  canQueryNumeric,
     staleTime: 60_000,
   });
@@ -300,8 +319,8 @@ export default function ReportCardsTab() {
   // in principle be shared across every year that has a Term 2 until
   // it's frozen into a published snapshot. Flagged, not fixed here.
   const { data: commentsMap, isError: isCommentsError, refetch: refetchComments } = useQuery({
-    queryKey: ['reportCards', 'draftComments', { classId, termNum }],
-    queryFn:  () => reportCardsApi.draftComments.list({ classId, termNumber: Number(termNum) }),
+    queryKey: ['reportCards', 'draftComments', { classId, termNum, cycle }],
+    queryFn:  () => reportCardsApi.draftComments.list({ classId, termNumber: Number(termNum), cycle: cycle || undefined }),
     enabled:  canQuery,
     staleTime: 30_000,
     select: (res) => Object.fromEntries((res?.data ?? []).map(c => [c.studentId, c])),
@@ -331,14 +350,21 @@ export default function ReportCardsTab() {
     select: (res) => Object.fromEntries((res?.data ?? []).map(a => [a._id, a])),
   });
 
-  // Published snapshots for this class/term/year — keyed by studentId
+  // Published snapshots for this class/term/year/CYCLE — keyed by
+  // studentId. Scoped by cycle (2026-11) so the status badge reflects
+  // only the currently-selected cycle: once two cycles can coexist for
+  // the same term, an unscoped newest-first list collapsed into a
+  // studentId map via Object.fromEntries would silently keep whichever
+  // duplicate key appears LAST in iteration order — the OLDER one, since
+  // the array is sorted newest-first — not the one actually relevant to
+  // what Generate/Publish on this screen would act on.
   const { data: snapshotsMap, isError: isSnapshotsError, refetch: refetchSnapshots } = useQuery({
-    queryKey: ['reportCards', 'snapshots', { classId, termNum, yearId }],
-    queryFn:  () => reportCardsApi.snapshots.list({ classId, termNumber: Number(termNum), academicYearId: yearId || undefined, limit: 200 }),
+    queryKey: ['reportCards', 'snapshots', { classId, termNum, yearId, cycle }],
+    queryFn:  () => reportCardsApi.snapshots.list({ classId, termNumber: Number(termNum), academicYearId: yearId || undefined, cycle: cycle || undefined, limit: 200 }),
     enabled:  canQuery,
     staleTime: 30_000,
     select: (res) => Object.fromEntries(
-      (res?.data ?? []).filter(s => !s.superseded).map(s => [s.studentId, s])
+      (res?.data ?? []).filter(s => !s.superseded && (s.cycle || null) === (cycle || null)).map(s => [s.studentId, s])
     ),
   });
 
@@ -367,8 +393,8 @@ export default function ReportCardsTab() {
   // year}, not part of the snapshot until generate/publish freezes it
   // onto one — so it survives a republish without needing to be retyped.
   const { data: cycleLabelData } = useQuery({
-    queryKey: ['reportCards', 'cycleLabel', { classId, termNum, yearId }],
-    queryFn:  () => reportCardsApi.cycleLabel.get({ classId, termNumber: Number(termNum), academicYearId: yearId || undefined }),
+    queryKey: ['reportCards', 'cycleLabel', { classId, termNum, yearId, cycle }],
+    queryFn:  () => reportCardsApi.cycleLabel.get({ classId, termNumber: Number(termNum), academicYearId: yearId || undefined, cycle: cycle || undefined }),
     enabled:  canQuery,
     staleTime: 30_000,
   });
@@ -379,10 +405,10 @@ export default function ReportCardsTab() {
 
   const { mutate: saveCycleLabel, isPending: savingLabel } = useMutation({
     mutationFn: () => reportCardsApi.cycleLabel.set({
-      classId, termNumber: Number(termNum), academicYearId: yearId || undefined, label: labelDraft,
+      classId, termNumber: Number(termNum), academicYearId: yearId || undefined, label: labelDraft, cycle: cycle || undefined,
     }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['reportCards', 'cycleLabel', { classId, termNum, yearId }] });
+      qc.invalidateQueries({ queryKey: ['reportCards', 'cycleLabel', { classId, termNum, yearId, cycle }] });
       setLabelSaved(true);
       setTimeout(() => setLabelSaved(false), 2000);
     },
@@ -393,8 +419,13 @@ export default function ReportCardsTab() {
   // has no studentId/streamId narrowing, so the stream filter below is a
   // view-only convenience and must never look like it scopes this.
   const { mutate: publishBatch, isPending: isPublishing } = useMutation({
+    // `cycle` only for the numeric path — the Kindergarten pipeline
+    // doesn't carry it yet (its underlying indicator_marks has no
+    // per-cycle data separation to publish independently; flagged as a
+    // separate follow-up, not silently half-wired here).
     mutationFn: (override = {}) => (isKgClass ? reportCardsApi.kg.publish : reportCardsApi.publish)({
       classId, termNumber: Number(termNum), academicYearId: yearId || undefined,
+      ...(isKgClass ? {} : { cycle: cycle || undefined }),
       ...override,
     }),
     onSuccess: () => {
@@ -526,9 +557,10 @@ ${docs.map(h => `<div>${_bodyOf(h)}</div>`).join('\n')}
         ...data,
         classId,
         termNumber: Number(termNum),
+        cycle: cycle || undefined,
       }),
     onSuccess: () => qc.invalidateQueries({
-      queryKey: ['reportCards', 'draftComments', { classId, termNum }],
+      queryKey: ['reportCards', 'draftComments', { classId, termNum, cycle }],
     }),
   });
 
@@ -538,9 +570,10 @@ ${docs.map(h => `<div>${_bodyOf(h)}</div>`).join('\n')}
         classId,
         termNumber: Number(termNum),
         comment,
+        cycle: cycle || undefined,
       }),
     onSuccess: () => qc.invalidateQueries({
-      queryKey: ['reportCards', 'draftComments', { classId, termNum }],
+      queryKey: ['reportCards', 'draftComments', { classId, termNum, cycle }],
     }),
   });
 
@@ -698,6 +731,15 @@ ${docs.map(h => `<div>${_bodyOf(h)}</div>`).join('\n')}
             options={yearsList.map(y => ({ value: y.id ?? y._id, label: y.name ?? y.year }))}
             placeholder={currentPeriod.academicYear ? `Current (${currentPeriod.academicYear})` : 'Current year'}
           />
+          {!isKgClass && (
+            <SelField
+              label="Report Cycle"
+              value={cycle}
+              onChange={async v => { if (!(await saveBeforeSwitch())) return; setCycle(v); }}
+              options={schoolCustomTypes.map(t => ({ value: t.key, label: t.label || t.key }))}
+              placeholder="Whole Term (default)"
+            />
+          )}
           {canQuery && isManagementRole && (
             <div className="flex flex-col gap-1">
               <div className="flex gap-2">
@@ -833,6 +875,11 @@ ${docs.map(h => `<div>${_bodyOf(h)}</div>`).join('\n')}
             <p className="text-xs text-amber-700">
               Publishing will lock every mark entry in the Markbook for <strong>{className || 'this class'}</strong> — Term {termNum}{displayAcademicYear && ` · ${displayAcademicYear}`} — teachers will no longer be able to edit them, and these report cards become visible to students and parents immediately. Only an admin can unlock marks afterward for a correction.
             </p>
+            {!isKgClass && cycle && (
+              <p className="text-xs text-amber-700">
+                This publishes under the <strong>{schoolCustomTypes.find(t => t.key === cycle)?.label || cycle}</strong> cycle — a new, independently-visible report alongside whatever is already published under a different cycle for this term. It does not replace or hide any other cycle's report.
+              </p>
+            )}
             <div className="flex items-center gap-2 pt-1">
               <button
                 onClick={() => { setConfirmingPublish(false); publishBatch(); }}

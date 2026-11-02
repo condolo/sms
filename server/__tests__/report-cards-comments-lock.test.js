@@ -27,16 +27,27 @@ function makeStore(seed = []) {
     return Object.entries(filter).every(([k, v]) => {
       if (k === '$or') return v.some(sub => matches(doc, sub));
       if (v && typeof v === 'object' && '$ne' in v) return doc[k] !== v.$ne;
+      // Real Mongo semantics: {k: null} matches an explicit null AND a
+      // missing field — needed now that `cycle` defaults to null and
+      // every pre-existing seeded doc below has no `cycle` field at all.
+      if (v === null) return doc[k] === null || doc[k] === undefined;
       return doc[k] === v;
     });
   }
   return {
     findOne: (filter) => chain(docs.find(d => matches(d, filter)) || null),
     find:    (filter) => chain(docs.filter(d => matches(d, filter))),
-    findOneAndUpdate: (filter, update) => ({
+    findOneAndUpdate: (filter, update, options = {}) => ({
       lean: async () => {
-        const doc = docs.find(d => matches(d, filter));
-        if (!doc) return null;
+        let doc = docs.find(d => matches(d, filter));
+        let inserted = false;
+        if (!doc) {
+          if (!options.upsert) return null;
+          doc = { ...filter };
+          docs.push(doc);
+          inserted = true;
+        }
+        if (inserted && update.$setOnInsert) Object.assign(doc, update.$setOnInsert);
         if (update.$set) Object.assign(doc, update.$set);
         return { ...doc };
       },
@@ -122,6 +133,30 @@ describe('_publishedCommentsLockFor', () => {
     ]);
     await expect(_publishedCommentsLockFor(SCHOOL, {}, 'stu_1', 2)).resolves.toBe(false);
   });
+
+  describe('cycle (2026-11) — a lock on one cycle never blocks a different cycle', () => {
+    test('a locked Mid-Term (cycle "MT") snapshot does not block a different cycle ("ET") draft', async () => {
+      mockStores.report_card_snapshots = makeStore([
+        { id: 'snap_mt', schoolId: SCHOOL, studentId: 'stu_1', termNumber: 2, cycle: 'MT', superseded: false, commentsLocked: true },
+      ]);
+      await expect(_publishedCommentsLockFor(SCHOOL, {}, 'stu_1', 2, 'ET')).resolves.toBe(false);
+      // The locked MT cycle itself is still correctly reported as locked.
+      await expect(_publishedCommentsLockFor(SCHOOL, {}, 'stu_1', 2, 'MT')).resolves.toBe(true);
+    });
+
+    test('a pre-existing, cycle-less locked snapshot does not block an explicit new cycle', async () => {
+      // Exactly what every already-published report looks like today —
+      // no `cycle` field at all. This is the core backward-compatibility
+      // guarantee: Trinitas's real locked Mid-Term reports must never
+      // block a brand-new End-of-Term cycle from being started.
+      mockStores.report_card_snapshots = makeStore([
+        { id: 'snap_legacy', schoolId: SCHOOL, studentId: 'stu_1', termNumber: 2, superseded: false, commentsLocked: true },
+      ]);
+      await expect(_publishedCommentsLockFor(SCHOOL, {}, 'stu_1', 2, 'ET')).resolves.toBe(false);
+      // The default/legacy cycle itself is still correctly reported as locked.
+      await expect(_publishedCommentsLockFor(SCHOOL, {}, 'stu_1', 2)).resolves.toBe(true);
+    });
+  });
 });
 
 describe('PUT /draft-comments/:studentId — blocked once the term\'s report card is published and locked', () => {
@@ -152,6 +187,21 @@ describe('PUT /draft-comments/:studentId — blocked once the term\'s report car
       .put('/report-cards/draft-comments/stu_1')
       .send({ termNumber: 2, classTeacherName: 'Mrs. Otieno' });
     expect(res.status).toBe(200);
+  });
+
+  test('a new cycle\'s comment can be written with NO unlock step, even while the default cycle is locked', async () => {
+    mockStores.report_card_snapshots = makeStore([
+      { id: 'snap_mt', schoolId: SCHOOL, studentId: 'stu_1', termNumber: 2, superseded: false, commentsLocked: true },
+    ]);
+    const res = await supertest(buildApp())
+      .put('/report-cards/draft-comments/stu_1')
+      .send({ termNumber: 2, cycle: 'ET', classTeacherName: 'Mrs. Otieno', classTeacherRemark: 'Great improvement this cycle.' });
+
+    expect(res.status).toBe(200);
+    const docs = mockStores.report_card_draft_comments._docs();
+    expect(docs).toHaveLength(1);
+    expect(docs[0].cycle).toBe('ET');
+    expect(docs[0].classTeacherRemark).toBe('Great improvement this cycle.');
   });
 });
 

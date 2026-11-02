@@ -86,6 +86,10 @@ function mockMatches(doc, filter) {
   for (const [key, cond] of Object.entries(filter)) {
     if (key === '$or') { if (!cond.some(sub => mockMatches(doc, sub))) return false; continue; }
     const val = doc[key];
+    // Real Mongo semantics: {k: null} matches an explicit null AND a
+    // missing field — needed for `cycle`, which defaults to null and is
+    // absent on every doc seeded before that field existed.
+    if (cond === null) { if (val !== null && val !== undefined) return false; continue; }
     if (cond && typeof cond === 'object' && !Array.isArray(cond)) {
       if ('$in' in cond && !cond.$in.includes(val)) return false;
       if ('$ne' in cond && val === cond.$ne) return false;
