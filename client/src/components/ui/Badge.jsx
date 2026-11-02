@@ -68,3 +68,13 @@ export function admissionStageBadge(stage) {
   };
   return <Badge variant={map[stage] ?? 'default'}>{stage}</Badge>;
 }
+
+// Assessment Analytics — Learners of Concern (2026-11): Priority is the
+// more urgent of the two levels (overall average below 50, or below 50
+// in 6+ subjects), Watch the lighter one — same red/amber severity
+// convention every other threshold pill on this page already uses.
+export function concernLevelBadge(level) {
+  const map = { priority: 'danger', watch: 'warning' };
+  const label = level === 'priority' ? 'Priority' : level === 'watch' ? 'Watch' : level;
+  return <Badge variant={map[level] ?? 'default'} dot>{label}</Badge>;
+}

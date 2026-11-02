@@ -6,6 +6,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.256.0] - 2026-11-02 - feat(analytics): Assessment Analytics gains automatic "Subjects of Concern" and "Learners of Concern" flagging
+
+Prompted by a direct comparison against a real school's own hand-built Mid-Term Examination Analysis report (Trinitas International School, 56 slides). Audit: the underlying mechanics (mean exclusion of ABS/EXM/missing, per-subject/class/stream/student breakdowns, PDF/CSV export) were already closely matched. What was missing was the one thing that actually makes that report useful to a Head of School — automatic concern flagging, not just sorted lists. Built to the source report's own stated methodology, as named constants (deliberately independent of the school-configurable `passMark`, since these are a fixed editorial convention, not something anyone asked to make configurable):
+
+- **Subject of Concern**: a subject is flagged in a class when its mean is below 60%, or 30%+ of its scores are below 50%. A new school-wide rollup (`subjectsOfConcern`) groups flagged {class, subject} pairs by subject, ranked by how many classes flagged it. The existing Subject/Class/Stream breakdown tables also gain a `concern` flag at their own grain, surfaced as a small "Concern" badge next to the name.
+- **Learner of Concern**: `Priority` — overall average below 50%, or below 50 in 6+ subjects. `Watch` — below 50 in 4-5 subjects, or below 50 in both "core" subjects. "English"/"Mathematics" have no dedicated field anywhere in this codebase (schools name subjects freely) — resolved by a first-match name/code pattern (`/\benglish\b/i`, `/\bmath(s|ematics)?\b/i`) against the school's own subjects; that one Watch path simply doesn't fire (no false positive, no crash) for a school that doesn't name them that way.
+- Both sections appear in the JSON response, the on-screen page (new `SubjectsOfConcernTable`/`LearnersOfConcernTable`, with a `concernLevelBadge` Priority/Watch pill), the exported PDF (two new auto-paginating tables), and the CSV export — honoring this feature's own stated invariant that the export can never show different numbers than the screen.
+- Two new compound aggregation facets (`byClassSubject`, `byStudentSubject`) added to the existing `$facet` pipeline at effectively zero extra query cost (same already-matched documents as every other facet). No new collections, no new routes, no new Settings surface.
+
+**Files:** `server/routes/assessment.js` (thresholds, `_aggregateAnalyticsPeriod`, `_buildAnalyticsReport`, `GET /analytics/export.pdf`), `client/src/pages/reports/AssessmentAnalyticsPage.jsx`, `client/src/components/ui/Badge.jsx` (`concernLevelBadge`), `server/__tests__/routes/assessment-analytics.test.js` (+11 new tests), `server/__tests__/routes/assessment-analytics-pdf.test.js` (+1 new test). Full suite: 376/376 suites, 4044/4044 tests. Browser verification not possible in this environment (no MongoDB reachable from this sandbox) — covered by the test suite only; recommend a manual walkthrough against real seed data before relying on it in production.
+
+---
+
 ## [v5.255.0] - 2026-11-02 - fix(grades,security): close the two RBAC/validation gaps v5.254.0's audit flagged but deliberately left open
 
 Direct follow-up request: v5.254.0's audit flagged `mark_submissions.assessmentType` having no enum validation and `GET /indicator-marks/definitions` having only coarse `grades:read` as **pre-existing** gaps, out of that audit's scope, and left both unfixed. Asked explicitly to close both now.

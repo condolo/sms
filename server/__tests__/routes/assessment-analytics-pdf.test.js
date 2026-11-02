@@ -57,21 +57,39 @@ function mockFakeMarksAggregate(pipeline) {
   const matchStage = pipeline.find(s => s.$match)?.$match ?? {};
   const matched = mockMarkDocs.filter(d => mockMatches(d, matchStage));
   const passMark = mockAcademicConfigDoc?.passMark ?? 40;
+  const CONCERN_SCORE_FLOOR = 50;
   function summarize(docs) {
     if (!docs.length) return null;
     const avgPct = Math.round((docs.reduce((s, d) => s + d.rawScore, 0) / docs.length) * 10) / 10;
     const passCount = docs.filter(d => d.rawScore >= passMark).length;
-    return { avgPct, count: docs.length, passRate: Math.round((passCount / docs.length) * 1000) / 10 };
+    const belowCount = docs.filter(d => d.rawScore < CONCERN_SCORE_FLOOR).length;
+    return {
+      avgPct, count: docs.length,
+      passRate: Math.round((passCount / docs.length) * 1000) / 10,
+      belowShare: Math.round((belowCount / docs.length) * 1000) / 10,
+    };
   }
   const bySubject = [...new Set(matched.map(d => d.subjectId))].map(subjectId => ({ subjectId, ...summarize(matched.filter(d => d.subjectId === subjectId)) }));
   const byClass   = [...new Set(matched.map(d => d.classId))].map(classId => ({ classId, ...summarize(matched.filter(d => d.classId === classId)) }));
   const byStream  = [...new Set(matched.map(d => d.streamId ?? null))].map(streamId => ({ streamId, ...summarize(matched.filter(d => (d.streamId ?? null) === streamId)) }));
   const byStudent = [...new Set(matched.map(d => d.studentId))].map(studentId => ({ studentId, ...summarize(matched.filter(d => d.studentId === studentId)) }));
+  const byClassSubjectKeys = [...new Set(matched.map(d => `${d.classId}::${d.subjectId}`))];
+  const byClassSubject = byClassSubjectKeys.map(k => {
+    const [classId, subjectId] = k.split('::');
+    const { passRate, ...rest } = summarize(matched.filter(d => d.classId === classId && d.subjectId === subjectId));
+    return { classId, subjectId, ...rest };
+  });
+  const byStudentSubjectKeys = [...new Set(matched.map(d => `${d.studentId}::${d.subjectId}`))];
+  const byStudentSubject = byStudentSubjectKeys.map(k => {
+    const [studentId, subjectId] = k.split('::');
+    const { passRate, ...rest } = summarize(matched.filter(d => d.studentId === studentId && d.subjectId === subjectId));
+    return { studentId, subjectId, ...rest };
+  });
   const overall = summarize(matched);
   const scores = matched.map(d => d.rawScore);
   const overallFull = overall ? { ...overall, minScore: scores.length ? Math.min(...scores) : null, maxScore: scores.length ? Math.max(...scores) : null, stdDev: 0, scores } : null;
   const distribution = _DIST_BOUNDARIES.slice(0, -1).map((b, i) => ({ _id: b, count: matched.filter(d => d.rawScore >= b && d.rawScore < _DIST_BOUNDARIES[i + 1]).length })).filter(x => x.count > 0);
-  return Promise.resolve([{ bySubject, byClass, byStream, byStudent, distribution, overall: overallFull ? [overallFull] : [] }]);
+  return Promise.resolve([{ bySubject, byClass, byStream, byStudent, byClassSubject, byStudentSubject, distribution, overall: overallFull ? [overallFull] : [] }]);
 }
 
 function mockFakeStudentSubjectsAggregate(pipeline) {
@@ -204,6 +222,22 @@ describe('GET /api/assessment/analytics/export.pdf', () => {
     const res = await supertest(buildApp())
       .get('/api/assessment/analytics/export.pdf')
       .query({ classId: 'cls_a', academicYearId: 'ay_2026', termNumber: 2, compareTo: 'none' });
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toBe('application/pdf');
+    expect(res.body.length).toBeGreaterThan(0);
+  });
+
+  // (2026-11) Subjects/Learners of Concern — renders without throwing when
+  // both sections have real flagged rows (a genuinely new code path: the
+  // two new `_drawAnalyticsTable` sections in the PDF route).
+  test('renders the Subjects of Concern and Learners of Concern sections without error when rows are flagged', async () => {
+    mockMarkDocs = [
+      { schoolId: SCHOOL, isPublished: true, academicYearId: 'ay_2026', termNumber: 2, classId: 'cls_a', subjectId: 'sub_math', studentId: 'stu_1', rawScore: 20 },
+      { schoolId: SCHOOL, isPublished: true, academicYearId: 'ay_2026', termNumber: 2, classId: 'cls_a', subjectId: 'sub_french', studentId: 'stu_1', rawScore: 90 },
+    ];
+    const res = await supertest(buildApp())
+      .get('/api/assessment/analytics/export.pdf')
+      .query({ academicYearId: 'ay_2026', termNumber: 2, compareTo: 'none' });
     expect(res.status).toBe(200);
     expect(res.headers['content-type']).toBe('application/pdf');
     expect(res.body.length).toBeGreaterThan(0);

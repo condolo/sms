@@ -20,6 +20,7 @@ import {
   ArrowLeft, Download, BarChart3, TrendingUp, TrendingDown, Scale, BookOpen, FileDown, AlertTriangle,
 } from 'lucide-react';
 import { assessment as assessmentApi, academicConfig as academicConfigApi, classSubjects as classSubjectsApi } from '@/api/client.js';
+import { Badge, concernLevelBadge } from '@/components/ui/Badge.jsx';
 import { Stat, Card, ChartTip } from './ReportsPrimitives.jsx';
 
 // A fixed, colorblind-validated 8-hue categorical palette (dataviz skill's
@@ -53,7 +54,7 @@ function _downloadCSV(rows, filename) {
 
 /* A sortable breakdown table — identical shape for subjects and classes,
    just a different id/name/label set. */
-function BreakdownTable({ title, rows, idKey, nameKey, nameLabel, compareTo, sort, setSort, emptyHint, barColor }) {
+function BreakdownTable({ title, rows, idKey, nameKey, nameLabel, compareTo, sort, setSort, emptyHint, barColor, concernKey }) {
   function doSort(col) {
     setSort(prev => (prev.col === col ? { col, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'desc' }));
   }
@@ -96,7 +97,12 @@ function BreakdownTable({ title, rows, idKey, nameKey, nameLabel, compareTo, sor
             <tbody>
               {sorted.map((row, i) => (
                 <tr key={row[idKey]} className={`border-b border-slate-50 ${i % 2 === 0 ? '' : 'bg-slate-50/40'}`}>
-                  <td className="py-2.5 px-3 font-medium text-slate-800">{row[nameKey]}</td>
+                  <td className="py-2.5 px-3 font-medium text-slate-800">
+                    <span className="inline-flex items-center gap-1.5">
+                      {row[nameKey]}
+                      {concernKey && row[concernKey] && <Badge variant="warning" size="sm">Concern</Badge>}
+                    </span>
+                  </td>
                   <td className="py-2.5 px-3 text-slate-600">{row.count}</td>
                   <td className="py-2.5 px-3">
                     <div className="flex items-center gap-2">
@@ -243,6 +249,162 @@ function EnrollmentCoverageTable({ classes, sort, setSort }) {
   );
 }
 
+/* Subjects of Concern — school-wide (or class-scoped, when a class filter
+   is already applied) rollup: which subjects are flagged in at least one
+   class, ranked by how many classes flagged them. Current period only
+   (a point-in-time flag list, same as the source methodology) — no
+   compareTo/delta column, unlike every BreakdownTable above. */
+function SubjectsOfConcernTable({ rows, sort, setSort }) {
+  function doSort(col) {
+    setSort(prev => (prev.col === col ? { col, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'desc' }));
+  }
+  const sorted = [...rows].sort((a, b) => {
+    const { col, dir } = sort;
+    const av = a[col], bv = b[col];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    const cmp = typeof av === 'string' ? av.localeCompare(bv) : av - bv;
+    return dir === 'asc' ? cmp : -cmp;
+  });
+  return (
+    <Card title="Subjects of Concern">
+      <p className="text-xs text-slate-400 -mt-2 mb-3">
+        A subject is flagged in a class when its mean is below 60%, or 30% or more of its scores are below 50%.
+      </p>
+      {rows.length > 0 && (
+        <div className="flex items-center gap-2 bg-red-50 border border-red-100 text-red-700 text-xs font-medium rounded-lg px-3 py-2 mb-3">
+          <AlertTriangle size={14} />
+          {rows.length} subject{rows.length !== 1 ? 's' : ''} flagged as a concern in at least one class.
+        </div>
+      )}
+      {rows.length === 0 ? (
+        <p className="text-center text-slate-400 text-sm py-12">No subjects flagged this period.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-100">
+                {[
+                  { col: 'subject',            label: 'Subject' },
+                  { col: 'classesFlaggedCount', label: 'Classes Flagged' },
+                  { col: 'worstClassName',     label: 'Worst Class' },
+                  { col: 'worstAvgPct',        label: 'Worst Avg %' },
+                  { col: 'worstBelowShare',    label: 'Below 50%' },
+                ].map(({ col, label }) => (
+                  <th
+                    key={col}
+                    onClick={() => doSort(col)}
+                    className="text-left py-2 px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider cursor-pointer select-none hover:text-slate-900"
+                  >
+                    {label}
+                    {sort.col === col && <span className="ml-1 text-violet-600">{sort.dir === 'asc' ? '↑' : '↓'}</span>}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((row, i) => (
+                <tr key={row.subjectId} className={`border-b border-slate-50 ${i % 2 === 0 ? '' : 'bg-slate-50/40'}`}>
+                  <td className="py-2.5 px-3 font-medium text-slate-800">{row.subject}</td>
+                  <td className="py-2.5 px-3 text-slate-600">{row.classesFlaggedCount}</td>
+                  <td className="py-2.5 px-3 text-slate-700">{row.worstClassName}</td>
+                  <td className="py-2.5 px-3 text-slate-700">{row.worstAvgPct}%</td>
+                  <td className="py-2.5 px-3">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700">
+                      {row.worstBelowShare}%
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/* Learners of Concern — Priority/Watch classification (see
+   server/routes/assessment.js's _buildAnalyticsReport for the exact rule).
+   The Class column is only useful across multiple classes; hidden once a
+   classId filter already narrows everything to one class. */
+function LearnersOfConcernTable({ rows, showClassColumn, sort, setSort }) {
+  function doSort(col) {
+    setSort(prev => (prev.col === col ? { col, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' }));
+  }
+  const sorted = [...rows].sort((a, b) => {
+    const { col, dir } = sort;
+    const av = a[col], bv = b[col];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    const cmp = typeof av === 'string' ? av.localeCompare(bv) : av - bv;
+    return dir === 'asc' ? cmp : -cmp;
+  });
+  const priorityCount = rows.filter(r => r.level === 'priority').length;
+  const watchCount = rows.length - priorityCount;
+  const columns = [
+    { col: 'studentName', label: 'Learner' },
+    ...(showClassColumn ? [{ col: 'className', label: 'Class' }] : []),
+    { col: 'level',       label: 'Level' },
+    { col: 'overallAvg',  label: 'Overall Avg %' },
+    { col: 'belowCount',  label: 'Subjects Below 50' },
+    { col: 'subjectsBelowLabel', label: 'Subjects' },
+  ];
+  return (
+    <Card title="Learners of Concern">
+      <p className="text-xs text-slate-400 -mt-2 mb-3">
+        Priority: overall average below 50%, or below 50 in 6 or more subjects. Watch: below 50 in 4-5 subjects, or below 50 in both core subjects (English and Mathematics, detected by name).
+      </p>
+      {rows.length > 0 && (
+        <div className="flex items-center gap-2 bg-red-50 border border-red-100 text-red-700 text-xs font-medium rounded-lg px-3 py-2 mb-3">
+          <AlertTriangle size={14} />
+          {rows.length} learner{rows.length !== 1 ? 's' : ''} flagged — {priorityCount} Priority, {watchCount} Watch.
+        </div>
+      )}
+      {rows.length === 0 ? (
+        <p className="text-center text-slate-400 text-sm py-12">No learners flagged this period.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-100">
+                {columns.map(({ col, label }) => (
+                  <th
+                    key={col}
+                    onClick={() => doSort(col)}
+                    className="text-left py-2 px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider cursor-pointer select-none hover:text-slate-900"
+                  >
+                    {label}
+                    {sort.col === col && <span className="ml-1 text-violet-600">{sort.dir === 'asc' ? '↑' : '↓'}</span>}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((row, i) => (
+                <tr key={row.studentId} className={`border-b border-slate-50 ${i % 2 === 0 ? '' : 'bg-slate-50/40'}`}>
+                  <td className="py-2.5 px-3 font-medium text-slate-800">
+                    {row.studentName}{row.admissionNo ? ` (${row.admissionNo})` : ''}
+                  </td>
+                  {showClassColumn && <td className="py-2.5 px-3 text-slate-700">{row.className}</td>}
+                  <td className="py-2.5 px-3">{concernLevelBadge(row.level)}</td>
+                  <td className="py-2.5 px-3 text-slate-700">{row.overallAvg}%</td>
+                  <td className="py-2.5 px-3 text-slate-600">{row.belowCount}</td>
+                  <td className="py-2.5 px-3 text-slate-500 max-w-[220px] truncate" title={row.subjectsBelowLabel}>
+                    {row.subjectsBelowLabel}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export default function AssessmentAnalyticsPage() {
   const navigate = useNavigate();
   const [classId,    setClassId]    = useState('');
@@ -253,6 +415,8 @@ export default function AssessmentAnalyticsPage() {
   const [enrollSort,  setEnrollSort]  = useState({ col: 'gap', dir: 'desc' });
   const [streamSort,  setStreamSort]  = useState({ col: 'stream', dir: 'asc' });
   const [studentSort, setStudentSort] = useState({ col: 'avgPct', dir: 'asc' });
+  const [concernSort, setConcernSort] = useState({ col: 'classesFlaggedCount', dir: 'desc' });
+  const [learnerSort, setLearnerSort] = useState({ col: 'overallAvg', dir: 'asc' });
   const [exportingPdf, setExportingPdf] = useState(false);
   const [pdfError,     setPdfError]     = useState('');
   // Year/term — left blank by default so the server picks "now" the same
@@ -322,12 +486,12 @@ export default function AssessmentAnalyticsPage() {
   const subjectRows = subjectsFiltered.map(s => ({
     subjectId: s.subjectId, subject: s.subject,
     count: s.current.count, avgPct: s.current.avgPct, passRate: s.current.passRate,
-    delta: s.delta,
+    delta: s.delta, belowShare: s.belowShare, concern: s.concern,
   }));
   const classRows = classesRaw.map(c => ({
     classId: c.classId, className: c.className,
     count: c.current.count, avgPct: c.current.avgPct, passRate: c.current.passRate,
-    delta: c.delta,
+    delta: c.delta, belowShare: c.belowShare, concern: c.concern,
   }));
   // Streams: only ever populated server-side once a class is selected
   // (see _buildAnalyticsReport — bare stream names are ambiguous across
@@ -350,6 +514,22 @@ export default function AssessmentAnalyticsPage() {
     studentName: s.admissionNo ? `${s.studentName} (${s.admissionNo})` : s.studentName,
     count: s.current.count, avgPct: s.current.avgPct, passRate: s.current.passRate,
     delta: s.delta,
+  }));
+  // Subjects/Learners of concern — whole-report-scope summaries, current
+  // period only (no compareTo/delta — see server's own comment on why).
+  const subjectsOfConcernRaw = data.subjectsOfConcern ?? [];
+  const concernRows = subjectsOfConcernRaw.map(s => ({
+    subjectId: s.subjectId, subject: s.subject,
+    classesFlaggedCount: s.classesFlaggedCount,
+    worstClassName: s.classesFlagged[0]?.className ?? '—',
+    worstAvgPct: s.classesFlagged[0]?.avgPct ?? null,
+    worstBelowShare: s.worstBelowShare,
+  }));
+  const learnersOfConcernRaw = data.learnersOfConcern ?? [];
+  const learnerRows = learnersOfConcernRaw.map(s => ({
+    studentId: s.studentId, studentName: s.studentName, admissionNo: s.admissionNo,
+    className: s.className, level: s.level, overallAvg: s.overallAvg, belowCount: s.belowCount,
+    subjectsBelowLabel: s.subjectsBelow.join(', '),
   }));
   const selectedSubjectName = subjectOptions.find(s => s.id === subjectId)?.name ?? '';
   const selectedClassName = availableClasses.find(c => c.id === classId)?.name ?? '';
@@ -383,6 +563,20 @@ export default function AssessmentAnalyticsPage() {
         [],
         ['Stream', 'Entries', 'Average %', 'Change', 'Pass Rate %'],
         ...streamRows.map(r => [r.stream, r.count, r.avgPct, r.delta ?? '—', r.passRate]),
+      );
+    }
+    if (concernRows.length) {
+      rows.push(
+        [],
+        ['Subject of Concern', 'Classes Flagged', 'Worst Class', 'Worst Avg %', 'Worst Below-50 %'],
+        ...concernRows.map(r => [r.subject, r.classesFlaggedCount, r.worstClassName, r.worstAvgPct, r.worstBelowShare]),
+      );
+    }
+    if (learnerRows.length) {
+      rows.push(
+        [],
+        ['Learner of Concern', 'Class', 'Level', 'Overall Avg %', 'Subjects Below 50', 'Subjects'],
+        ...learnerRows.map(r => [r.studentName, r.className, r.level, r.overallAvg, r.belowCount, r.subjectsBelowLabel]),
       );
     }
     _downloadCSV(rows, `assessment_analytics_${date}.csv`);
@@ -618,6 +812,7 @@ export default function AssessmentAnalyticsPage() {
             compareTo={compareTo} sort={subjectSort} setSort={setSubjectSort}
             emptyHint="No assessment marks recorded yet for this period. Enter marks via the Markbook."
             barColor={row => subjectColor(row.subjectId)}
+            concernKey="concern"
           />
 
           <BreakdownTable
@@ -625,7 +820,11 @@ export default function AssessmentAnalyticsPage() {
             rows={classRows} idKey="classId" nameKey="className" nameLabel="Class"
             compareTo={compareTo} sort={classSort} setSort={setClassSort}
             emptyHint="No assessment marks recorded yet for this period."
+            concernKey="concern"
           />
+
+          <SubjectsOfConcernTable rows={concernRows} sort={concernSort} setSort={setConcernSort} />
+          <LearnersOfConcernTable rows={learnerRows} showClassColumn={!classId} sort={learnerSort} setSort={setLearnerSort} />
 
           {/* Only shown once a class is selected — see streamRows' own
               comment (bare stream names are ambiguous across classes). */}

@@ -1819,8 +1819,25 @@ function _periodLabel(p) {
 const _DISTRIBUTION_BOUNDARIES = [0, 40, 50, 60, 70, 80, 90, 101];
 const _DISTRIBUTION_LABELS     = ['0–39', '40–49', '50–59', '60–69', '70–79', '80–89', '90–100'];
 
+// Concern-flagging thresholds (2026-11) — mirror, field for field, the
+// methodology stated in Trinitas International School's own Mid-Term
+// Examination Analysis report ("How the figures were worked out"): a
+// fixed editorial convention from that report, not a school-configurable
+// setting — deliberately independent of `passMark` (academic_config,
+// defaults 40), which stays exactly what it was for `passRate` everywhere
+// else in this file.
+const CONCERN_SCORE_FLOOR            = 50; // "below 50" everywhere below
+const SUBJECT_CONCERN_MEAN_FLOOR     = 60; // subject mean < 60 ⇒ concern
+const SUBJECT_CONCERN_SHARE_PCT      = 30; // ≥30% of scores < 50 ⇒ concern
+const LEARNER_PRIORITY_AVG_FLOOR     = 50; // overall average < 50 ⇒ Priority
+const LEARNER_PRIORITY_SUBJECT_COUNT = 6;  // below 50 in ≥6 subjects ⇒ Priority
+const LEARNER_WATCH_SUBJECT_COUNT_MIN = 4; // below 50 in 4-5 subjects ⇒ Watch
+const LEARNER_WATCH_SUBJECT_COUNT_MAX = 5;
+
 async function _aggregateAnalyticsPeriod(Marks, baseFilter, academicYearId, termNumber, passMark) {
-  if (!academicYearId || !termNumber) return { bySubject: [], byClass: [], byStream: [], byStudent: [], distribution: [], overall: null };
+  if (!academicYearId || !termNumber) {
+    return { bySubject: [], byClass: [], byStream: [], byStudent: [], byClassSubject: [], byStudentSubject: [], distribution: [], overall: null };
+  }
   // rawScore is null for a non-present mark state (ABS/MIS/EXM/INC — see
   // POST /marks: "non-present mark state carries no score, nulled server-
   // side"), a real and expected value, not a data error. Live-confirmed
@@ -1832,15 +1849,37 @@ async function _aggregateAnalyticsPeriod(Marks, baseFilter, academicYearId, term
   const _byDimension = (field) => ([
     { $group: {
         _id: `$${field}`,
-        avgPct:    { $avg: '$rawScore' },
-        count:     { $sum: 1 },
-        passCount: { $sum: { $cond: [{ $gte: ['$rawScore', passMark] }, 1, 0] } },
+        avgPct:     { $avg: '$rawScore' },
+        count:      { $sum: 1 },
+        passCount:  { $sum: { $cond: [{ $gte: ['$rawScore', passMark] }, 1, 0] } },
+        belowCount: { $sum: { $cond: [{ $lt: ['$rawScore', CONCERN_SCORE_FLOOR] }, 1, 0] } },
     }},
     { $project: {
-        [field]:   '$_id', _id: 0,
-        avgPct:    { $round: ['$avgPct', 1] },
-        count:     1,
-        passRate:  { $round: [{ $multiply: [{ $divide: ['$passCount', '$count'] }, 100] }, 1] },
+        [field]:    '$_id', _id: 0,
+        avgPct:     { $round: ['$avgPct', 1] },
+        count:      1,
+        passRate:   { $round: [{ $multiply: [{ $divide: ['$passCount', '$count'] }, 100] }, 1] },
+        belowShare: { $round: [{ $multiply: [{ $divide: ['$belowCount', '$count'] }, 100] }, 1] },
+    }},
+  ]);
+  // Compound-key grouping — needed only for concern flagging: Subject-of-
+  // concern needs {classId,subjectId} (which classes flagged which
+  // subjects); Learner-of-concern needs {studentId,subjectId} (how many of
+  // a student's subjects are below 50). No passRate at this grain (nothing
+  // reads it); same already-matched documents as every other facet below —
+  // "free", same cost precedent as byStream/byStudent.
+  const _byDimensionPair = (f1, f2) => ([
+    { $group: {
+        _id: { [f1]: `$${f1}`, [f2]: `$${f2}` },
+        avgPct:     { $avg: '$rawScore' },
+        count:      { $sum: 1 },
+        belowCount: { $sum: { $cond: [{ $lt: ['$rawScore', CONCERN_SCORE_FLOOR] }, 1, 0] } },
+    }},
+    { $project: {
+        [f1]: `$_id.${f1}`, [f2]: `$_id.${f2}`, _id: 0,
+        avgPct:     { $round: ['$avgPct', 1] },
+        count:      1,
+        belowShare: { $round: [{ $multiply: [{ $divide: ['$belowCount', '$count'] }, 100] }, 1] },
     }},
   ]);
   const [result] = await Marks.aggregate([
@@ -1863,6 +1902,8 @@ async function _aggregateAnalyticsPeriod(Marks, baseFilter, academicYearId, term
         // enforces by only reading this facet off a SEPARATE, subject-
         // scoped call, never off the main unscoped one.
         byStudent: _byDimension('studentId'),
+        byClassSubject:   _byDimensionPair('classId', 'subjectId'),
+        byStudentSubject: _byDimensionPair('studentId', 'subjectId'),
         distribution: [
           { $bucket: { groupBy: '$rawScore', boundaries: _DISTRIBUTION_BOUNDARIES, output: { count: { $sum: 1 } } } },
         ],
@@ -1910,6 +1951,7 @@ async function _aggregateAnalyticsPeriod(Marks, baseFilter, academicYearId, term
   return {
     bySubject: result?.bySubject ?? [], byClass: result?.byClass ?? [],
     byStream: result?.byStream ?? [], byStudent: result?.byStudent ?? [],
+    byClassSubject: result?.byClassSubject ?? [], byStudentSubject: result?.byStudentSubject ?? [],
     distribution, overall,
   };
 }
@@ -1972,6 +2014,7 @@ async function _buildAnalyticsReport(req) {
       scope: isWholeSchoolView ? 'whole_school' : 'assigned',
       currentPeriod: null, previousPeriod: null, passMark,
       overall: null, distribution: [], subjects: [], classes: [], streams: [], students: [], availableClasses: [],
+      subjectsOfConcern: [], learnersOfConcern: [],
     };
   }
 
@@ -2003,7 +2046,7 @@ async function _buildAnalyticsReport(req) {
   const Marks = tenantModel('assessment_marks', ctx);
   const [currentAgg, previousAgg] = await Promise.all([
     _aggregateAnalyticsPeriod(Marks, baseFilter, currentYearId, currentTermNumber, passMark),
-    previous ? _aggregateAnalyticsPeriod(Marks, baseFilter, previous.year.id ?? String(previous.year._id), previous.termNumber, passMark) : Promise.resolve({ bySubject: [], byClass: [], byStream: [], byStudent: [], distribution: [], overall: null }),
+    previous ? _aggregateAnalyticsPeriod(Marks, baseFilter, previous.year.id ?? String(previous.year._id), previous.termNumber, passMark) : Promise.resolve({ bySubject: [], byClass: [], byStream: [], byStudent: [], byClassSubject: [], byStudentSubject: [], distribution: [], overall: null }),
   ]);
 
   // Resolve subject display names for everything either period touched
@@ -2014,6 +2057,16 @@ async function _buildAnalyticsReport(req) {
   const subjectNameMap = Object.fromEntries(subjectDocs.map(s => [s.id, s.name]));
   const prevBySubject = Object.fromEntries(previousAgg.bySubject.map(r => [r.subjectId, r]));
 
+  // Subject/Class/Stream "of concern" at their own grain — mirrors the
+  // deck's own Subject Ranking Table "Status" column: a subject (or a
+  // class, or a stream) whose mean is below SUBJECT_CONCERN_MEAN_FLOOR, or
+  // whose share of scores under CONCERN_SCORE_FLOOR is at or above
+  // SUBJECT_CONCERN_SHARE_PCT, is flagged. Independent of the school-wide
+  // subjectsOfConcern rollup below (which flags at the finer {class,
+  // subject} grain) — this is the cheap inline badge on the tables already
+  // rendered for every row.
+  const _isConcern = (cur) => cur.avgPct < SUBJECT_CONCERN_MEAN_FLOOR || (cur.belowShare ?? 0) >= SUBJECT_CONCERN_SHARE_PCT;
+
   const subjects = currentAgg.bySubject
     .map(cur => {
       const prev = prevBySubject[cur.subjectId] ?? null;
@@ -2023,6 +2076,8 @@ async function _buildAnalyticsReport(req) {
         current:   { avgPct: cur.avgPct, count: cur.count, passRate: cur.passRate },
         previous:  prev ? { avgPct: prev.avgPct, count: prev.count, passRate: prev.passRate } : null,
         delta:     prev ? Math.round((cur.avgPct - prev.avgPct) * 10) / 10 : null,
+        belowShare: cur.belowShare ?? 0,
+        concern:    _isConcern(cur),
       };
     })
     .sort((a, b) => a.current.avgPct - b.current.avgPct); // weakest subject first
@@ -2063,6 +2118,8 @@ async function _buildAnalyticsReport(req) {
         current:   { avgPct: cur.avgPct, count: cur.count, passRate: cur.passRate },
         previous:  prev ? { avgPct: prev.avgPct, count: prev.count, passRate: prev.passRate } : null,
         delta:     prev ? Math.round((cur.avgPct - prev.avgPct) * 10) / 10 : null,
+        belowShare: cur.belowShare ?? 0,
+        concern:    _isConcern(cur),
       };
     })
     .sort((a, b) => a.current.avgPct - b.current.avgPct); // weakest class first
@@ -2121,6 +2178,8 @@ async function _buildAnalyticsReport(req) {
           current:  { avgPct: cur.avgPct, count: cur.count, passRate: cur.passRate },
           previous: prev ? { avgPct: prev.avgPct, count: prev.count, passRate: prev.passRate } : null,
           delta:    prev ? Math.round((cur.avgPct - prev.avgPct) * 10) / 10 : null,
+          belowShare: cur.belowShare ?? 0,
+          concern:    _isConcern(cur),
         };
       })
       .sort((a, b) => a.current.avgPct - b.current.avgPct); // weakest stream first
@@ -2165,6 +2224,109 @@ async function _buildAnalyticsReport(req) {
       .sort((a, b) => a.current.avgPct - b.current.avgPct); // weakest student first
   }
 
+  // Subjects of concern — school-wide rollup, current period only (a
+  // point-in-time flag list, like the source report, not a trend).
+  // Flags at the {classId,subjectId} grain (byClassSubject), then groups
+  // flagged rows by subjectId. Reuses subjectNameMap/classNameMap built
+  // above — byClassSubject's id sets are subsets of bySubject's/byClass's
+  // (same $match, finer grouping), so no new name-lookup query is needed.
+  // Ranked by classesFlaggedCount desc, then worstBelowShare desc — a
+  // deterministic, explainable ordering, not a reproduction of the source
+  // report's own hand-curated P1-P5 priority labels (which weren't a
+  // clean function of classes-flagged alone, confirmed by inspecting the
+  // report itself — English/Music both flagged 6 classes but ranked P1/P3).
+  const flaggedClassSubjects = (currentAgg.byClassSubject ?? [])
+    .filter(_isConcern);
+  const bySubjectConcern = new Map();
+  for (const row of flaggedClassSubjects) {
+    if (!bySubjectConcern.has(row.subjectId)) bySubjectConcern.set(row.subjectId, []);
+    bySubjectConcern.get(row.subjectId).push({
+      classId: row.classId,
+      className: classNameMap[row.classId] ?? row.classId,
+      avgPct: row.avgPct,
+      belowShare: row.belowShare ?? 0,
+    });
+  }
+  const subjectsOfConcern = [...bySubjectConcern.entries()]
+    .map(([subjectId, classesFlagged]) => {
+      classesFlagged.sort((a, b) => a.avgPct - b.avgPct); // weakest class first
+      return {
+        subjectId,
+        subject: subjectNameMap[subjectId] ?? subjectId,
+        classesFlaggedCount: classesFlagged.length,
+        classesFlagged,
+        worstBelowShare: Math.max(...classesFlagged.map(c => c.belowShare)),
+      };
+    })
+    .sort((a, b) => b.classesFlaggedCount - a.classesFlaggedCount || b.worstBelowShare - a.worstBelowShare);
+
+  // Learners of concern — same methodology as the source report:
+  //   Priority: overall average < 50, OR below 50 in ≥6 subjects.
+  //   Watch:    below 50 in 4-5 subjects, OR below 50 in BOTH English
+  //             and Mathematics specifically.
+  // "English"/"Mathematics" have no dedicated field anywhere in this
+  // codebase (subjects.js's SubjectSchema has no isCore/category —
+  // confirmed) — resolved here by a first-match name/code pattern against
+  // this period's own `subjects` list; the "both core subjects" Watch path
+  // simply never fires (no false positive, no crash) when a school's
+  // subjects aren't named that way, since the belowCount-based paths above
+  // it are unaffected by this.
+  const englishSubject = subjects.find(s => /\benglish\b/i.test(s.subject));
+  const mathSubject     = subjects.find(s => /\bmath(s|ematics)?\b/i.test(s.subject));
+  const coreSubjectIds  = englishSubject && mathSubject ? [englishSubject.subjectId, mathSubject.subjectId] : [];
+
+  const studentSubjectRows = currentAgg.byStudentSubject ?? [];
+  const byStudentConcern = new Map();
+  for (const row of studentSubjectRows) {
+    if (!byStudentConcern.has(row.studentId)) byStudentConcern.set(row.studentId, []);
+    byStudentConcern.get(row.studentId).push(row);
+  }
+  const concernStudentIds = [...byStudentConcern.keys()];
+  const concernStudentDocs = concernStudentIds.length
+    ? await tenantModel('students', ctx).find({ schoolId, id: { $in: concernStudentIds } }).select('id firstName lastName admissionNumber classId').lean()
+    : [];
+  const concernStudentInfoMap = Object.fromEntries(concernStudentDocs.map(s => [s.id, s]));
+
+  const learnersOfConcern = concernStudentIds
+    .map(studentId => {
+      const rows = byStudentConcern.get(studentId);
+      const subjectsBelow = rows.filter(r => r.avgPct < CONCERN_SCORE_FLOOR);
+      const overallAvg = Math.round((rows.reduce((s, r) => s + r.avgPct, 0) / rows.length) * 10) / 10;
+      const belowCount = subjectsBelow.length;
+      const hasBothCoreBelow = coreSubjectIds.length === 2
+        && coreSubjectIds.every(id => subjectsBelow.some(r => r.subjectId === id));
+
+      let level = null;
+      if (overallAvg < LEARNER_PRIORITY_AVG_FLOOR || belowCount >= LEARNER_PRIORITY_SUBJECT_COUNT) {
+        level = 'priority';
+      } else if (
+        (belowCount >= LEARNER_WATCH_SUBJECT_COUNT_MIN && belowCount <= LEARNER_WATCH_SUBJECT_COUNT_MAX)
+        || hasBothCoreBelow
+      ) {
+        level = 'watch';
+      }
+      if (!level) return null;
+
+      const info = concernStudentInfoMap[studentId];
+      return {
+        studentId,
+        studentName: info ? `${info.firstName} ${info.lastName}`.trim() : studentId,
+        admissionNo: info?.admissionNumber || '',
+        classId:     info?.classId ?? null,
+        className:   info?.classId ? (classNameMap[info.classId] ?? info.classId) : '',
+        level,
+        overallAvg,
+        subjectCount: rows.length,
+        belowCount,
+        subjectsBelow: subjectsBelow.map(r => subjectNameMap[r.subjectId] ?? r.subjectId).sort(),
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => {
+      if (a.level !== b.level) return a.level === 'priority' ? -1 : 1; // Priority first
+      return a.overallAvg - b.overallAvg; // weakest average first within each tier
+    });
+
   return {
     scope:            isWholeSchoolView ? 'whole_school' : 'assigned',
     currentPeriod:    _periodLabel({ year: currentYear, termNumber: currentTermNumber }),
@@ -2177,6 +2339,8 @@ async function _buildAnalyticsReport(req) {
     streams,
     students,
     availableClasses: classDocs.map(c => ({ id: c.id ?? String(c._id), name: c.name })),
+    subjectsOfConcern,
+    learnersOfConcern,
   };
 }
 
@@ -2472,6 +2636,30 @@ router.get('/analytics/export.pdf', authMiddleware, PLAN, MODGATE, rbac('grades'
     });
     y += 10;
 
+    // ── Subjects of Concern ─────────────────────────────────────
+    // Same gating as the on-screen section: nothing shown when the list
+    // is empty, never a different number than the screen.
+    if (report.subjectsOfConcern.length) {
+      doc.font('Helvetica-Bold').fontSize(10).fillColor('#1e293b').text('Subjects of Concern', margin, y);
+      y = doc.y + 2;
+      doc.font('Helvetica').fontSize(7.5).fillColor('#94a3b8')
+        .text(`A subject is flagged in a class when its mean is below ${SUBJECT_CONCERN_MEAN_FLOOR}%, or ${SUBJECT_CONCERN_SHARE_PCT}% or more of its scores are below ${CONCERN_SCORE_FLOOR}%.`, margin, y, { width: contentW });
+      y = doc.y + 6;
+      y = _drawAnalyticsTable(doc, {
+        x: margin, y, width: contentW, margin,
+        columns: [
+          { label: 'SUBJECT',         w: contentW * 0.28, value: r => sanitisePdfStr(r.subject) },
+          { label: 'CLASSES FLAGGED', w: contentW * 0.18, value: r => r.classesFlaggedCount, align: 'right' },
+          { label: 'WORST CLASS',     w: contentW * 0.22, value: r => sanitisePdfStr(r.classesFlagged[0]?.className ?? '—') },
+          { label: 'WORST AVG %',     w: contentW * 0.16, value: r => `${r.classesFlagged[0]?.avgPct ?? '—'}%`, align: 'right', color: r => pctColor(r.classesFlagged[0]?.avgPct) },
+          { label: 'BELOW 50%',       w: contentW * 0.16, value: r => `${r.worstBelowShare}%`, align: 'right', color: () => '#dc2626' },
+        ],
+        rows: report.subjectsOfConcern,
+        emptyText: 'No subjects flagged this period.',
+      });
+      y += 10;
+    }
+
     // ── Average Score % by Stream / Performance by Stream ──────
     // Only present when the report was requested for a specific class
     // (see _buildAnalyticsReport — bare stream names are ambiguous
@@ -2504,6 +2692,29 @@ router.get('/analytics/export.pdf', authMiddleware, PLAN, MODGATE, rbac('grades'
         ],
         rows: report.streams,
         emptyText: 'No assessment marks recorded yet for this period.',
+      });
+      y += 10;
+    }
+
+    // ── Learners of Concern ─────────────────────────────────────
+    if (report.learnersOfConcern.length) {
+      doc.font('Helvetica-Bold').fontSize(10).fillColor('#1e293b').text('Learners of Concern', margin, y);
+      y = doc.y + 2;
+      doc.font('Helvetica').fontSize(7.5).fillColor('#94a3b8')
+        .text(`Priority: overall average below ${LEARNER_PRIORITY_AVG_FLOOR}%, or below 50 in ${LEARNER_PRIORITY_SUBJECT_COUNT} or more subjects. Watch: below 50 in ${LEARNER_WATCH_SUBJECT_COUNT_MIN}-${LEARNER_WATCH_SUBJECT_COUNT_MAX} subjects, or below 50 in both core subjects.`, margin, y, { width: contentW });
+      y = doc.y + 6;
+      y = _drawAnalyticsTable(doc, {
+        x: margin, y, width: contentW, margin,
+        columns: [
+          { label: 'LEARNER',  w: contentW * 0.22, value: r => sanitisePdfStr(r.studentName) },
+          { label: 'CLASS',    w: contentW * 0.16, value: r => sanitisePdfStr(r.className) },
+          { label: 'LEVEL',    w: contentW * 0.12, value: r => r.level === 'priority' ? 'Priority' : 'Watch', color: r => (r.level === 'priority' ? '#dc2626' : '#b45309') },
+          { label: 'AVG %',    w: contentW * 0.12, value: r => `${r.overallAvg}%`, align: 'right', color: r => pctColor(r.overallAvg) },
+          { label: 'BELOW 50', w: contentW * 0.12, value: r => r.belowCount, align: 'right' },
+          { label: 'SUBJECTS', w: contentW * 0.26, value: r => sanitisePdfStr(_truncatePdfLabel(r.subjectsBelow.join(', '), 40)) },
+        ],
+        rows: report.learnersOfConcern,
+        emptyText: 'No learners flagged this period.',
       });
       y += 10;
     }

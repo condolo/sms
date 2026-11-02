@@ -86,11 +86,17 @@ function mockFakeMarksAggregate(pipeline) {
   const matched = mockMarkDocs.filter(d => mockMatchesFilter(d, matchStage));
   const passMark = mockAcademicConfigDoc?.passMark ?? 40;
 
+  const CONCERN_SCORE_FLOOR = 50;
   function summarize(docs) {
     if (docs.length === 0) return null;
     const avgPct = Math.round((docs.reduce((s, d) => s + d.rawScore, 0) / docs.length) * 10) / 10;
     const passCount = docs.filter(d => d.rawScore >= passMark).length;
-    return { avgPct, count: docs.length, passRate: Math.round((passCount / docs.length) * 1000) / 10 };
+    const belowCount = docs.filter(d => d.rawScore < CONCERN_SCORE_FLOOR).length;
+    return {
+      avgPct, count: docs.length,
+      passRate: Math.round((passCount / docs.length) * 1000) / 10,
+      belowShare: Math.round((belowCount / docs.length) * 1000) / 10,
+    };
   }
 
   const bySubjectIds = [...new Set(matched.map(d => d.subjectId))];
@@ -104,6 +110,23 @@ function mockFakeMarksAggregate(pipeline) {
   const byStream = byStreamIds.map(streamId => ({ streamId, ...summarize(matched.filter(d => (d.streamId ?? null) === streamId)) }));
   const byStudentIds = [...new Set(matched.map(d => d.studentId))];
   const byStudent = byStudentIds.map(studentId => ({ studentId, ...summarize(matched.filter(d => d.studentId === studentId)) }));
+  // Compound-key facets — concern flagging only. Shape matches the real
+  // pipeline's _byDimensionPair: {f1, f2, avgPct, count, belowShare}, no
+  // passRate at this grain.
+  const byClassSubjectKeys = [...new Set(matched.map(d => `${d.classId}::${d.subjectId}`))];
+  const byClassSubject = byClassSubjectKeys.map(k => {
+    const [classId, subjectId] = k.split('::');
+    const docs = matched.filter(d => d.classId === classId && d.subjectId === subjectId);
+    const { passRate, ...rest } = summarize(docs);
+    return { classId, subjectId, ...rest };
+  });
+  const byStudentSubjectKeys = [...new Set(matched.map(d => `${d.studentId}::${d.subjectId}`))];
+  const byStudentSubject = byStudentSubjectKeys.map(k => {
+    const [studentId, subjectId] = k.split('::');
+    const docs = matched.filter(d => d.studentId === studentId && d.subjectId === subjectId);
+    const { passRate, ...rest } = summarize(docs);
+    return { studentId, subjectId, ...rest };
+  });
   const overall = summarize(matched);
 
   const scores = matched.map(d => d.rawScore);
@@ -122,7 +145,7 @@ function mockFakeMarksAggregate(pipeline) {
     }))
     .filter(b => b.count > 0);
 
-  return Promise.resolve([{ bySubject, byClass, byStream, byStudent, distribution, overall: overallFull ? [overallFull] : [] }]);
+  return Promise.resolve([{ bySubject, byClass, byStream, byStudent, byClassSubject, byStudentSubject, distribution, overall: overallFull ? [overallFull] : [] }]);
 }
 
 let mockAssignmentRows = [];
@@ -533,5 +556,188 @@ describe('GET /api/assessment/analytics — per-student breakdown (2026-11)', ()
     // Both subjects still present — studentSubjectId must not leak into
     // the shared baseFilter the Subjects table's own aggregation uses.
     expect(res.body.data.subjects.map(s => s.subjectId).sort()).toEqual(['sub_eng', 'sub_math']);
+  });
+});
+
+describe('GET /api/assessment/analytics — Subjects/Learners of Concern (2026-11)', () => {
+  test('empty school (no academic years) returns both new arrays as []', async () => {
+    mockYears = [];
+    const res = await supertest(buildApp()).get('/api/assessment/analytics');
+    expect(res.status).toBe(200);
+    expect(res.body.data.subjectsOfConcern).toEqual([]);
+    expect(res.body.data.learnersOfConcern).toEqual([]);
+  });
+
+  test('a subject mean of exactly 60 is NOT flagged — the rule is strictly < 60', async () => {
+    // Two marks, avg exactly 60, none below 50 — neither threshold crossed.
+    mockMarkDocs = [
+      mark({ subjectId: 'sub_math', classId: 'cls_a', rawScore: 50 }),
+      mark({ subjectId: 'sub_math', classId: 'cls_a', rawScore: 70 }),
+    ];
+    const res = await supertest(buildApp()).get('/api/assessment/analytics').query({ academicYearId: 'ay_2026', termNumber: 2, compareTo: 'none' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.subjectsOfConcern).toEqual([]);
+    expect(res.body.data.subjects.find(s => s.subjectId === 'sub_math').concern).toBe(false);
+  });
+
+  test('a belowShare of exactly 30% IS flagged — the rule is >= 30, even with mean >= 60', async () => {
+    // 3 of 10 scores below 50 (exactly 30%); avg stays 68 (>= 60) so the
+    // mean rule alone would not fire — isolates the share-based path.
+    mockMarkDocs = [
+      ...Array.from({ length: 3 }, () => mark({ subjectId: 'sub_math', classId: 'cls_a', rawScore: 40 })),
+      ...Array.from({ length: 7 }, () => mark({ subjectId: 'sub_math', classId: 'cls_a', rawScore: 80 })),
+    ];
+    const res = await supertest(buildApp()).get('/api/assessment/analytics').query({ academicYearId: 'ay_2026', termNumber: 2, compareTo: 'none' });
+    expect(res.status).toBe(200);
+    const mathSubject = res.body.data.subjects.find(s => s.subjectId === 'sub_math');
+    expect(mathSubject.current.avgPct).toBe(68);
+    expect(mathSubject.concern).toBe(true);
+    expect(res.body.data.subjectsOfConcern.map(s => s.subjectId)).toEqual(['sub_math']);
+  });
+
+  test('school-wide rollup: classesFlaggedCount is correct and subjects are ranked by it, worst-first', async () => {
+    mockClassDocs = [...CLASSES, { id: 'cls_c', name: 'Form 3C', schoolId: SCHOOL }];
+    mockMarkDocs = [
+      mark({ subjectId: 'sub_math', classId: 'cls_a', rawScore: 40 }), // flags math in cls_a
+      mark({ subjectId: 'sub_math', classId: 'cls_c', rawScore: 45 }), // flags math in cls_c too
+      mark({ subjectId: 'sub_eng',  classId: 'cls_b', rawScore: 42 }), // flags english in cls_b only
+    ];
+    const res = await supertest(buildApp()).get('/api/assessment/analytics').query({ academicYearId: 'ay_2026', termNumber: 2, compareTo: 'none' });
+    expect(res.status).toBe(200);
+    const [first, second] = res.body.data.subjectsOfConcern;
+    expect(first.subjectId).toBe('sub_math');
+    expect(first.classesFlaggedCount).toBe(2);
+    expect(second.subjectId).toBe('sub_eng');
+    expect(second.classesFlaggedCount).toBe(1);
+  });
+
+  test('scoping to one class (classId) narrows subjectsOfConcern to that class only', async () => {
+    mockMarkDocs = [
+      mark({ subjectId: 'sub_math', classId: 'cls_a', rawScore: 40 }),
+      mark({ subjectId: 'sub_eng',  classId: 'cls_b', rawScore: 42 }),
+    ];
+    const res = await supertest(buildApp()).get('/api/assessment/analytics').query({ classId: 'cls_a', academicYearId: 'ay_2026', termNumber: 2, compareTo: 'none' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.subjectsOfConcern.map(s => s.subjectId)).toEqual(['sub_math']);
+  });
+
+  test('Learner Priority via overall average alone (< 50), with belowCount under the count threshold', async () => {
+    mockMarkDocs = [
+      mark({ studentId: 'stu_p1', subjectId: 'sub_math', classId: 'cls_a', rawScore: 20 }),
+      mark({ studentId: 'stu_p1', subjectId: 'sub_eng',  classId: 'cls_a', rawScore: 70 }),
+    ];
+    mockStudentDocs = [{ id: 'stu_p1', schoolId: SCHOOL, firstName: 'Amara', lastName: 'Osei', admissionNumber: '001', classId: 'cls_a' }];
+    const res = await supertest(buildApp()).get('/api/assessment/analytics').query({ academicYearId: 'ay_2026', termNumber: 2, compareTo: 'none' });
+    expect(res.status).toBe(200);
+    const row = res.body.data.learnersOfConcern.find(r => r.studentId === 'stu_p1');
+    expect(row).toBeTruthy();
+    expect(row.level).toBe('priority');
+    expect(row.overallAvg).toBe(45); // (20+70)/2
+    expect(row.belowCount).toBe(1);  // only math — the count path never fires here
+  });
+
+  test('Learner Priority via belowCount >= 6 alone, with overall average kept >= 50', async () => {
+    const manySubjects = Array.from({ length: 7 }, (_, i) => ({ id: `subj_${i}`, name: `Subject ${i}`, schoolId: SCHOOL }));
+    mockSubjectDocs = manySubjects;
+    // 6 subjects at 49 (below 50), 1 at 100 — avg = (6*49+100)/7 ≈ 56.3 (>= 50)
+    mockMarkDocs = [
+      ...manySubjects.slice(0, 6).map(s => mark({ studentId: 'stu_p2', subjectId: s.id, classId: 'cls_a', rawScore: 49 })),
+      mark({ studentId: 'stu_p2', subjectId: manySubjects[6].id, classId: 'cls_a', rawScore: 100 }),
+    ];
+    mockStudentDocs = [{ id: 'stu_p2', schoolId: SCHOOL, firstName: 'Ben', lastName: 'Kato', admissionNumber: '002', classId: 'cls_a' }];
+    const res = await supertest(buildApp()).get('/api/assessment/analytics').query({ academicYearId: 'ay_2026', termNumber: 2, compareTo: 'none' });
+    expect(res.status).toBe(200);
+    const row = res.body.data.learnersOfConcern.find(r => r.studentId === 'stu_p2');
+    expect(row).toBeTruthy();
+    expect(row.level).toBe('priority');
+    expect(row.overallAvg).toBeGreaterThanOrEqual(50);
+    expect(row.belowCount).toBe(6);
+  });
+
+  test('Learner Watch via belowCount in [4,5], with overall average kept >= 50', async () => {
+    const sevenSubjects = Array.from({ length: 7 }, (_, i) => ({ id: `subj_${i}`, name: `Subject ${i}`, schoolId: SCHOOL }));
+    mockSubjectDocs = sevenSubjects;
+    // 4 subjects at 45 (below 50), 3 at 90 — avg = (4*45+3*90)/7 ≈ 64.3 (>= 50), belowCount = 4
+    mockMarkDocs = [
+      ...sevenSubjects.slice(0, 4).map(s => mark({ studentId: 'stu_w1', subjectId: s.id, classId: 'cls_a', rawScore: 45 })),
+      ...sevenSubjects.slice(4).map(s => mark({ studentId: 'stu_w1', subjectId: s.id, classId: 'cls_a', rawScore: 90 })),
+    ];
+    mockStudentDocs = [{ id: 'stu_w1', schoolId: SCHOOL, firstName: 'Cleo', lastName: 'Nyarko', admissionNumber: '003', classId: 'cls_a' }];
+    const res = await supertest(buildApp()).get('/api/assessment/analytics').query({ academicYearId: 'ay_2026', termNumber: 2, compareTo: 'none' });
+    expect(res.status).toBe(200);
+    const row = res.body.data.learnersOfConcern.find(r => r.studentId === 'stu_w1');
+    expect(row).toBeTruthy();
+    expect(row.level).toBe('watch');
+    expect(row.belowCount).toBe(4);
+  });
+
+  test('Learner Watch via both core subjects (English and Mathematics, matched by name) below 50, with belowCount under 4', async () => {
+    // sub_math='Mathematics', sub_eng='English' — the shared fixture's own
+    // names already match the core-subject detection pattern. A third,
+    // non-core subject keeps the overall average >= 50 so only the core-
+    // subject path (not the avg or count paths) can be responsible.
+    mockSubjectDocs = [...SUBJECTS, { id: 'sub_sci', name: 'Science', schoolId: SCHOOL }];
+    mockMarkDocs = [
+      mark({ studentId: 'stu_w2', subjectId: 'sub_math', classId: 'cls_a', rawScore: 45 }),
+      mark({ studentId: 'stu_w2', subjectId: 'sub_eng',  classId: 'cls_a', rawScore: 48 }),
+      mark({ studentId: 'stu_w2', subjectId: 'sub_sci',  classId: 'cls_a', rawScore: 95 }),
+    ];
+    mockStudentDocs = [{ id: 'stu_w2', schoolId: SCHOOL, firstName: 'Dara', lastName: 'Issa', admissionNumber: '004', classId: 'cls_a' }];
+    const res = await supertest(buildApp()).get('/api/assessment/analytics').query({ academicYearId: 'ay_2026', termNumber: 2, compareTo: 'none' });
+    expect(res.status).toBe(200);
+    const row = res.body.data.learnersOfConcern.find(r => r.studentId === 'stu_w2');
+    expect(row).toBeTruthy();
+    expect(row.level).toBe('watch');
+    expect(row.belowCount).toBe(2); // under the 4-5 count threshold — only the core-subject path explains this
+    expect(row.overallAvg).toBeGreaterThanOrEqual(50);
+  });
+
+  test('the "both core subjects" Watch path never fires — no false positive, no crash — when no subject is named English/Mathematics', async () => {
+    // Same shape as the core-subjects test above, but neither subject
+    // name matches the detection pattern — the student must NOT be
+    // flagged at all (belowCount is only 2, under every count threshold).
+    mockSubjectDocs = [
+      { id: 'sub_kis', name: 'Kiswahili', schoolId: SCHOOL },
+      { id: 'sub_fre', name: 'French',    schoolId: SCHOOL },
+      { id: 'sub_sci', name: 'Science',   schoolId: SCHOOL },
+    ];
+    mockMarkDocs = [
+      mark({ studentId: 'stu_x', subjectId: 'sub_kis', classId: 'cls_a', rawScore: 45 }),
+      mark({ studentId: 'stu_x', subjectId: 'sub_fre', classId: 'cls_a', rawScore: 48 }),
+      mark({ studentId: 'stu_x', subjectId: 'sub_sci', classId: 'cls_a', rawScore: 95 }),
+    ];
+    mockStudentDocs = [{ id: 'stu_x', schoolId: SCHOOL, firstName: 'Zuri', lastName: 'Obi', admissionNumber: '005', classId: 'cls_a' }];
+    const res = await supertest(buildApp()).get('/api/assessment/analytics').query({ academicYearId: 'ay_2026', termNumber: 2, compareTo: 'none' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.learnersOfConcern.find(r => r.studentId === 'stu_x')).toBeUndefined();
+  });
+
+  test('a learner meeting neither rule is excluded from the list entirely', async () => {
+    mockMarkDocs = [
+      mark({ studentId: 'stu_ok', subjectId: 'sub_math', classId: 'cls_a', rawScore: 45 }), // 1 subject below 50 only
+      mark({ studentId: 'stu_ok', subjectId: 'sub_eng',  classId: 'cls_a', rawScore: 90 }),
+    ];
+    mockStudentDocs = [{ id: 'stu_ok', schoolId: SCHOOL, firstName: 'Femi', lastName: 'Tano', admissionNumber: '006', classId: 'cls_a' }];
+    const res = await supertest(buildApp()).get('/api/assessment/analytics').query({ academicYearId: 'ay_2026', termNumber: 2, compareTo: 'none' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.learnersOfConcern.find(r => r.studentId === 'stu_ok')).toBeUndefined();
+  });
+
+  test('a scoped (non-management) caller never sees another class\'s flagged subjects/learners', async () => {
+    mockJwtUser = { userId: 'usr_teacher', schoolId: SCHOOL, role: 'teacher', roles: ['teacher'] };
+    mockScope = { level: 'assigned', classIds: ['cls_a'] };
+    mockAssignmentRows = [{ schoolId: SCHOOL, teacherId: 'usr_teacher', classId: 'cls_a', subjectId: 'sub_math', streamId: null }];
+    mockMarkDocs = [
+      mark({ studentId: 'stu_a', subjectId: 'sub_math', classId: 'cls_a', rawScore: 40 }), // in scope, flagged
+      mark({ studentId: 'stu_b', subjectId: 'sub_eng',  classId: 'cls_b', rawScore: 40 }), // out of scope
+    ];
+    mockStudentDocs = [
+      { id: 'stu_a', schoolId: SCHOOL, firstName: 'In', lastName: 'Scope', admissionNumber: '007', classId: 'cls_a' },
+      { id: 'stu_b', schoolId: SCHOOL, firstName: 'Out', lastName: 'OfScope', admissionNumber: '008', classId: 'cls_b' },
+    ];
+    const res = await supertest(buildApp()).get('/api/assessment/analytics').query({ academicYearId: 'ay_2026', termNumber: 2, compareTo: 'none' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.subjectsOfConcern.map(s => s.subjectId)).toEqual(['sub_math']);
+    expect(res.body.data.learnersOfConcern.map(r => r.studentId)).not.toContain('stu_b');
   });
 });
