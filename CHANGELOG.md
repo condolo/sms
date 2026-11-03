@@ -6,6 +6,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.259.0] - 2026-11-03 - fix(parent-portal): Profile moved off a crowded icon row onto its own page; the floating support bubble now actually renders
+
+Reported directly: "where it is now is congested — under parent's profile click on the profile and you see where to log out," plus the floating support icon should sit bottom-right like it does in the school account.
+
+- **Decongested the sidebar footer.** It previously carried three separate icon buttons (change password, support, sign out) crammed next to the parent's name, each only distinguishable by a tooltip. Change Password now lives on a proper **My Profile** page — clicking the parent's own name/avatar opens it, the same "avatar → My Profile" pattern `TopBar.jsx` already uses for staff — and the footer is back down to identity + Sign Out.
+- **The floating support bubble was imported but never rendered.** `FloatingHelp` (the same bottom-right circular launcher the school/staff account already shows, via `AppShell.jsx`) was imported in both `ParentDashboard.jsx` and `StudentDashboard.jsx` but never actually placed in either page's JSX — a dead import, not a positioning bug; nothing was floating at all. Added `<FloatingHelp />` to both, so it now appears, already fixed-positioned `bottom-5 right-5` exactly like the staff shell — no new component or CSS needed, the component already had the right position.
+- The self-service password-change logic itself is unchanged (same `POST /api/auth/change-password` call, same validation) — only moved from a modal into an inline form on the new page.
+
+**Files:** `client/src/pages/parent-portal/ParentDashboard.jsx` (new `ProfilePage`, sidebar footer simplified, `ChangePasswordModal` removed as dead code once its only trigger was removed, `<FloatingHelp />` added), `client/src/pages/student-portal/StudentDashboard.jsx` (`<FloatingHelp />` added — same dead-import bug, fixed in passing). No server changes. Not covered by the server Jest suite (pure client UI); verified by reading the rendered JSX and an esbuild parse-check of both files — this sandbox has no reachable MongoDB, so an authenticated browser walkthrough of the parent portal isn't possible here.
+
+---
+
 ## [v5.258.0] - 2026-11-03 - feat(students,parent-portal): Student Profile gains a Timetable tab; Parent Portal gains full per-child Behaviour, Medical and Timetable views
 
 Two requests, bundled together because they share the same underlying read: "whatever this student's own class+stream's weekly schedule is." The parent-facing half was explicitly scoped by the product owner to stay per-child and field-limited, not a blanket mirror of the admin view.

@@ -1438,6 +1438,8 @@ export default function StudentDashboard() {
         onSend={sendCompose}
         primary={primary}
       />
+
+      <FloatingHelp />
     </div>
   );
 }

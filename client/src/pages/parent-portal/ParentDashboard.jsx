@@ -35,7 +35,7 @@ import {
   CheckCircle, Download, FileText, GraduationCap,
   Lock, LogOut, MessageSquare, Send, Star, Wallet,
   ChevronDown, ChevronLeft, ChevronRight, MonitorPlay, MapPin, BookOpen, CalendarCheck,
-  Menu, X, TrendingUp, LifeBuoy, KeyRound, Eye, EyeOff, Loader2, Heart,
+  Menu, X, TrendingUp, LifeBuoy, KeyRound, Eye, EyeOff, Loader2, Heart, User,
 } from 'lucide-react';
 import NotificationBell from '@/components/layout/NotificationBell.jsx';
 import FloatingHelp from '@/components/help/FloatingHelp.jsx';
@@ -325,93 +325,19 @@ function ComposeMessageModal({ open, mode, sent, recipientOptions, form, onFormC
   );
 }
 
-/* Reported directly 2026-10-28: "parents dont have that clickable
-   profile to update or change their password" — the self-service
-   POST /api/auth/change-password route already works for any
-   authenticated role (confirmed: no role check at all in that route,
-   just authMiddleware scoped to the caller's own userId/schoolId), and
-   the staff-facing ProfilePage.jsx already has a form calling it —
-   there was simply no equivalent anywhere in either portal shell, since
-   neither has a /profile page at all (they're separate top-level routes,
-   /parent-dashboard and /student-dashboard, with no nested "profile"
-   route under them). A self-contained modal, not a new page, for the
-   same reason ComposeMessageModal above is one: no portal-wide "second
-   page" concept to hook into.
-
-   Hoisted to a top-level component for the exact reason documented on
-   ComposeMessageModal above — a function defined inside the main
-   component's body gets a new identity every render, which would
-   unmount/remount this modal (dropping input focus) on every keystroke. */
-function ChangePasswordModal({ open, currentPw, newPw, confirmPw, onCurrentChange, onNewChange, onConfirmChange, showPws, onToggleShow, banner, saving, onClose, onSubmit, primary }) {
-  if (!open) return null;
-  return (
-    <AnimatePresence>
-      <motion.div key="pw-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-        className="fixed inset-0 bg-black/30 z-40" onClick={onClose} />
-      <motion.div key="pw-dialog" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }}
-        role="dialog" aria-modal="true" aria-label="Change password"
-        className="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm" onClick={e => e.stopPropagation()}>
-          <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-            <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
-              <KeyRound size={14} className="text-slate-400" /> Change Password
-            </h3>
-            <button onClick={onClose} className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100">
-              <X size={16} />
-            </button>
-          </div>
-
-          <form onSubmit={onSubmit} className="px-5 py-4 space-y-3">
-            <div>
-              <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Current password</label>
-              <input
-                type={showPws ? 'text' : 'password'} autoComplete="current-password" autoFocus
-                className="w-full mt-1 text-[13px] border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1"
-                value={currentPw} onChange={e => onCurrentChange(e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">New password</label>
-              <input
-                type={showPws ? 'text' : 'password'} autoComplete="new-password"
-                className="w-full mt-1 text-[13px] border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1"
-                value={newPw} onChange={e => onNewChange(e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Confirm new password</label>
-              <input
-                type={showPws ? 'text' : 'password'} autoComplete="new-password"
-                className="w-full mt-1 text-[13px] border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1"
-                value={confirmPw} onChange={e => onConfirmChange(e.target.value)}
-              />
-            </div>
-            <button type="button" onClick={onToggleShow} className="flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-slate-600">
-              {showPws ? <EyeOff size={12} /> : <Eye size={12} />} {showPws ? 'Hide' : 'Show'} passwords
-            </button>
-
-            {banner?.msg && (
-              <p className={`text-[12px] ${banner.type === 'success' ? 'text-emerald-600' : 'text-red-600'}`}>{banner.msg}</p>
-            )}
-
-            <div className="flex justify-end gap-2 pt-1">
-              <button type="button" onClick={onClose} className="text-[12px] font-medium text-slate-500 px-3 py-2 rounded-lg hover:bg-slate-50">
-                Cancel
-              </button>
-              <button
-                type="submit" disabled={saving}
-                className="flex items-center gap-1.5 text-[12px] font-semibold text-white px-4 py-2 rounded-lg disabled:opacity-50"
-                style={{ background: primary }}
-              >
-                {saving ? <Loader2 size={12} className="animate-spin" /> : <KeyRound size={12} />} {saving ? 'Updating…' : 'Update password'}
-              </button>
-            </div>
-          </form>
-        </div>
-      </motion.div>
-    </AnimatePresence>
-  );
-}
+/* Reported directly 2026-10-28, then again 2026-11-03: "parents dont
+   have that clickable profile to update or change their password" /
+   "where it is now is congested — click on the profile and you see
+   where to log out." The first pass (since superseded) put Change
+   Password in a modal reachable from a small key icon crammed next to
+   the sidebar name — reasoned at the time as "no portal-wide page
+   concept to hook into," which wasn't actually true: this file already
+   has one (`activePage`/`PAGE_BODIES`, the same mechanism every other
+   section — Grades, Attendance, Behaviour… — uses). Password change now
+   lives on its own Profile page (see `ProfilePage` below, registered in
+   `PAGE_BODIES`), reached by clicking the parent's own name/avatar in
+   the sidebar — the same "avatar → My Profile" pattern the staff
+   TopBar.jsx already uses — instead of a modal and three crowded icons. */
 
 /* ══════════════════════════════════════════════════════════════════
    MAIN COMPONENT
@@ -458,8 +384,8 @@ export default function ParentDashboard() {
   const [composeSending,  setComposeSending]  = useState(false);
   const [composeError,    setComposeError]    = useState('');
   const [composeSent,     setComposeSent]     = useState(false);
-  // Self-service password change — see ChangePasswordModal's own comment above.
-  const [pwModalOpen, setPwModalOpen] = useState(false);
+  // Self-service password change — now inline on the Profile page (see
+  // ProfilePage below), not a modal.
   const [currentPw,   setCurrentPw]   = useState('');
   const [newPw,       setNewPw]       = useState('');
   const [confirmPw,   setConfirmPw]   = useState('');
@@ -1559,17 +1485,92 @@ export default function ParentDashboard() {
     );
   }
 
+  function ProfilePage() {
+    return (
+      <div className="space-y-4 max-w-md">
+        <Card id="section-profile-identity">
+          <CardHeader icon={User} iconClass="text-slate-500" title="My Profile" />
+          <div className="px-[18px] py-4 flex items-center gap-3">
+            <div className="w-12 h-12 rounded-full flex items-center justify-center text-white text-base font-bold flex-shrink-0" style={{ background: avatarGradient }}>
+              {_initials(parentName)}
+            </div>
+            <div className="min-w-0">
+              <p className="text-[14px] font-semibold text-slate-800 truncate">{parentName || 'Parent'}</p>
+              <p className="text-[12px] text-slate-400 truncate">{liveProfile?.user?.email ?? session?.user?.email ?? ''}</p>
+            </div>
+          </div>
+        </Card>
+
+        <Card id="section-profile-password">
+          <CardHeader icon={KeyRound} iconClass="text-slate-500" title="Change Password" />
+          <form onSubmit={handlePasswordChange} className="px-[18px] py-4 space-y-3">
+            <div>
+              <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Current password</label>
+              <input
+                type={pwShow ? 'text' : 'password'} autoComplete="current-password"
+                className="w-full mt-1 text-[13px] border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1"
+                value={currentPw} onChange={e => setCurrentPw(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">New password</label>
+              <input
+                type={pwShow ? 'text' : 'password'} autoComplete="new-password"
+                className="w-full mt-1 text-[13px] border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1"
+                value={newPw} onChange={e => setNewPw(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Confirm new password</label>
+              <input
+                type={pwShow ? 'text' : 'password'} autoComplete="new-password"
+                className="w-full mt-1 text-[13px] border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1"
+                value={confirmPw} onChange={e => setConfirmPw(e.target.value)}
+              />
+            </div>
+            <button type="button" onClick={() => setPwShow(s => !s)} className="flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-slate-600">
+              {pwShow ? <EyeOff size={12} /> : <Eye size={12} />} {pwShow ? 'Hide' : 'Show'} passwords
+            </button>
+
+            {pwBanner?.msg && (
+              <p className={`text-[12px] ${pwBanner.type === 'success' ? 'text-emerald-600' : 'text-red-600'}`}>{pwBanner.msg}</p>
+            )}
+
+            <div className="flex justify-end pt-1">
+              <button
+                type="submit" disabled={pwSaving}
+                className="flex items-center gap-1.5 text-[12px] font-semibold text-white px-4 py-2 rounded-lg disabled:opacity-50"
+                style={{ background: primary }}
+              >
+                {pwSaving ? <Loader2 size={12} className="animate-spin" /> : <KeyRound size={12} />} {pwSaving ? 'Updating…' : 'Update password'}
+              </button>
+            </div>
+          </form>
+        </Card>
+
+        <button
+          onClick={() => navigate('/support')}
+          className="flex items-center gap-2 text-[12px] font-medium text-slate-500 hover:text-slate-700 px-1"
+        >
+          <LifeBuoy size={14} /> Need help? Contact support
+        </button>
+      </div>
+    );
+  }
+
   const PAGE_BODIES = {
     overview: OverviewPage, grades: GradesPage, attendance: AttendancePage, fees: FeesPage,
     timetable: TimetablePage, library: LibraryPage, messages: MessagesPage,
-    calendar: CalendarPage, behaviour: BehaviourPage, medical: MedicalPage, announcements: AnnouncementsPage,
+    calendar: CalendarPage, behaviour: BehaviourPage, medical: MedicalPage, profile: ProfilePage, announcements: AnnouncementsPage,
   };
   // A page whose module got disabled mid-session (or a stale activePage
   // from before this change) falls back to Overview rather than a blank
   // screen — same fail-safe default as landing on an unknown route.
   const ActivePageBody = PAGE_BODIES[activePage] ?? OverviewPage;
   const activeNavItem  = [...myChildNav, ...schoolNav].find(n => n.id === activePage);
-  const activePageLabel = activeNavItem?.label ?? 'Overview';
+  // Profile isn't a nav list item (reached via the sidebar avatar, same as
+  // the staff TopBar's "My Profile"), so it needs its own label here.
+  const activePageLabel = activePage === 'profile' ? 'My Profile' : (activeNavItem?.label ?? 'Overview');
 
   /* ════════════════════════════════════════════════════════════════
      RENDER
@@ -1716,22 +1717,29 @@ export default function ParentDashboard() {
             </button>
           )}
 
-          {/* Parent identity */}
+          {/* Parent identity — clicking it opens My Profile, same idea as
+              the staff TopBar's avatar → "My Profile". Previously this row
+              carried three separate icon buttons (change password, support,
+              sign out) crammed in beside the name; Support is now the
+              floating help bubble (see FloatingHelp below) and Change
+              Password lives on the new Profile page, so this row goes back
+              to just identity + sign out. */}
           <div className={`flex items-center gap-2.5 px-2.5 py-2 rounded-[7px] ${collapsed ? 'lg:justify-center lg:px-0' : ''}`}>
-            <div id="sidebar-parent-avatar" className="w-[30px] h-[30px] rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ background: avatarGradient }}>
-              {_initials(parentName)}
-            </div>
-            <div className={`flex-1 min-w-0 ${collapsed ? 'lg:hidden' : ''}`}>
-              <div className="text-white text-[12px] font-semibold truncate">{parentName || 'Parent'}</div>
-              <div className="text-[10px] truncate" style={{ color: '#fcd34d' }}>
-                {children.length === 1 && activeChild ? `Parent · ${activeChild.name?.split(' ')[0]}` : `${children.length} children`}
+            <button
+              id="sidebar-parent-profile-btn"
+              onClick={() => goToPage('profile')}
+              title="My Profile"
+              className={`flex-1 min-w-0 flex items-center gap-2.5 text-left rounded-[7px] transition-colors hover:bg-white/5 ${collapsed ? 'lg:justify-center' : ''}`}
+            >
+              <div id="sidebar-parent-avatar" className="w-[30px] h-[30px] rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ background: avatarGradient }}>
+                {_initials(parentName)}
               </div>
-            </div>
-            <button id="sidebar-change-password-btn" onClick={() => { setPwBanner({ type: '', msg: '' }); setPwModalOpen(true); }} title="Change Password" className={`flex-shrink-0 transition-colors hover:text-amber-300 ${collapsed ? 'lg:hidden' : ''}`} style={{ color: '#a8a29e' }}>
-              <KeyRound size={14} />
-            </button>
-            <button id="sidebar-support-btn" onClick={() => navigate('/support')} title="Support" className={`flex-shrink-0 transition-colors hover:text-amber-300 ${collapsed ? 'lg:hidden' : ''}`} style={{ color: '#a8a29e' }}>
-              <LifeBuoy size={14} />
+              <div className={`flex-1 min-w-0 ${collapsed ? 'lg:hidden' : ''}`}>
+                <div className="text-white text-[12px] font-semibold truncate">{parentName || 'Parent'}</div>
+                <div className="text-[10px] truncate" style={{ color: '#fcd34d' }}>
+                  {children.length === 1 && activeChild ? `Parent · ${activeChild.name?.split(' ')[0]}` : `${children.length} children`}
+                </div>
+              </div>
             </button>
             <button id="sidebar-logout-btn" onClick={handleLogout} title="Sign out" className={`flex-shrink-0 transition-colors hover:text-red-400 ${collapsed ? 'lg:hidden' : ''}`} style={{ color: '#a8a29e' }}>
               <LogOut size={14} />
@@ -1782,11 +1790,13 @@ export default function ParentDashboard() {
             <h2 id="active-page-title" className="text-base font-bold text-slate-800">{activePageLabel}</h2>
           )}
 
-          {/* Child banner — shown on every page, same identity strip.
-              Wraps on a phone: the child's identity takes the full width
-              on one line and the three stats drop underneath, instead of
-              squeezing the name into a 90px column next to them. */}
-          {activeChild && (
+          {/* Child banner — shown on every page about a child, same identity
+              strip. Not on Profile, which is about the parent's own
+              account, not any one child. Wraps on a phone: the child's
+              identity takes the full width on one line and the three
+              stats drop underneath, instead of squeezing the name into a
+              90px column next to them. */}
+          {activeChild && activePage !== 'profile' && (
             <div id="child-banner" className="rounded-xl p-[18px] flex flex-wrap items-center gap-x-[18px] gap-y-3 border" style={{ background: 'linear-gradient(135deg, #1c1917, #292524)', borderColor: '#44403c' }}>
               <div className="flex items-center gap-[14px] min-w-0 flex-1 basis-full sm:basis-auto">
                 <div id="child-banner-avatar" className="w-[52px] h-[52px] rounded-full flex items-center justify-center text-white text-xl font-bold flex-shrink-0" style={{ background: avatarGradient }}>
@@ -1868,16 +1878,7 @@ export default function ParentDashboard() {
       </div>
       {/* end MAIN AREA */}
 
-      <ChangePasswordModal
-        open={pwModalOpen}
-        currentPw={currentPw} newPw={newPw} confirmPw={confirmPw}
-        onCurrentChange={setCurrentPw} onNewChange={setNewPw} onConfirmChange={setConfirmPw}
-        showPws={pwShow} onToggleShow={() => setPwShow(s => !s)}
-        banner={pwBanner} saving={pwSaving}
-        onClose={() => setPwModalOpen(false)}
-        onSubmit={handlePasswordChange}
-        primary={primary}
-      />
+      <FloatingHelp />
     </div>
   );
 }

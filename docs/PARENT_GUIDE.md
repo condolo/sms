@@ -22,8 +22,9 @@
 14. [Announcements](#14-announcements)
 15. [If You Have More Than One Child](#15-if-you-have-more-than-one-child)
 16. [Notifications](#16-notifications)
-17. [Signing Out](#17-signing-out)
-18. [Something Looks Wrong?](#18-something-looks-wrong)
+17. [My Profile](#17-my-profile)
+18. [Signing Out](#18-signing-out)
+19. [Something Looks Wrong?](#19-something-looks-wrong)
 
 ---
 
@@ -52,7 +53,9 @@ If you've forgotten your password or your account won't let you in, contact the 
 The portal has two parts:
 
 - **Sidebar (left)** — your navigation. **My Child** groups the sections about your child specifically (Overview, Grades & Reports, Attendance, Fee Statements, Timetable, Library, Behaviour & Rewards, Clinic Visits); **School** groups the ones about the school as a whole (Messages, School Calendar, Announcements). Click any item to open that page — each one is a full page on its own, not just a scroll down a long list.
+- **Your name, at the bottom of the sidebar** — click it to open **My Profile**, where you change your password (§17). The sign-out icon next to it is separate.
 - **Top bar** — a greeting, the current term and academic year, a notification bell, and two buttons: **Message School** and, if your school has M-Pesa payments switched on, **Pay Fees via M-Pesa**. Both jump straight to the relevant page.
+- **The circular help icon, bottom-right of every page** — click it for Help & FAQs or to contact support, without leaving the page you're on.
 
 **On a phone or narrow screen**, the sidebar tucks away behind a menu button (☰) in the top-left — tap it to open, and it closes itself once you pick something.
 
@@ -159,13 +162,19 @@ The bell icon in the top bar shows a count when you have unread notifications. C
 
 ---
 
-## 17. Signing Out
+## 17. My Profile
+
+Click your name at the bottom of the sidebar to open your profile. From here you can change your password — enter your current password, then your new one twice, and confirm. There's also a shortcut to contact support without leaving the page.
+
+---
+
+## 18. Signing Out
 
 Click the sign-out icon next to your name at the bottom of the sidebar. This ends your session — you'll need your password again to sign back in.
 
 ---
 
-## 18. Something Looks Wrong?
+## 19. Something Looks Wrong?
 
 - **A section you expected isn't in the sidebar** — your school hasn't enabled that module yet (see §1). Ask the school office, not Msingi support, since this is a per-school setting.
 - **Grades look out of date** — you're seeing the most recently *published* report card, not live in-progress marks; the school publishes a new one at the end of each assessment cycle.
