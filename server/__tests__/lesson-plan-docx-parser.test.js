@@ -159,6 +159,23 @@ describe('extractLessonBlocks — defensive behavior', () => {
     expect(blocks).toHaveLength(1);
     expect(warnings[0]).toMatch(/no data row found/);
   });
+
+  // The CLASS-only conflict protection generalized to every recognized
+  // meta label (2026-11-03) — a duplicated DATE cell is exactly as likely
+  // a source of a confusing downstream "could not parse date" error as a
+  // duplicated CLASS cell is of a "class could not be resolved" one.
+  test('a duplicated DATE cell disagreeing with the first is warned about, first value still wins', () => {
+    const { blocks, warnings } = extractLessonBlocks([
+      ['TEACHER', 'Mr X', 'WEEK', '1', 'TERM & YEAR', '1 2026'],
+      ['SUBJECT', 'Maths', 'DATE', '3 SEPTEMBER 2026', 'CLASS', 'Year 6', 'DATE', '2'],
+      ['Lesson', 'Topic', 'Objectives'],
+      ['1', 'Fractions', 'Add fractions'],
+    ]);
+    expect(blocks[0].dateRaw).toBe('3 SEPTEMBER 2026');
+    expect(warnings).toEqual([
+      'Lesson block at row 0: Conflicting DATE values found ("3 SEPTEMBER 2026" vs "2") — using "3 SEPTEMBER 2026"; verify this lesson\'s date is correct.',
+    ]);
+  });
 });
 
 describe('extractDocxRows — decompression-bomb guard (security review, 2026-09)', () => {

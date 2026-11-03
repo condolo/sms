@@ -34,6 +34,37 @@ The standard **Teacher** role is provisioned with the following module permissio
 
 **HR self-service:** staff can access their own leave and, when available, payslip views through HR/My HR even though HR management is not part of the standard Teacher module grants. **Behaviour, eLearning, Finance, Admissions, Settings, and full Medical/Inventory management are not standard Teacher grants.** A school can make an explicit extra grant; only follow those workflows when the module/action is actually available to you.
 
+## Teacher routines that keep family information current
+
+Parents get the most useful view when teachers save the underlying school records promptly and consistently. Parent visibility still depends on the school's enabled modules and account setup. In particular, parents see published report cards rather than live, in-progress Markbook entries; routine work should not be described to families as immediately visible if the portal does not expose it yet.
+
+### Daily
+
+- **Check today's work:** review your timetable, assigned class/stream, announcements, and messages. Report an incorrect assignment or missing class to the administrator instead of entering records against a different class.
+- **Take attendance:** complete and save each assigned register on the day of the lesson. Review the roster and statuses before submitting; reopen the saved register to check it if something looks wrong. This keeps the parent's attendance view current after the school's normal data refresh.
+- **Record teaching progress:** use the lesson plan and coverage workflow for the class and subject. Mark the topic or lesson delivered after teaching, and verify it appears in the coverage view. Parent portal curriculum coverage is based on the school's recorded teaching progress.
+- **Record relevant learner information:** where your role allows it, enter a factual behaviour record or growth-profile evidence promptly and in the correct student's record. These modules are not granted to every teacher by default; follow the school's safeguarding and confidentiality rules.
+- **Communicate carefully:** read and respond to school or family messages through the approved channel available to your role. Check the recipient/audience before sending and do not place sensitive student information in a broad message.
+- **Enter marks when due:** follow the assessment schedule. Do not create unofficial daily marks or use a different year, term, class, stream, subject, or assessment instance to make a record appear.
+
+### Weekly
+
+- Review your assigned attendance registers for missing dates, obvious status errors, or unresolved corrections. Fix the original register where permitted; tell the administrator when a correction needs elevated access.
+- Review lesson plans and syllabus coverage for the week. Update delivered topics and resolve plans still marked pending if the lesson took place.
+- Check messages and follow up on items that need a response. Use approved school communication practices and keep a concise record in the relevant school workflow where one exists.
+- Review relevant behaviour and growth-profile entries for accuracy, correct student, date, and appropriate detail. Add information only where it is useful and within your role.
+- If your school uses **Weekly Snapshot**, keep its source records accurate. The parent-facing weekly summary is generated automatically on the school's schedule (the current Parent Guide describes Saturday generation); teachers do not edit the snapshot itself. Correct source attendance, coverage, behaviour, or other records in their own modules.
+
+### Each term and reporting cycle
+
+- Check the academic year, term, class, stream, subject, and assessment instance before entering results. Follow the published assessment schedule and use explicit states such as Absent, Missing, Exempt, or Incomplete where appropriate.
+- Save marks and comments separately, then reopen the same Markbook selection to verify both. Report-card publication locks marks and comments. If a published value needs correction, use the school's authorized administrator correction/unlock process; do not overwrite a locked record or promise that a draft is already visible to parents.
+- Complete class/form-teacher remarks and any configured observation ratings if you are the assigned form teacher and have the required Report Cards access. Save and confirm the result before the school administrator or authorized publisher releases the cards.
+- Review lesson coverage and any permitted Growth Profile evidence for the term, so parents receive a useful picture of learning progress as well as final grades. Report missing or inconsistent student/class records before publication.
+- For Kindergarten, use the configured template's scoring mode: numeric with optional bands, or band-only. Add this term's indicators in the Markbook, score each child, and check the report preview. Band-only subject and overall grades follow the configured band-point rules; follow the separate [Kindergarten Teacher Guide](KINDERGARTEN_TEACHER_GUIDE.md).
+
+These are working routines, not a requirement to create a record when nothing happened. Follow your school's assessment calendar, communication policy, safeguarding requirements, and role permissions. The parent-facing view and its update timing are described in the [Parent Guide](PARENT_GUIDE.md).
+
 ## 1. Sign in for the first time
 
 1. Open the Msingi login link sent by your school administrator.
@@ -106,6 +137,34 @@ Use the original incident's edit/review action to correct a mistake if your role
 
 If a required field or topic is missing, ask the administrator or curriculum lead to check the class curriculum and lesson-plan template. Do not re-create a plan before checking whether it is already present.
 
+### Importing a term's lesson plans from a Word document instead of retyping them
+
+If you already wrote the term's lesson plans in a Word document (a completed version of your school's own lesson-plan template), you can import it instead of retyping every lesson by hand. This needs its own **Import** permission — ask an administrator if you don't see the **Import** button next to **New Lesson Plan**.
+
+**Before you upload:**
+
+1. **Pick the right class, subject, academic year, and term in the Import dialog itself, every time.** This is the single most important step: Msingi files every imported lesson under whatever class/subject/term you select in the dropdowns — it does **not** read the class or subject off the document and file it there automatically. If you select the wrong class, the lessons import under the wrong class even if the document itself correctly says "Year 6" at the top. Double-check your selection before uploading.
+2. **Use a real `.docx` file exported from Word** (or a `.csv` — see below), not a PDF, a scan, or a photo. Anything else is rejected immediately with a clear message rather than a confusing error.
+3. **Each lesson in the document needs the same label structure your school's template already uses**, specifically:
+   - A row whose first cell is literally **TEACHER** (this is how Msingi finds where each lesson starts — it doesn't matter if your document puts every lesson in its own table, or stacks several lessons' rows inside one table).
+   - The next row down must have a **DATE** cell. **This must contain an actual calendar date for that specific lesson** — for example `3 September 2026`, `1st September`, or `03/09/2026`. Do **not** leave it as just a lesson number or week number (e.g. a bare `2`) — Msingi cannot tell that apart from a typo and will reject that lesson with an explanation rather than guess.
+   - A row whose first cell says **Lesson**, with column headers for Topic/Subtopic, Objectives, Activities, Resources, and Remarks (your school can label and reorder these columns however it likes — Msingi matches them by keyword, not position), followed by one row of actual lesson content underneath.
+   - If your template has a **DIFFERENTIATION** row (Low/Middle/High Ability, or similarly named), Msingi reads those by their own column headers too.
+   - **ASSESSMENT** and **HOMEWORK**/**LESSON-WEEK ASSIGNMENT** rows, if your template has them.
+4. **The TEACHER / CLASS / SUBJECT text written in the document itself is for your own reference only** — it is not what Msingi uses to decide where the lesson goes (step 1 does that). If your document happens to repeat one of these fields twice with two different values (a common copy-paste slip when a template is reused week to week), you'll see a yellow "Conflicting values" warning on the preview screen — it's safe to proceed; Msingi always uses the first value it found and tells you so.
+
+**The import itself:**
+
+5. Open **Lessons**, drill into the class/subject (and stream, if relevant), and click **Import**.
+6. Select the academic year and term the document covers, then choose the file.
+7. Click **Read Document**. Nothing is saved yet at this point.
+8. Review every lesson on the preview screen. Each one is labeled **Ready**, **Invalid** (with the specific reason — fix the document and re-upload if needed), **Already Imported** (a safe no-op if you're re-running the same file), or **Conflict** (an existing plan for that date has different content — review it before deciding whether to include it).
+9. Only rows you tick are imported — invalid and already-imported rows are unticked and can't be ticked. Click **Import N Lessons** to finish.
+
+**If every lesson in your document comes back invalid with a date error:** this almost always means the DATE cell in your document isn't formatted the way Msingi expects (see step 3 above) — check what's actually typed in that cell for one lesson, fix it in Word, and re-upload. You do not need to retype the whole document; only the file needs correcting, then you can re-run the same import.
+
+**CSV alternative:** if you'd rather prepare a spreadsheet than use the Word template, export a `.csv` with one row per lesson and a header row using these column names: `Date`, `Topic` and `Subtopic` (or a combined `Topic/Subtopic` column), `Objectives`, `Activities`, `Resources`, `Remarks`, `Low Ability`/`Middle Ability`/`High Ability`, `Assessment`, `Homework`. The `Date` column is required — a `.csv` with no `Date` column is rejected immediately; every other column is optional. Column names are matched by keyword and aren't case-sensitive.
+
 ## 7. Enter marks in the Markbook
 
 > **Current workflow:** Exams records the sitting; marks are entered in the Markbook. Do not use an old Exams → Results workflow if it is still mentioned in older instructions.
@@ -137,7 +196,7 @@ The Markbook protects unsaved edits when you change selectors by asking before d
 3. Wait for the saved confirmation. Mark saving and comment saving are separate actions; saving marks does not automatically save the comment.
 4. Reopen the same class/subject/term view to confirm the comment is still displayed.
 
-The school may disable the comment column for an assessment window, and your subject assignment/permissions determine which students you can update. The saved subject comment is for that student, subject, and term; it is not a separate comment for each assessment instance. If the column is absent or saving is rejected, ask the administrator to check the schedule's comment setting, your subject/stream assignment, and your Report Cards permission. If an old comment appears when starting the same term number in a new academic year, do not overwrite it until the administrator confirms the correct record; current draft comments are not yet keyed by academic year.
+The school may disable the comment column for an assessment window, and your subject assignment/permissions determine which students you can update. The saved subject comment is for that student, subject, and term; it is not a separate comment for each assessment instance. If the column is absent or saving is rejected, ask the administrator to check the schedule's comment setting, your subject/stream assignment, and your Report Cards permission. If an old comment appears when starting the same term number in a new academic year, do not overwrite it until the administrator confirms the correct record; current draft comments are not yet keyed by academic year. **After the report card is published, its comments are locked along with its marks.** Only an authorized administrator can unlock a published comment, with a recorded reason; it is automatically re-locked after the correction window. Finish and verify your comment before publication.
 
 ### Class/form-teacher remark and observation ratings
 
@@ -229,6 +288,6 @@ Send the school administrator the module, screen, school, class/stream, student,
 - [HR Guide](HR_GUIDE.md) · [Timetabler Guide](TIMETABLER_GUIDE.md)
 - [Developer Guide](DEVELOPER_GUIDE.md) for implementation and deployment changes
 
-**Documentation reconciliation completed for this guide:** this guide's standard teacher-module list was checked against the teacher role defaults in `repairPermissions.js` and onboarding; grades/exams/report-card wording was checked against the current routes and changelog, including v5.193.0 comment-field protection and v5.194.0 student display correction. The User Guide password-rotation statement matches current authentication code. Other module-flow pages should still be checked against newer changelog entries when they are next revised.
+**Documentation reconciliation completed for this guide:** the standard teacher-module list was checked against the teacher role defaults in `repairPermissions.js` and onboarding; daily, weekly, and termly routines were reconciled with the current teacher workflows and parent-facing data described in `PARENT_GUIDE.md`. Grade, exam, report-card, and Kindergarten guidance was checked against current routes and changelog entries through v5.212.0, including v5.201.0 comment locking at publication, v5.203.0 teacher-owned Kindergarten indicator definitions, v5.207.0 band-only scoring, and v5.208.0–v5.209.1 draft report preview/print options. The User Guide password-rotation statement matches current authentication guidance. Other module-flow pages should still be checked against newer changelog entries when next revised.
 
-**Sources checked:** `docs/USER_GUIDE.md`, `docs/HR_GUIDE.md`, the relevant `docs/module-flows/*.md`, `CHANGELOG.md` (through v5.194.0), `server/utils/repairPermissions.js`, `server/routes/onboard.js`, `server/routes/report-cards.js`, `client/src/pages/profile/ProfilePage.jsx`, `client/src/pages/exams/ExamsPage.jsx`, `client/src/pages/hr/HRPage.jsx`, and associated routes. HR self-service wording was reconciled with v5.154.0–v5.157.0 on 2026-10-16; teacher module grants and the guide coverage were rechecked on 2026-10-17.
+**Sources checked:** `docs/USER_GUIDE.md`, `docs/PARENT_GUIDE.md`, `docs/HR_GUIDE.md`, relevant `docs/module-flows/*.md`, and `CHANGELOG.md` through v5.212.0; `server/utils/repairPermissions.js`, `server/routes/onboard.js`, `server/routes/report-cards.js`, `server/routes/attendance.js`, `server/routes/lessons.js`, `server/routes/weekly-snapshots.js`, `client/src/pages/profile/ProfilePage.jsx`, `client/src/pages/exams/ExamsPage.jsx`, `client/src/pages/hr/HRPage.jsx`, and related routes. HR self-service wording was reconciled with v5.154.0–v5.157.0; this guide's daily/weekly/termly routines were updated on 2026-10-26.

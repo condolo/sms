@@ -114,6 +114,16 @@ function resolveLessonDate(dateRaw, term) {
     // ambiguity worth guarding against here.
     const rawYear = parseInt(numeric[3], 10);
     candidateYears = [numeric[3].length <= 2 ? 2000 + rawYear : rawYear];
+  } else if (/^\d{1,3}$/.test(cleaned)) {
+    // Real recurring support issue: a teacher's DATE cell sometimes holds
+    // a bare lesson/week number ("2", "3"...) instead of a calendar date —
+    // every row in that document then fails identically, with no clue why
+    // from a bare "Could not parse date" message. A short pure-digit string
+    // can never be a real date in any format this parser accepts (named
+    // dates need a month word; numeric dates need two "/" or "-" separators),
+    // so this is always that specific mistake — name it directly instead of
+    // making the operator guess.
+    return { error: `The DATE cell for this lesson just says "${dateRaw}" — that looks like a lesson or week number, not a date. Check that your document's DATE column has an actual calendar date for every lesson (e.g. "3 September 2026" or "03/09/2026").` };
   } else {
     return { error: `Could not parse date "${dateRaw}"` };
   }

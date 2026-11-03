@@ -156,34 +156,35 @@ function _cellStartsWith(cell, label) {
 
 // Pulls {teacher, week, termYear, subject, date, class} out of the two
 // meta rows by label, not fixed position — a school's row 0 sometimes
-// carries an extra duplicate CLASS cell (seen in one real document). The
-// first occurrence of a label wins; when a later occurrence disagrees with
-// it (confirmed against real data: one lesson block's row 0 gave "x" and
-// row 1 gave "YEAR" — a genuine authoring error in the source document,
-// not a harmless repeat), that's surfaced as a warning rather than
-// silently discarded, so the operator has a concrete reason for a
-// downstream "class could not be resolved" error instead of no clue at
-// all.
+// carries an extra duplicate cell for one of these labels (seen in one
+// real document, for CLASS). The first occurrence of a label wins; when a
+// later occurrence disagrees with it (confirmed against real data: one
+// lesson block's row 0 gave "x" and row 1 gave "YEAR" for CLASS — a
+// genuine authoring error in the source document, not a harmless repeat),
+// that's surfaced as a warning rather than silently discarded. This check
+// applies to every recognized label, not just CLASS — a duplicated DATE
+// cell is exactly as likely a source of a confusing downstream "could not
+// parse date" error as a duplicated CLASS cell is of a "class could not be
+// resolved" one, so both (and TEACHER/WEEK/TERM/SUBJECT) get the same
+// protection, instead of the second occurrence silently overwriting the
+// first with no clue why.
 function _parseMetaRows(row0, row1) {
   const meta = {};
   const warnings = [];
-  const FIELD_BY_LABEL = { CLASS: 'classRaw' };
+  const FIELD_BY_LABEL = {
+    TEACHER: 'teacherRaw', WEEK: 'weekRaw', SUBJECT: 'subjectRaw',
+    DATE: 'dateRaw', CLASS: 'classRaw',
+  };
   const pairs = (row) => {
     for (let i = 0; i + 1 < row.length; i += 2) {
       const label = _norm(row[i]).toUpperCase();
       const value = _norm(row[i + 1]);
       if (!label) continue;
-      if (label === 'TEACHER') meta.teacherRaw = value;
-      else if (label === 'WEEK') meta.weekRaw = value;
-      else if (label.startsWith('TERM')) meta.termYearRaw = value;
-      else if (label === 'SUBJECT') meta.subjectRaw = value;
-      else if (label === 'DATE') meta.dateRaw = value;
-      else if (label in FIELD_BY_LABEL) {
-        const field = FIELD_BY_LABEL[label];
-        if (!meta[field]) meta[field] = value;
-        else if (value && value !== meta[field]) {
-          warnings.push(`Conflicting ${label} values found ("${meta[field]}" vs "${value}") — using "${meta[field]}"; verify this lesson's class is correct.`);
-        }
+      const field = label.startsWith('TERM') ? 'termYearRaw' : FIELD_BY_LABEL[label];
+      if (!field) continue;
+      if (!meta[field]) meta[field] = value;
+      else if (value && value !== meta[field]) {
+        warnings.push(`Conflicting ${label} values found ("${meta[field]}" vs "${value}") — using "${meta[field]}"; verify this lesson's ${label.toLowerCase()} is correct.`);
       }
     }
   };

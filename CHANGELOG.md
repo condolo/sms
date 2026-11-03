@@ -6,6 +6,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.260.0] - 2026-11-03 - fix(lessons): lesson plan import audit — named the real "DATE cell has a lesson number, not a date" failure directly, generalized duplicate-field warnings, and wrote the missing teacher how-to
+
+Reported directly, with a screenshot: a real school's import came back 0 ready / 4 invalid, every lesson showing `(no date)` and `Could not parse date "2"` (then "3", "4"...), plus a `Conflicting CLASS values` warning on every block. "I think so far no one has managed to import the lesson plan effectively" — asked for both a step-by-step teacher guide and an audit of whether the import is working as expected.
+
+**Audit finding:** the document's DATE cell for every lesson literally contained a bare lesson/week number instead of a calendar date — always correctly rejected, but with a generic "Could not parse date" message that gave no clue what was actually wrong. `resolveLessonDate` now recognizes this specific, unambiguous case (a short pure-digit string can never be a real date in either format this parser accepts) and names it directly: *"...that looks like a lesson or week number, not a date. Check that your document's DATE column has an actual calendar date for every lesson..."*
+
+**Second finding, a real narrow gap:** the "first value wins, warn on a disagreeing duplicate" protection added for CLASS (v5.131.0, for one real document's duplicate-cell quirk) never covered TEACHER/WEEK/TERM/SUBJECT/DATE — a duplicated, disagreeing cell for any of those silently overwrote the first value with zero warning. Generalized the same protection to all of them, same message format.
+
+**Confirmed working as designed, not a bug:** the document's own TEACHER/CLASS/SUBJECT text is never used to resolve or verify anything against what's actually imported — teacher/class/subject/term come exclusively from the dropdowns the operator picks before uploading (confirmed by grep: the resolver's `matchByName` is imported into the route and never called). The "Conflicting CLASS" warning was real but always informational-only. This is the fact most missing from the in-app UI, now stated explicitly in the new guide.
+
+**The real root cause of "no one has managed to import effectively":** there was no in-app or written guidance on what a well-formed document actually looks like — `ImportSlideOver`'s only copy is one sentence. Added a full step-by-step section to `docs/TEACHER_GUIDE.md`: exact required label structure (TEACHER/WEEK/TERM row, SUBJECT/DATE/CLASS row, Lesson/Topic/Objectives/Activities/Resources/Remarks header row, Differentiation/Assessment/Homework rows), accepted DATE formats with concrete examples, the CSV column spec and its one required column, and — the actual fix for "every row is invalid" — what to check first.
+
+Full details: [Developer Guide](docs/DEVELOPER_GUIDE.md#lesson-plan-import-audit-bare-lessonweek-numbers-in-the-date-cell-now-named-directly-not-silently-mis-mapped-as-no-clue-why-v52600-2026-11-03).
+
+- `server/utils/lesson-plan-import-resolver.js` — specific error for a bare lesson/week number in the DATE field
+- `server/utils/lesson-plan-docx-parser.js` — duplicate-field conflict warning generalized from CLASS-only to every recognized meta label
+- `docs/TEACHER_GUIDE.md` — new "Importing a term's lesson plans from a Word document" step-by-step section
+- `server/__tests__/lesson-plan-import-resolver.test.js`, `server/__tests__/lesson-plan-docx-parser.test.js` — new tests for both
+
+Full server suite re-run clean, zero regressions, including the existing golden-fixture tests against two real Trinitas documents.
+
 ## [v5.259.0] - 2026-11-03 - fix(parent-portal): Profile moved off a crowded icon row onto its own page; the floating support bubble now actually renders
 
 Reported directly: "where it is now is congested — under parent's profile click on the profile and you see where to log out," plus the floating support icon should sit bottom-right like it does in the school account.

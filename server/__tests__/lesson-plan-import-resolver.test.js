@@ -66,6 +66,22 @@ describe('resolveLessonDate — against the real Term 1 2026-2027 span', () => {
     expect(resolveLessonDate('sometime next week', TERM_1_2026).error).toMatch(/Could not parse/);
   });
 
+  // Real customer report, 2026-11-03: a DATE cell holding a bare lesson/
+  // week number ("2") instead of a calendar date, failing every lesson in
+  // the document identically with no clue why. A short pure-digit string
+  // can never be a real date here (named dates need a month word; numeric
+  // dates need two separators), so this gets its own, more specific error
+  // instead of the generic "Could not parse date" fallback.
+  test('a bare lesson/week number is named directly, not reported as generic unparseable text', () => {
+    const result = resolveLessonDate('2', TERM_1_2026);
+    expect(result.error).toMatch(/looks like a lesson or week number, not a date/);
+    expect(result.error).toContain('"2"');
+  });
+
+  test('a short bare number still gets the specific hint even with 3 digits', () => {
+    expect(resolveLessonDate('123', TERM_1_2026).error).toMatch(/looks like a lesson or week number/);
+  });
+
   test('a real calendar date that is just outside the term is reported, not clamped', () => {
     expect(resolveLessonDate('25 DECEMBER 2026', TERM_1_2026).error).toMatch(/does not fall within/);
   });
