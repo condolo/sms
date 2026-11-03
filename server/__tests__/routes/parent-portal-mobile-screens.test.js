@@ -45,9 +45,10 @@ jest.mock('../../middleware/auth', () => ({
 
 jest.mock('../../utils/timetable-publish', () => ({
   isTimetablePublished: jest.fn().mockResolvedValue(false),
-  publishedReader: jest.fn().mockResolvedValue({
-    find: () => ({ sort: () => ({ select: () => ({ lean: () => Promise.resolve([]) }) }) }),
-  }),
+  // Resolves to the real mocked `timetable` collection (defined further
+  // down this file) so a test can seed slots and assert the route's own
+  // filter/scoping, rather than always answering an empty, unfiltered list.
+  publishedReader: jest.fn(() => Promise.resolve(mockCollections['timetable'] ?? mockCollection('timetable'))),
 }));
 
 /* The real _inboxQuery takes the { schoolId, userId, role } triple from
@@ -108,7 +109,10 @@ function matchesFilter(doc, filter) {
 function mockChain(rows) {
   let data = Array.isArray(rows) ? [...rows] : rows;   // findOne hands us one doc, not a list
   const c = {
-    select: () => c,
+    // A jest.fn so a test can inspect exactly which fields a route asked
+    // for (see the Behaviour/Medical allow-list tests below) — behavior
+    // is unchanged, this mock never actually projects fields itself.
+    select: jest.fn(() => c),
     // Honours the sort/limit the route asks for, so a test can actually pin
     // "newest message wins" and "chronological conversation" rather than
     // whatever order the seed happened to be in.
@@ -162,6 +166,7 @@ const express   = require('express');
 const supertest = require('supertest');
 const messageRoutes = require('../../routes/messages');
 const parentPortal  = require('../../routes/parent-portal');
+const { isTimetablePublished } = require('../../utils/timetable-publish');
 
 function buildApp() {
   const app = express();
@@ -200,6 +205,9 @@ beforeEach(() => {
   mockCollection('report_card_snapshots', []);
   mockCollection('subjects', []);
   mockCollection('messages', []);
+  mockCollection('behaviour_incidents', []);
+  mockCollection('medical_visits', []);
+  mockCollection('timetable', []);
   mockCollection('users', [{ id: PARENT, schoolId: SCHOOL, name: 'Mrs. Kamau', email: 'kamau@example.com', role: 'parent' }]);
 });
 
@@ -373,6 +381,106 @@ describe('GET /api/parent-portal/fees/:childId', () => {
     mockCollections.invoices._seed.push({ id: 'inv_9', schoolId: SCHOOL, studentId: CHILD, total: 100, balance: 100, dueDate: '2026-11-01' });
     const res = await supertest(buildApp()).get(`/api/parent-portal/fees/${CHILD}`);
     expect(res.body.data.invoices[0].invoiceNumber).toBe('inv_9');
+  });
+});
+
+/* ── Screen 5b — full behaviour incident history, parent-safe fields ── */
+
+describe('GET /api/parent-portal/behaviour/:childId', () => {
+  test('returns the parent-safe fields, newest first, and strips staff-internal ones', async () => {
+    mockCollections.behaviour_incidents._seed.push(
+      { id: 'inc_1', schoolId: SCHOOL, studentId: CHILD, date: '2026-10-05', type: 'demerit', category: 'Classroom', title: 'Late to class', description: 'Arrived 10 minutes late.', severity: 'low', points: -5, location: 'Room 4', action: 'Verbal warning', note: 'Spoke to parent informally — do not escalate yet', witnesses: ['stu_other_kid'], reportedBy: 'usr_teacher_otieno' },
+      { id: 'inc_2', schoolId: SCHOOL, studentId: CHILD, date: '2026-10-20', type: 'merit', category: 'Academic', title: 'Top of class', points: 10 },
+      { id: 'inc_3', schoolId: SCHOOL, studentId: 'stu_someone_else', date: '2026-10-21', type: 'demerit', title: 'Not this child' },
+    );
+
+    const res = await supertest(buildApp()).get(`/api/parent-portal/behaviour/${CHILD}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.map((i) => i.id)).toEqual(['inc_2', 'inc_1']); // newest first, and never another child's
+
+    const late = res.body.data.find((i) => i.id === 'inc_1');
+    expect(late.title).toBe('Late to class');
+    expect(late.action).toBe('Verbal warning');
+
+    // The route's own .select() is the real redaction mechanism (a real
+    // Mongo query only ever returns what's named here) — pin that the
+    // three staff-internal fields are never even asked for.
+    const selectArg = mockCollections.behaviour_incidents.find.mock.results[0].value.select.mock.calls[0][0];
+    expect(selectArg).not.toMatch(/\bnote\b/);
+    expect(selectArg).not.toMatch(/\bwitnesses\b/);
+    expect(selectArg).not.toMatch(/\breportedBy\b/);
+  });
+
+  test('a sibling who is not linked to this parent is refused', async () => {
+    const res = await supertest(buildApp()).get('/api/parent-portal/behaviour/stu_not_mine');
+    expect(res.status).toBe(403);
+  });
+});
+
+/* ── Screen 5c — clinic / nurse-visit history ────────────────────── */
+
+describe('GET /api/parent-portal/medical/:childId', () => {
+  test('returns this child’s own visits, excluding a soft-deleted one and another child’s', async () => {
+    mockCollections.medical_visits._seed.push(
+      { id: 'vis_1', schoolId: SCHOOL, studentId: CHILD, date: '2026-10-10', time: '10:15', complaint: 'Headache', observation: 'Mild fever', actionTaken: 'Rested in sick bay', medicationGiven: 'Paracetamol', returnedToClass: true, sentHome: false, referred: false, recordedBy: 'usr_nurse' },
+      { id: 'vis_2', schoolId: SCHOOL, studentId: CHILD, date: '2026-10-22', complaint: 'Sprained ankle', sentHome: true, referred: true, referredTo: 'Nairobi Hospital', deletedAt: '2026-10-23T00:00:00.000Z' },
+      { id: 'vis_3', schoolId: SCHOOL, studentId: SIBLING, date: '2026-10-11', complaint: 'Stomach ache' },
+    );
+
+    const res = await supertest(buildApp()).get(`/api/parent-portal/medical/${CHILD}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.map((v) => v.id)).toEqual(['vis_1']); // the deleted one and the sibling's are both excluded
+    expect(res.body.data[0].complaint).toBe('Headache');
+    expect(res.body.data[0].medicationGiven).toBe('Paracetamol');
+
+    // Same allow-list posture as Behaviour — staff identity (recordedBy/
+    // createdBy/updatedBy) is never asked for.
+    const selectArg = mockCollections.medical_visits.find.mock.results[0].value.select.mock.calls[0][0];
+    expect(selectArg).not.toMatch(/recordedBy|createdBy|updatedBy/);
+  });
+
+  test('a child not linked to this parent is refused', async () => {
+    const res = await supertest(buildApp()).get('/api/parent-portal/medical/stu_not_mine');
+    expect(res.status).toBe(403);
+  });
+});
+
+/* ── Screen 5d — full weekly timetable ───────────────────────────── */
+
+describe('GET /api/parent-portal/timetable/:childId', () => {
+  test('an unpublished timetable shows nothing, same gate as the dashboard', async () => {
+    isTimetablePublished.mockResolvedValueOnce(false);
+    mockCollections.timetable._seed.push(
+      { schoolId: SCHOOL, classId: 'cls_7a', streamId: 'strm_7a', day: 'monday', startTime: '08:00', endTime: '08:40', subject: 'Mathematics', isActive: true },
+    );
+    const res = await supertest(buildApp()).get(`/api/parent-portal/timetable/${CHILD}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.slots).toEqual([]);
+  });
+
+  test('a published timetable returns this child’s own class+stream slots, unioned with whole-class ones', async () => {
+    isTimetablePublished.mockResolvedValueOnce(true);
+    mockCollections.timetable._seed.push(
+      { schoolId: SCHOOL, classId: 'cls_7a', streamId: 'strm_7a', day: 'monday', startTime: '08:00', endTime: '08:40', subject: 'Mathematics', teacherName: 'Mrs. Otieno', room: 'Rm 4', isActive: true },
+      { schoolId: SCHOOL, classId: 'cls_7a', day: 'monday', startTime: '09:00', endTime: '09:40', subject: 'Assembly', isActive: true }, // whole-class, no streamId
+      { schoolId: SCHOOL, classId: 'cls_7a', streamId: 'strm_other', day: 'monday', startTime: '10:00', endTime: '10:40', subject: 'French', isActive: true }, // a different stream of the same class
+      { schoolId: SCHOOL, classId: 'cls_4b', streamId: 'strm_4b', day: 'monday', startTime: '08:00', endTime: '08:40', subject: 'English', isActive: true }, // a different child's class entirely
+    );
+
+    const res = await supertest(buildApp()).get(`/api/parent-portal/timetable/${CHILD}`);
+
+    expect(res.status).toBe(200);
+    const subjects = res.body.data.slots.map((s) => s.subjectName);
+    expect(subjects).toEqual(expect.arrayContaining(['Mathematics', 'Assembly']));
+    expect(subjects).not.toContain('French');   // a different stream of the SAME class
+    expect(subjects).not.toContain('English');  // a different child's class
+  });
+
+  test('a child not linked to this parent is refused', async () => {
+    const res = await supertest(buildApp()).get('/api/parent-portal/timetable/stu_not_mine');
+    expect(res.status).toBe(403);
   });
 });
 

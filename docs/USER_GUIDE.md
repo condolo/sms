@@ -227,6 +227,7 @@ Click any student row to open their full profile:
 - **Attendance tab**: monthly attendance breakdown
 - **Behaviour tab**: merit/demerit history, current stage, milestone badges
 - **Finance tab**: invoice history and payment status
+- **Timetable tab**: this student's own weekly schedule — their class+stream's lessons, grouped by day. Same schedule a form teacher sees on the class grid, filtered to this one student; there's no separate per-student/elective schedule in Msingi.
 - **Medical tab**: emergency contact, doctor/clinic details, medical notes
 - **Portal tab** (admin/principal/deputy only): create or reset the student's own login and, if a parent email is on file, the parent's login; deactivate or reactivate the student. See `SCHOOL_ADMIN_GUIDE.md` §7 for the full workflow, including bulk activation for many students at once.
 

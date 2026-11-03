@@ -506,6 +506,7 @@ export const admissions = {
 export const timetable = {
   list:        (params)     => _get('/timetable', params),
   byClass:     (classId, p) => _get(`/timetable/class/${classId}`, p),
+  byStudent:   (studentId)  => _get(`/timetable/student/${studentId}`),
   byTeacher:   (id, p)      => _get(`/timetable/teacher/${id}`, p),
   workload:    (p)          => _get('/timetable/workload', p),
   conflicts:   (p)          => _get('/timetable/conflicts', p),

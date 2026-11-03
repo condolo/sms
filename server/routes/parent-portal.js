@@ -725,6 +725,105 @@ router.get('/attendance/:childId', authMiddleware, PLAN, async (req, res) => {
   }
 });
 
+/* ── Screen 5b: full behaviour incident history (parent-safe fields) ──
+   The dashboard's own behaviourSummary already reads this exact
+   collection scoped to studentId:childId (see /dashboard/:childId
+   above) — this exposes the full list behind that summary. Fields are
+   an explicit allow-list, not a deny-list (same defensive convention
+   medical.js's /alerts route documents) — so a future field added to
+   IncidentSchema is invisible here by default, not leaked by accident.
+   `note` (the teacher's private annotation), `witnesses` (other
+   students' userIds) and `reportedBy`/name/role (staff identity) are
+   deliberately never selected: those are the three fields that would
+   turn "my child's own incident record" into "the staff's internal
+   case file" if shown verbatim — see behaviour.js's IncidentSchema. */
+router.get('/behaviour/:childId', authMiddleware, PLAN, async (req, res) => {
+  if (!_requireParent(req, res)) return;
+  try {
+    const { schoolId } = req.jwtUser;
+    const childId = req.params.childId;
+    if (_unlinked(req, res, childId)) return;
+
+    const docs = await tenantModel('behaviour_incidents', tenantContext(req))
+      .find({ schoolId, studentId: childId })
+      .sort({ date: -1, createdAt: -1 })
+      .limit(200)
+      .select('id date type category title description severity points location action detention detentionDate')
+      .lean();
+
+    return ok(res, docs);
+  } catch (err) {
+    console.error('[parent-portal GET /behaviour/:childId]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ── Screen 5c: clinic / nurse-visit history ──
+   Sourced from medical_visits (see medical.js) — every visit is already
+   nothing but this child's own clinic record (complaint, what the nurse
+   observed and did, whether they were sent home/referred). Unlike
+   Behaviour above, nothing here needs redacting — it's an allow-list
+   anyway, for the same "a future field is invisible by default" reason. */
+router.get('/medical/:childId', authMiddleware, PLAN, async (req, res) => {
+  if (!_requireParent(req, res)) return;
+  try {
+    const { schoolId } = req.jwtUser;
+    const childId = req.params.childId;
+    if (_unlinked(req, res, childId)) return;
+
+    const docs = await tenantModel('medical_visits', tenantContext(req))
+      .find({ schoolId, studentId: childId, deletedAt: { $exists: false } })
+      .sort({ date: -1, createdAt: -1 })
+      .limit(100)
+      .select('id date time complaint observation actionTaken medicationGiven returnedToClass sentHome referred referredTo notes')
+      .lean();
+
+    return ok(res, docs);
+  } catch (err) {
+    console.error('[parent-portal GET /medical/:childId]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ── Screen 5d: full weekly timetable ──
+   The dashboard payload already carries today's slice (timetableToday) —
+   this is the whole week, same query shape as timetable.js's own
+   /student/:studentId (the admin Student Profile's Timetable tab), but
+   gated on isTimetablePublished like every other parent-facing
+   timetable read in this file. */
+router.get('/timetable/:childId', authMiddleware, PLAN, async (req, res) => {
+  if (!_requireParent(req, res)) return;
+  try {
+    const { schoolId } = req.jwtUser;
+    const childId = req.params.childId;
+    if (_unlinked(req, res, childId)) return;
+
+    const student = await tenantModel('students', tenantContext(req))
+      .findOne({ id: childId, schoolId }).select('classId streamId').lean();
+    if (!student?.classId) return ok(res, { slots: [] });
+
+    // Unpublished timetables are not shown to parents — same gate the
+    // dashboard's own timetableToday already applies.
+    if (!(await isTimetablePublished(schoolId))) return ok(res, { slots: [] });
+
+    const streamOr = student.streamId
+      ? [{ streamId: student.streamId }, { streamId: { $exists: false } }]
+      : [{ streamId: { $exists: false } }];
+
+    const Timetable = await publishedReader(schoolId, tenantContext(req));
+    const docs = await Timetable.find({ schoolId, classId: student.classId, isActive: true, $or: streamOr })
+      .sort({ day: 1, startTime: 1 })
+      .limit(200)
+      .select('subject teacherName day startTime endTime room')
+      .lean();
+
+    return ok(res, { slots: docs.map(s => ({ ...s, subjectName: s.subject })) });
+  } catch (err) {
+    console.error('[parent-portal GET /timetable/:childId]', err);
+    return E.serverError(res);
+  }
+});
+
 /* ── Screen 6: the term report ─────────────────────────────────── */
 
 router.get('/report/:childId', authMiddleware, PLAN, async (req, res) => {

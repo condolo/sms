@@ -13,7 +13,7 @@ import {
   Star, ShieldAlert, TrendingUp, TrendingDown, Award,
   Hash, Mail, Phone, MapPin, Shield, BookOpen, Home,
   CheckCircle2, Clock, XCircle, CheckCheck, Heart, Printer,
-  KeyRound, UserX, UserCheck, Copy, RefreshCcw, Camera,
+  KeyRound, UserX, UserCheck, Copy, RefreshCcw, Camera, Calendar,
 } from 'lucide-react';
 import {
   students  as studentsApi,
@@ -24,6 +24,7 @@ import {
   settings   as settingsApi,
   classes    as classesApi,
   streams    as streamsApi,
+  timetable  as timetableApi,
   _csrfToken,
 } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
@@ -38,6 +39,7 @@ const TABS = [
   { id: 'finance',    label: 'Finance',     Icon: Receipt        },
   { id: 'behaviour',  label: 'Behaviour',   Icon: Scale          },
   { id: 'grades',     label: 'Grades',      Icon: GraduationCap  },
+  { id: 'timetable',  label: 'Timetable',   Icon: Calendar       },
   { id: 'medical',    label: 'Medical',     Icon: Heart          },
   { id: 'portal',     label: 'Portal',      Icon: KeyRound       },
 ];
@@ -179,6 +181,13 @@ export default function StudentProfile() {
     queryFn:  () => assessmentApi.report({ studentId }),
     enabled:  tab === 'grades' && !!studentId,
     staleTime: 5 * 60_000,
+  });
+
+  const { data: timetableData, isLoading: timetableLoading } = useQuery({
+    queryKey: ['timetable', 'student', studentId],
+    queryFn:  () => timetableApi.byStudent(studentId),
+    enabled:  tab === 'timetable' && !!studentId,
+    staleTime: 60_000,
   });
 
   /* ── Update mutation ──
@@ -536,6 +545,9 @@ td:last-child{font-weight:500}
             )}
             {tab === 'grades' && (
               <GradesTab data={gradesData?.data?.students?.[0]?.subjects} loading={gradesLoading} />
+            )}
+            {tab === 'timetable' && (
+              <TimetableTab data={timetableData?.data} loading={timetableLoading} />
             )}
             {tab === 'medical' && (
               <MedicalTab student={student} saving={saving} onSave={updateStudent} canEdit={can('students')} />
@@ -1314,6 +1326,75 @@ function GradesTab({ data, loading }) {
    MEDICAL TAB
    ══════════════════════════════════════════════════════════════ */
 const BLOOD_GROUPS = ['A+','A-','B+','B-','O+','O-','AB+','AB-','Unknown'];
+
+/* ══════════════════════════════════════════════════════════════
+   TIMETABLE TAB — this student's own class+stream weekly schedule.
+   There is no per-student/elective slot granularity anywhere in the
+   timetable schema — this shows whatever that class+stream's lessons
+   are, the same thing a form teacher already sees on the class grid,
+   just filtered to one student's own week.
+   ══════════════════════════════════════════════════════════════ */
+const WEEKDAY_ORDER = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+function TimetableTab({ data, loading }) {
+  if (loading) return (
+    <div className="space-y-3">
+      {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-28 rounded-xl" />)}
+    </div>
+  );
+
+  const slots = Array.isArray(data?.slots) ? data.slots : [];
+  if (!data?.classId) return (
+    <div className="bg-white border border-slate-200 rounded-xl p-8 text-center">
+      <Calendar size={24} className="mx-auto text-slate-300 mb-2" />
+      <p className="text-sm text-slate-500">This student has no class assigned yet — a timetable needs a class.</p>
+    </div>
+  );
+  if (!slots.length) return (
+    <div className="bg-white border border-slate-200 rounded-xl p-8 text-center">
+      <Calendar size={24} className="mx-auto text-slate-300 mb-2" />
+      <p className="text-sm text-slate-500">No timetable slots scheduled yet for {data.className ?? 'this class'}{data.streamName ? ` — ${data.streamName}` : ''}.</p>
+    </div>
+  );
+
+  const byDay = new Map();
+  for (const slot of slots) {
+    const day = (slot.day || '').toLowerCase();
+    if (!byDay.has(day)) byDay.set(day, []);
+    byDay.get(day).push(slot);
+  }
+  const orderedDays = WEEKDAY_ORDER.filter(d => byDay.has(d));
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-slate-400">{data.className ?? 'Class'}{data.streamName ? ` — ${data.streamName}` : ''}</p>
+      {orderedDays.map(day => (
+        <div key={day} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+          <div className="px-4 py-2 bg-slate-50 border-b border-slate-100">
+            <h3 className="text-xs font-semibold text-slate-600 uppercase tracking-wider capitalize">{day}</h3>
+          </div>
+          <div className="divide-y divide-slate-50">
+            {byDay.get(day)
+              .slice()
+              .sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''))
+              .map((slot, i) => (
+                <div key={slot.id ?? i} className="flex items-center gap-3 px-4 py-2.5">
+                  <div className="text-xs text-slate-400 min-w-[90px] flex-shrink-0">
+                    {slot.startTime}{slot.endTime ? `–${slot.endTime}` : ''}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-slate-800 truncate">{slot.subject || '—'}</p>
+                    <p className="text-xs text-slate-400 truncate">
+                      {slot.teacherName || ''}{slot.room ? `${slot.teacherName ? ' · ' : ''}${slot.room}` : ''}
+                    </p>
+                  </div>
+                </div>
+              ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function MedicalTab({ student, saving, onSave, canEdit }) {
   const [editing, setEditing] = useState(false);

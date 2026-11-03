@@ -18,6 +18,7 @@
      GET    /conflicts               Institution-wide conflict scan
      GET    /overview                All-class master grid data
      GET    /class/:classId          Full class timetable (array)
+     GET    /student/:studentId      One student's own weekly schedule
      GET    /teacher/:teacherId      Teacher weekly schedule (array)
      GET    /:id                     Single slot
      POST   /                        Create slot (with conflict checks)
@@ -661,6 +662,54 @@ router.get('/class/:classId', authMiddleware, PLAN, MODGATE, timetableManageAcce
 
     return ok(res, docs);
   } catch (err) { console.error('[timetable GET /class/:classId]', err); return E.serverError(res); }
+});
+
+/* ── GET /api/timetable/student/:studentId ─ One student's own weekly
+   schedule, for the Student Profile's Timetable tab.
+
+   Deliberately gated by rbac('students','read') — the SAME floor that
+   gates viewing the profile itself (see students.js's GET /:id) — not
+   timetableManageAccess. A student's schedule is "whatever their
+   class+stream's timetable is" (there is no per-student/elective slot
+   granularity anywhere in this schema); it is information the profile
+   already implies, not a new scheduling-admin surface. A staffer who
+   can open this profile at all can already see the student's class and
+   stream right there in Overview — this tab just resolves what that
+   class+stream's lessons are. Returns the real (possibly unpublished)
+   timetable, same posture as /class/:classId above — this is an admin-
+   console view, not the Parent/Student Portal (which gate on
+   isTimetablePublished instead; see parent-portal.js's own version of
+   this same query). */
+router.get('/student/:studentId', authMiddleware, PLAN, MODGATE, rbac('students', 'read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const student = await tenantModel('students', tenantContext(req))
+      .findOne({ id: req.params.studentId, schoolId })
+      .select('id classId className streamId streamName').lean();
+    if (!student) return E.notFound(res, 'Student not found');
+    if (!student.classId) return ok(res, { classId: null, className: null, streamId: null, streamName: null, slots: [] });
+
+    // Same "this stream's own slots, union any genuine whole-class slot"
+    // rule as every other student-facing timetable read in this codebase
+    // (see parent-portal.js's dashboard route) — without it, every
+    // stream's lessons for the class would merge onto this one student.
+    const streamOr = student.streamId
+      ? [{ streamId: student.streamId }, { streamId: { $exists: false } }]
+      : [{ streamId: { $exists: false } }];
+
+    const docs = await tenantModel('timetable', tenantContext(req))
+      .find({ schoolId, classId: student.classId, isActive: true, $or: streamOr })
+      .sort({ day: 1, periodNumber: 1, period: 1 })
+      .limit(200)
+      .select('-__v')
+      .lean();
+
+    return ok(res, {
+      classId: student.classId, className: student.className ?? null,
+      streamId: student.streamId ?? null, streamName: student.streamName ?? null,
+      slots: docs,
+    });
+  } catch (err) { console.error('[timetable GET /student/:studentId]', err); return E.serverError(res); }
 });
 
 /* ── GET /api/timetable/teacher/:teacherId ─ Teacher schedule ── */

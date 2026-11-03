@@ -35,7 +35,7 @@ import {
   CheckCircle, Download, FileText, GraduationCap,
   Lock, LogOut, MessageSquare, Send, Star, Wallet,
   ChevronDown, ChevronLeft, ChevronRight, MonitorPlay, MapPin, BookOpen, CalendarCheck,
-  Menu, X, TrendingUp, LifeBuoy, KeyRound, Eye, EyeOff, Loader2,
+  Menu, X, TrendingUp, LifeBuoy, KeyRound, Eye, EyeOff, Loader2, Heart,
 } from 'lucide-react';
 import NotificationBell from '@/components/layout/NotificationBell.jsx';
 import FloatingHelp from '@/components/help/FloatingHelp.jsx';
@@ -133,13 +133,16 @@ const MY_CHILD_NAV = [
   { id: 'fees',       label: 'Fee Statements',    Icon: Wallet,      module: 'finance' },
   { id: 'timetable',  label: 'Timetable',         Icon: Calendar,    module: 'timetable' },
   { id: 'library',    label: 'Library',           Icon: BookOpen,    module: 'library' },
+  { id: 'behaviour',  label: 'Behaviour & Rewards',Icon: Star,        module: 'behaviour' },
+  { id: 'medical',    label: 'Medical',           Icon: Heart,       module: 'medical' },
 ];
 const SCHOOL_NAV = [
   { id: 'messages',      label: 'Messages',            Icon: MessageSquare, module: 'messages' },
   { id: 'calendar',      label: 'School Calendar',     Icon: CalendarCheck, module: 'events' },
-  { id: 'behaviour',     label: 'Behaviour & Rewards',  Icon: Star,          module: 'behaviour' },
   { id: 'announcements', label: 'Announcements',       Icon: Bell,          module: null },
 ];
+
+const WEEKDAY_ORDER = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 
 /* ── Grade progress bar ─────────────────────────────────────────── */
 function GradeBar({ id, label, pct, delay = 0 }) {
@@ -428,6 +431,11 @@ export default function ParentDashboard() {
   const [downloading,   setDownloading]   = useState(null);
   const [dlError,       setDlError]       = useState('');
   const [latestWeek,    setLatestWeek]    = useState(null); // most recent Weekly Snapshot for activeChildId, or undefined if none generated yet
+  // Full per-child histories — each this child's own, scoped server-side
+  // by studentId. null = loading, [] = loaded and empty.
+  const [behaviourFull, setBehaviourFull] = useState(null);
+  const [medicalVisits, setMedicalVisits] = useState(null);
+  const [timetableWeek, setTimetableWeek] = useState(null);
   const [inboxMessages, setInboxMessages] = useState(null); // real /api/messages inbox — per parent, not per child
   const [inboxLoading,  setInboxLoading]  = useState(false);
   const [inboxTotal,    setInboxTotal]    = useState(0);
@@ -554,6 +562,23 @@ export default function ParentDashboard() {
     _fetch(`/api/parent-portal/weekly-snapshot/${activeChildId}/weeks`)
       .then(({ weeks }) => setLatestWeek(weeks?.[0] ?? undefined))
       .catch(() => setLatestWeek(undefined)); // no snapshot yet, or transient error — card simply hides
+  }, [activeChildId]);
+
+  /* ── This child's own full histories — Behaviour, Medical (nurse
+     visits), full weekly Timetable. Same "own endpoint, own effect"
+     convention as the Weekly Snapshot above, not bolted onto the fat
+     dashboard payload — these can genuinely grow across a child's whole
+     time at the school. Each is already scoped server-side to this one
+     child (parent-portal.js's /behaviour, /medical, /timetable screens);
+     nothing here trusts or re-filters by child on the client. ── */
+  useEffect(() => {
+    if (!activeChildId) return;
+    setBehaviourFull(null);
+    setMedicalVisits(null);
+    setTimetableWeek(null);
+    _fetch(`/api/parent-portal/behaviour/${activeChildId}`).then(setBehaviourFull).catch(() => setBehaviourFull([]));
+    _fetch(`/api/parent-portal/medical/${activeChildId}`).then(setMedicalVisits).catch(() => setMedicalVisits([]));
+    _fetch(`/api/parent-portal/timetable/${activeChildId}`).then(r => setTimetableWeek(r?.slots ?? [])).catch(() => setTimetableWeek([]));
   }, [activeChildId]);
 
   /* ── Real messages inbox (/api/messages) — reported directly: the
@@ -1204,7 +1229,20 @@ export default function ParentDashboard() {
   }
 
   function TimetablePage() {
+    // Grouped by day for the full-week section below "Today" — there is
+    // no per-student/elective slot granularity anywhere in this schema,
+    // so this is genuinely "this child's class+stream's whole week,"
+    // the same thing TimetableTab shows on the admin Student Profile.
+    const byDay = new Map();
+    for (const slot of (timetableWeek ?? [])) {
+      const day = (slot.day || '').toLowerCase();
+      if (!byDay.has(day)) byDay.set(day, []);
+      byDay.get(day).push(slot);
+    }
+    const orderedDays = WEEKDAY_ORDER.filter(dy => byDay.has(dy));
+
     return (
+      <>
       <Card id="section-timetable-full">
         <CardHeader
           icon={Calendar} iconClass="text-sky-500" title="Today's Timetable"
@@ -1245,6 +1283,39 @@ export default function ParentDashboard() {
           </div>
         )}
       </Card>
+
+      <Card id="section-timetable-week" className="mt-4">
+        <CardHeader icon={Calendar} iconClass="text-sky-500" title="Full Week" />
+        {timetableWeek === null ? (
+          <div className="px-4 py-8 text-center text-[12px] text-slate-400">Loading…</div>
+        ) : !orderedDays.length ? (
+          <div className="flex flex-col items-center justify-center py-10 text-slate-400">
+            <Calendar size={20} className="mb-2 opacity-40" />
+            <p className="text-[12px]">No published timetable yet this week</p>
+          </div>
+        ) : (
+          <div id="timetable-week-grid" className="divide-y divide-slate-100">
+            {orderedDays.map(day => (
+              <div key={day} className="px-4 py-3">
+                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.04em] mb-2 capitalize">{day}</p>
+                <div className="space-y-1.5">
+                  {byDay.get(day)
+                    .slice()
+                    .sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''))
+                    .map((slot, i) => (
+                      <div key={`tt-week-${day}-${i}`} className="flex items-center gap-3">
+                        <span className="text-[11px] text-slate-400 min-w-[52px] flex-shrink-0">{slot.startTime}</span>
+                        <span className="text-[12px] font-medium text-slate-700 truncate">{slot.subjectName}</span>
+                        <span className="text-[11px] text-slate-400 truncate">{slot.teacherName}{slot.room ? ` · ${slot.room}` : ''}</span>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+      </>
     );
   }
 
@@ -1371,6 +1442,7 @@ export default function ParentDashboard() {
 
   function BehaviourPage() {
     return (
+      <>
       <Card id="section-behaviour">
         <CardHeader icon={Star} iconClass="text-amber-500" title="Behaviour & Rewards" />
         <div className="px-[18px] py-4 flex items-center gap-4">
@@ -1394,6 +1466,74 @@ export default function ParentDashboard() {
             )}
           </div>
         </div>
+      </Card>
+
+      {/* Full incident history — {activeChild?.name}'s own recorded
+          incidents only, parent-safe fields (see parent-portal.js's
+          /behaviour/:childId for exactly what's excluded and why). */}
+      <Card id="section-behaviour-history" className="mt-4">
+        <CardHeader icon={Star} iconClass="text-amber-500" title="Incident History" />
+        {behaviourFull === null ? (
+          <div className="px-4 py-8 text-center text-[12px] text-slate-400">Loading…</div>
+        ) : !behaviourFull.length ? (
+          <p className="text-[12px] text-slate-400 text-center py-8">No incidents recorded yet</p>
+        ) : (
+          <div id="behaviour-history-list" className="divide-y divide-slate-50">
+            {behaviourFull.map((inc, i) => {
+              const positive = (Number(inc.points) || 0) > 0;
+              return (
+                <div key={inc.id ?? i} className="px-[18px] py-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[13px] font-semibold text-slate-800">{inc.title}</p>
+                      <p className="text-[11px] text-slate-400 mt-0.5">{inc.category || ''}{inc.category && inc.date ? ' · ' : ''}{inc.date ? _fmtDate(inc.date) : ''}</p>
+                    </div>
+                    <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${positive ? 'text-emerald-700 bg-emerald-50' : (inc.points ?? 0) < 0 ? 'text-red-700 bg-red-50' : 'text-slate-600 bg-slate-100'}`}>
+                      {positive ? '+' : ''}{inc.points ?? 0}
+                    </span>
+                  </div>
+                  {inc.description && <p className="text-[12px] text-slate-600 mt-1.5">{inc.description}</p>}
+                  {inc.action && <p className="text-[11px] text-slate-400 mt-1">Action taken: {inc.action}</p>}
+                  {inc.detention && <p className="text-[11px] text-amber-600 mt-1">Detention{inc.detentionDate ? ` · ${_fmtDate(inc.detentionDate)}` : ''}</p>}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
+      </>
+    );
+  }
+
+  function MedicalPage() {
+    return (
+      <Card id="section-medical">
+        <CardHeader icon={Heart} iconClass="text-rose-500" title="Clinic Visits" />
+        {medicalVisits === null ? (
+          <div className="px-4 py-8 text-center text-[12px] text-slate-400">Loading…</div>
+        ) : !medicalVisits.length ? (
+          <p className="text-[12px] text-slate-400 text-center py-8">No clinic visits recorded yet</p>
+        ) : (
+          <div id="medical-visits-list" className="divide-y divide-slate-50">
+            {medicalVisits.map((v, i) => (
+              <div key={v.id ?? i} className="px-[18px] py-3.5">
+                <div className="flex items-start justify-between gap-3">
+                  <p className="text-[13px] font-semibold text-slate-800">{v.complaint}</p>
+                  <span className="text-[11px] text-slate-400 flex-shrink-0">{v.date ? _fmtDate(v.date) : ''}{v.time ? ` · ${v.time}` : ''}</span>
+                </div>
+                {v.observation && <p className="text-[12px] text-slate-600 mt-1">{v.observation}</p>}
+                {v.actionTaken && <p className="text-[11px] text-slate-500 mt-1">Action: {v.actionTaken}</p>}
+                {v.medicationGiven && <p className="text-[11px] text-slate-500 mt-0.5">Medication given: {v.medicationGiven}</p>}
+                <div className="flex items-center gap-2 mt-1.5">
+                  {v.sentHome && <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">Sent home</span>}
+                  {v.referred && <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-sky-50 text-sky-700">Referred{v.referredTo ? ` — ${v.referredTo}` : ''}</span>}
+                  {v.returnedToClass && <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">Returned to class</span>}
+                </div>
+                {v.notes && <p className="text-[11px] text-slate-400 italic mt-1.5">{v.notes}</p>}
+              </div>
+            ))}
+          </div>
+        )}
       </Card>
     );
   }
@@ -1422,7 +1562,7 @@ export default function ParentDashboard() {
   const PAGE_BODIES = {
     overview: OverviewPage, grades: GradesPage, attendance: AttendancePage, fees: FeesPage,
     timetable: TimetablePage, library: LibraryPage, messages: MessagesPage,
-    calendar: CalendarPage, behaviour: BehaviourPage, announcements: AnnouncementsPage,
+    calendar: CalendarPage, behaviour: BehaviourPage, medical: MedicalPage, announcements: AnnouncementsPage,
   };
   // A page whose module got disabled mid-session (or a stale activePage
   // from before this change) falls back to Overview rather than a blank

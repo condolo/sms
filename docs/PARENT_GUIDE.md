@@ -1,6 +1,6 @@
 # Msingi — Parent Guide
 
-> **Audience:** Parents and guardians with a Parent Portal account. Covers signing in, reading your dashboard, and every section of the portal — Grades & Reports, Attendance, Fee Statements, Timetable, Library, Messages, School Calendar, Behaviour & Rewards, and Announcements. Which of these you see depends on what your school has switched on — see §1.
+> **Audience:** Parents and guardians with a Parent Portal account. Covers signing in, reading your dashboard, and every section of the portal — Grades & Reports, Attendance, Fee Statements, Timetable, Library, Messages, School Calendar, Behaviour & Rewards, Clinic Visits, and Announcements. Which of these you see depends on what your school has switched on — see §1.
 
 ---
 
@@ -18,17 +18,18 @@
 10. [Messages](#10-messages)
 11. [School Calendar](#11-school-calendar)
 12. [Behaviour & Rewards](#12-behaviour--rewards)
-13. [Announcements](#13-announcements)
-14. [If You Have More Than One Child](#14-if-you-have-more-than-one-child)
-15. [Notifications](#15-notifications)
-16. [Signing Out](#16-signing-out)
-17. [Something Looks Wrong?](#17-something-looks-wrong)
+13. [Clinic Visits (Medical)](#13-clinic-visits-medical)
+14. [Announcements](#14-announcements)
+15. [If You Have More Than One Child](#15-if-you-have-more-than-one-child)
+16. [Notifications](#16-notifications)
+17. [Signing Out](#17-signing-out)
+18. [Something Looks Wrong?](#18-something-looks-wrong)
 
 ---
 
 ## 1. What You See Depends on Your School
 
-The sidebar you see is not the same for every school. Each section — Grades & Reports, Attendance, Fee Statements, Timetable, Library, Messages, School Calendar, Behaviour & Rewards — only appears if your child's school has that module switched on. **Overview** and **Announcements** are always there; everything else is the school's choice, made in their own admin settings, not something you can turn on or off yourself.
+The sidebar you see is not the same for every school. Each section — Grades & Reports, Attendance, Fee Statements, Timetable, Library, Behaviour & Rewards, Clinic Visits, Messages, School Calendar — only appears if your child's school has that module switched on. **Overview** and **Announcements** are always there; everything else is the school's choice, made in their own admin settings, not something you can turn on or off yourself.
 
 So if a section this guide describes isn't in your sidebar, it isn't broken — your school simply hasn't enabled that feature. Contact the school office if you expected to see one.
 
@@ -40,7 +41,7 @@ The portal also picks up your school's own name, logo, and brand colours automat
 
 Your school issues your parent account — typically a username/email and a temporary password, often shared when your child is enrolled or when a sibling is added to your account. Go to the school's Msingi login page and sign in with those credentials.
 
-If you have more than one child at the same school, one account covers all of them — see §14.
+If you have more than one child at the same school, one account covers all of them — see §15.
 
 If you've forgotten your password or your account won't let you in, contact the school office; they manage parent account resets, not a public "forgot password" self-service flow.
 
@@ -50,7 +51,7 @@ If you've forgotten your password or your account won't let you in, contact the 
 
 The portal has two parts:
 
-- **Sidebar (left)** — your navigation. **My Child** groups the sections about your child specifically (Overview, Grades & Reports, Attendance, Fee Statements, Timetable, Library); **School** groups the ones about the school as a whole (Messages, School Calendar, Behaviour & Rewards, Announcements). Click any item to open that page — each one is a full page on its own, not just a scroll down a long list.
+- **Sidebar (left)** — your navigation. **My Child** groups the sections about your child specifically (Overview, Grades & Reports, Attendance, Fee Statements, Timetable, Library, Behaviour & Rewards, Clinic Visits); **School** groups the ones about the school as a whole (Messages, School Calendar, Announcements). Click any item to open that page — each one is a full page on its own, not just a scroll down a long list.
 - **Top bar** — a greeting, the current term and academic year, a notification bell, and two buttons: **Message School** and, if your school has M-Pesa payments switched on, **Pay Fees via M-Pesa**. Both jump straight to the relevant page.
 
 **On a phone or narrow screen**, the sidebar tucks away behind a menu button (☰) in the top-left — tap it to open, and it closes itself once you pick something.
@@ -100,6 +101,8 @@ Your child's fee position for the current term: total fees, amount paid, and out
 
 Your child's full schedule for **today** — subject, time, room, and teacher, with the current lesson highlighted and the next one marked. If your school has switched on Emergency Online Learning for the day, you'll see a banner saying so at the top.
 
+Below that, a **Full Week** card shows the rest of the week's lessons grouped by day. If the school hasn't published a timetable yet, this stays empty rather than guessing — once it's published, it appears automatically next time you open this page.
+
 ---
 
 ## 9. Library
@@ -126,15 +129,23 @@ Upcoming school-wide events — sports days, holidays, meetings — soonest firs
 
 Your child's behaviour points total, their current badge (Bronze, Silver, or Gold, based on points earned), their most recent reward if any, and the latest teacher comment, if one has been added.
 
+Below that, **Incident History** lists every recorded incident for your child — merit and demerit alike — with its date, category, title, description, points, any action taken, and detention details if applicable. This only ever shows incidents recorded for **your own child**; a sibling's incidents stay on that sibling's own page. A couple of fields stay internal to staff and are not shown here: a teacher's private note on an incident, and the names of any witnesses.
+
 ---
 
-## 13. Announcements
+## 13. Clinic Visits (Medical)
+
+A record of every visit your child has made to the school nurse or clinic: date and time, the complaint, what the nurse observed and did, any medication given, and whether your child was sent home, referred elsewhere, or returned to class. This is the clinic's visit log specifically — not your child's full medical profile (allergies, conditions, emergency contacts, etc.), which the school's office manages separately.
+
+---
+
+## 14. Announcements
 
 The full list of notices from your school, most recent first — the same feed your Overview and Messages pages draw their previews from, shown here in full with the complete text of each one.
 
 ---
 
-## 14. If You Have More Than One Child
+## 15. If You Have More Than One Child
 
 If more than one of your children attends the same school on your account, a child switcher appears above your name at the bottom of the sidebar. Click it to see all your children and pick which one's dashboard you're viewing — every page (Grades, Attendance, Fees, etc.) switches to show that child's data.
 
@@ -142,19 +153,19 @@ Each child's fee balance, grades, and attendance are tracked completely separate
 
 ---
 
-## 15. Notifications
+## 16. Notifications
 
 The bell icon in the top bar shows a count when you have unread notifications. Click it to see what's new; selecting one takes you to the relevant page (usually Messages).
 
 ---
 
-## 16. Signing Out
+## 17. Signing Out
 
 Click the sign-out icon next to your name at the bottom of the sidebar. This ends your session — you'll need your password again to sign back in.
 
 ---
 
-## 17. Something Looks Wrong?
+## 18. Something Looks Wrong?
 
 - **A section you expected isn't in the sidebar** — your school hasn't enabled that module yet (see §1). Ask the school office, not Msingi support, since this is a per-school setting.
 - **Grades look out of date** — you're seeing the most recently *published* report card, not live in-progress marks; the school publishes a new one at the end of each assessment cycle.
