@@ -20,6 +20,7 @@ const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { isTimetablePublished, publishedReader } = require('../utils/timetable-publish');
 const { resolveCurrentPeriod } = require('./academic-config');
+const { audienceClause }        = require('../utils/announcement-audience');
 const { _getMpesaConfig } = require('./mpesa');
 const { createDirectMessage } = require('./messages');
 const { resolveMessageCategories, resolveOneCategory } = require('../utils/parent-message-recipients');
@@ -300,14 +301,37 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
         .select('points type category description date title').lean()
         .catch(() => []),
       student.classId
-        ? Exams.find({ schoolId, classId: student.classId, date: { $gte: todayISO } })
+        ? Exams.find({
+            schoolId,
+            classId: student.classId,
+            date: { $gte: todayISO },
+            // A sitting that is over, or that the office deleted — delete is a
+            // soft delete: status 'cancelled' with `deletedAt` stamped, the
+            // same leak the staff Exams screen had — is not an exam to look
+            // forward to. A mid-sitting exam (in_progress) still shows.
+            $or: [
+              { status: { $exists: false } },
+              { status: 'scheduled' },
+              { status: 'in_progress' },
+            ],
+            $and: [
+              { $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }] },
+            ],
+          })
             .sort({ date: 1 }).limit(4)
-            .select('subjectName date startTime type').lean()
+            .select('title subjectName date startTime type').lean()
             .catch(() => [])
         : [],
+      // A student sees the notices addressed to students — and only those.
+      // The cut is in the query, not a post-filter, because `.limit(3)` below
+      // runs at the database: filtering afterwards would let three
+      // parents-only posts occupy the whole board.
       Announcements.find({
         schoolId,
-        $or: [{ expiresAt: { $gte: new Date() } }, { expiresAt: { $exists: false } }, { expiresAt: null }],
+        $and: [
+          { $or: [{ expiresAt: { $gte: new Date() } }, { expiresAt: { $exists: false } }, { expiresAt: null }] },
+          audienceClause('students'),
+        ],
       }).sort({ createdAt: -1 }).limit(3)
         .select('title body createdAt priority').lean()
         .catch(() => []),
@@ -329,7 +353,6 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
         .select('id bookId bookTitle status dueDate lostAt')
         .lean().catch(() => []),
     ]);
-
     // Behaviour summary
     const totalPoints  = bRecords.reduce((sum, r) => sum + (Number(r.points) || 0), 0);
     const latestReward = bRecords.find(r => (Number(r.points) || 0) > 0) || null;
@@ -410,7 +433,15 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
       upcomingExams:    upcomingExamsDocs,
       announcements:    announcementsDocs,
       upcomingEvents:   upcomingEventsDocs,
-      borrowedBooks:    borrowedBooksDocs,
+      /* An active loan whose due date has passed IS overdue — derived here so
+         Home's badge agrees with the weekly snapshot's own library section,
+         which already derives the same way. The stored status stays 'active'
+         until the librarian returns it; this is a read view, not a write. */
+      borrowedBooks: borrowedBooksDocs.map((doc) => (
+        doc.status === 'active' && doc.dueDate
+          ? { ...doc, status: (doc.dueDate < todayISO ? 'overdue' : 'active') }
+          : doc
+      )),
     });
   } catch (err) {
     console.error('[student-portal GET /dashboard]', err);
@@ -436,6 +467,13 @@ router.get('/me', authMiddleware, PLAN, async (req, res) => {
   }
 });
 
+/* ===============================================================
+   NOTE (merge): the two conflict regions below were resolved by hand —
+   main had added the student messaging routes and this branch adds the
+   published full-week timetable read; both are kept, each closed by the
+   shared `return E.serverError(res); } });` tail.
+   =============================================================== */
+
 /* ═══════════════════════════════════════════════════════════════
    GET /api/student-portal/message-recipients
    Student-safe compose: the categories a student can message are resolved
@@ -452,6 +490,160 @@ router.get('/message-recipients', authMiddleware, PLAN, async (req, res) => {
     return ok(res, categories.map(c => ({ key: c.key, label: c.label })));
   } catch (err) {
     console.error('[student-portal GET /message-recipients]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ── Full-week timetable ─────────────────────────────────────────────
+   The dashboard hands a student `timetableToday`; this route is the read the
+   Timetable screen needs for the rest of the week. Same collection, same
+   published gate, resolved to the student's own stream, with any substitution
+   for that date + period attached as a `change`.
+
+   Per-day shape, not a flat slot list: the screen renders a week, and a flat
+   list silently merges the same period across days. */
+
+const WEEK_DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'];
+
+function _mondayOf(value) {
+  const base = /^\d{4}-\d{2}-\d{2}$/.test(String(value ?? ''))
+    ? String(value)
+    : new Date().toISOString().slice(0, 10);
+  const date = new Date(`${base}T00:00:00Z`);
+  const delta = (date.getUTCDay() + 6) % 7; // Sunday 0 -> Monday 0
+  date.setUTCDate(date.getUTCDate() - delta);
+  return date.toISOString().slice(0, 10);
+}
+
+function _addDays(iso, days) {
+  const date = new Date(`${iso}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+router.get('/timetable', authMiddleware, PLAN, async (req, res) => {
+  if (!_requireStudent(req, res)) return;
+  try {
+    const { schoolId, studentId } = req.jwtUser;
+
+    const student = await tenantModel('students', tenantContext(req))
+      .findOne({ id: studentId, schoolId })
+      .select('classId streamId')
+      .lean();
+    if (!student) return E.notFound(res, 'Student record not found.');
+
+    const monday = _mondayOf(req.query.weekOf);
+    const currentMonday = _mondayOf(undefined);
+    const weeksApart = Math.round(
+      (Date.parse(`${monday}T00:00:00Z`) - Date.parse(`${currentMonday}T00:00:00Z`)) / 604800000,
+    );
+    if (Math.abs(weeksApart) > 1) {
+      return E.validation(res, [
+        { field: 'weekOf', message: 'Only the current week and one week either side can be read.' },
+      ]);
+    }
+
+    const weekEnd = _addDays(monday, 6);
+    const dates = WEEK_DAYS.map((day, index) => ({ day, date: _addDays(monday, index) }));
+
+    let termLabel = '';
+    try {
+      const years = await tenantModel('academic_years', tenantContext(req)).find({ schoolId }).lean();
+      const { year, term, termNumber } = resolveCurrentPeriod(years);
+      termLabel = [term?.name || (termNumber ? `Term ${termNumber}` : ''), year?.name]
+        .filter(Boolean)
+        .join(' ');
+    } catch { /* a missing year is not a reason to fail the week */ }
+
+    const published = await isTimetablePublished(schoolId);
+    if (!published || !student.classId) {
+      return ok(res, { weekOf: monday, weekEnd, termLabel, notPublished: !published, days: [] });
+    }
+
+    const Timetable = await publishedReader(schoolId, tenantContext(req));
+    const streamOr = student.streamId
+      ? [{ streamId: student.streamId }, { streamId: { $exists: false } }]
+      : [{ streamId: { $exists: false } }];
+
+    const slots = await Timetable
+      .find({ schoolId, classId: student.classId, isActive: true, $or: streamOr })
+      .sort({ day: 1, periodNumber: 1, startTime: 1 })
+      .limit(300)
+      .select('subjectId subject teacherId teacherName room day period periodNumber startTime endTime type')
+      .lean();
+
+    /* The timetable document carries `teacherId` but its denormalised
+       `teacherName` is often blank (the seed writes ids only). A student
+       seeing "No teacher" for their own lesson is a data defect they cannot
+       fix, so resolve the names here — by id OR userId, the same two forms
+       the dashboard's link join uses. */
+    const teacherIds = [...new Set(slots.map((s) => s.teacherId).filter(Boolean))];
+    const teacherNameById = new Map();
+    if (teacherIds.length > 0) {
+      const teacherDocs = await tenantModel('teachers', tenantContext(req))
+        .find({ schoolId, $or: [{ id: { $in: teacherIds } }, { userId: { $in: teacherIds } }] })
+        .select('id userId title firstName lastName name')
+        .lean();
+      for (const teacher of teacherDocs) {
+        const name = teacher.name || [teacher.title, teacher.firstName, teacher.lastName].filter(Boolean).join(' ');
+        if (teacher.id) teacherNameById.set(teacher.id, name);
+        if (teacher.userId) teacherNameById.set(teacher.userId, name);
+      }
+    }
+
+    // ONE substitutions query for the whole week, indexed by date|period.
+    const subs = await tenantModel('substitutions', tenantContext(req))
+      .find({
+        schoolId,
+        date: { $gte: dates[0].date, $lte: dates[4].date },
+        $or: [{ classId: student.classId }, { classId: { $exists: false } }],
+      })
+      .limit(300)
+      .lean();
+    const subByKey = new Map();
+    for (const sub of subs) {
+      if (sub?.date && sub?.period) subByKey.set(`${sub.date}|${sub.period}`, sub);
+    }
+
+    const days = dates.map(({ day, date }) => {
+      const daySlots = slots
+        .filter((slot) => String(slot.day || '').toLowerCase() === day)
+        .map((slot) => {
+          const sub = subByKey.get(`${date}|${slot.period}`);
+          const change = sub
+            ? {
+                kind: 'substitution',
+                from: sub.originalTeacherName ?? slot.teacherName ?? '',
+                to: sub.substituteTeacherName ?? null,
+                note: sub.reason || sub.notes || '',
+                at: sub.createdAt ?? null,
+              }
+            : null;
+          return {
+            period: slot.period ?? '',
+            periodNumber: Number(slot.periodNumber ?? slot.period) || 0,
+            type: slot.type || 'lesson',
+            subjectId: slot.subjectId ?? null,
+            subjectName: slot.subject ?? slot.subjectName ?? '',
+            teacherId: slot.teacherId ?? null,
+            teacherName:
+              sub?.substituteTeacherName ||
+              slot.teacherName ||
+              teacherNameById.get(slot.teacherId) ||
+              '',
+            room: slot.room ?? '',
+            startTime: slot.startTime ?? null,
+            endTime: slot.endTime ?? null,
+            change,
+          };
+        })
+        .sort((a, b) => a.periodNumber - b.periodNumber || String(a.period).localeCompare(String(b.period)));
+      return { date, day, slots: daySlots };
+    });
+
+    return ok(res, { weekOf: monday, weekEnd, termLabel, notPublished: false, days });
+  } catch (err) {
+    console.error('[student-portal GET /timetable]', err);
     return E.serverError(res);
   }
 });
@@ -491,6 +683,46 @@ router.post('/messages', authMiddleware, PLAN, async (req, res) => {
     return E.serverError(res);
   }
 });
+
+/* ── Timetable changes — next 7 days, for the Home banner ─────────── */
+router.get('/timetable/changes', authMiddleware, PLAN, async (req, res) => {
+  if (!_requireStudent(req, res)) return;
+  try {
+    const { schoolId, studentId } = req.jwtUser;
+    const student = await tenantModel('students', tenantContext(req))
+      .findOne({ id: studentId, schoolId })
+      .select('classId')
+      .lean();
+    if (!student?.classId) return ok(res, []);
+
+    const today = new Date().toISOString().slice(0, 10);
+    const until = _addDays(today, 7);
+
+    const subs = await tenantModel('substitutions', tenantContext(req))
+      .find({
+        schoolId,
+        date: { $gte: today, $lte: until },
+        $or: [{ classId: student.classId }, { classId: { $exists: false } }],
+      })
+      .sort({ date: 1, period: 1 })
+      .limit(10)
+      .lean();
+
+    return ok(res, subs.map((sub) => ({
+      date: sub.date,
+      period: sub.period ?? '',
+      kind: 'substitution',
+      from: sub.originalTeacherName ?? '',
+      to: sub.substituteTeacherName ?? null,
+      subjectName: sub.subject ?? '',
+      note: sub.reason || sub.notes || '',
+    })));
+  } catch (err) {
+    console.error('[student-portal GET /timetable/changes]', err);
+    return E.serverError(res);
+  }
+});
+
 
 /* ══════════════════════════════════════════════════════════════
    Weekly Student Snapshot — self-service, bypasses RBAC entirely
