@@ -56,15 +56,21 @@ function buildTermLines({ term, assignments = [], routes = [], enrolments = [], 
       s.warnings.push(`Transport (${route.name}): no one-way or two-way fare was chosen for this assignment`);
       continue;
     }
-    const fare = (route.fares || []).find(f => f.fareType === a.fareType);
-    if (!fare) {
+    // Prefer the fare captured when the student was assigned: a fare raised
+    // next term must not reprice a ride already billed for this one. The
+    // route's own fare is the fallback for assignments written before the
+    // capture existed (and any hand-written fixture).
+    const captured  = typeof a.fareAmount === 'number' ? a.fareAmount : null;
+    const routeFare = (route.fares || []).find(f => f.fareType === a.fareType);
+    const amount    = captured != null ? captured : (routeFare ? routeFare.amount : null);
+    if (amount == null) {
       s.warnings.push(`Transport (${route.name}): no ${FARE_LABEL[a.fareType]} fare is set on this route`);
       continue;
     }
     s.lines.push({
       description: `Transport — ${route.name} (${FARE_LABEL[a.fareType]})`,
       quantity:    1,
-      unitPrice:   fare.amount,
+      unitPrice:   amount,
       feeType:     'transport',
     });
   }

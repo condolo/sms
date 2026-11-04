@@ -71,7 +71,8 @@ async function generateEnrollmentInvoices(schoolId, ctx, student, userId, req) {
     const discounts   = await resolveAutoDiscounts(schoolId, ctx, [studentId]);
     const discountPct = discounts.get(studentId) ?? 0;
     const totals       = calcInvoiceTotals(fs.lineItems, discountPct);
-    const invoiceNumber = await nextInvoiceNumber(schoolId);
+    const invoiceNumber = await nextInvoiceNumber(schoolId,
+      (num) => Invoices.exists({ schoolId, invoiceNumber: num }).then(hit => hit !== null));
 
     const inv = await Invoices.create({
       id: uuidv4(), schoolId, discountPct, invoiceNumber,

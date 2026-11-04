@@ -14,6 +14,18 @@ const { _model } = require('./model');
 const { isConnected } = require('../config/db');
 
 const INDEXES = [
+  /* ── smart_reminder_runs ────────────────────────────────────────
+     The idempotency lock for utils/smart-reminders.js: one row per
+     (school, rule, window). The unique index IS the guarantee — two
+     ticks racing both try to insert, and the loser gets E11000 instead
+     of sending a second copy of the same reminder. */
+  {
+    col: 'smart_reminder_runs',
+    indexes: [
+      { key: { schoolId: 1, ruleKey: 1, windowKey: 1 }, name: 'smart_run_window', unique: true },
+      { key: { schoolId: 1, ranAt: -1 },                name: 'smart_run_recent' },
+    ],
+  },
   /* ── report_card_snapshots ──────────────────────────────────
      Primary query pattern: find current snapshots by class/term
      Secondary:            find by student + term
@@ -435,6 +447,11 @@ const INDEXES = [
     indexes: [
       { key: { schoolId: 1, studentId: 1, status: 1 }, name: 'inv_student_status' },
       { key: { schoolId: 1, status: 1, dueDate: 1 },   name: 'inv_status_due' },
+      // Every invoice-number filing checks whether this school already holds a
+      // number (see nextInvoiceNumber's isTaken walk). Not unique: a school
+      // whose history already contains a repeat — which is what the drift
+      // produces — must still be able to build its indexes.
+      { key: { schoolId: 1, invoiceNumber: 1 },        name: 'inv_school_number' },
       { key: { id: 1 },                                 name: 'inv_id', unique: true, sparse: true },
       // One term-billing invoice per student per term. Two runs at the same time
       // cannot both create one: the second insert fails and is reported as skipped.
@@ -450,6 +467,29 @@ const INDEXES = [
     indexes: [
       { key: { schoolId: 1, invoiceId: 1 }, name: 'pay_invoice' },
       { key: { id: 1 },                      name: 'pay_id', unique: true, sparse: true },
+      // Every receipt-number filing checks whether this school's ledger already
+      // holds a number (see nextReceiptNumber's isTaken walk). Not unique: a
+      // school that imported or hand-numbered receipts may already hold two of
+      // one number, and a unique index would then fail to build — and stop the
+      // next legitimate receipt — over a problem that only the generator fixes.
+      { key: { schoolId: 1, receiptNumber: 1 }, name: 'pay_school_receipt' },
+      // GET /api/finance/payments sorts on paidAt and range-filters it, and the
+      // startup backfill asks for `paidAt: null` — all three read this one.
+      { key: { schoolId: 1, paidAt: -1 }, name: 'pay_school_paid_at' },
+    ],
+  },
+
+  /* ── message_attachments ────────────────────────────────────
+     The bytes behind a message's document card. This collection holds
+     multi-megabyte rows, so a lookup without an index is a collection scan
+     over the heaviest documents in the database — the download route asks
+     for { schoolId, id } on every click (see routes/messages.js), and
+     deleting a message sweeps its attachments by messageId. */
+  {
+    col: 'message_attachments',
+    indexes: [
+      { key: { schoolId: 1, id: 1 },        name: 'att_school_id', unique: true, sparse: true },
+      { key: { schoolId: 1, messageId: 1 }, name: 'att_message' },
     ],
   },
 
@@ -552,6 +592,28 @@ const INDEXES = [
       { key: { schoolId: 1, routeId: 1, status: 1 },    name: 'ta_route_status' },
       { key: { schoolId: 1, studentId: 1, status: 1 },  name: 'ta_student_status' },
       { key: { id: 1 },                                  name: 'ta_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── transport_vehicles / transport_drivers ─────────────────
+     The fleet and the drivers. A registration is unique per school (the route
+     enforces it too — the index is what makes that hold under a double-click),
+     and both collections are listed by name/status and resolved by id when a
+     route points at one. */
+  {
+    col: 'transport_vehicles',
+    indexes: [
+      { key: { schoolId: 1, registration: 1 }, name: 'tv_school_reg', unique: true, sparse: true },
+      { key: { schoolId: 1, status: 1 },       name: 'tv_school_status' },
+      { key: { id: 1 },                        name: 'tv_id', unique: true, sparse: true },
+    ],
+  },
+  {
+    col: 'transport_drivers',
+    indexes: [
+      { key: { schoolId: 1, name: 1 },   name: 'td_school_name' },
+      { key: { schoolId: 1, status: 1 }, name: 'td_school_status' },
+      { key: { id: 1 },                  name: 'td_id', unique: true, sparse: true },
     ],
   },
 

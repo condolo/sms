@@ -13,6 +13,12 @@
    group_director-type account whose whole job is "the merged view,
    not any one school's settings" — see CHANGELOG for the
    platform-admin flow that provisions this role.
+
+   GET /api/analytics/series?dateFrom=&dateTo=&bucket= — the window cut
+   into consecutive buckets (attendance rate, money billed, money
+   collected, marks filed) for trend charts, which no windowed snapshot
+   can give. Same gate as /leadership: it is the same school's numbers,
+   just sliced by time.
    ============================================================ */
 const express = require('express');
 
@@ -256,6 +262,229 @@ async function _computeLeadershipSnapshot(schoolId, days) {
   };
 }
 
+/* ============================================================
+   Time series — the same aggregates grouped into consecutive
+   periods, so a chart can draw one honest trend. Without this the
+   client would have to re-issue windowed leadership calls and
+   stitch them, which costs a query per data point and drifts.
+   ============================================================ */
+
+/* The date-bearing fields across these collections are NOT uniformly
+   typed: attendance.date is 'YYYY-MM-DD', payments.paidAt is a full ISO
+   string, invoices/assessment_marks.createdAt are real Dates, and
+   behaviour_incidents.date has been written as both. $substr throws on a
+   Date and $dateToString throws on a String, and either failure 500s the
+   whole route, so the day key is taken from whatever the field actually
+   is rather than from which type this school's records happen to use.
+   Rows with neither (missing/null) bucket to null and are skipped. */
+function _dayKeyExpr(field) {
+  return { $switch: {
+    branches: [
+      { case: { $eq: [{ $type: `$${field}` }, 'string'] }, then: { $substr: [`$${field}`, 0, 10] } },
+      { case: { $eq: [{ $type: `$${field}` }, 'date']   }, then: { $dateToString: { format: '%Y-%m-%d', date: `$${field}` } } },
+    ],
+    default: null,
+  }};
+}
+
+const SERIES_BUCKETS    = ['day', 'week', 'month'];
+// A phone chart is roughly 300dp of plotting width; past this many points
+// the bars are sub-pixel and the trend stops being readable.
+const SERIES_MAX_POINTS = 26;
+
+/* 'YYYY-MM-DD' → the first day of the bucket holding it. Weeks start
+   Monday. All arithmetic is on UTC midnights so a device timezone never
+   moves a day into a different bucket. */
+function _bucketStart(day, bucket) {
+  if (bucket === 'month') return `${day.slice(0, 7)}-01`;
+  if (bucket === 'week') {
+    const d = new Date(`${day}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+    return d.toISOString().slice(0, 10);
+  }
+  return day;
+}
+
+function _nextBucketStart(day, bucket) {
+  const d = new Date(`${day}T00:00:00Z`);
+  if (bucket === 'month') d.setUTCMonth(d.getUTCMonth() + 1, 1);
+  else d.setUTCDate(d.getUTCDate() + (bucket === 'week' ? 7 : 1));
+  return d.toISOString().slice(0, 10);
+}
+
+/* The x-axis: every bucket from since to until, oldest first, with no
+   gaps — a week with no register read has to still occupy its slot or the
+   chart draws a straight line over the hole and invents continuity.
+   Past MAX_POINTS the OLDEST buckets are dropped, and truncatedFrom
+   records where the series really begins: a silently clipped axis is how
+   a trend line lies. rawCount stays the un-cut length, so a caller can
+   tell a truncated axis from a merely short one. */
+function _seriesAxis(since, until, bucket) {
+  const keys = [];
+  const last = _bucketStart(until, bucket);
+  for (let cursor = _bucketStart(since, bucket); cursor <= last; cursor = _nextBucketStart(cursor, bucket)) {
+    keys.push(cursor);
+  }
+  const dropped = keys.length > SERIES_MAX_POINTS ? keys.length - SERIES_MAX_POINTS : 0;
+  return {
+    keys: dropped ? keys.slice(dropped) : keys,
+    truncatedFrom: dropped ? keys[keys.length - SERIES_MAX_POINTS] : null,
+    rawCount: keys.length,
+  };
+}
+
+/* Day → bucket resolution: honour an explicit request, else pick the
+   grain that reads as a trend for the span (daily detail is only
+   meaningful over a fortnight or less). A grain that overflows the point
+   cap escalates before it truncates — 90 days asked for as days is better
+   served by 14 weekly points covering the whole span than by 26 daily
+   ones covering only its last month. 'month' has nothing coarser to fall
+   back to, so it is the only grain that ever truncates. */
+function _chooseBucket(since, until, requested) {
+  const spanDays = Math.round((Date.parse(`${until}T00:00:00Z`) - Date.parse(`${since}T00:00:00Z`)) / 86400000) + 1;
+  const asked    = SERIES_BUCKETS.includes(requested) ? requested : null;
+  let bucket = asked || (spanDays <= 14 ? 'day' : spanDays <= 182 ? 'week' : 'month');
+
+  let axis = _seriesAxis(since, until, bucket);
+  while (axis.rawCount > SERIES_MAX_POINTS && bucket !== 'month') {
+    bucket = SERIES_BUCKETS[SERIES_BUCKETS.indexOf(bucket) + 1];
+    axis   = _seriesAxis(since, until, bucket);
+  }
+  return { bucket, requested: asked, spanDays, ...axis };
+}
+
+/* Fold day-grain rows onto the shared axis. `blank` seeds a bucket, `add`
+   accumulates one day into it, `shape` renders the point — an axis slot
+   with no rows still gets a point, with null where an average would be a
+   guess and 0 where zero is the real answer. */
+function _foldSeries(rows, keys, bucket, blank, add, shape) {
+  const byBucket = new Map();
+  for (const row of rows) {
+    if (!row._id) continue;
+    const key = _bucketStart(row._id, bucket);
+    if (!byBucket.has(key)) byBucket.set(key, blank());
+    add(byBucket.get(key), row);
+  }
+  return keys.map(key => shape(key, byBucket.has(key) ? byBucket.get(key) : null));
+}
+
+/* ────────────────────────────────────────────────────────────
+   The four series, for one school, in one window. Mirrors
+   _computeLeadershipSnapshot's guards so a bucket sums exactly what
+   the same window's headline number sums:
+     - attendance counts 'late' as attended, as the risk table does;
+     - invoices exclude voided AND draft — a draft has not been billed
+       yet, so counting it would make the "billed" bar claim money the
+       school has not asked anyone for (/finance/summary uses the same
+       $nin);
+     - marks are published, present, and scored, as academic health is.
+   assessment_marks has no date of its own — no assessmentId, no exam
+   date — so a mark lands in the bucket it was FILED in. That is honest
+   ("marks entered per week, at the average they were entered at") but
+   it is not "performance over term", and the caller must not label it
+   as such.
+   ─────────────────────────────────────────────────────────── */
+async function _computeSeriesSnapshot(schoolId, sinceStr, untilStr, requestedBucket) {
+  const { bucket, requested, keys, truncatedFrom } = _chooseBucket(sinceStr, untilStr, requestedBucket);
+  const sinceDate = new Date(`${sinceStr}T00:00:00.000Z`);
+  const untilDate = new Date(`${untilStr}T23:59:59.999Z`);
+
+  const [attendanceDays, invoiceDays, paymentDays, markDays] = await Promise.all([
+
+    /* attendance.date holds 'YYYY-MM-DD', so the bounds are day strings —
+       the same comparison the leadership risk table makes. */
+    tenantModel('attendance', { schoolId }).aggregate([
+      { $match: { schoolId, date: { $gte: sinceStr, $lte: untilStr } } },
+      { $group: {
+        _id:     _dayKeyExpr('date'),
+        total:   { $sum: 1 },
+        present: { $sum: { $cond: [{ $in: ['$status', ['present', 'late']] }, 1, 0] } },
+      }},
+      { $sort: { _id: 1 } },
+    ]),
+
+    /* invoices.createdAt is a Date; `total` is the canonical billed amount
+       (see the leadership fee aggregation's note on the legacy `amount`). */
+    tenantModel('invoices', { schoolId }).aggregate([
+      { $match: { schoolId, status: { $nin: ['voided', 'draft'] }, createdAt: { $gte: sinceDate, $lte: untilDate } } },
+      { $group: {
+        _id:    _dayKeyExpr('createdAt'),
+        amount: { $sum: '$total' },
+        count:  { $sum: 1 },
+      }},
+      { $sort: { _id: 1 } },
+    ]),
+
+    /* payments.paidAt is an ISO *string*, so the upper bound needs the
+       end-of-day suffix — `${until}` alone would sort every timestamp on
+       that day after it and drop the day's money. */
+    tenantModel('payments', { schoolId }).aggregate([
+      { $match: { schoolId, paidAt: { $gte: `${sinceStr}T00:00:00.000Z`, $lte: `${untilStr}T23:59:59.999Z` } } },
+      { $group: {
+        _id:    _dayKeyExpr('paidAt'),
+        amount: { $sum: '$amount' },
+        count:  { $sum: 1 },
+      }},
+      { $sort: { _id: 1 } },
+    ]),
+
+    tenantModel('assessment_marks', { schoolId }).aggregate([
+      { $match: { schoolId, isPublished: true, markState: 'present', rawScore: { $ne: null }, createdAt: { $gte: sinceDate, $lte: untilDate } } },
+      { $group: {
+        _id:   _dayKeyExpr('createdAt'),
+        avg:   { $avg: '$rawScore' },
+        count: { $sum: 1 },
+      }},
+      { $sort: { _id: 1 } },
+    ]),
+  ]);
+
+  const attendance = _foldSeries(
+    attendanceDays, keys, bucket,
+    () => ({ present: 0, total: 0 }),
+    (acc, r) => { acc.present += r.present; acc.total += r.total; },
+    (key, acc) => ({
+      bucket:  key,
+      present: acc?.present ?? 0,
+      total:   acc?.total ?? 0,
+      // null, not 0% — no register read that week is not the same fact as
+      // everybody being absent, and a chart must not be able to confuse them.
+      rate:    acc && acc.total > 0 ? Math.round((acc.present / acc.total) * 1000) / 10 : null,
+    }),
+  );
+
+  const money = rows => _foldSeries(
+    rows, keys, bucket,
+    () => ({ amount: 0, count: 0 }),
+    (acc, r) => { acc.amount += (r.amount || 0); acc.count += r.count; },
+    (key, acc) => ({ bucket: key, amount: Math.round((acc?.amount ?? 0) * 100) / 100, count: acc?.count ?? 0 }),
+  );
+
+  const marks = _foldSeries(
+    markDays, keys, bucket,
+    () => ({ sum: 0, count: 0 }),
+    (acc, r) => { acc.sum += r.avg * r.count; acc.count += r.count; },
+    (key, acc) => ({
+      bucket:     key,
+      marksCount: acc?.count ?? 0,
+      // mean of the marks, not of the students — a heavy week of one
+      // student's work should not out-weigh a light week of many.
+      avgScore:   acc && acc.count > 0 ? Math.round((acc.sum / acc.count) * 10) / 10 : null,
+    }),
+  );
+
+  return {
+    meta: {
+      bucket, requested, since: sinceStr, until: untilStr,
+      pointCount: keys.length, truncatedFrom, generatedAt: new Date().toISOString(),
+    },
+    attendance,
+    billed:    money(invoiceDays),
+    collected: money(paymentDays),
+    marks,
+  };
+}
+
 /* ── Fold N per-school snapshots into one organization-wide summary.
    Class-level breakdowns (attendanceRisk/behaviourHeatmap/academicHealth
    arrays) are meaningless concatenated across schools — a classId from
@@ -342,6 +571,54 @@ router.get('/leadership', authMiddleware, PLAN, MODGATE, rbac('analytics', 'read
 });
 
 /* ────────────────────────────────────────────────────────────
+   GET /api/analytics/series
+   The window's aggregates as consecutive buckets — the four arrays in
+   the response share one x-axis (meta.pointCount long, oldest first),
+   so a chart can plot any of them, or all of them, without re-querying.
+
+   Query params, same contract as /leadership's date filter:
+     dateFrom / dateTo — 'YYYY-MM-DD'; dateTo alone means "up to today",
+                         dateTo without dateFrom means the whole life of
+                         the school (LIFETIME_DAYS, then bucket-escalated
+                         or truncated to the most recent points)
+     days              — legacy 7|30|90 fallback, only when dateTo is absent
+     bucket            — 'day' | 'week' | 'month'; any other value, or none,
+                         lets the server choose from the span. meta.bucket
+                         always reports the grain actually used, and
+                         meta.requested says whether that was the caller.
+   ─────────────────────────────────────────────────────────── */
+router.get('/series', authMiddleware, PLAN, MODGATE, rbac('analytics', 'read'), async (req, res) => {
+  try {
+    const until = req.query.dateTo ? String(req.query.dateTo).slice(0, 10) : new Date().toISOString().slice(0, 10);
+
+    let since;
+    if (req.query.dateFrom) {
+      since = String(req.query.dateFrom).slice(0, 10);
+    } else if (req.query.dateTo) {
+      const far = new Date();
+      far.setDate(far.getDate() - LIFETIME_DAYS);
+      since = far.toISOString().slice(0, 10);
+    } else {
+      const rawDays = parseInt(req.query.days) || 30;
+      const back    = [7, 30, 90].includes(rawDays) ? rawDays : 30;
+      const d = new Date();
+      d.setDate(d.getDate() - back);
+      since = d.toISOString().slice(0, 10);
+    }
+
+    if (since > until) {
+      return E.badRequest(res, 'dateFrom must be on or before dateTo');
+    }
+
+    const snapshot = await _computeSeriesSnapshot(req.jwtUser.schoolId, since, until, req.query.bucket);
+    return ok(res, snapshot);
+  } catch (err) {
+    console.error('[analytics GET /series]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ────────────────────────────────────────────────────────────
    GET /api/analytics/group
    The same leadership snapshot, for every school in the caller's
    organization — for a group_director-type account whose account
@@ -393,5 +670,9 @@ router.get('/group', authMiddleware, PLAN, MODGATE, rbac('group_analytics', 'rea
 
 router._computeLeadershipSnapshot = _computeLeadershipSnapshot;
 router._combineSnapshots          = _combineSnapshots;
+router._computeSeriesSnapshot     = _computeSeriesSnapshot;
+router._chooseBucket              = _chooseBucket;
+router._bucketStart               = _bucketStart;
+router._foldSeries                = _foldSeries;
 
 module.exports = router;

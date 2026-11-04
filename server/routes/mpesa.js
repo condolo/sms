@@ -392,8 +392,17 @@ router.post('/callback', async (req, res) => {
     const invoice  = await Invoices.findOne({ id: txn.invoiceId, schoolId: txn.schoolId }).lean();
     if (!invoice) return;
 
+    const Payments = tenantModel('payments', { schoolId: txn.schoolId });
     let receiptNum = mpesaCode;
-    try { receiptNum = await nextReceiptNumber(txn.schoolId); } catch {}
+    // Same collision guard as POST /api/finance/payments: walk past receipt
+    // numbers this school's ledger already holds. On failure this keeps the
+    // M-Pesa code as the number, which is unique on its own.
+    try {
+      receiptNum = await nextReceiptNumber(
+        txn.schoolId,
+        (num) => Payments.exists({ schoolId: txn.schoolId, receiptNumber: num }).then(hit => hit !== null)
+      );
+    } catch {}
 
     // Denormalized, same as POST /api/finance/payments does — without
     // it, PaymentsTab.jsx falls back to showing the raw studentId.
@@ -404,7 +413,6 @@ router.post('/callback', async (req, res) => {
       if (student) studentName = `${student.firstName} ${student.lastName}`.trim();
     }
 
-    const Payments = tenantModel('payments', { schoolId: txn.schoolId });
     await Payments.create({
       id:            _uid(),
       schoolId:      txn.schoolId,
@@ -515,8 +523,15 @@ router.post('/c2b/confirmation', async (req, res) => {
       return;
     }
 
+    const Payments = tenantModel('payments', { schoolId: school.id });
     let receiptNum = TransID;
-    try { receiptNum = await nextReceiptNumber(school.id); } catch {}
+    // Collision guard, same as the STK path above and POST /api/finance/payments.
+    try {
+      receiptNum = await nextReceiptNumber(
+        school.id,
+        (num) => Payments.exists({ schoolId: school.id, receiptNumber: num }).then(hit => hit !== null)
+      );
+    } catch {}
 
     // Denormalized, same as POST /api/finance/payments does — without
     // it, PaymentsTab.jsx falls back to showing the raw studentId.
@@ -527,7 +542,6 @@ router.post('/c2b/confirmation', async (req, res) => {
       if (student) studentName = `${student.firstName} ${student.lastName}`.trim();
     }
 
-    const Payments = tenantModel('payments', { schoolId: school.id });
     await Payments.create({
       id:            _uid(),
       schoolId:      school.id,

@@ -163,6 +163,31 @@ async function _downloadPdf(path, filename, params) {
   URL.revokeObjectURL(a.href);
 }
 
+// Blob-download for an arbitrary binary route (message attachments) —
+// same headers/credentials as _downloadPdf, but the server already names
+// the file in Content-Disposition, so prefer that over anything we pass.
+async function _downloadAttachment(path) {
+  const { slug } = detectSchool();
+  const headers = {};
+  if (slug) headers['X-School-Slug'] = slug;
+  const res = await fetch(`${BASE}${path}`, { headers, credentials: 'include' });
+  if (!res.ok) {
+    const json = await res.json().catch(() => null);
+    throw new APIError('ATTACHMENT_FAILED', json?.error?.message ?? 'Failed to download attachment', res.status);
+  }
+  const disposition = res.headers.get('Content-Disposition') || '';
+  const match = disposition.match(/filename="?([^";]+)"?/i);
+  const filename = match?.[1] ?? 'attachment';
+  const blob = await res.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = decodeURIComponent(filename);
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+}
+
 // POST counterpart to _downloadPdf — for a PDF-generating route whose
 // input is a JSON body too large/structured for a query string (a draft
 // report card preview: student, subjects, config, etc., same payload
@@ -261,6 +286,27 @@ export const auth = {
   exchange:        (code)         => _post('/auth/exchange', { code }),
   orgLogin:        (data)         => _post('/auth/org-login', data),
   completeOrgLogin:(data)         => _post('/auth/complete-org-login', data),
+
+  /* App-lock PIN (server/routes/pin.js) — a 4-digit unlock for an ALREADY
+     signed-in session, never a second login. The server therefore answers a
+     wrong PIN with 400 (not 401: a 401 would sign the app out), 409 when no
+     PIN is set yet, and 423 after five failures (15-min server-side lock).
+     Every body is { error: { code, message } } WITHOUT a success:false flag,
+     which _req() still unwraps into APIError.code — so callers switch on
+     err.code (PIN_WEAK / PIN_WRONG / PIN_REQUIRED / PIN_CURRENT_REQUIRED /
+     PIN_NOT_SET / PIN_LOCKED) rather than on the message text. */
+  pin: {
+    /** { enabled, lockedForMinutes, attemptsRemaining } */
+    status: ()        => _get('/auth/pin'),
+    /** set/change a PIN — currentPin is required once one exists */
+    set:    (data)    => _post('/auth/pin', data),
+    /** unlock check — { ok: true }. The app's lock screen is the caller:
+        the web manages the PIN (Settings → Account) but never asks for it. */
+    verify: (data)    => _post('/auth/pin/verify', data),
+    /** clear without knowing it (requires a fresh re-auth on the server) */
+    forgot: ()        => _post('/auth/pin/forgot', {}),
+    remove: (data)    => _delete('/auth/pin', data),
+  },
 };
 
 export const profile = {
@@ -619,6 +665,14 @@ export const importExport = {
   },
 };
 
+/* Smart Reminders — the rules a school can preview and run, and the student
+   digest a teacher turns into a drafted guardian message. */
+export const smartReminders = {
+  list:    ()              => _get('/smart-reminders'),
+  preview: (key)           => _post(`/smart-reminders/${key}/preview`, {}),
+  run:     (key, data = {}) => _post(`/smart-reminders/${key}/run`, data),
+};
+
 export const settings = {
   get:     ()       => _get('/settings'),
   update:  (data)   => _put('/settings', data),
@@ -729,6 +783,34 @@ export const birthdaysApi = {
 
 export const teacherPortalApi = {
   dashboard: () => _get('/teacher-portal/dashboard'),
+
+  /* ── Messaging (teacher/staff only) ──────────────────────────────
+     The rich compose + thread endpoints live on the teacher portal rather
+     than /messages, because only they accept message-extras (kind, dueAt,
+     context, attachment, poll — see server/utils/message-extras.js).
+     POST /messages (staff) deliberately still ignores those fields. */
+
+  /** Recipient buckets the server resolved: { categories:[{key,label,count}], groups:[{id,name,memberCount}] } */
+  messageRecipients: ()      => _get('/teacher-portal/message-recipients'),
+  /** Flat address book for the thread picker: { contacts:[{id,name,role,kind,detail}] } */
+  messageContacts:   ()      => _get('/teacher-portal/message-contacts'),
+  /** Rich compose — exactly one of category / groupId / memberIds */
+  compose:           (data)  => _post('/teacher-portal/messages', data),
+
+  /* ── 1:1 threads ──────────────────────────────────────────────── */
+  /** Conversation list: { threads:[{ counterpartUserId, name, role,
+   *  subject, preview, lastAt, unread, ...recipientSummary }] } */
+  inbox: () => _get('/teacher-portal/inbox'),
+  threads: {
+    get:   (counterpartId)   => _get(`/teacher-portal/threads/${counterpartId}`),
+    reply: (counterpartId, data) => _post(`/teacher-portal/threads/${counterpartId}/messages`, data),
+  },
+
+  /** One student's register for a month: { student, month, summary, days, guardians } */
+  studentAttendance: (studentId, params) => _get(`/teacher-portal/students/${studentId}/attendance`, params),
+
+  /** The facts behind a drafted report: attendance, behaviour, published marks. */
+  studentDigest: (studentId, params) => _get(`/teacher-portal/students/${studentId}/digest`, params),
 };
 
 export const hr = {
@@ -777,6 +859,16 @@ export const messages = {
   remove:      (id)     => _delete(`/messages/${id}`),
   unreadCount: ()       => _get('/messages/unread-count'),
   recipients:  (params) => _get('/messages/recipients', params),
+
+  /* Poll vote — server answers per-reader (myVote/totalVotes/closed) and
+     400s on "not on this poll" / "poll has closed", 404 if no poll. */
+  vote:        (id, optionId) => _post(`/messages/${id}/vote`, { optionId }),
+
+  /* Raw attachment bytes (server sends Content-Disposition with the real
+     filename, so honour it instead of inventing one). Membership of the
+     inbox is the only authorisation — no rbac() on this route. */
+  attachment:  (id) => _downloadAttachment(`/messages/attachments/${id}`),
+
   groups: {
     list:   ()         => _get('/messages/groups'),
     create: (data)     => _post('/messages/groups', data),
@@ -790,6 +882,33 @@ export const messages = {
 export const parentMessaging = {
   recipients: (childId) => _get('/parent-portal/message-recipients', { childId }),
   send:       (data)    => _post('/parent-portal/messages', data),
+
+  /* Parent half of the same 1:1 thread the teacher opens from Messages.
+     Thread rows carry the rich extras (kind/dueAt/context/attachment/poll)
+     but the parent's reply body does NOT accept them — { body, subject? }.
+     Consumed by the Parent Portal's Messages page: its Chats tab lists these
+     threads and opens one at a time (see ParentDashboard's loadThreads /
+     openThread), and the parent app reads the same two routes. */
+  inbox: () => _get('/parent-portal/inbox'),
+  threads: {
+    get:   (counterpartId)       => _get(`/parent-portal/threads/${counterpartId}`),
+    reply: (counterpartId, data) => _post(`/parent-portal/threads/${counterpartId}/messages`, data),
+  },
+};
+
+/* Parent-portal reads that are not messaging. The rest of a parent's data
+   (attendance, fees, timetable, grades, behaviour, calendar) arrives in one
+   dashboard payload; transport is its own route because it is a read join
+   across transport_assignments + transport_routes for ONE child, and the
+   dashboard does not carry it. */
+export const parentPortal = {
+  /** { child:{id,name,className}, assignments:[{ id, routeName, pickupStop,
+   *  direction, fareType, startDate, endDate, notes, status,
+   *  route:{ vehicleType, vehicleReg, driverName, driverPhone, stops,
+   *          departureTime, arrivalTime, fares, ... } | null }] }
+   *  `route: null` means the route was deleted — hide the times rather than
+   *  claiming the run still exists. */
+  transport: (childId) => _get(`/parent-portal/transport/${childId}`),
 };
 
 // Student-safe compose — recipients are a server-resolved category list
@@ -927,6 +1046,30 @@ export const analytics = {
    *  lower bound); _get() already drops null/'' params from the query
    *  string, so passing dateFrom: null naturally omits it. */
   leadership: ({ dateFrom, dateTo } = {}) => _get('/analytics/leadership', { dateFrom, dateTo }),
+
+  /** Time series for the charts. { dateFrom, dateTo, days, bucket } —
+   *  bucket = 'day'|'week'|'month'; omit it and the server picks by span
+   *  (and truncates to 26 points) rather than guessing wrong client-side.
+   *  Returns { meta, attendance, billed, collected, marks } where all four
+   *  arrays share one gap-free x-axis, oldest first. */
+  series: (params) => _get('/analytics/series', params),
+};
+
+/* Student portal — the portal pages normally fetch through their own local
+   _fetch(), but the exams endpoint is shared with the dashboard's exam card
+   and belongs with the rest of the API surface. */
+export const studentPortalApi = {
+  dashboard: ()     => _get('/student-portal/dashboard'),
+  /** { from, to } — defaults today → +30d, clamped to 120d, ≤200 rows.
+   *  Rows are already the student-safe projection: id, title, subjectName,
+   *  type, date, startTime, endTime, durationMinutes, venue, instructions,
+   *  topics, status, daysUntil — never invigilator/maxScore/passMark. */
+  exams: (params)   => _get('/student-portal/exams', params),
+  /** The bus this student rides — the same join the parent portal shows a
+   *  parent for their child (server/utils/transport-ride.js), scoped to the
+   *  account's own record: { assignments:[{ routeName, pickupStop, direction,
+   *  fareType, startDate, endDate, notes, status, route:{...}|null }] }. */
+  transport: ()     => _get('/student-portal/transport'),
 };
 
 export const billing = {
@@ -1004,6 +1147,23 @@ export const transport = {
     create: (data)       => _post('/transport/routes', data),
     update: (id, data)   => _put(`/transport/routes/${id}`, data),
     remove: (id)         => _delete(`/transport/routes/${id}`),
+  },
+  /* The fleet and the drivers. Each row comes back with `routes: [{id,name}]`
+     — the runs it is currently on — so a list can say where a vehicle or
+     driver is being used without a request per row. A registration is unique
+     per school; deleting one that is on a route is refused with a message
+     naming how many. */
+  vehicles: {
+    list:   (params)     => _get('/transport/vehicles', params),
+    create: (data)       => _post('/transport/vehicles', data),
+    update: (id, data)   => _put(`/transport/vehicles/${id}`, data),
+    remove: (id)         => _delete(`/transport/vehicles/${id}`),
+  },
+  drivers: {
+    list:   (params)     => _get('/transport/drivers', params),
+    create: (data)       => _post('/transport/drivers', data),
+    update: (id, data)   => _put(`/transport/drivers/${id}`, data),
+    remove: (id)         => _delete(`/transport/drivers/${id}`),
   },
   assignments: {
     list:       (params)     => _get('/transport/assignments', params),

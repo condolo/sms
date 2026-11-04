@@ -127,7 +127,12 @@ router.get('/invoices', authMiddleware, PLAN, MODGATE, rbac('finance', 'read'), 
 
     const Invoices = tenantModel('invoices', tenantContext(req));
     const [docs, total] = await Promise.all([
-      Invoices.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).select('-__v').lean(),
+      // `_id` is part of the sort so the order is total. Rows sharing a sort
+      // value otherwise have no defined order between one skip/limit query and
+      // the next, so page 2 repeats page 1's rows and drops others — invoice
+      // createdAt ties by the millisecond for anything written in one batch
+      // (bulk fee-structure generate, a re-seed). Same reason on GET /payments.
+      Invoices.find(filter).sort({ createdAt: -1, _id: -1 }).skip(skip).limit(limit).select('-__v').lean(),
       Invoices.countDocuments(filter)
     ]);
 
@@ -166,7 +171,13 @@ router.post('/invoices', authMiddleware, PLAN, MODGATE, rbac('finance', 'create'
 
     // Server-side financial calculations — client totals are ignored
     const totals        = _calcInvoiceTotals(data.lineItems, data.discountPct, data.taxPct);
-    const invoiceNumber = await nextInvoiceNumber(schoolId);
+
+    // Hoisted above the number draw because nextInvoiceNumber probes this
+    // collection — a drifted invoice counter otherwise hands out a number an
+    // existing invoice already holds. See POST /payments for the same reason.
+    const Invoices = tenantModel('invoices', tenantContext(req));
+    const invoiceNumber = await nextInvoiceNumber(schoolId,
+      (num) => Invoices.exists({ schoolId, invoiceNumber: num }).then(hit => hit !== null));
 
     // Use school's currency if client didn't specify — never default to GBP
     if (!data.currency) {
@@ -174,7 +185,6 @@ router.post('/invoices', authMiddleware, PLAN, MODGATE, rbac('finance', 'create'
       data.currency = school?.currency || 'KES';
     }
 
-    const Invoices = tenantModel('invoices', tenantContext(req));
     const doc = await Invoices.create({
       ...data,
       id:            uuidv4(),
@@ -352,7 +362,10 @@ router.get('/payments', authMiddleware, PLAN, MODGATE, rbac('finance', 'read'), 
 
     const Payments = tenantModel('payments', tenantContext(req));
     const [docs, total] = await Promise.all([
-      Payments.find(filter).sort({ paidAt: -1 }).skip(skip).limit(limit).select('-__v').lean(),
+      // `_id` makes the order total — see the same tiebreaker on GET /invoices.
+      // Without it, the receipts tied on a missing paidAt have no defined order
+      // between one skip/limit query and the next.
+      Payments.find(filter).sort({ paidAt: -1, _id: -1 }).skip(skip).limit(limit).select('-__v').lean(),
       Payments.countDocuments(filter)
     ]);
 
@@ -428,7 +441,15 @@ router.post('/payments', authMiddleware, PLAN, MODGATE, rbac('finance', 'create'
       return E.badRequest(res, `Payment amount (${data.amount}) exceeds outstanding balance (${maxPayable})`);
     }
 
-    const receiptNumber = await nextReceiptNumber(schoolId);
+    const Payments = tenantModel('payments', tenantContext(req));
+    // Skip numbers this school's ledger already holds. The receipt counter only
+    // advances when a payment is filed through here, so seeded, imported and
+    // hand-numbered receipts leave it behind — it then hands out a number an
+    // existing receipt carries, and nothing at the DB layer catches it.
+    const receiptNumber = await nextReceiptNumber(
+      schoolId,
+      (num) => Payments.exists({ schoolId, receiptNumber: num }).then(hit => hit !== null)
+    );
 
     // Server-side resolve, never trust the client — payments never carried
     // a denormalized studentName at all, which is why PaymentsTab.jsx and
@@ -443,7 +464,6 @@ router.post('/payments', authMiddleware, PLAN, MODGATE, rbac('finance', 'create'
       if (student) studentName = `${student.firstName} ${student.lastName}`.trim();
     }
 
-    const Payments = tenantModel('payments', tenantContext(req));
     const payment  = await Payments.create({
       ...data,
       id:            uuidv4(),
@@ -1031,7 +1051,10 @@ async function _runTermBilling(req, res, { dryRun }) {
     tenantModel('transport_routes', ctx).find({ schoolId }).lean(),
     tenantModel('activity_enrolments', ctx).find({ schoolId, status: 'active' }).lean(),
     tenantModel('activities', ctx).find({ schoolId }).lean(),
-    tenantModel('students', ctx).find({ schoolId, status: 'active' }).select('firstName middleName lastName').lean(),
+    // `id` is the domain id every plan row is keyed by. Selecting only the
+    // name fields left studentById keyed by ObjectId, so every lookup missed
+    // and the whole run reported "Student is not active in this school".
+    tenantModel('students', ctx).find({ schoolId, status: 'active' }).select('id firstName middleName lastName').lean(),
     Invoices.distinct('studentId', { schoolId, termBillingTermId: period.termId }),
   ]);
   const alreadyBilled = new Set(alreadyBilledIds);
@@ -1091,7 +1114,8 @@ async function _runTermBilling(req, res, { dryRun }) {
       const inv = await Invoices.create({
         id:                uuidv4(),
         schoolId,
-        invoiceNumber:     await nextInvoiceNumber(schoolId),
+        invoiceNumber:     await nextInvoiceNumber(schoolId,
+          (num) => Invoices.exists({ schoolId, invoiceNumber: num }).then(hit => hit !== null)),
         studentId:         r.studentId,
         studentName:       r.studentName,
         title:             `Term billing — ${termLabel}`,
@@ -1316,7 +1340,8 @@ router.post('/fee-structures/:id/generate', authMiddleware, PLAN, MODGATE, rbac(
       const sid = student.id ?? student._id?.toString();
       const discountPct = autoDiscounts.get(sid) ?? 0;
       const totals = _calcInvoiceTotals(fs.lineItems, discountPct);
-      const invNum = await nextInvoiceNumber(schoolId);
+      const invNum = await nextInvoiceNumber(schoolId,
+        (num) => Invoices.exists({ schoolId, invoiceNumber: num }).then(hit => hit !== null));
       const earlyPaymentEligible = earlyPaymentDeadline && earlyPaymentPolicy.flatPct > discountPct;
       const inv = await Invoices.create({
         id:             uuidv4(),

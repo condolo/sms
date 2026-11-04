@@ -39,6 +39,7 @@ const { seedMobileScenarios } = require('./seed-demo-scenarios');
 const { _model } = require('../utils/model');
 const { MODULE_KEYS } = require('../config/moduleRegistry');
 const { ROLE_DEFAULTS } = require('../utils/repairPermissions');
+const { withFinanceSubGrants } = require('../middleware/explicit-sub');
 
 /* ── Users to provision ── */
 const DEMO_USERS = [
@@ -187,10 +188,12 @@ async function seedDemo() {
       exams: RCU, grades: RCU, admissions: R, timetable: RCU, messages: RCU, settings: R,
       assessment: RCU, report_cards: RCU, lessons: FULL, analytics: R, events: R,
     }),
+    // classes/events create are demo-only: they let the teacher persona walk the
+    // mobile Create Event / Create Class flows. Real schools grant these themselves.
     teacher: canonical('teacher', {
-      students: R, teachers: R, classes: R, attendance: RCU, finance: [], behaviour: RCU,
+      students: R, teachers: R, classes: ['read', 'create'], attendance: RCU, finance: [], behaviour: RCU,
       exams: RCU, grades: RCU, admissions: [], timetable: R, messages: RCU, settings: [],
-      assessment: RCU, report_cards: R, lessons: FULL, events: R,
+      assessment: RCU, report_cards: R, lessons: FULL, events: ['read', 'create'],
     }),
     finance: canonical('finance', {
       students: R, teachers: [], classes: [], attendance: [], finance: FULL, behaviour: [],
@@ -211,7 +214,13 @@ async function seedDemo() {
 
   await Promise.all(Object.entries(PERMS).map(([roleKey, permissions]) =>
     Perm.updateOne({ id: `rp_${roleKey}_${schoolId}` }, {
-      $set: { id: `rp_${roleKey}_${schoolId}`, schoolId, roleKey, permissions }
+      // Run the same derivation onboarding uses (middleware/explicit-sub.js):
+      // a role that holds `finance: ['read','create']` must also carry
+      // finance__term_billing, or the explicit checks refuse it. Without this
+      // the demo seed rewrote the whole permissions object on every boot and
+      // silently deleted the sub-grants the startup backfill had just added —
+      // so a restart put Term Billing back behind a 403 every time.
+      $set: { id: `rp_${roleKey}_${schoolId}`, schoolId, roleKey, permissions: withFinanceSubGrants(permissions) },
     }, { upsert: true })
   ));
 

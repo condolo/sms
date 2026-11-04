@@ -134,8 +134,8 @@ describe('GET /api/parent-portal/dashboard/:childId — subjectMarks (real marks
     const res = await supertest(buildApp()).get(`/api/parent-portal/dashboard/${CHILD_1}`);
     expect(res.status).toBe(200);
     expect(res.body.data.subjectMarks).toEqual([
-      { subjectId: 'subj_eng',  subjectName: 'English Language', finalScore: 68, grade: 'B',  assignmentScore: 55 },
-      { subjectId: 'subj_math', subjectName: 'Mathematics',      finalScore: 74, grade: 'B+', assignmentScore: 82 },
+      { subjectId: 'subj_eng',  subjectName: 'English Language', finalScore: 68, grade: 'B',  assignmentScore: 55, breakdown: { CA: 70, HW: 55, MT: 72, ET: 75 }, classAverage: null, deviation: null },
+      { subjectId: 'subj_math', subjectName: 'Mathematics',      finalScore: 74, grade: 'B+', assignmentScore: 82, breakdown: { CA: 78, HW: 82, MT: 70, ET: 76 }, classAverage: null, deviation: null },
     ]);
   });
 
@@ -148,7 +148,7 @@ describe('GET /api/parent-portal/dashboard/:childId — subjectMarks (real marks
     const res = await supertest(buildApp()).get(`/api/parent-portal/dashboard/${CHILD_1}`);
     expect(res.status).toBe(200);
     expect(res.body.data.subjectMarks).toEqual([
-      { subjectId: 'subj_eng', subjectName: 'English Language', finalScore: 55, grade: 'C+', assignmentScore: null },
+      { subjectId: 'subj_eng', subjectName: 'English Language', finalScore: 55, grade: 'C+', assignmentScore: null, breakdown: { CA: 60, MT: 50, ET: 55 }, classAverage: null, deviation: null },
     ]);
   });
 

@@ -175,3 +175,139 @@ export function matchesSearch(msg, q) {
   ].join(' ').toLowerCase();
   return haystack.includes(needle);
 }
+
+/* ══════════════════════════════════════════════════════════════
+   Rich message extras — mirrors server/utils/message-extras.js
+   kind | dueAt | context | attachment | poll. Everything here is
+   optional: an old plain message reads exactly as it did before.
+   ══════════════════════════════════════════════════════════════ */
+
+/** The kinds a compose can send, in the order the UI offers them. */
+export const MESSAGE_KINDS = [
+  { value: 'text',     label: 'Message',  desc: 'A plain note',              tone: 'slate' },
+  { value: 'reminder', label: 'Reminder', desc: 'A nudge, with a due date',   tone: 'amber' },
+  { value: 'homework', label: 'Homework', desc: 'An assignment and deadline', tone: 'sky' },
+  { value: 'results',  label: 'Results',  desc: 'Marks or a report card',     tone: 'emerald' },
+  { value: 'poll',     label: 'Poll',     desc: 'A question with options',    tone: 'violet' },
+];
+
+export const CONTEXT_TYPES = [
+  { value: 'general',    label: 'Note' },
+  { value: 'attendance', label: 'Attendance' },
+  { value: 'homework',   label: 'Homework' },
+  { value: 'results',    label: 'Results' },
+];
+
+export function kindMeta(kind) {
+  return MESSAGE_KINDS.find(k => k.value === kind) ?? MESSAGE_KINDS[0];
+}
+
+export function isRichKind(kind) {
+  return Boolean(kind) && kind !== 'text';
+}
+
+/** Poll rules, shared with the server so the UI can't build a rejected poll. */
+export const POLL_MIN_OPTIONS = 2;
+export const POLL_MAX_OPTIONS = 6;
+
+/** Attachment cap — server/utils/message-extras.js ATTACHMENT_MAX_BYTES. */
+export const ATTACHMENT_MAX_BYTES = 4 * 1024 * 1024;
+
+/**
+ * The poll as THIS reader sees it.
+ *
+ * Two server shapes reach the client and both are handled here rather than
+ * at each call site:
+ *   • thread reads  — already projected (myVote/totalVotes/closed)
+ *   • inbox lists   — raw `poll.votes` (every voter's choice), because the
+ *                     list route returns whole documents
+ * Returns null when there is no poll to show.
+ */
+export function pollForReader(msg, userId) {
+  const poll = msg?.poll;
+  if (!poll || !Array.isArray(poll.options)) return null;
+
+  const projected = typeof poll.totalVotes === 'number'
+    && poll.options.every(o => typeof o.votes === 'number');
+  const closed = typeof poll.closed === 'boolean'
+    ? poll.closed
+    : Boolean(poll.closesAt && Date.parse(poll.closesAt) < Date.now());
+
+  if (projected) {
+    return {
+      question: poll.question ?? '',
+      options: poll.options,
+      totalVotes: poll.totalVotes,
+      myVote: poll.myVote ?? null,
+      closed,
+      closesAt: poll.closesAt ?? null,
+    };
+  }
+
+  const votes = poll.votes && typeof poll.votes === 'object' ? poll.votes : {};
+  const counts = {};
+  for (const optionId of Object.values(votes)) {
+    counts[optionId] = (counts[optionId] || 0) + 1;
+  }
+  return {
+    question: poll.question ?? '',
+    options: poll.options.map(o => ({ id: o.id, text: o.text, votes: counts[o.id] || 0 })),
+    totalVotes: Object.keys(votes).length,
+    myVote: votes[userId] ?? null,
+    closed,
+    closesAt: poll.closesAt ?? null,
+  };
+}
+
+/** The extras a card should render, with the poll already per-reader. */
+export function extrasFor(msg, userId) {
+  return {
+    kind: msg?.kind ?? 'text',
+    dueAt: msg?.dueAt ?? null,
+    context: msg?.context ?? null,
+    attachment: msg?.attachment ?? null,
+    poll: pollForReader(msg, userId),
+  };
+}
+
+/** Yes/no: does this message carry anything beyond its text? */
+export function hasExtras(msg, userId) {
+  const { kind, dueAt, context, attachment, poll } = extrasFor(msg, userId);
+  return isRichKind(kind) || Boolean(dueAt) || Boolean(context) || Boolean(attachment) || Boolean(poll);
+}
+
+export function fmtFileSize(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${unit === 0 || value >= 10 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
+}
+
+/** "due Fri, Mar 6, 4:00 PM" plus a lead that says whether it has passed. */
+export function fmtDue(iso) {
+  if (!iso) return null;
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return null;
+  const label = at.toLocaleString('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric',
+    hour: 'numeric', minute: '2-digit',
+  });
+  const diffMs = at.getTime() - Date.now();
+  const dayMs = 86_400_000;
+  let lead = null;
+  if (diffMs < 0) lead = 'overdue';
+  else if (diffMs < dayMs) lead = 'today';
+  else if (diffMs < 2 * dayMs) lead = 'tomorrow';
+  else lead = `in ${Math.round(diffMs / dayMs)} days`;
+  return { label, lead, past: diffMs < 0 };
+}
+
+export function contextTypeLabel(type) {
+  return CONTEXT_TYPES.find(c => c.value === type)?.label ?? 'Note';
+}
+

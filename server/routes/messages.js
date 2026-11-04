@@ -18,6 +18,7 @@ const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { schoolLoginUrl } = require('../utils/school-url');
 const { _model } = require('../utils/model');
 const { ROLE_GROUPS, AUDIENCE_KEYS, namedRecipients, recipientSummary } = require('../utils/message-audience');
+const { pollView } = require('../utils/message-extras');
 
 const router = express.Router();
 router.use(authMiddleware, tenantMiddleware, moduleGate('messages'));
@@ -588,7 +589,7 @@ router.post('/', rbac('messages', 'create'), async (req, res) => {
    short, real userId list — never 'all'/a role group, so only this
    "direct" notification shape ever applies there) rather than
    duplicating the create+notify logic a second time. */
-async function createDirectMessage(req, { recipientUserIds, subject, body, senderName, senderRole, type = 'direct' }) {
+async function createDirectMessage(req, { recipientUserIds, subject, body, senderName, senderRole, type = 'direct', groupId = null, groupName = null, extra = null }) {
   const { schoolId, userId } = req.jwtUser;
   const Msg  = tenantModel('messages', tenantContext(req));
   const User = tenantModel('users', tenantContext(req));
@@ -596,6 +597,11 @@ async function createDirectMessage(req, { recipientUserIds, subject, body, sende
   const msg = await Msg.create({
     id: uuidv4(), schoolId, senderId: userId, senderName, senderRole,
     recipients: recipientUserIds, subject, body, type, isRead: {},
+    // A saved-group send stays an ordinary direct message to every member;
+    // the stamp is only what lets the inbox show the group badge.
+    ...(groupId ? { groupId, groupName } : {}),
+    // kind / dueAt / context / attachment / poll — absent on a plain message.
+    ...(extra || {}),
     createdAt: new Date().toISOString(),
   });
 
@@ -669,8 +675,93 @@ router.delete('/:id', rbac('messages', 'delete'), async (req, res) => {
     if (!canDelete) return res.status(403).json({ error: 'You cannot delete this message' });
 
     await Msg.deleteOne({ id: req.params.id, schoolId });
+    /* The bytes live in their own collection, so deleting the message must
+       take them with it — otherwise every deleted document with an
+       attachment leaves a multi-megabyte row nobody references (and the
+       collection is the one place a school's storage grows without bound).
+       Best-effort by design: the message is already gone, so a sweep that
+       cannot run (a database without the collection yet, a transient error)
+       must not turn a successful delete into a 500. */
+    try {
+      await tenantModel('message_attachments', tenantContext(req))
+        .deleteMany({ schoolId, messageId: req.params.id });
+    } catch (err) {
+      console.error('[messages DELETE] attachment sweep failed:', err.message);
+    }
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* ── GET /api/messages/attachments/:attachmentId ────────────
+   The bytes behind a document card. The blob lives in
+   message_attachments so every thread/inbox read stays small; access is
+   the same membership as the message itself — its SENDER, a named
+   recipient, or a role-group audience. An attachment id alone is not a key
+   to the file, and someone who is neither is a 404 either way.
+
+   The sender is included because they are the one person guaranteed to have
+   put the file there: without it, a document on your own Sent bubble — the
+   teacher's thread read and the inbox detail both render one — answered
+   404 and the card looked broken. */
+router.get('/attachments/:attachmentId', async (req, res) => { // rbac: member-scoped — sender or recipient of the message, enforced inline below
+  try {
+    const { schoolId, userId, role } = req.jwtUser;
+    const att = await tenantModel('message_attachments', tenantContext(req))
+      .findOne({ schoolId, id: req.params.attachmentId }).lean();
+    if (!att) return res.status(404).json({ error: 'Attachment not found.' });
+
+    const msg = await tenantModel('messages', tenantContext(req))
+      .findOne({
+        id: att.messageId,
+        $or: [{ senderId: userId }, _inboxQuery({ schoolId, userId, role })],
+      })
+      .select('id').lean();
+    if (!msg) return res.status(404).json({ error: 'Attachment not found.' });
+
+    const bytes = Buffer.from(att.data || '', 'base64');
+    const safeName = String(att.name || 'document').replace(/[^\w.\- ]+/g, '_').slice(0, 120);
+    res.set('Content-Type', att.mimeType || 'application/octet-stream');
+    res.set('Content-Length', String(bytes.length));
+    res.set('Content-Disposition', `attachment; filename="${safeName}"`);
+    res.set('Cache-Control', 'private, max-age=300');
+    return res.send(bytes);
+  } catch (err) {
+    console.error('[messages GET /attachments/:id]', err);
+    return res.status(500).json({ error: 'The document could not be read.' });
+  }
+});
+
+/* ── POST /api/messages/:id/vote — one choice per recipient ──
+   The vote map lives on the message, so there is no poll collection to
+   keep in sync. Re-voting replaces the caller's choice; a closed poll
+   refuses. Any recipient of the message may vote — that is the same
+   membership _inboxQuery() already defines. */
+router.post('/:id/vote', async (req, res) => { // rbac: recipient-scoped — the same _inboxQuery membership the message itself uses
+  try {
+    const { schoolId, userId, role } = req.jwtUser;
+    const optionId = typeof req.body?.optionId === 'string' ? req.body.optionId.trim() : '';
+    if (!optionId) return res.status(400).json({ error: 'Choose an option.' });
+
+    const Msg = tenantModel('messages', tenantContext(req));
+    const msg = await Msg.findOne({ id: req.params.id, ..._inboxQuery({ schoolId, userId, role }) }).lean();
+    if (!msg || !msg.poll) return res.status(404).json({ error: 'Poll not found.' });
+    if (msg.poll.closesAt && Date.parse(msg.poll.closesAt) < Date.now()) {
+      return res.status(400).json({ error: 'This poll has closed.' });
+    }
+    if (!(msg.poll.options || []).some(o => o.id === optionId)) {
+      return res.status(400).json({ error: 'That option is not on this poll.' });
+    }
+
+    const poll = { ...msg.poll, votes: { ...(msg.poll.votes || {}), [userId]: optionId } };
+    await Msg.updateOne(
+      { id: msg.id, schoolId },
+      { $set: { [`poll.votes.${userId}`]: optionId } },
+    );
+    return res.json({ success: true, data: pollView(poll, userId) });
+  } catch (err) {
+    console.error('[messages POST /:id/vote]', err);
+    return res.status(500).json({ error: 'Your vote could not be saved.' });
+  }
 });
 
 module.exports = router;

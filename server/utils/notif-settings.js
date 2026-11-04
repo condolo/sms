@@ -41,6 +41,27 @@ const EVENT_REGISTRY = {
     channels:    { email: true, inApp: true },
     implemented: true,
   },
+  /* Sent by utils/smart-reminders.js, weekly, to whoever still has not opened
+     an announcement from the last seven days. Deliberately separate from
+     `announcement` itself: the first delivery and the follow-up are different
+     decisions, and a school may want one without the other. */
+  notice_unread: {
+    label:       'Notice Not Opened',
+    desc:        'Weekly nudge to anyone who has not opened an announcement posted in the last week',
+    group:       'communication',
+    audience:    ['staff', 'parents', 'students'],
+    channels:    { email: true, inApp: true },
+    implemented: true,
+  },
+  /* Sent by utils/change-alerts.js when a route\'s departure, arrival or stops move. */
+  transport_route_change: {
+    label:       'Transport Route Changed',
+    desc:        'Sent to the guardians of students on a bus route when its times or stops change',
+    group:       'communication',
+    audience:    ['parents'],
+    channels:    { email: true, inApp: true },
+    implemented: true,
+  },
 
   /* ── Academic ────────────────────────────────────────────── */
   assessment_reminder: {
@@ -78,6 +99,27 @@ const EVENT_REGISTRY = {
     // still resolve.
     implemented: false,
   },
+  /* Sent by utils/smart-reminders.js — 7 days out and again the day before.
+     A separate event from exam_results on purpose: one is a date, the other
+     is a grade, and a school may want to say "your exam is tomorrow" while
+     still publishing marks without an email. */
+  exam_upcoming: {
+    label:       'Exam Coming Up',
+    desc:        'Sent to students and guardians a week before a scheduled exam, and again the day before',
+    group:       'academic',
+    audience:    ['parents', 'students'],
+    channels:    { email: true, inApp: true },
+    implemented: true,
+  },
+  /* Sent by utils/change-alerts.js the moment a slot is edited. */
+  timetable_change: {
+    label:       'Timetable Changed',
+    desc:        'Sent to a class\'s guardians — and the incoming teacher — when a lesson\'s day, period, time, room or teacher changes',
+    group:       'academic',
+    audience:    ['parents', 'students', 'staff'],
+    channels:    { email: true, inApp: true },
+    implemented: true,
+  },
   report_comment_step: {
     label:       'Report Comment Ready For You',
     desc:        'Sent to the next approver in a school\'s report-level remark chain (RC8) once the previous step writes their remark',
@@ -109,6 +151,16 @@ const EVENT_REGISTRY = {
     desc:        'Reminder sent before a fee invoice\'s due date (schedule set in Finance → Fee Settings)',
     group:       'finance',
     audience:    ['parents'],
+    channels:    { email: true, inApp: true },
+    implemented: true,
+  },
+  /* Staff-facing counterpart to invoice_due_soon (utils/smart-reminders.js):
+     the office hears the count and the total two days before the date. */
+  fee_deadline_staff: {
+    label:       'Fees Falling Due (Office)',
+    desc:        'Sent to finance, admin and principal staff two days before invoices fall due, with the amount still owing',
+    group:       'finance',
+    audience:    ['staff'],
     channels:    { email: true, inApp: true },
     implemented: true,
   },
@@ -152,6 +204,27 @@ const EVENT_REGISTRY = {
     group:       'attendance',
     audience:    ['staff'],
     channels:    { email: false, inApp: true },
+    implemented: true,
+  },
+  /* Sent by utils/smart-reminders.js at 15:00 school time, and as an office
+     rollup after 16:00. Distinct from attendance_summary ("what happened") —
+     this one is "what nobody recorded". */
+  class_register_missing: {
+    label:       'Register Not Marked',
+    desc:        'Sent to a teacher when today\'s classes still have no register, then to the office after 16:00',
+    group:       'attendance',
+    audience:    ['staff'],
+    channels:    { email: true, inApp: true },
+    implemented: true,
+  },
+  /* Weekly, from utils/smart-reminders.js: the form teacher hears about the
+     children who stopped turning up or started collecting incidents. */
+  at_risk_student: {
+    label:       'Student Needs a Check-in',
+    desc:        'Weekly note to a form teacher about students with repeated absences or incidents in the last seven days',
+    group:       'attendance',
+    audience:    ['staff'],
+    channels:    { email: true, inApp: true },
     implemented: true,
   },
 

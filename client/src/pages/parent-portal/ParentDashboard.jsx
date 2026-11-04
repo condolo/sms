@@ -31,16 +31,18 @@ import useAuthStore from '@/store/auth.js';
 import { useSchoolTheme } from '@/hooks/useSchoolTheme.js';
 import { buildModuleConfigMap } from '@/config/moduleNav.js';
 import {
-  Activity, AlertCircle, Bell, BookCheck, Calendar,
+  Activity, AlertCircle, Bell, BookCheck, Bus, Calendar,
   CheckCircle, Download, FileText, GraduationCap,
-  Lock, LogOut, MessageSquare, Send, Star, Wallet,
+  Lock, LogOut, MessageSquare, Phone, Send, Star, Users, Wallet,
   ChevronDown, ChevronLeft, ChevronRight, MonitorPlay, MapPin, BookOpen, CalendarCheck,
   Menu, X, TrendingUp, LifeBuoy, KeyRound, Eye, EyeOff, Loader2, Heart, User,
 } from 'lucide-react';
 import NotificationBell from '@/components/layout/NotificationBell.jsx';
 import FloatingHelp from '@/components/help/FloatingHelp.jsx';
 import MessagesPanel from './components/MessagesPanel.jsx';
-import { messages as messagesApi, parentMessaging, auth as authApi } from '@/api/client.js';
+import ThreadView from '@/pages/messages/components/ThreadView.jsx';
+import TransportRideCard from '@/components/transport/TransportRideCard.jsx';
+import { messages as messagesApi, parentMessaging, parentPortal, auth as authApi } from '@/api/client.js';
 
 /* ── API helpers ────────────────────────────────────────────────── */
 const API_BASE = import.meta.env.VITE_API_BASE || '';
@@ -132,6 +134,9 @@ const MY_CHILD_NAV = [
   { id: 'attendance', label: 'Attendance',        Icon: Activity,    module: 'attendance' },
   { id: 'fees',       label: 'Fee Statements',    Icon: Wallet,      module: 'finance' },
   { id: 'timetable',  label: 'Timetable',         Icon: Calendar,    module: 'timetable' },
+  /* The bus this child rides — its own route, so it is gated by the transport
+     module rather than hidden inside the overview. */
+  { id: 'transport',  label: 'Transport',         Icon: Bus,         module: 'transport' },
   { id: 'library',    label: 'Library',           Icon: BookOpen,    module: 'library' },
   { id: 'behaviour',  label: 'Behaviour & Rewards',Icon: Star,        module: 'behaviour' },
   { id: 'medical',    label: 'Medical',           Icon: Heart,       module: 'medical' },
@@ -373,6 +378,21 @@ export default function ParentDashboard() {
   const [msgTab,        setMsgTab]        = useState('inbox');
   const [msgUnreadOnly, setMsgUnreadOnly] = useState(false);
   const [openMessageId, setOpenMessageId] = useState(null); // the one message expanded in place
+  // Poll voting and attachment downloads from the inbox. Both act on a
+  // message already in the list, so the answer is patched into local state
+  // rather than triggering a full re-fetch of the page.
+  const [pollVotingId,  setPollVotingId]  = useState(null);
+  const [pollError,     setPollError]     = useState('');
+  // Conversations — the same (parent, one staff member) pairing the parent app
+  // reads, opened from the Chats tab. `openThreadId` switches the Messages page
+  // from the list to the conversation in place.
+  const [threads,        setThreads]        = useState([]);
+  const [threadsLoading, setThreadsLoading] = useState(false);
+  const [threadsError,   setThreadsError]   = useState('');
+  const [openThreadId,   setOpenThreadId]   = useState(null);
+  const [threadData,     setThreadData]     = useState(null);
+  const [threadLoading,  setThreadLoading]  = useState(false);
+  const [threadReturning, setThreadReturning] = useState(false);
   // Reported directly: "the parent cannot message the school... select
   // whom they want to message... but not fellow parents." Compose state
   // for the new send flow — recipients are a server-resolved category
@@ -392,6 +412,10 @@ export default function ParentDashboard() {
   const [pwShow,      setPwShow]      = useState(false);
   const [pwSaving,    setPwSaving]    = useState(false);
   const [pwBanner,    setPwBanner]    = useState({ type: '', msg: '' });
+  // School transport for the child currently in view.
+  const [transport,        setTransport]        = useState(null);
+  const [transportLoading, setTransportLoading] = useState(false);
+  const [transportError,   setTransportError]   = useState('');
   const [initError,     setInitError]     = useState('');
   const [activePage,    setActivePage]    = useState('overview');
   const [childMenuOpen, setChildMenuOpen] = useState(false);
@@ -487,7 +511,7 @@ export default function ParentDashboard() {
     setLatestWeek(null);
     _fetch(`/api/parent-portal/weekly-snapshot/${activeChildId}/weeks`)
       .then(({ weeks }) => setLatestWeek(weeks?.[0] ?? undefined))
-      .catch(() => setLatestWeek(undefined)); // no snapshot yet, or transient error — card simply hides
+      .catch(() => setLatestWeek(undefined)); // no snapshot yet, or transient error - card simply hides
   }, [activeChildId]);
 
   /* ── This child's own full histories — Behaviour, Medical (nurse
@@ -506,6 +530,16 @@ export default function ParentDashboard() {
     _fetch(`/api/parent-portal/medical/${activeChildId}`).then(setMedicalVisits).catch(() => setMedicalVisits([]));
     _fetch(`/api/parent-portal/timetable/${activeChildId}`).then(r => setTimetableWeek(r?.slots ?? [])).catch(() => setTimetableWeek([]));
   }, [activeChildId]);
+
+  /* Transport is per child too: switching child while reading the transport
+     page must load the new child's run, not leave the previous child's on
+     screen. Only fetched for the page that shows it. */
+  useEffect(() => {
+    if (!activeChildId || activePage !== 'transport') return;
+    loadTransport(activeChildId);
+    // loadTransport is stable enough for this purpose (a plain data fetch).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeChildId, activePage]);
 
   /* ── Real messages inbox (/api/messages) — reported directly: the
      bell shows a notification but it "can't open." The Messages page
@@ -559,6 +593,120 @@ export default function ParentDashboard() {
   }
   function replyToMessage(m) {
     openCompose({ subject: m.subject ? `Re: ${m.subject}` : 'Re: ' });
+  }
+
+  /* Voting on a poll from the inbox. The server answers with the poll as
+     THIS parent sees it (their own choice + fresh counts), so the row is
+     patched in place — no re-fetch, and no chance of the list showing one
+     person's tally while the detail shows another. Re-voting replaces the
+     previous choice; a closed poll refuses server-side and the message is
+     surfaced rather than swallowed. */
+  async function voteOnPoll(m, optionId) {
+    if (pollVotingId) return;
+    setPollVotingId(m.id);
+    setPollError('');
+    try {
+      const res = await messagesApi.vote(m.id, optionId);
+      const poll = res?.data;
+      if (poll) {
+        const apply = list => (Array.isArray(list)
+          ? list.map(x => (x.id === m.id ? { ...x, poll } : x))
+          : list);
+        setInboxMessages(apply);
+        setSentMessages(apply);
+      }
+    } catch (err) {
+      setPollError(err?.message || 'Your vote could not be saved.');
+    } finally {
+      setPollVotingId(null);
+    }
+  }
+
+  /* Attachment bytes are fetched on demand (the inbox read never carries
+     them) and the browser download is driven by the server's own filename. */
+  function downloadAttachment(attachment) {
+    return messagesApi.attachment(attachment.id);
+  }
+
+  /* ── Transport (the bus this child rides) ────────────────────────
+     Its own read: a join across the child's assignments and the routes they
+     point at, so a family with a current run and a last-term one is one
+     round trip. Loaded when the page is opened, and again if the parent
+     switches child while reading it. */
+  function loadTransport(childId) {
+    if (!childId) return;
+    setTransportLoading(true);
+    setTransportError('');
+    parentPortal.transport(childId)
+      .then(r => setTransport(r?.data ?? null))
+      .catch(err => {
+        setTransport(null);
+        setTransportError(err?.message || 'Transport details could not be loaded.');
+      })
+      .finally(() => setTransportLoading(false));
+  }
+
+  /* ── Conversations (the Chats tab) ───────────────────────────────
+     A thread is the pair (this parent, one staff member), derived by the
+     server from the messages themselves — see parent-portal.js. Opening one
+     IS reading it (the server marks it read), so the inbox and the thread
+     list are refreshed afterwards to keep the badges honest. */
+  function loadThreads() {
+    setThreadsLoading(true);
+    setThreadsError('');
+    parentMessaging.inbox()
+      .then(r => setThreads(r?.data?.threads ?? []))
+      .catch(err => setThreadsError(err?.message || 'Conversations could not be loaded.'))
+      .finally(() => setThreadsLoading(false));
+  }
+
+  async function openThread(counterpartUserId) {
+    setOpenThreadId(counterpartUserId);
+    setThreadData(null);
+    setThreadLoading(true);
+    setThreadsError('');
+    try {
+      const res = await parentMessaging.threads.get(counterpartUserId);
+      setThreadData(res?.data ?? null);
+      loadInbox(1);
+      loadThreads();
+      window.dispatchEvent(new Event('messages:read'));
+    } catch (err) {
+      setThreadsError(err?.message || 'That conversation could not be opened.');
+    } finally {
+      setThreadLoading(false);
+    }
+  }
+
+  async function replyInThread(payload) {
+    if (!openThreadId) return;
+    setThreadReturning(true);
+    try {
+      await parentMessaging.threads.reply(openThreadId, payload);
+      const res = await parentMessaging.threads.get(openThreadId);
+      setThreadData(res?.data ?? null);
+      loadInbox(1);
+      loadThreads();
+    } finally {
+      setThreadReturning(false);
+    }
+  }
+
+  /* Voting from inside a conversation patches that thread's own bubble — the
+     inbox lists are patched by voteOnPoll, which cannot see this copy. */
+  async function voteInThread(m, optionId) {
+    try {
+      const res = await messagesApi.vote(m.id, optionId);
+      const poll = res?.data;
+      if (poll) {
+        setThreadData(prev => prev && ({
+          ...prev,
+          messages: (prev.messages ?? []).map(x => (x.id === m.id ? { ...x, poll } : x)),
+        }));
+      }
+    } catch (err) {
+      setPollError(err?.message || 'Your vote could not be saved.');
+    }
   }
 
   /* `prefill` carries a subject when the parent is replying to a message
@@ -630,6 +778,7 @@ export default function ParentDashboard() {
     setMobileNavOpen(false);
     if (mainRef.current) mainRef.current.scrollTo({ top: 0 });
     if (pageId === 'messages') loadInbox();
+    if (pageId === 'transport') loadTransport(activeChildId);
   }
 
   /* ── Loading state ── */
@@ -1298,6 +1447,27 @@ export default function ParentDashboard() {
     const rows      = (!isSent && msgUnreadOnly) ? allRows.filter(m => !m.isRead?.[myUserId]) : allRows;
     const hasMore   = allRows.length < total;
 
+    /* A conversation, opened from the Chats tab, takes over the panel: the
+       parent reads one thread at a time and goes back to the list. */
+    if (openThreadId) {
+      return (
+        <div className="h-[70vh] min-h-[420px] bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden" id="section-messages">
+          <ThreadView
+            thread={threadData}
+            loading={threadLoading}
+            userId={myUserId}
+            onBack={() => { setOpenThreadId(null); setThreadData(null); }}
+            onReply={replyInThread}
+            replying={threadReturning}
+            onVote={voteInThread}
+            votingId={pollVotingId}
+            onDownloadAttachment={downloadAttachment}
+            showBack
+          />
+        </div>
+      );
+    }
+
     return (
       <>
       <MessagesPanel
@@ -1306,6 +1476,7 @@ export default function ParentDashboard() {
           setMsgTab(t);
           setOpenMessageId(null);
           if (t === 'sent' && sentMessages === null) loadSent();
+          if (t === 'chats') loadThreads();
         }}
         messages={rows}
         loading={loading}
@@ -1321,6 +1492,14 @@ export default function ParentDashboard() {
         unreadOnly={msgUnreadOnly}
         onUnreadOnlyChange={setMsgUnreadOnly}
         unreadCount={unreadCount}
+        onVote={voteOnPoll}
+        pollVotingId={pollVotingId}
+        pollError={pollError}
+        onDownloadAttachment={downloadAttachment}
+        threads={threads}
+        threadsLoading={threadsLoading}
+        threadsError={threadsError}
+        onOpenThread={openThread}
       />
       <ComposeMessageModal
         open={composeOpen}
@@ -1339,8 +1518,24 @@ export default function ParentDashboard() {
     );
   }
 
-  function CalendarPage() {
+  /* ── Transport page ──────────────────────────────────────────
+     One question, answered from what the office already filed: which bus,
+     driven by whom, from which stop, and when. The card itself is shared with
+     the student portal (components/transport/TransportRideCard.jsx) so the two
+     faces of the same read cannot drift. */
+  function TransportPage() {
     return (
+      <TransportRideCard
+        id="section-transport"
+        assignments={transport?.assignments ?? []}
+        loading={transportLoading}
+        error={transportError}
+        emptyMessage={`${transport?.child?.name ?? 'This child'} is not on a school route. Contact the school office if they should be.`}
+      />
+    );
+  }
+
+  function CalendarPage() {    return (
       <Card id="section-calendar">
         <CardHeader icon={Calendar} iconClass="text-blue-500" title="School Calendar" />
         {!d.upcomingEvents?.length ? (
@@ -1562,6 +1757,7 @@ export default function ParentDashboard() {
     overview: OverviewPage, grades: GradesPage, attendance: AttendancePage, fees: FeesPage,
     timetable: TimetablePage, library: LibraryPage, messages: MessagesPage,
     calendar: CalendarPage, behaviour: BehaviourPage, medical: MedicalPage, profile: ProfilePage, announcements: AnnouncementsPage,
+    transport: TransportPage,
   };
   // A page whose module got disabled mid-session (or a stale activePage
   // from before this change) falls back to Overview rather than a blank

@@ -37,6 +37,7 @@ const { planGate }       = require('../middleware/plan');
 const { _model }         = require('../utils/model');
 const { getPublishState, markTimetableChanged, publishedReader, timetableReaderFor } = require('../utils/timetable-publish');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
+const { notifyTimetableChange } = require('../utils/change-alerts');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 const { resolveBellSchedule } = require('./bell-schedule');
 const { sanitisePdfStr }      = require('../utils/sanitisePdf');
@@ -1784,6 +1785,12 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, timetableManageAccess('update'
       { ...data, updatedBy: userId },
       { new: true, runValidators: false },
     ).lean();
+
+    // Families find out about a moved lesson from their child, days later.
+    // Fire-and-forget: the slot is already saved, and a notification failure
+    // must not turn a successful edit into an error screen.
+    notifyTimetableChange({ ctx: tenantContext(req), schoolId, before: current, after: doc })
+      .catch(err => console.error('[timetable] change alert failed:', err.message));
 
     return ok(res, doc);
   } catch (err) { console.error('[timetable PUT /:id]', err); return E.serverError(res); }

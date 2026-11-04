@@ -58,6 +58,7 @@ jest.mock('../../utils/counters', () => ({
   reserveAdmissionNumbers: jest.fn(),
   reserveStaffIds: jest.fn((schoolId, n) => Promise.resolve(Array.from({ length: n }, (_, i) => `STF-${i + 1}`))),
   reserveInvoiceNumbers: jest.fn(),
+  reserveFreeInvoiceNumbers: jest.fn(),
 }));
 jest.mock('../../utils/provision-identities', () => ({ provisionIdentityForUser: jest.fn().mockResolvedValue(undefined) }));
 jest.mock('../../utils/email', () => ({ sendWelcomeCredentials: jest.fn().mockResolvedValue(undefined) }));

@@ -7,14 +7,16 @@
 'use strict';
 
 const express            = require('express');
+const { v4: uuidv4 }     = require('uuid');
 const { authMiddleware } = require('../middleware/auth');
 const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { isTimetablePublished, publishedReader } = require('../utils/timetable-publish');
-const { ok, E }          = require('../utils/response');
+const { ok, created, E } = require('../utils/response');
 const { resolveTeacher } = require('../utils/resolveTeacher');
-const { _inboxQuery }   = require('./messages');
+const { _inboxQuery, createDirectMessage } = require('./messages');
 const { recipientSummary } = require('../utils/message-audience');
+const { readExtras, messageExtras } = require('../utils/message-extras');
 const { resolveCurrentPeriod } = require('./academic-config');
 
 const router    = express.Router();
@@ -24,6 +26,7 @@ const router    = express.Router();
 // one). A capitalized array here silently broke "Today's Timetable" on
 // this dashboard for every teacher, every day, since this route shipped.
 const DAY_NAMES = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+const { loadStudentDigest } = require('../utils/student-digest');
 
 function _requireTeacher(req, res) {
   const role = req.jwtUser?.role;
@@ -38,9 +41,396 @@ const _resolveTeacher = (userId, email, schoolId) =>
   resolveTeacher(userId, email, schoolId, 'firstName lastName title photo email');
 
 /* ══════════════════════════════════════════════════════════════
+   Teacher compose — who a teacher may start a conversation with.
+
+   Two doors, both re-resolved on the server at SEND time:
+     • categories — "Parents of Form 1A", "Parents of all my classes",
+       "School office", "Teachers". The client sends a key, never ids.
+     • members — a saved group or a picked list of people. Those ids are
+       accepted only when they are a colleague or the parent of a student
+       in one of this teacher's OWN classes; a raw id from anywhere else
+       is rejected, so a crafted request cannot reach another tenant or
+       another teacher's parents.
+   The group itself is the existing message_groups document (a reusable
+   recipient list, not a room) so delivery stays an ordinary direct
+   message per member — same inbox, email and push semantics as replies.
+   ══════════════════════════════════════════════════════════════ */
+
+const GUARDIAN_ROLES = ['parent', 'guardian'];
+const PORTAL_ROLES = new Set([...GUARDIAN_ROLES, 'student']);
+const OFFICE_ROLES = new Set(['admin', 'superadmin', 'principal', 'deputy_principal', 'deputy']);
+
+async function _teacherAudience(req) {
+  const { schoolId, userId, email } = req.jwtUser;
+  const teacher = await _resolveTeacher(userId, email, schoolId).catch(() => null);
+  const ownerIds = [...new Set([teacher?.userId, teacher?.id, userId].filter(Boolean))];
+
+  const [assignments, timetable, formStreams] = await Promise.all([
+    tenantModel('teaching_assignments', tenantContext(req))
+      .find({ schoolId, teacherId: { $in: ownerIds } }).select('classId').lean().catch(() => []),
+    tenantModel('timetable', tenantContext(req))
+      .find({ schoolId, teacherId: { $in: ownerIds }, isActive: true }).select('classId').lean().catch(() => []),
+    // The form-teacher arm reads the streams — classes.formTeacherId is a
+    // legacy, never-written field, so a probe there matched nothing, ever.
+    teacher
+      ? tenantModel('streams', tenantContext(req))
+          .find({ schoolId, $or: [{ formTeacherId: teacher.id }, { assistantFormTeacherId: teacher.id }] })
+          .select('classId').lean().catch(() => [])
+      : Promise.resolve([]),
+  ]);
+
+  const classIds = [...new Set([
+    ...assignments.map(a => a.classId),
+    ...timetable.map(t => t.classId),
+    ...formStreams.map(s => s.classId),
+  ].filter(Boolean))];
+
+  const [classDocs, staff] = await Promise.all([
+    classIds.length
+      ? tenantModel('classes', tenantContext(req))
+          .find({ schoolId, id: { $in: classIds } }).select('id name').sort({ name: 1 }).lean().catch(() => [])
+      : Promise.resolve([]),
+    tenantModel('users', tenantContext(req))
+      .find({ schoolId, isActive: { $ne: false }, role: { $nin: [...PORTAL_ROLES] } })
+      .select('id name role').lean().catch(() => []),
+  ]);
+
+  const students = classIds.length
+    ? await tenantModel('students', tenantContext(req))
+        .find({ schoolId, classId: { $in: classIds } })
+        .select('id classId name firstName lastName').lean().catch(() => [])
+    : [];
+  const studentIds = students.map(s => s.id);
+  const parents = studentIds.length
+    ? await tenantModel('users', tenantContext(req))
+        .find({ schoolId, role: { $in: GUARDIAN_ROLES }, isActive: { $ne: false }, studentIds: { $in: studentIds } })
+        .select('id name role studentIds').lean().catch(() => [])
+    : [];
+
+  const studentById = Object.fromEntries(students.map(s => [s.id, {
+    id: s.id,
+    classId: s.classId,
+    name: s.name || [s.firstName, s.lastName].filter(Boolean).join(' ') || 'Student',
+  }]));
+
+  const parentsByClass = Object.fromEntries(classDocs.map(c => [c.id, []]));
+  const parentsByStudent = {};
+  for (const parent of parents) {
+    parent.children = (parent.studentIds || []).map(id => studentById[id]).filter(Boolean);
+    for (const child of parent.children) {
+      const list = parentsByClass[child.classId];
+      if (list && !list.includes(parent.id)) list.push(parent.id);
+      if (!parentsByStudent[child.id]) parentsByStudent[child.id] = [];
+      if (!parentsByStudent[child.id].includes(parent.id)) parentsByStudent[child.id].push(parent.id);
+    }
+  }
+
+  const colleagues = staff.filter(s => s.id !== userId);
+  const byId = new Map();
+  for (const s of colleagues) byId.set(s.id, { id: s.id, name: s.name || 'Staff member', role: s.role, kind: 'staff' });
+  for (const p of parents) byId.set(p.id, { id: p.id, name: p.name || 'Parent', role: p.role, kind: 'parent' });
+
+  return {
+    classIds,
+    classes: classDocs,
+    classById: Object.fromEntries(classDocs.map(c => [c.id, c])),
+    colleagues,
+    parents,
+    parentsByClass,
+    parentsByStudent,
+    studentById,
+    byId,
+  };
+}
+
+/** A category key → recipient ids, or null when the key is not this teacher's. */
+function _resolveCategory(audience, key) {
+  if (key === 'parents:all') {
+    return [...new Set(Object.values(audience.parentsByClass).flat())];
+  }
+  if (key.startsWith('parents:')) {
+    const classId = key.slice('parents:'.length);
+    return Object.prototype.hasOwnProperty.call(audience.parentsByClass, classId)
+      ? audience.parentsByClass[classId]
+      : null;
+  }
+  if (key === 'staff:office') {
+    return audience.colleagues.filter(s => OFFICE_ROLES.has(s.role)).map(s => s.id);
+  }
+  if (key === 'staff:teachers') {
+    return audience.colleagues.filter(s => s.role === 'teacher').map(s => s.id);
+  }
+  return null;
+}
+
+/* GET /api/teacher-portal/message-recipients — what a teacher can start. */
+router.get('/message-recipients', authMiddleware, async (req, res) => {
+  if (!_requireTeacher(req, res)) return;
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const audience = await _teacherAudience(req);
+
+    const categories = [];
+    const seenParents = new Set();
+    for (const cls of audience.classes) {
+      const ids = audience.parentsByClass[cls.id] ?? [];
+      ids.forEach(id => seenParents.add(id));
+      if (ids.length) categories.push({ key: `parents:${cls.id}`, label: `Parents of ${cls.name}`, count: ids.length });
+    }
+    if (audience.classes.filter(c => (audience.parentsByClass[c.id] ?? []).length).length > 1) {
+      categories.unshift({ key: 'parents:all', label: 'Parents of all my classes', count: seenParents.size });
+    }
+    const office = audience.colleagues.filter(s => OFFICE_ROLES.has(s.role)).length;
+    if (office) categories.push({ key: 'staff:office', label: 'School office', count: office });
+    const teachers = audience.colleagues.filter(s => s.role === 'teacher').length;
+    if (teachers) categories.push({ key: 'staff:teachers', label: 'Teachers', count: teachers });
+
+    const groups = await tenantModel('message_groups', tenantContext(req))
+      .find({ schoolId, $or: [{ createdBy: userId }, { memberIds: userId }] })
+      .sort({ updatedAt: -1 }).lean().catch(() => []);
+
+    return ok(res, {
+      categories,
+      groups: groups.map(g => ({ id: g.id, name: g.name, memberCount: (g.memberIds ?? []).length })),
+    });
+  } catch (err) {
+    console.error('[teacher-portal GET /message-recipients]', err);
+    return E.serverError(res);
+  }
+});
+
+/* GET /api/teacher-portal/message-contacts — the people behind a new group. */
+router.get('/message-contacts', authMiddleware, async (req, res) => {
+  if (!_requireTeacher(req, res)) return;
+  try {
+    const audience = await _teacherAudience(req);
+    const byName = (a, b) => String(a.name).localeCompare(String(b.name));
+    return ok(res, {
+      contacts: [
+        ...audience.colleagues
+          .map(s => ({ id: s.id, name: s.name || 'Staff member', role: s.role, kind: 'staff', detail: null }))
+          .sort(byName),
+        ...audience.parents
+          .map(p => ({
+            id: p.id,
+            name: p.name || 'Parent',
+            role: p.role,
+            kind: 'parent',
+            detail: (p.children ?? []).map(c => c.name).filter(Boolean).join(', ') || null,
+          }))
+          .sort(byName),
+      ],
+    });
+  } catch (err) {
+    console.error('[teacher-portal GET /message-contacts]', err);
+    return E.serverError(res);
+  }
+});
+
+/* Bytes live in their own collection so every thread read stays small.
+   If the blob write fails, the message keeps its text but loses the
+   attachment card — better than a card that downloads to an error. */
+async function _persistAttachment(req, messageId, extras, attachmentBlob) {
+  if (!attachmentBlob || !extras?.attachment) return;
+  try {
+    await tenantModel('message_attachments', tenantContext(req)).create({
+      id: extras.attachment.id,
+      schoolId: req.jwtUser.schoolId,
+      messageId,
+      name: attachmentBlob.name,
+      mimeType: attachmentBlob.mimeType,
+      size: attachmentBlob.size,
+      data: attachmentBlob.data,
+      createdAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('[teacher-portal attachment persist]', err);
+    await tenantModel('messages', tenantContext(req))
+      .updateOne({ id: messageId }, { $unset: { attachment: '' } })
+      .catch(() => {});
+  }
+}
+
+/* POST /api/teacher-portal/messages — start a conversation or send to a
+   saved group. One message document per send, exactly like a reply. */
+router.post('/messages', authMiddleware, async (req, res) => {
+  if (!_requireTeacher(req, res)) return;
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const subject = String(req.body?.subject ?? '').trim();
+    const body = String(req.body?.body ?? '').trim();
+    const category = typeof req.body?.category === 'string' ? req.body.category.trim() : '';
+    const groupId = typeof req.body?.groupId === 'string' ? req.body.groupId.trim() : '';
+    const groupName = typeof req.body?.groupName === 'string' ? req.body.groupName.trim() : '';
+    const memberIds = [...new Set(
+      (Array.isArray(req.body?.memberIds) ? req.body.memberIds : [])
+        .filter(id => typeof id === 'string' && id.trim())
+        .map(id => id.trim()),
+    )];
+
+    if (!subject) return E.badRequest(res, 'Add a subject.');
+    if (subject.length > 200) return E.badRequest(res, 'Subject must be 200 characters or fewer.');
+    if (!body) return E.badRequest(res, 'Write a message first.');
+    if (body.length > 4000) return E.badRequest(res, 'That message is too long.');
+    if (groupName.length > 80) return E.badRequest(res, 'Group name must be 80 characters or fewer.');
+
+    const extrasResult = readExtras(req.body);
+    if (extrasResult.error) return E.badRequest(res, extrasResult.error);
+
+    const audience = await _teacherAudience(req);
+    let recipients = [];
+    let group = null;
+
+    if (groupId) {
+      const saved = await tenantModel('message_groups', tenantContext(req))
+        .findOne({ schoolId, id: groupId }).lean();
+      if (!saved) return E.notFound(res, 'That group no longer exists.');
+      if (saved.createdBy !== userId && !(saved.memberIds ?? []).includes(userId)) {
+        return E.forbidden(res, 'You are not a member of that group.');
+      }
+      recipients = (saved.memberIds ?? []).filter(id => id !== userId && audience.byId.has(id));
+      group = { id: saved.id, name: saved.name };
+      if (!recipients.length) return E.badRequest(res, 'That group has no recipients you can message.');
+    } else if (category) {
+      const resolved = _resolveCategory(audience, category);
+      if (resolved === null) return E.badRequest(res, 'That audience is not available to you.');
+      recipients = resolved;
+      if (!recipients.length) return E.badRequest(res, 'No one is in that audience yet.');
+    } else {
+      const invalid = memberIds.find(id => !audience.byId.has(id));
+      if (invalid) return E.badRequest(res, 'One or more recipients are not people you can message.');
+      recipients = memberIds.filter(id => id !== userId);
+      if (!recipients.length) return E.badRequest(res, 'Choose at least one recipient.');
+
+      if (groupName) {
+        const sender = await tenantModel('users', tenantContext(req))
+          .findOne({ schoolId, id: userId }).select('name').lean();
+        const now = new Date().toISOString();
+        const doc = await tenantModel('message_groups', tenantContext(req)).create({
+          id: uuidv4(),
+          createdBy: userId,
+          createdByName: sender?.name ?? 'Teacher',
+          name: groupName,
+          memberIds: recipients,
+          createdAt: now,
+          updatedAt: now,
+        });
+        group = { id: doc.id, name: doc.name };
+      }
+    }
+
+    const sender = await tenantModel('users', tenantContext(req))
+      .findOne({ schoolId, id: userId }).select('name email').lean();
+    const msg = await createDirectMessage(req, {
+      recipientUserIds: recipients,
+      subject,
+      body,
+      senderName: sender?.name || sender?.email || 'Teacher',
+      senderRole: 'teacher',
+      ...(group ? { groupId: group.id, groupName: group.name } : {}),
+      extra: extrasResult.extras,
+    });
+    await _persistAttachment(req, msg.id, extrasResult.extras, extrasResult.attachmentBlob);
+
+    return created(res, { id: msg.id, recipients, group });
+  } catch (err) {
+    console.error('[teacher-portal POST /messages]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   GET /api/teacher-portal/students/:studentId/attendance?month=YYYY-MM
+   The conversation starter: a teacher checks one of their own students'
+   month of attendance (and who to message about it). Day registers only —
+   an elective register is not that student's day.
+   ══════════════════════════════════════════════════════════════ */
+router.get('/students/:studentId/attendance', authMiddleware, async (req, res) => {
+  if (!_requireTeacher(req, res)) return;
+  try {
+    const { schoolId } = req.jwtUser;
+    const audience = await _teacherAudience(req);
+    const student = audience.studentById[req.params.studentId];
+    if (!student) return E.notFound(res, 'That student is not in one of your classes.');
+
+    const now = new Date();
+    const fallbackMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const month = typeof req.query.month === 'string' && req.query.month ? req.query.month : fallbackMonth;
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+      return E.badRequest(res, 'Month must look like 2026-10.');
+    }
+
+    const records = await tenantModel('attendance', tenantContext(req))
+      .find({ schoolId, studentId: student.id, subjectId: null, date: { $gte: `${month}-01`, $lte: `${month}-31` } })
+      .sort({ date: -1 }).limit(62)
+      .select('date status note')
+      .lean().catch(() => []);
+
+    const summary = { total: records.length, present: 0, late: 0, absent: 0, authorised: 0, other: 0 };
+    for (const r of records) {
+      if (r.status === 'present') summary.present += 1;
+      else if (r.status === 'late') summary.late += 1;
+      else if (r.status === 'absent') summary.absent += 1;
+      else if (r.status === 'authorised_absence') summary.authorised += 1;
+      else summary.other += 1;
+    }
+    const attended = summary.present + summary.late;
+    const pct = summary.total ? Math.round((attended / summary.total) * 100) : null;
+
+    return ok(res, {
+      student: {
+        id: student.id,
+        name: student.name,
+        classId: student.classId,
+        className: audience.classById[student.classId]?.name ?? null,
+      },
+      month,
+      summary: { ...summary, attended, pct },
+      days: records.map(r => ({ date: r.date, status: r.status, note: r.note || '' })),
+      guardians: (audience.parentsByStudent[student.id] ?? [])
+        .map(id => audience.byId.get(id))
+        .filter(Boolean)
+        .map(p => ({ id: p.id, name: p.name, role: p.role })),
+    });
+  } catch (err) {
+    console.error('[teacher-portal GET /students/:id/attendance]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
    GET /api/teacher-portal/dashboard
    One-shot payload for the teacher Command Centre.
    ══════════════════════════════════════════════════════════════ */
+/* GET /api/teacher-portal/students/:studentId/digest
+   The facts behind a drafted report: attendance, behaviour and published
+   marks over one window, already worded. Read-only — the teacher still
+   edits and sends; this only spares them assembling it from four screens.
+   Same audience guard as the attendance sheet: a teacher sees their own
+   classes, never the whole school. */
+router.get('/students/:studentId/digest', authMiddleware, async (req, res) => {
+  if (!_requireTeacher(req, res)) return;
+  try {
+    const { schoolId } = req.jwtUser;
+    const audience = await _teacherAudience(req);
+    const student = audience.studentById[req.params.studentId];
+    if (!student) return E.notFound(res, 'That student is not in one of your classes.');
+
+    const days = Math.min(Math.max(Number(req.query.days) || 30, 7), 120);
+    const className = audience.classById?.[student.classId]?.name || '';
+    const digest = await loadStudentDigest({
+      schoolId,
+      student: { ...student, className },
+      days,
+    });
+
+    return ok(res, { digest });
+  } catch (err) {
+    console.error('[teacher-portal GET /students/:id/digest]', err);
+    return E.serverError(res);
+  }
+});
+
 router.get('/dashboard', authMiddleware, async (req, res) => {
   if (!_requireTeacher(req, res)) return;
   try {
@@ -138,17 +528,45 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
       ? { date: { $gte: currentTermDoc.startDate, $lte: currentTermDoc.endDate } }
       : {};
 
-    // ── Teaching assignments (classIds + subjectIds) ─────────
+    // ── The classes this teacher teaches ─────────────────────
     // Assignments are keyed by the teacher's LOGIN id (see teaching-
     // assignments.js's canonicalTeacherId comment: every scope check matches
     // req.jwtUser.userId), but older rows can still be keyed by the staff
     // record id. Read both so neither form is silently invisible here.
+    //
+    // teaching_assignments authorises a marks write, but it is not the only
+    // place a school says "this teacher teaches this class": the timetable
+    // and the form-teacher role carry it too. Reading assignments alone left
+    // a teacher with a full timetable staring at "No classes assigned yet",
+    // so myClasses is the union of all three sources.
+    // The form-teacher arm reads the STREAMS: classes.formTeacherId is a
+    // legacy, never-written field (confirmed 2026-10-29 — the main fix that
+    // moved form/assistant teachers onto streams exists because of it).
     const assignmentOwnerIds = [teacher.userId, teacher.id].filter(Boolean);
-    const assignments = await TeachingAssignments.find({ teacherId: { $in: assignmentOwnerIds }, schoolId })
-      .select('classId subjectId streamId streamName').lean();
+    const [assignments, teacherTimetable, formStreams] = await Promise.all([
+      TeachingAssignments.find({ teacherId: { $in: assignmentOwnerIds }, schoolId })
+        .select('classId subjectId streamId streamName').lean(),
+      // The DRAFT timetable, not the published reader: an unpublished schedule
+      // still says who teaches what, and hiding a teacher's own classes
+      // because the timetabler has not hit publish is a data bug, not a rule.
+      tenantModel('timetable', tenantContext(req))
+        .find({ schoolId, teacherId: { $in: assignmentOwnerIds }, isActive: true })
+        .select('classId subjectId subject').lean().catch(() => []),
+      Streams.find({
+        schoolId,
+        $or: [{ formTeacherId: teacher.id }, { assistantFormTeacherId: teacher.id }],
+      }).select('classId').lean().catch(() => []),
+    ]);
 
-    const classIds   = [...new Set(assignments.map(a => a.classId).filter(Boolean))];
-    const subjectIds = [...new Set(assignments.map(a => a.subjectId).filter(Boolean))];
+    const classIds = [...new Set([
+      ...assignments.map(a => a.classId),
+      ...teacherTimetable.map(s => s.classId),
+      ...formStreams.map(s => s.classId),
+    ].filter(Boolean))];
+    const subjectIds = [...new Set([
+      ...assignments.map(a => a.subjectId),
+      ...teacherTimetable.map(s => s.subjectId),
+    ].filter(Boolean))];
 
     // ── Today's timetable ────────────────────────────────────
     // streamId included so the dashboard can tell apart two lessons for
@@ -254,7 +672,7 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     // ── Classes info ─────────────────────────────────────────
     const [classDocs, subjectDocs] = await Promise.all([
       classIds.length ? Classes.find({ id: { $in: classIds }, schoolId })
-        .select('id name formTeacherId studentCount').lean().catch(() => []) : [],
+        .select('id name').lean().catch(() => []) : [],
       subjectIds.length ? Subjects.find({ id: { $in: subjectIds }, schoolId })
         .select('id name code').lean().catch(() => []) : [],
     ]);
@@ -274,11 +692,17 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
 
       const attPct = attTotal > 0 ? Math.round((attPresent / attTotal) * 100) : 0;
 
-      // Subject(s) this teacher teaches in this class
-      const classSubjectIds = assignments
-        .filter(a => a.classId === classId)
-        .map(a => a.subjectId);
-      const classSubjects = classSubjectIds.map(sid => subjectMap[sid]?.name).filter(Boolean);
+      // Subject(s) this teacher teaches in this class — from the assignment
+      // record where there is one, otherwise from the timetable slot's own
+      // subject (a timetabled teacher may have no assignment row yet).
+      const classSubjects = [...new Set([
+        ...assignments
+          .filter(a => a.classId === classId)
+          .map(a => subjectMap[a.subjectId]?.name),
+        ...teacherTimetable
+          .filter(s => s.classId === classId)
+          .map(s => subjectMap[s.subjectId]?.name ?? s.subject),
+      ].filter(Boolean))];
 
       return {
         id:           classId,
@@ -653,6 +1077,117 @@ router.get('/inbox', authMiddleware, async (req, res) => {
     });
   } catch (err) {
     console.error('[teacher-portal GET /inbox]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   GET /api/teacher-portal/threads/:counterpartUserId
+   One conversation behind a Messages row. Same pair definition and
+   same read-on-open write as the parent portal's screen-12 read —
+   a thread is (this user, one counterpart), not a document — so the
+   two faces cannot disagree about what a conversation contains.
+   ══════════════════════════════════════════════════════════════ */
+router.get('/threads/:counterpartUserId', authMiddleware, async (req, res) => {
+  if (!_requireTeacher(req, res)) return;
+  try {
+    const { schoolId, userId, role } = req.jwtUser;
+    const counterpartUserId = req.params.counterpartUserId;
+    const Msg = tenantModel('messages', tenantContext(req));
+
+    const docs = await Msg.find({
+      $or: [
+        { schoolId, senderId: userId, recipients: counterpartUserId },
+        { senderId: counterpartUserId, ..._inboxQuery({ schoolId, userId, role }) },
+      ],
+    }).sort({ createdAt: 1 }).limit(300)
+      .select('id senderId senderName senderRole subject body isRead createdAt recipients groupId groupName kind dueAt context attachment poll')
+      .lean();
+
+    // Opening a conversation IS reading it — the same single write the
+    // web inbox does on open, not a per-message round trip.
+    const unreadIds = docs.filter(m => m.senderId !== userId && !m.isRead?.[userId]).map(m => m.id);
+    if (unreadIds.length) {
+      await Msg.updateMany({ schoolId, id: { $in: unreadIds } }, { $set: { [`isRead.${userId}`]: true } }).catch(() => {});
+    }
+
+    const counterpart = await tenantModel('users', tenantContext(req))
+      .findOne({ schoolId, id: counterpartUserId }).select('id name role').lean().catch(() => null);
+
+    return ok(res, {
+      counterpartUserId,
+      counterpart: {
+        id: counterpartUserId,
+        name: counterpart?.name || 'School office',
+        role: counterpart?.role || null,
+      },
+      messages: docs.map(m => ({
+        id: m.id,
+        mine: m.senderId === userId,
+        from: m.senderId === userId ? 'You' : (m.senderName || counterpart?.name || 'School office'),
+        subject: m.subject || '',
+        body: m.body,
+        at: m.createdAt,
+        ...recipientSummary(m),
+        // kind/due/context/attachment plus the poll as THIS reader sees it.
+        ...messageExtras(m, userId),
+        // Same split as the parent read: for my own bubble this is "did the
+        // counterpart open it", for theirs it is "have I".
+        read: m.senderId === userId
+          ? Boolean(m.isRead?.[counterpartUserId])
+          : Boolean(m.isRead?.[userId]),
+      })),
+    });
+  } catch (err) {
+    console.error('[teacher-portal GET /threads/:id]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   POST /api/teacher-portal/threads/:counterpartUserId/messages
+   A teacher's reply. Goes through the same createDirectMessage path
+   as every other compose surface so notifications and the message
+   document shape stay identical.
+   ══════════════════════════════════════════════════════════════ */
+router.post('/threads/:counterpartUserId/messages', authMiddleware, async (req, res) => {
+  if (!_requireTeacher(req, res)) return;
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const counterpartUserId = req.params.counterpartUserId;
+    const body    = String(req.body?.body || '').trim();
+    const subject = String(req.body?.subject || '').trim() || 'Message from teacher';
+
+    if (!body) return E.badRequest(res, 'Write a message first.');
+    if (body.length > 4000) return E.badRequest(res, 'That message is too long.');
+
+    const extrasResult = readExtras(req.body);
+    if (extrasResult.error) return E.badRequest(res, extrasResult.error);
+
+    // The counterpart must be a real person in THIS school — otherwise a
+    // crafted id could drop a message into another tenant's inbox.
+    const counterpart = await tenantModel('users', tenantContext(req))
+      .findOne({ schoolId, id: counterpartUserId }).select('id name role isActive').lean();
+    if (!counterpart || counterpart.isActive === false) {
+      return E.badRequest(res, 'That recipient is no longer available — please pick another and try again.');
+    }
+
+    const sender = await tenantModel('users', tenantContext(req))
+      .findOne({ id: userId, schoolId }).select('name email').lean();
+
+    const msg = await createDirectMessage(req, {
+      recipientUserIds: [counterpartUserId],
+      subject,
+      body,
+      senderName: sender?.name || sender?.email || 'Teacher',
+      senderRole: 'teacher',
+      extra: extrasResult.extras,
+    });
+    await _persistAttachment(req, msg.id, extrasResult.extras, extrasResult.attachmentBlob);
+
+    return created(res, { id: msg.id, at: msg.createdAt });
+  } catch (err) {
+    console.error('[teacher-portal POST /threads/:id/messages]', err);
     return E.serverError(res);
   }
 });

@@ -59,6 +59,7 @@ jest.mock('../../utils/counters', () => ({
   reserveFreeAdmissionNumbers: jest.fn((schoolId, n) => Promise.resolve(Array.from({ length: n }, (_, i) => `ADM-${i + 1}`))),
   reserveStaffIds: jest.fn(),
   reserveInvoiceNumbers: jest.fn((schoolId, n) => Promise.resolve(Array.from({ length: n }, (_, i) => `INV-${i + 1}`))),
+  reserveFreeInvoiceNumbers: jest.fn((schoolId, n) => Promise.resolve(Array.from({ length: n }, (_, i) => `INV-${i + 1}`))),
 }));
 
 let mockCurrentPeriod;
