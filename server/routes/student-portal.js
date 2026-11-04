@@ -273,6 +273,9 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
         subjectName: markSubjectNameMap[subjectId] || subjectId,
         finalScore:  latestSubjects[subjectId]?.finalScore ?? null,
         grade:       latestSubjects[subjectId]?.grade ?? null,
+        breakdown:    latestSubjects[subjectId]?.breakdown ?? null,
+        classAverage: latestSubjects[subjectId]?.classAverage ?? null,
+        deviation:    latestSubjects[subjectId]?.deviation ?? null,
       }))
       .sort((a, b) => a.subjectName.localeCompare(b.subjectName));
     // The per-type breakdown stays internal to this computation — the

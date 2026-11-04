@@ -2438,45 +2438,81 @@ router.get('/analytics/export.pdf', authMiddleware, PLAN, MODGATE, rbac('grades'
  */
 router.get('/reminders', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), async (req, res) => {
   try {
-    const { schoolId } = req.jwtUser;
+    const { schoolId, userId, role } = req.jwtUser;
     const { academicYearId, classId, subjectId } = req.query;
     const daysAhead = Number(req.query.days) || 7;
 
-    const today      = new Date();
-    today.setHours(0, 0, 0, 0);
-    const todayStr   = today.toISOString().slice(0, 10);
-    const futureDate = new Date(today);
-    futureDate.setDate(futureDate.getDate() + daysAhead);
-    const futureDateStr = futureDate.toISOString().slice(0, 10);
+    // UTC, not local midnight: a +03:00 school would otherwise read "yesterday"
+    // and flip today's deadline to overdue a day early.
+    const todayStr   = new Date().toISOString().slice(0, 10);
+    const futureStr  = new Date(Date.now() + daysAhead * 86400000).toISOString().slice(0, 10);
 
-    // Load schedule
-    const schedFilter = { schoolId, ..._yearFilterPart(academicYearId) };
+    // 'deputy_principal' is the canonical role key (repairPermissions.js);
+    // 'deputy' is kept for schools that created it as a custom role.
+    const OVERSIGHT = new Set(['admin', 'superadmin', 'principal', 'deputy_principal', 'deputy']);
+    const overseeing = OVERSIGHT.has(role);
 
-    const schedules = await tenantModel('assessment_schedule', tenantContext(req)).find(schedFilter).lean();
+    const Assignments = tenantModel('teaching_assignments', tenantContext(req));
+    const Students    = tenantModel('students', tenantContext(req));
+    const Marks       = tenantModel('assessment_marks', tenantContext(req));
 
-    // For each schedule entry, check if marks have been entered
+    /* A schedule entry is school-wide (type + instance + term, no class), so
+       "missing" only means anything against the classes this teacher actually
+       teaches. Oversight roles keep the school-wide date view. */
+    let targets = null;
+    if (!overseeing) {
+      const own = await Assignments.find({ schoolId, teacherId: userId }).lean();
+      targets = own.filter((a) =>
+        (!classId || a.classId === classId) && (!subjectId || a.subjectId === subjectId));
+      if (!targets.length) return _ok(res, []);
+    }
+
+    const rosterCache = new Map();
+    const rosterOf = async (id) => {
+      if (!rosterCache.has(id)) {
+        rosterCache.set(id, await Students.countDocuments({ schoolId, classId: id, status: 'active' }));
+      }
+      return rosterCache.get(id);
+    };
+
+    const schedules = await tenantModel('assessment_schedule', tenantContext(req))
+      .find({ schoolId, ..._yearFilterPart(academicYearId) }).lean();
+
     const reminders = [];
-
     for (const sched of schedules) {
-      const status =
-        sched.dateTo < todayStr   ? 'overdue' :
-        sched.dateFrom <= todayStr ? 'open'    :
-        sched.dateFrom <= futureDateStr ? 'upcoming' : null;
-
-      if (!status) continue;
-
-      // Count marks entered for this assessment
-      const marksFilter = {
+      const base = {
         schoolId,
         termNumber:     sched.termNumber,
         assessmentType: sched.assessmentType,
         instance:       sched.instance,
         academicYearId: sched.academicYearId || null,
       };
-      if (classId)   marksFilter.classId   = classId;
-      if (subjectId) marksFilter.subjectId = subjectId;
 
-      const marksCount = await tenantModel('assessment_marks', tenantContext(req)).countDocuments(marksFilter);
+      let expected = 0;
+      let entered = 0;
+      if (targets) {
+        for (const t of targets) {
+          expected += await rosterOf(t.classId);
+          entered  += await Marks.countDocuments({ ...base, classId: t.classId, subjectId: t.subjectId });
+        }
+      } else {
+        const filter = { ...base };
+        if (classId)   filter.classId   = classId;
+        if (subjectId) filter.subjectId = subjectId;
+        entered = await Marks.countDocuments(filter);
+      }
+
+      const missing = targets ? Math.max(0, expected - entered) : null;
+      const past    = sched.dateTo < todayStr;
+
+      const status = past
+        ? (targets && missing === 0 ? 'completed' : 'overdue')
+        : sched.dateFrom <= todayStr
+          ? 'open'
+          : sched.dateFrom <= futureStr
+            ? 'upcoming'
+            : null;
+      if (!status) continue;
 
       reminders.push({
         scheduleId:     sched.id,
@@ -2487,17 +2523,17 @@ router.get('/reminders', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
         dateFrom:       sched.dateFrom,
         dateTo:         sched.dateTo,
         status,
-        marksEntered:   marksCount,
+        marksEntered:   entered,
+        missingCount:   missing,
+        expectedCount:  targets ? expected : null,
         academicYearId: sched.academicYearId,
       });
     }
 
-    // Sort: overdue first, then open, then upcoming
-    const ORDER = { overdue: 0, open: 1, upcoming: 2 };
+    // Overdue first, then open, then upcoming, then what is already done.
+    const ORDER = { overdue: 0, open: 1, upcoming: 2, completed: 3 };
     reminders.sort((a, b) =>
-      (ORDER[a.status] - ORDER[b.status]) ||
-      (a.dateFrom > b.dateFrom ? 1 : -1)
-    );
+      (ORDER[a.status] - ORDER[b.status]) || (a.dateFrom > b.dateFrom ? 1 : -1));
 
     return _ok(res, reminders);
   } catch (err) {

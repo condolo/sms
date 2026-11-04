@@ -136,8 +136,8 @@ describe('GET /api/student-portal/dashboard — subjectMarks (real marks, not co
     expect(res.status).toBe(200);
     // The NEWEST report (rc_2, by publishedAt) is the one subjectMarks comes from — not rc_1.
     expect(res.body.data.subjectMarks).toEqual([
-      { subjectId: 'subj_eng',  subjectName: 'English Language', finalScore: 68, grade: 'B' },
-      { subjectId: 'subj_math', subjectName: 'Mathematics',      finalScore: 74, grade: 'B+' },
+      { subjectId: 'subj_eng',  subjectName: 'English Language', finalScore: 68, grade: 'B',  breakdown: null, classAverage: null, deviation: null },
+      { subjectId: 'subj_math', subjectName: 'Mathematics',      finalScore: 74, grade: 'B+', breakdown: null, classAverage: null, deviation: null },
     ]);
   });
 
