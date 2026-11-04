@@ -39,6 +39,7 @@ const { seedMobileScenarios } = require('./seed-demo-scenarios');
 const { _model } = require('../utils/model');
 const { MODULE_KEYS } = require('../config/moduleRegistry');
 const { ROLE_DEFAULTS } = require('../utils/repairPermissions');
+const { withFinanceSubGrants } = require('../middleware/explicit-sub');
 
 /* ── Users to provision ── */
 const DEMO_USERS = [
@@ -213,7 +214,13 @@ async function seedDemo() {
 
   await Promise.all(Object.entries(PERMS).map(([roleKey, permissions]) =>
     Perm.updateOne({ id: `rp_${roleKey}_${schoolId}` }, {
-      $set: { id: `rp_${roleKey}_${schoolId}`, schoolId, roleKey, permissions }
+      // Run the same derivation onboarding uses (middleware/explicit-sub.js):
+      // a role that holds `finance: ['read','create']` must also carry
+      // finance__term_billing, or the explicit checks refuse it. Without this
+      // the demo seed rewrote the whole permissions object on every boot and
+      // silently deleted the sub-grants the startup backfill had just added —
+      // so a restart put Term Billing back behind a 403 every time.
+      $set: { id: `rp_${roleKey}_${schoolId}`, schoolId, roleKey, permissions: withFinanceSubGrants(permissions) },
     }, { upsert: true })
   ));
 

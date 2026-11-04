@@ -807,11 +807,20 @@ async function start() {
         .catch(err => console.error('[startup] payment paidAt backfill failed:', err.message));
     }
 
-    repairPermissions()
-      .catch(err => console.error('[repairPermissions] Unhandled error:', err));
-
-    seedDemo()
-      .catch(err => console.error('[seed-demo] Unhandled top-level error — demo school may not be provisioned correctly:', err));
+    // Repair, then seed — both write role permissions, and both run AFTER the
+    // backfill above. A seed that lands later used to wipe the sub-grants the
+    // backfill had just derived, so the very next restart put Term Billing
+    // back behind a 403. Run the backfill once more when both have settled:
+    // it is idempotent and only fills keys that are genuinely missing.
+    Promise.allSettled([
+      repairPermissions()
+        .catch(err => console.error('[repairPermissions] Unhandled error:', err)),
+      seedDemo()
+        .catch(err => console.error('[seed-demo] Unhandled top-level error — demo school may not be provisioned correctly:', err)),
+    ])
+      .then(() => backfillFinanceSubPermissions())
+      .then(r => { if (r?.updated) console.log(`[startup] finance sub-permissions: ${r.updated} role(s) healed after seeding`); })
+      .catch(err => console.error('[startup] late finance sub-permission backfill failed:', err.message));
 
     // Initialise 90-day password rotation clock for existing users
     _migratePasswordChangedAt()
