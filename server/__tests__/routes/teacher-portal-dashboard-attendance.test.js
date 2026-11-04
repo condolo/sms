@@ -242,7 +242,10 @@ describe('GET /dashboard — myClasses comes from every way a school assigns a c
   test('a class this teacher is form teacher of still appears with no assignment or timetable row', async () => {
     mockAssignments = [];
     mockTimetableDocs = [];
-    mockClassDocs = [{ id: CLASS_ID, schoolId: SCHOOL_A, name: 'Standard 4A', formTeacherId: TEACHER_ID, studentCount: 0 }];
+    /* Form/assistant teachers live on the STREAM, not the class
+       (classes.formTeacherId is a legacy, never-written field — see
+       main's form-teacher fix, 2026-10-29). */
+    mockStreamDocs = [{ id: 'str_4a', schoolId: SCHOOL_A, classId: CLASS_ID, formTeacherId: TEACHER_ID }];
     const res = await supertest(buildApp()).get('/api/teacher-portal/dashboard');
     expect(res.body.data.myClasses.find(c => c.id === CLASS_ID)).toBeTruthy();
     expect(res.body.data.formClassData?.id).toBe(CLASS_ID);
