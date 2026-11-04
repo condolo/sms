@@ -1,10 +1,53 @@
-﻿# Msingi — Changelog
+# Msingi — Changelog
 
 All notable changes to Msingi (formerly InnoLearn) are documented here.  
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).  
 Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
+
+## [v5.234.0] - 2026-11-04 - feat(reminders): Smart Reminders on the web, and a guardian report drafted from real data
+
+Two gaps closed together. The school could already send a lot of automated mail, but **nothing ever followed up**: an announcement went out once and a parent who never opened it stayed uninformed; a lesson happened and its register was never marked; an exam sat on the timetable with nobody told. And a teacher who wanted to write home about a child had to assemble attendance, behaviour and marks from four different screens — so in practice they wrote nothing.
+
+**Smart Reminders** (`server/utils/smart-reminders.js`) is a small rule engine: each rule has a `load()` that reads what it needs and a pure `detect()` that returns who should hear from it. Because preview and send run the *same* `detect()`, the console's "who would get this right now" cannot drift from what actually goes out. Three rules shipped:
+
+- `exam_upcoming` — 7 days out and again the day before, to the student and their guardians, one message listing all of that day's papers.
+- `class_register_missing` — today's timetable slots with no register behind them, grouped per teacher at 15:00; after 16:00 the office gets one rollup instead of a message per class.
+- `notice_unread` — weekly, to whoever still has not opened an announcement from the last seven days.
+- `at_risk_student` — weekly, to a form teacher, naming each child with 3+ absences or 2+ incidents in the last seven days and why.
+- `fee_deadline_staff` — daily, two days before invoices fall due: one message per finance user with the count and the money still owing (totalled per currency, never one message per invoice).
+
+**Two change alerts** (`server/utils/change-alerts.js`) close the other half: a timetable slot edit (day, period, time, room, teacher) messages that class's guardians and the incoming teacher with the before → after of every field that moved; a transport route edit (departure, arrival, stops) messages the guardians of every student on it. Both are fire-and-forget — the save has already succeeded — and both stay silent when the edit changed nothing.
+
+Lesson-plan reminders already exist and are listed in the console, but carry no Run button: that cron sweeps every school at once, and a per-school trigger would message the whole platform.
+
+Delivery still goes through `dispatchNotification`, so a school's own channel and frequency choices apply — a rule that bypassed them would be a second, quieter notification system. Each rule fires in the school's **own timezone**, not the server's. Idempotency is a `smart_reminder_runs` row keyed by `(schoolId, ruleKey, windowKey)` with a unique index: a restart, an overlapping tick or a second click inside the same window is a no-op, not a duplicate.
+
+**The drafted report** (`server/utils/student-digest.js`) is the other half: one student, one window, attendance (a day counts once, worst status wins — the same rule the parent calendar uses), behaviour counts with the most recent incident named, and the average across published marks. `buildStudentDigest` is pure and takes rows, so the numbers a teacher sends home are testable without a database. "Draft report" on the dashboard's attendance sheet opens the composer with that text already written; the teacher edits and sends it themselves. An empty window says so rather than reporting 0% attendance.
+
+### Files
+- `server/utils/smart-reminders.js`, `server/utils/smart-reminders-cron.js`, `server/routes/smart-reminders.js`
+- `server/utils/change-alerts.js` — timetable and route change alerts
+- `server/utils/student-digest.js`; `GET /api/teacher-portal/students/:id/digest`
+- `client/src/pages/settings/components/SmartRemindersTab.jsx`, `server/utils/email.js` (`sendSmartReminder`)
+- `server/utils/notif-settings.js` — `exam_upcoming`, `class_register_missing`, `notice_unread`, `at_risk_student`, `fee_deadline_staff`, `timetable_change`, `transport_route_change`
+- `server/utils/indexes.js` — `smart_run_window` (unique), `smart_run_recent`
+- `client/src/pages/dashboard/components/StudentAttendanceSheet.jsx` — Draft report
+
+### Fixed alongside (found reviewing the transport work)
+- **Term billing billed nobody.** `finance.js` fetched students with `.select('firstName middleName lastName')`, which drops the domain `id`; `studentById` was keyed by ObjectId while the plan looked up `std_demo_1`, so every student came back as "Student is not active in this school". `id` is now selected — verified against the demo database: 26/26 students carry one, 7/7 plan lookups hit, 7 students billed.
+- **The "already invoiced" guard was dead code.** `invoicedTransportAssignmentIds()` always returned an empty set, so the comment claiming a double charge was prevented described protection that could not trigger. Removed from `transport-invoicing.js`, `finance.js` and `term-billing.js` along with its test, rather than left to mislead.
+- **Invoice lines had lost their em dash** (`Transport — …` became `Transport - …`), breaking two existing tests and changing user-visible wording. Restored.
+- **A single assignment never froze its fare.** `POST /api/transport/assignments` accepted `fareAmount` in its schema and silently dropped it, so only the bulk route captured the snapshot. It now captures it too, and the never-stored `academicYearId` was removed from the schema instead of being accepted and discarded.
+- **The transport e2e suite could not run** (it targeted `input[name="email"]`, which does not exist, and `/login` without the school) and its last test wrote to whatever database it pointed at. Rewritten: 6/6 green, read-only.
+- Stale PATCH comment ("drafts a fresh invoice") corrected, the `invoiceId` freeze entry dropped (nothing writes it), and an unused `userId` removed from the delete handler.
+- **Term Billing was 403 for every role, on every restart.** The explicit finance sub-permissions (`finance__term_billing`, `finance__early_payment`, `finance__activities`) exist and Roles & Permissions can grant them, but the demo seed rewrote each role's whole `permissions` object on boot — and it runs *after* the startup backfill — so every restart deleted the very grants the backfill had just derived. Two fixes: the seed now derives them with `withFinanceSubGrants()` (the same call onboarding uses), and `server/index.js` re-runs the backfill once `repairPermissions()` and `seedDemo()` settle, so any writer that lands after the early pass is healed in the same boot instead of the next one. Verified: admin and finance now carry `finance__term_billing: ['read','create']`, and `/api/finance/term-billing/preview` returns 200 with 7 billable students.
+
+### Verified
+- 55 new/updated Jest tests: every rule's `detect()` against fixtures, the runner's idempotency (a second run in the same window is refused; `force` is a deliberate re-send that updates the same row), the digest's worst-of-day and empty-window behaviour, and the change alerts' before → after wording and "unchanged means silent" rule.
+- Live on the seeded demo school: all six rules listed; `class_register_missing` sent 11 messages and a second run returned `skipped: "Already ran for 2026-11-04"`; `at_risk_student` and `fee_deadline_staff` fired against temporary rows (1 form teacher, 2 finance users) and the rows were removed afterwards (0 left); a no-op timetable edit and a no-op route edit returned 200 without messaging anyone; the teacher flow produced `Progress update — Solomon Auma` with the digest body prefilled.
+- Transport e2e: 6/6 green. Notification, dispatch and teacher-portal regression suites: 88 tests green.
 
 ## [v5.233.0] - 2026-10-28 - fix(email): every "Sign In" / "Open" button in an automated email could render as an invisible blank gap
 

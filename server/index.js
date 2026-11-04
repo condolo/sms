@@ -299,6 +299,7 @@ app.use('/api/assessment',      require('./routes/assessment'));
 app.use('/api/report-cards',   require('./routes/report-cards'));
 app.use('/api/import-export',  require('./routes/import-export'));
 app.use('/api/settings',       require('./routes/settings'));
+app.use('/api/smart-reminders', require('./routes/smart-reminders'));
 app.use('/api/analytics',      require('./routes/analytics'));
 app.use('/api/bell-schedule',  require('./routes/bell-schedule'));
 app.use('/api/departments',       require('./routes/departments'));
@@ -932,6 +933,15 @@ async function start() {
       startAttendanceSummaryCron();
     } catch (err) {
       console.error('[attendance-summary-cron] Failed to start:', err.message);
+    }
+
+    // Smart Reminders — one hourly tick; each rule fires in the school's own
+    // local hour (utils/smart-reminders.js) and is idempotent per window.
+    try {
+      const { startSmartRemindersCron } = require('./utils/smart-reminders-cron');
+      startSmartRemindersCron();
+    } catch (err) {
+      console.error('[smart-reminders] Failed to start:', err.message);
     }
 
     // Weekly Student Snapshot cron — hourly UTC tick, generates each

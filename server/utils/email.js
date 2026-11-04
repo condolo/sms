@@ -1049,6 +1049,30 @@ async function sendAttendanceSummaryAlert({
    end-of-day rollup, cron-driven) and from sendAbsenceAlert (the parent/
    guardian's own copy) — this is the staff-facing "someone needs to
    follow up now" alert. */
+/* 26. Smart reminder — the generic body for anything the Smart Reminders
+   engine decides to send (utils/smart-reminders.js). The rule supplies the
+   headline and its own lines; this only dresses them, so a new rule never
+   needs a new email function. Wording stays out of the school's editable
+   templates registry on purpose: these are operational nudges, not the
+   school's own voice, and the rule's copy is already reviewed in code. */
+async function sendSmartReminder({
+  recipientName, recipientEmail, title, lines = [], schoolName, schoolEmail, schoolId = null, appUrl,
+}) {
+  const url = appUrl || APP_URL;
+  const safeLines = (Array.isArray(lines) ? lines : []).slice(0, 12).map(l => _escapeHtml(String(l)));
+  const html = _wrap(`
+    <h2>${_escapeHtml(title || 'Reminder')}</h2>
+    <p>Hi ${_escapeHtml(recipientName || 'there')},</p>
+    <div class="info" style="margin:12px 0">
+      ${safeLines.map(l => `<p style="margin:4px 0">${l}</p>`).join('')}
+    </div>
+    <p style="text-align:center">
+      <a href="${url}" class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0">Open Msingi →</a>
+    </p>
+  `, schoolName);
+  return _sendAsSchool(recipientEmail, title || 'Reminder', html, { schoolName, schoolEmail, schoolId });
+}
+
 async function sendAbsenteeStaffAlert({
   recipientName, recipientEmail, studentNames, date,
   schoolName, schoolEmail, schoolId = null, appUrl,
@@ -1325,6 +1349,7 @@ module.exports = {
   sendAbsenceAlert,
   sendInvoiceOverdueAlert,
   sendAttendanceSummaryAlert,
+  sendSmartReminder,
   sendAbsenteeStaffAlert,
   sendPayrollStatusEmail,
   sendPlatformOperatorInvite,

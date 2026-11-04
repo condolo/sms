@@ -14,7 +14,7 @@ import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
-  AlertTriangle, ChevronLeft, ChevronRight, Loader2, MessageSquare, Send, X,
+  AlertTriangle, ChevronLeft, ChevronRight, Loader2, MessageSquare, Send, X, Sparkles,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { teacherPortalApi } from '@/api/client.js';
@@ -74,6 +74,59 @@ export default function StudentAttendanceSheet({ student, onClose, onCompose }) 
     if (!summary || summary.absent === 0) return null;
     return `${summary.absent} absence${summary.absent === 1 ? '' : 's'} in ${_monthLabel(month)}`;
   }, [summary, month]);
+
+  const [drafting, setDrafting] = useState(false);
+
+  /* "Draft report" — the same hand-off as `compose` below, but carrying a
+     month of behaviour and published marks as well as the register. The
+     numbers come from the server's digest endpoint (utils/student-digest.js)
+     so the sentence a parent reads matches the portal, not a second opinion
+     built in the browser. The teacher still edits before sending. */
+  async function draftReport() {
+    if (!guardians.length) {
+      setError('No guardian is linked to this student yet — ask the office to link one before messaging home.');
+      return;
+    }
+    setDrafting(true);
+    setError('');
+    try {
+      const res = await teacherPortalApi.studentDigest(student.id, { days: 30 });
+      const digest = res?.data?.digest;
+      if (!digest) throw new Error('No digest came back for this student.');
+
+      const body = [
+        'Dear parent / guardian,',
+        '',
+        `Here is where ${studentName} stands over the last ${digest.window.days} days.`,
+        '',
+        ...digest.lines.map(l => `• ${l}`),
+        '',
+        'Reply here if you would like to talk any of this through.',
+      ].join('\n');
+
+      onCompose?.({
+        student: { id: student?.id, name: studentName, className },
+        kind: 'results',
+        subject: `Progress update — ${studentName}`,
+        body,
+        context: {
+          type: 'results',
+          title: `${studentName} — last ${digest.window.days} days`,
+          detail: digest.lines.join(' · ').slice(0, 300),
+        },
+        recipients: guardians.map(g => ({
+          id: g.id,
+          name: g.name,
+          role: g.role,
+          roleLabel: String(g.role ?? '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+        })),
+      });
+    } catch (err) {
+      setError(err?.message ?? 'That report could not be drafted.');
+    } finally {
+      setDrafting(false);
+    }
+  }
 
   function compose() {
     if (!guardians.length) {
@@ -293,6 +346,15 @@ export default function StudentAttendanceSheet({ student, onClose, onCompose }) 
                     className="rounded-xl px-3 py-2 text-xs font-medium text-slate-600 transition hover:bg-slate-100"
                   >
                     Close
+                  </button>
+                  <button
+                    type="button"
+                    onClick={draftReport}
+                    disabled={isLoading || isError || drafting || guardians.length === 0}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-45"
+                  >
+                    {drafting ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+                    Draft report
                   </button>
                   <button
                     type="button"

@@ -663,6 +663,14 @@ export const importExport = {
   },
 };
 
+/* Smart Reminders — the rules a school can preview and run, and the student
+   digest a teacher turns into a drafted guardian message. */
+export const smartReminders = {
+  list:    ()              => _get('/smart-reminders'),
+  preview: (key)           => _post(`/smart-reminders/${key}/preview`, {}),
+  run:     (key, data = {}) => _post(`/smart-reminders/${key}/run`, data),
+};
+
 export const settings = {
   get:     ()       => _get('/settings'),
   update:  (data)   => _put('/settings', data),
@@ -798,6 +806,9 @@ export const teacherPortalApi = {
 
   /** One student's register for a month: { student, month, summary, days, guardians } */
   studentAttendance: (studentId, params) => _get(`/teacher-portal/students/${studentId}/attendance`, params),
+
+  /** The facts behind a drafted report: attendance, behaviour, published marks. */
+  studentDigest: (studentId, params) => _get(`/teacher-portal/students/${studentId}/digest`, params),
 };
 
 export const hr = {
