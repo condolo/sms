@@ -6,6 +6,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.261.0] - 2026-11-04 - fix(students,email): a primary guardian's corrected name wasn't syncing to their portal account; every school-facing email now shows the school's own logo, not Msingi's
+
+Reported directly, with a screenshot: a parent (Esther Kobia) kept receiving behaviour-incident emails addressed to "Rhodah Marimbi" — a name the school had already corrected in Msingi. "I think so far no one has managed to import the lesson plan effectively... audit the cause of this system's assumption." Also requested: a proper branded HTML template for every email notification, carrying the sending school's own logo instead of Msingi's, with "Powered by Msingi" moved to the footer.
+
+### Fixed — guardian-name sync had a real, narrow gap
+`PUT /api/students/:id` has synced a corrected guardian name to their already-created parent portal account since v5.176.0 — but it matched the account ONLY via `guardianOf`. A guardian's link to a student actually lives on either `studentIds` (primary guardian) or `guardianOf` (co-guardian) — every other consumer of this relationship already treats "`studentIds` ∪ `guardianOf`" as the authoritative set (see `parent-portal.js`'s own comment: "Primary guardians live in studentIds, co-guardians in guardianOf"). A primary guardian's account — the common case — whose `guardianOf` array was never backfilled with this student (true for any account created before that field existed, or by any path that only ever wrote `studentIds`) matched **zero** documents on every correction, silently, forever: the student record itself updated correctly, but the portal account — and every email addressed to it — kept the old name indefinitely, with no error anywhere to notice. Now matches on the same union every other consumer already relies on.
+
+### Added — per-school branded email header, "Powered by Msingi" in the footer
+Every school-facing email (behaviour incidents, fee invoices, exam results, welcome credentials, password resets, and 20+ others) showed the generic "🎓 Msingi" header regardless of which school it was from. The shared HTML wrapper now shows the sending school's own uploaded logo (Settings → School Profile) in the header when one is configured, falling back to the previous Msingi-mark treatment for a school that hasn't uploaded one yet — never a broken image. "Powered by Msingi" now appears in the footer of every email, school-branded or not.
+
+### Tests
+- `students-guardian-name-sync.test.js` — new case: correcting a primary guardian's name (linked via `studentIds`, no `guardianOf`) now syncs correctly; all 6 existing cases still pass unchanged.
+- `email-branding.test.js` (new, 8 tests) — logo renders when configured; safe Msingi-mark fallback when not; an already-absolute logo URL is used unchanged; footer always says "Powered by Msingi"; a school-doc lookup failure never throws; the per-school lookup is cached and `invalidateLogoCache` forces a fresh one.
+
+Full suite re-run clean. Full details: [Developer Guide](docs/DEVELOPER_GUIDE.md#guardian-name-sync-the-studentids-gap-and-a-per-school-branded-email-header-v52610-2026-11-04).
+
+- `server/routes/students.js` — guardian-name-sync filter widened to `$or: [{guardianOf}, {studentIds}]`
+- `server/utils/email.js` — `_wrap` now resolves and renders the school's own logo (cached, `invalidateLogoCache` exported), footer reworded to "Powered by Msingi"
+- `server/routes/settings.js` — logo upload/delete routes invalidate the new cache
+- `server/__tests__/routes/students-guardian-name-sync.test.js`, `server/__tests__/email-branding.test.js` (new)
+
 ## [v5.260.0] - 2026-11-03 - fix(lessons): lesson plan import audit — named the real "DATE cell has a lesson number, not a date" failure directly, generalized duplicate-field warnings, and wrote the missing teacher how-to
 
 Reported directly, with a screenshot: a real school's import came back 0 ready / 4 invalid, every lesson showing `(no date)` and `Could not parse date "2"` (then "3", "4"...), plus a `Conflicting CLASS values` warning on every block. "I think so far no one has managed to import the lesson plan effectively" — asked for both a step-by-step teacher guide and an audit of whether the import is working as expected.

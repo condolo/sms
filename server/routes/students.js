@@ -1061,6 +1061,23 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('students', 'update'), as
     // stores it), not by studentId alone, since one account can be
     // shared across siblings — only the slot whose NAME this edit
     // actually changed is touched, never the login email itself.
+    //
+    // Real recurrence, 2026-11-04: the v5.176.0 fix below matched ONLY
+    // `guardianOf`, but a guardian's link to a student lives on EITHER
+    // `studentIds` (primary guardian) or `guardianOf` (co-guardian) —
+    // every other consumer of this relationship (parent-portal.js,
+    // self-service-scope.js, timetable.js, report-cards.js) already
+    // treats "studentIds ∪ guardianOf" as the authoritative set, per
+    // parent-portal.js's own comment: "Primary guardians live in
+    // studentIds, co-guardians in guardianOf." A primary guardian whose
+    // account was never backfilled with a matching `guardianOf` entry
+    // (common for accounts created before that field's introduction, or
+    // by any path that only ever wrote `studentIds`) silently matched
+    // ZERO documents here — updateOne's no-match is not an error, so
+    // this swallowed catch never surfaced it — while the live
+    // notification pipeline (notify-students.js) still finds that same
+    // account by `studentIds` and sends the stale name regardless. Now
+    // matches on the same union everyone else already relies on.
     const guardianSlots = [
       { nameField: 'parentName', emailField: 'parentEmail' },
       { nameField: 'motherName', emailField: 'motherEmail' },
@@ -1073,7 +1090,7 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('students', 'update'), as
       if (!email) continue;
       try {
         await tenantModel('users', tenantContext(req)).updateOne(
-          { schoolId, role: 'parent', email, guardianOf: studentDocId },
+          { schoolId, role: 'parent', email, $or: [{ guardianOf: studentDocId }, { studentIds: studentDocId }] },
           { $set: { name: data[nameField], updatedAt: new Date().toISOString() } }
         );
       } catch (_) { /* non-fatal — the student edit itself already succeeded */ }

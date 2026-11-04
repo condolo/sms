@@ -378,13 +378,15 @@ Go to **Settings → School Profile**.
 
 You can update:
 - **School name** and **short name** (shown in sidebar)
-- **Logo** — upload a PNG or JPG (shown in sidebar and reports)
+- **Logo** — upload a PNG or JPG (shown in sidebar, reports, and the header of every email Msingi sends to your staff and parents — see below)
 - **Motto**
 - **Address, phone, email, website**
 - **Curriculum type** (Cambridge, IB, National, Custom)
 - **Timezone** and **currency**
 
 These settings are used across reports, letters, and the app header.
+
+**Your logo in emails:** once uploaded, every notification Msingi sends on your school's behalf (behaviour incidents, fee invoices, exam results, welcome credentials, password resets, and more) shows your own logo at the top instead of the generic Msingi mark — "Powered by Msingi" stays in the small print at the bottom. If you haven't uploaded a logo yet, those emails show your school's name instead, never a broken image. A change here (upload or remove) takes effect on the next email sent — no need to wait or log out.
 
 ---
 

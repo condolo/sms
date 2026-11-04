@@ -74,10 +74,12 @@ jest.mock('../../utils/tenant-model', () => ({
       return {
         updateOne: (filter, update) => {
           mockUsersUpdateCalls.push({ filter, update });
+          const linkId = filter.$or?.[0]?.guardianOf;
           const match = mockUsersDocs.find(u =>
             u.schoolId === filter.schoolId && u.role === filter.role &&
             u.email === filter.email &&
-            (Array.isArray(u.guardianOf) ? u.guardianOf.includes(filter.guardianOf) : false)
+            ((Array.isArray(u.guardianOf) && u.guardianOf.includes(linkId)) ||
+             (Array.isArray(u.studentIds) && u.studentIds.includes(linkId)))
           );
           if (match && update.$set) Object.assign(match, update.$set);
           return Promise.resolve({ matchedCount: match ? 1 : 0 });
@@ -134,6 +136,39 @@ test("correcting the mother's name syncs her ALREADY-CREATED parent account", as
   expect(mockUsersDocs[0].name).toBe('Adjoa Osei');
 });
 
+// Real recurrence, 2026-11-04, specifically re-verified for the mother/
+// father slots after a direct follow-up question ("does the fix apply only
+// to the guardian [parentName slot], remember we have mother and father
+// too — was it fixed?"): the studentIds-only gap is not specific to
+// parentName — it's the SAME shared guardianSlots loop for all three, so a
+// mother's or father's account linked only via studentIds (no guardianOf)
+// hits the exact same code path and needed the exact same fix.
+test("correcting the MOTHER's name (linked via studentIds only, no guardianOf) still syncs", async () => {
+  mockStudentDoc = makeStudent({ motherName: 'Rhodah Marimbi' });
+  mockUsersDocs = [{
+    schoolId: SCHOOL, role: 'parent', email: 'adjoa@example.com',
+    name: 'Rhodah Marimbi', studentIds: ['stu_001'], guardianOf: [],
+  }];
+
+  const res = await supertest(buildApp()).put('/api/students/stu_001').send({ motherName: 'Esther Kobia' });
+
+  expect(res.status).toBe(200);
+  expect(mockUsersDocs[0].name).toBe('Esther Kobia');
+});
+
+test("correcting the FATHER's name (linked via studentIds only, no guardianOf) still syncs", async () => {
+  mockStudentDoc = makeStudent({ fatherName: 'Kofi Osie' });
+  mockUsersDocs = [{
+    schoolId: SCHOOL, role: 'parent', email: 'kofi@example.com',
+    name: 'Kofi Osie', studentIds: ['stu_001'], guardianOf: [],
+  }];
+
+  const res = await supertest(buildApp()).put('/api/students/stu_001').send({ fatherName: 'Kofi Osei' });
+
+  expect(res.status).toBe(200);
+  expect(mockUsersDocs[0].name).toBe('Kofi Osei');
+});
+
 test("correcting the father's name does NOT touch the mother's account", async () => {
   mockStudentDoc = makeStudent({ fatherName: 'Kofi Osie' }); // typo being corrected
   mockUsersDocs = [
@@ -164,6 +199,24 @@ test('editing an UNRELATED field (e.g. phone) never touches the users collection
 
   expect(res.status).toBe(200);
   expect(mockUsersUpdateCalls).toHaveLength(0);
+});
+
+// Real recurrence, 2026-11-04: a primary guardian's account is linked via
+// `studentIds`, not `guardianOf` — matching ONLY `guardianOf` (the original
+// v5.176.0 fix) silently matched nothing for this, extremely common, case:
+// the student edit still succeeded, but the parent portal account kept
+// showing the pre-correction name indefinitely, with no error anywhere.
+test("correcting a PRIMARY guardian's name (linked via studentIds, no guardianOf) still syncs", async () => {
+  mockStudentDoc = makeStudent({ parentName: 'Rhodah Marimbi' });
+  mockUsersDocs = [{
+    schoolId: SCHOOL, role: 'parent', email: 'adjoa@example.com',
+    name: 'Rhodah Marimbi', studentIds: ['stu_001'], guardianOf: [],
+  }];
+
+  const res = await supertest(buildApp()).put('/api/students/stu_001').send({ parentName: 'Esther Kobia' });
+
+  expect(res.status).toBe(200);
+  expect(mockUsersDocs[0].name).toBe('Esther Kobia');
 });
 
 test('only touches the account matching THIS student via guardianOf — a same-email account not linked to this student is untouched', async () => {

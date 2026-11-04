@@ -728,6 +728,7 @@ router.put('/school/logo', authMiddleware, rbac('settings', 'update'), async (re
       { id: req.jwtUser.schoolId },
       { $set: { logoBase64, logoUrl, updatedAt: new Date().toISOString() } }
     );
+    emailUtil.invalidateLogoCache(req.jwtUser.schoolId);
     AuditService.log({
       action: 'settings.school_updated', actor: req.jwtUser, schoolId: req.jwtUser.schoolId,
       target: { type: 'school', id: req.jwtUser.schoolId },
@@ -748,6 +749,7 @@ router.delete('/school/logo', authMiddleware, rbac('settings', 'update'), async 
       { id: req.jwtUser.schoolId },
       { $unset: { logoBase64: '', logoUrl: '' }, $set: { updatedAt: new Date().toISOString() } }
     );
+    emailUtil.invalidateLogoCache(req.jwtUser.schoolId);
     AuditService.log({
       action: 'settings.school_updated', actor: req.jwtUser, schoolId: req.jwtUser.schoolId,
       target: { type: 'school', id: req.jwtUser.schoolId },
