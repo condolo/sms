@@ -281,6 +281,11 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
         // included with their score." Never live Markbook data — this is the
         // vetted, published breakdown, so it adds no new visibility.
         assignmentScore: latestSubjects[subjectId]?.breakdown?.HW ?? null,
+        // The published snapshot's own per-type split (still no live Markbook
+        // data) — the dashboard renders the breakdown for each subject.
+        breakdown:    latestSubjects[subjectId]?.breakdown ?? null,
+        classAverage: latestSubjects[subjectId]?.classAverage ?? null,
+        deviation:    latestSubjects[subjectId]?.deviation ?? null,
       }))
       .sort((a, b) => a.subjectName.localeCompare(b.subjectName));
     // The per-type breakdown stays internal to this computation — the
