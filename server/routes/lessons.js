@@ -470,10 +470,60 @@ function _validate(schema, data) {
 
 /* ── Helper: get teacher's assignments ─────────────────────── */
 async function _teacherAssignments(schoolId, teacherId) {
-  return tenantModel('teaching_assignments', { schoolId })
+  const rows = await tenantModel('teaching_assignments', { schoolId })
     .find({ schoolId, teacherId })
     .select('classId className subjectId subjectName streamId streamName')
     .lean();
+  return _collapseAssignments(rows);
+}
+
+/* ── Helper: one row per assignment identity ─────────────────
+   A teaching assignment is identified by teacher+class+subject+stream —
+   the exact identity POST /api/teaching-assignments guards with a
+   "already assigned" conflict, and the identity the coverage and plan
+   writers key on. Nothing enforces it in the database (no unique index),
+   so a school whose rows arrived by restore, bulk import or an older
+   seeder can hold two rows for one identity; POST's own guard then reads
+   the first match while my-classes mapped every one of them, printing the
+   same class twice with half-filled and half-populated labels. Collapsing
+   here means every consumer of this helper — the class overview, the
+   dashboard counts, the topic scope checks — sees one row per identity,
+   keeping whichever row carries the most names, since a sparse row says
+   nothing the rich one doesn't already. */
+function _collapseAssignments(rows) {
+  const byIdentity = new Map();
+  for (const row of rows) {
+    const key = `${row.classId}|${row.subjectId}|${row.streamId ?? ''}`;
+    const kept = byIdentity.get(key);
+    if (!kept) { byIdentity.set(key, row); continue; }
+    const score = (r) => (r.className ? 1 : 0) + (r.subjectName ? 1 : 0) + (r.streamName ? 1 : 0);
+    if (score(row) > score(kept)) byIdentity.set(key, row);
+  }
+  return [...byIdentity.values()];
+}
+
+/* ── Helper: the name to sign a coverage mark or plan with ───
+   The JWT has never carried a `name` claim (see auth.js's
+   _buildTokenPayload — userId/schoolId/email/role/roles/tv), so
+   `req.jwtUser.name` was undefined on every request and every mark and
+   plan stored a permanently blank teacher name. Resolved at write time
+   rather than from the token, the same way hr.js's POST /leave and
+   inventory.js's POST /requisitions closed the identical hole: an
+   existing session's token can't be amended, so a claim added today would
+   stay absent until that user signed out, silently writing '' for days.
+   The staff record wins because that is the name the rest of lessons
+   prints — title plus given and family names, "Ms. Lilian Wairimu" — and
+   a login with no staff profile behind it, which is what an admin marking
+   coverage in the school's own name is, falls back to its display name. */
+async function _teacherNameFor(req, teacherId) {
+  const { schoolId, email } = req.jwtUser;
+  const staff = await resolveTeacher(teacherId, email, schoolId, 'title firstName lastName')
+    .catch(() => null);
+  const professional = [staff?.title, staff?.firstName, staff?.lastName].filter(Boolean).join(' ');
+  if (professional) return professional;
+  const user = await tenantModel('users', tenantContext(req))
+    .findOne({ id: teacherId, schoolId }).select('name').lean().catch(() => null);
+  return user?.name || '';
 }
 
 /* ── Helper: coverage identity filter for one class-subject-[stream] ──
@@ -1070,12 +1120,7 @@ router.post('/coverage', authMiddleware, PLAN, MODGATE, rbac('lessons', 'create'
       if (!stExists) return E.notFound(res, 'Subtopic not found on this topic');
     }
 
-    // Get teacher name
-    let teacherName = req.jwtUser.name ?? '';
-    if (effectiveTeacherId !== userId) {
-      const t = await tenantModel('users', tenantContext(req)).findOne({ id: effectiveTeacherId, schoolId }).select('name').lean();
-      teacherName = t?.name ?? teacherName;
-    }
+    const teacherName = await _teacherNameFor(req, effectiveTeacherId);
 
     // Upsert — prevent duplicate coverage records for same class-subject-
     // [stream-]topic-subtopic. streamId is part of the identity now, same
@@ -1275,11 +1320,16 @@ router.post('/plans/:id/copy', authMiddleware, PLAN, MODGATE, rbac('lessons', 'c
       }
     }
 
+    // The copy belongs to whoever duplicated it, not to the author of the
+    // plan they copied — teacherId below is the caller, and the name has to
+    // agree with it or the shared plan reads as signed by the wrong person.
+    const teacherName = await _teacherNameFor(req, userId);
+
     const doc = await tenantModel('lesson_plans', tenantContext(req)).create({
       id: uuidv4(),
       schoolId,
       teacherId: userId,
-      teacherName: req.jwtUser.name ?? '',
+      teacherName,
       classId: source.classId,
       className: source.className ?? '',
       ...(targetStreamId ? { streamId: targetStreamId, streamName } : {}),
@@ -1489,11 +1539,7 @@ router.post('/plans', authMiddleware, PLAN, MODGATE, rbac('lessons', 'create'), 
       data.streamId ? tenantModel('streams', tenantContext(req)).findOne({ id: data.streamId, schoolId }).select('name').lean() : null,
     ]);
 
-    let teacherName = req.jwtUser.name ?? '';
-    if (effectiveTeacherId !== userId) {
-      const t = await tenantModel('users', tenantContext(req)).findOne({ id: effectiveTeacherId, schoolId }).select('name').lean();
-      teacherName = t?.name ?? teacherName;
-    }
+    const teacherName = await _teacherNameFor(req, effectiveTeacherId);
 
     // Snapshot the EFFECTIVE label for every builtin field at creation time
     // — a school renaming "Remarks" to "Notes" next term must never rewrite
@@ -1937,10 +1983,16 @@ async function _hasBulkImportGrant(req) {
 // only legitimate source of which stream(s) an import may target. Whole-
 // class (no stream split) assignments come back with streamId undefined.
 async function _importAssignments(schoolId, teacherId, classId, subjectId) {
-  return tenantModel('teaching_assignments', { schoolId })
+  const rows = await tenantModel('teaching_assignments', { schoolId })
     .find({ schoolId, teacherId, classId, subjectId })
     .select('classId subjectId streamId streamName')
     .lean();
+  /* Collapsed for the same reason as _teacherAssignments, and it matters
+     more here: _resolveStreamTargets decides "one stream" versus "more than
+     one — say which" by counting these rows, so a single duplicated
+     stream-scoped assignment reads as two different streams and the import
+     fails as ambiguous while naming the same stream twice. */
+  return _collapseAssignments(rows);
 }
 
 /* Resolves which stream(s) this import targets. Returns
@@ -2181,11 +2233,7 @@ router.post('/plans/import/commit', authMiddleware, PLAN, MODGATE, async (req, r
     ]);
     const streamNameById = Object.fromEntries(assignments.filter(a => a.streamId).map(a => [a.streamId, a.streamName]));
 
-    let teacherName = req.jwtUser.name ?? '';
-    if (effectiveTeacherId !== userId) {
-      const t = await tenantModel('users', tenantContext(req)).findOne({ id: effectiveTeacherId, schoolId }).select('name').lean();
-      teacherName = t?.name ?? teacherName;
-    }
+    const teacherName = await _teacherNameFor(req, effectiveTeacherId);
 
     const schoolDoc = await _model('schools').findOne({ id: schoolId }, { lessonPlanTemplate: 1 }).lean();
     const template = _mergeTemplate(schoolDoc?.lessonPlanTemplate);

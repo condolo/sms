@@ -7,6 +7,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
+import clsx from 'clsx';
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -19,7 +20,7 @@ import {
   BarChart3, Clock, AlertTriangle, Wallet,
   Cake, CalendarDays, CheckCircle, MapPin, Tag,
   ShieldAlert, Activity, Zap, TrendingDown, Award,
-  RefreshCw, Rocket,
+  RefreshCw, Rocket, ShieldCheck,
   BookCheck, Briefcase, FileText, MessageSquare, MonitorPlay, Plus,
 } from 'lucide-react';
 import {
@@ -41,6 +42,8 @@ import { KpiCard }  from '@/components/ui/KpiCard.jsx';
 import DateRangeFilter, { computeDateRange, DEFAULT_RANGE, RANGE_PRESETS } from '@/components/ui/DateRangeFilter.jsx';
 import { useSchoolTheme, withOpacity } from '@/hooks/useSchoolTheme.js';
 import { useCurrentAcademicPeriod } from '@/hooks/useCurrentAcademicPeriod.js';
+import UsersPermissionsSlideOver from './dashboard/components/UsersPermissionsSlideOver.jsx';
+import StudentAttendanceSheet from './dashboard/components/StudentAttendanceSheet.jsx';
 
 /* ── Helpers ──────────────────────────────────────────────── */
 function greeting() {
@@ -136,6 +139,21 @@ export default function Dashboard() {
      but now any role can be granted it explicitly, and the client no
      longer fires a query the server will just 403. */
   const canViewLeadership = can('analytics') || isAdminLevel;
+  /* Each widget below now asks about ITS OWN module rather than borrowing a
+     neighbour's. Before this, the attendance summary query had no gate at all
+     (every role — teachers included — fetched a school-wide summary the route
+     would 403) and the attendance panel was gated on the FINANCE grant, so an
+     attendance-only role could never see it and a finance-only role fired a
+     query it had no business making. */
+  const canViewAttendance = can('attendance') || isAdminLevel;
+  const canViewMessages   = can('messages')   || isAdminLevel;
+  const canViewEvents     = can('events')     || isAdminLevel;
+  /* Users & Permissions is the one Quick Action that opens a panel instead of
+     navigating — and it is only offered to a role the server will actually let
+     write permissions for (settings:users / settings:permissions, or the
+     admin floor settings.js itself applies). */
+  const canManageUsers    = can('settings', 'users')       || isAdminLevel;
+  const canManagePerms    = can('settings', 'permissions') || isAdminLevel;
 
   /* ── Global date-range filter — drives every genuinely time-scoped
      widget below (Fees Collected, Admissions funnel, Attendance,
@@ -143,6 +161,10 @@ export default function Dashboard() {
      Students, Active Enrolment, Students by Gender, Outstanding Fees
      balance — deliberately stay unfiltered; see their "current" labels. */
   const [range, setRange] = useState(DEFAULT_RANGE);
+  /* Users & Permissions opens in place rather than navigating to Settings,
+     so the admin never loses the page they were looking at. */
+  const [showPerms, setShowPerms] = useState(false);
+
   // "Year" resolves against the school's real current academic year, not a
   // rolling 365-day window — see DateRangeFilter.jsx. Falls back to the old
   // rolling behaviour while this is still loading or unconfigured.
@@ -187,6 +209,7 @@ export default function Dashboard() {
   const { data: annData } = useQuery({
     queryKey: ['announcements'],
     queryFn:  () => announcementsApi.list(),
+    enabled:  canViewMessages,
     staleTime: 60_000,
   });
 
@@ -201,6 +224,7 @@ export default function Dashboard() {
   const { data: eventsData } = useQuery({
     queryKey: ['events', 'dashboard-upcoming'],
     queryFn:  () => eventsApi.list({ from: todayStr(), limit: 6 }),
+    enabled:  canViewEvents,
     staleTime: 5 * 60_000,
   });
 
@@ -211,6 +235,7 @@ export default function Dashboard() {
   const { data: attData } = useQuery({
     queryKey: ['attendance', 'summary', dateFrom, dateTo],
     queryFn:  () => attendanceApi.summary({ dateFrom, dateTo }),
+    enabled:  canViewAttendance,
     staleTime: 2 * 60_000,
   });
 
@@ -479,9 +504,13 @@ export default function Dashboard() {
         </div>
 
         {/* ── Term Overview + Attendance strip ──────────── */}
-        <div id="dashboard-term-strip" className="grid lg:grid-cols-2 gap-4">
+        <div id="dashboard-term-strip" className={clsx('grid gap-4', canViewAttendance && 'lg:grid-cols-2')}>
 
-          {/* Attendance today */}
+          {/* Attendance — its own module grant. Without it the strip showed a
+              label and a permanent "—", advertising a figure the role cannot
+              read (and never asked the server for it). The grid fills with
+              whichever tiles this role may actually see. */}
+          {canViewAttendance && (
           <div id="term-strip-attendance" className="bg-white rounded-[10px] border border-slate-200 shadow-sm p-4">
             <div className="flex items-center gap-2 mb-3 pb-3 border-b border-slate-100">
               <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: withOpacity(primary, 0.1) }}>
@@ -515,6 +544,7 @@ export default function Dashboard() {
               </p>
             </div>
           </div>
+          )}
 
           {/* Term overview */}
           <div id="term-strip-overview" className="bg-white rounded-[10px] border border-slate-200 shadow-sm p-4">
@@ -733,7 +763,7 @@ export default function Dashboard() {
           )}
 
           {/* If no finance — show attendance chart */}
-          {!canViewFinance && (
+          {canViewAttendance && !canViewFinance && (
             <ChartCard title={attendanceLabel} icon={<UserCheck size={14} />} primary={primary}>
               {attRate != null ? (
                 <div className="flex flex-col items-center justify-center py-4 gap-3">
@@ -799,7 +829,8 @@ export default function Dashboard() {
             upcomingBirths={upcomingBirths}
           />
 
-          {/* Upcoming Events — 2/3 */}
+          {/* Upcoming Events — 2/3, its own module grant */}
+          {canViewEvents && (
           <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
               <div className="flex items-center gap-2">
@@ -855,6 +886,7 @@ export default function Dashboard() {
               </div>
             )}
           </div>
+          )}
         </div>
 
         {/* ── Bottom grid ───────────────────────────────── */}
@@ -929,24 +961,42 @@ export default function Dashboard() {
               <h2 className="text-sm font-semibold text-slate-700">Quick Actions</h2>
             </div>
             <div className="px-3 py-3 space-y-1">
-              {QUICK_ACTIONS.filter(qa => can(qa.module)).map(qa => (
-                <Link key={qa.to} to={qa.to} className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition group">
-                  <div className={`w-7 h-7 rounded-lg ${qa.iconBg} flex items-center justify-center shrink-0`}>
-                    <qa.Icon size={14} className={qa.iconColor} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-slate-700 group-hover:text-slate-900 transition">{qa.label}</p>
-                    <p className="text-[11px] text-slate-400">{qa.desc}</p>
-                  </div>
-                  <ChevronRight size={13} className="text-slate-300 group-hover:text-slate-500 transition shrink-0" />
-                </Link>
-              ))}
+              {QUICK_ACTIONS
+                .filter(qa => (qa.panel ? (canManageUsers || canManagePerms) : can(qa.module)))
+                .map(qa => {
+                  const inner = (
+                    <>
+                      <div className={`w-7 h-7 rounded-lg ${qa.iconBg} flex items-center justify-center shrink-0`}>
+                        <qa.Icon size={14} className={qa.iconColor} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-slate-700 group-hover:text-slate-900 transition">{qa.label}</p>
+                        <p className="text-[11px] text-slate-400">{qa.desc}</p>
+                      </div>
+                      <ChevronRight size={13} className="text-slate-300 group-hover:text-slate-500 transition shrink-0" />
+                    </>
+                  );
+                  return qa.panel ? (
+                    <button
+                      key={qa.label}
+                      type="button"
+                      onClick={() => setShowPerms(true)}
+                      className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition group hover:bg-slate-50"
+                    >
+                      {inner}
+                    </button>
+                  ) : (
+                    <Link key={qa.to} to={qa.to} className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition group hover:bg-slate-50">
+                      {inner}
+                    </Link>
+                  );
+                })}
             </div>
           </div>
         </div>
 
-        {/* ── Attendance stat (finance users) ────────────── */}
-        {canViewFinance && attRate != null && (
+        {/* ── Attendance stat (its own grant, not the finance one) ── */}
+        {canViewAttendance && attRate != null && (
           <div className="bg-white border border-slate-200 rounded-xl p-5 flex items-center gap-5">
             <div className="relative w-14 h-14 shrink-0">
               <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
@@ -978,6 +1028,9 @@ export default function Dashboard() {
         )}
         </>)}
       </div>
+
+      {/* Users & Permissions — opened in place from the Quick Actions tile */}
+      <UsersPermissionsSlideOver open={showPerms} onClose={() => setShowPerms(false)} />
     </div>
   );
 }
@@ -1704,6 +1757,10 @@ const QUICK_ACTIONS = [
   { label: 'Lessons',         to: '/lessons',    desc: 'Syllabus and curriculum',      Icon: BookOpen,         iconBg: 'bg-teal-50',    iconColor: 'text-teal-600',    module: 'lessons'    },
   { label: 'Reports',         to: '/reports',    desc: 'Analytics and insights',       Icon: BarChart3,        iconBg: 'bg-emerald-50', iconColor: 'text-emerald-700', module: 'reports'    },
   { label: 'Messages',        to: '/messages',   desc: 'Announcements & messaging',    Icon: Bell,             iconBg: 'bg-sky-50',     iconColor: 'text-sky-600',     module: 'messages'   },
+  /* Opens the Users & Permissions panel in place instead of navigating — the
+     one Quick Action that is a verb, not a destination. Gated on the grants
+     the panel itself needs (settings:users / settings:permissions). */
+  { label: 'Users & Permissions', panel: 'users-permissions', desc: 'Invite people and set what roles may do', Icon: ShieldCheck, iconBg: 'bg-slate-100', iconColor: 'text-slate-700' },
 ];
 
 /* ══════════════════════════════════════════════════════════
@@ -1752,6 +1809,24 @@ function TBar({ pct=0 }) {
 }
 
 function TeacherView({ data, loading, primary }) {
+  /* Hooks first: the early loading return below must not sit between two
+     hook calls. */
+  const [attendanceStudent, setAttendanceStudent] = useState(null);
+  const navigate = useNavigate();
+
+  /* Hand the composer a finished opening rather than a bare page: the
+     month, the reason and the guardians are worked out while the teacher
+     still has the student in front of them. sessionStorage is the bridge
+     because this is a route change, and it is cleared on read. */
+  function handOffToCompose(prefill) {
+    try {
+      sessionStorage.setItem('messages:prefill', JSON.stringify(prefill));
+    } catch {
+      /* private mode / storage disabled — the composer still opens, just blank */
+    }
+    navigate('/messages');
+  }
+
   if (loading || !data) return (
     <div className="flex items-center justify-center py-24">
       <div className="flex flex-col items-center gap-3">
@@ -1914,6 +1989,18 @@ function TeacherView({ data, loading, primary }) {
                         : <p className="text-xs font-bold text-red-600">{s.incidents} incidents</p>}
                       <p className="text-[10px] text-slate-400 capitalize">{s.reason} concern</p>
                     </div>
+                    {/* The number above is a prompt, not an explanation — open
+                        the month behind it, with who to tell. */}
+                    {s.reason==='attendance' && (
+                      <button
+                        type="button"
+                        onClick={() => setAttendanceStudent(s)}
+                        title={`Open ${s.name}'s register for this month`}
+                        className="shrink-0 rounded-lg p-1.5 text-slate-400 transition hover:bg-teal-50 hover:text-teal-700"
+                      >
+                        <MessageSquare size={14}/>
+                      </button>
+                    )}
                     <Link to={`/students?search=${encodeURIComponent(s.name)}`} className="shrink-0 text-teal-600 hover:text-teal-800"><ChevronRight size={14}/></Link>
                   </div>
                 ))}
@@ -2227,6 +2314,17 @@ function TeacherView({ data, loading, primary }) {
           ))}
         </div>
       </div>
+
+      {/* The conversation starter: a student's month of attendance, opened
+          from "Students Needing Attention", with the guardians it will reach. */}
+      <StudentAttendanceSheet
+        student={attendanceStudent}
+        onClose={() => setAttendanceStudent(null)}
+        onCompose={prefill => {
+          setAttendanceStudent(null);
+          handOffToCompose(prefill);
+        }}
+      />
     </div>
   );
 }

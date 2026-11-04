@@ -45,6 +45,11 @@ function makeFakeCollection(seed = []) {
     _docs: () => docs,
     find:    jest.fn((filter) => mockChainArr(docs.filter(d => matchesFilter(d, filter)))),
     findOne: jest.fn((filter) => mockChainObj(docs.find(d => matchesFilter(d, filter)) || null)),
+    // Real mongoose semantics: resolves to the document's _id, or null.
+    exists:  jest.fn(async (filter) => {
+      const hit = docs.find(d => matchesFilter(d, filter));
+      return hit ? { _id: hit._id } : null;
+    }),
     create:  jest.fn((doc) => { docs.push(doc); return Promise.resolve(doc); }),
   };
 }
@@ -66,7 +71,23 @@ jest.mock('../utils/tenant-model', () => ({
     return { find: jest.fn(() => mockChainArr([])), findOne: jest.fn(() => mockChainObj(null)) };
   }),
 }));
-jest.mock('../utils/counters', () => ({ nextInvoiceNumber: jest.fn().mockResolvedValue('INV-1') }));
+// Faithful stand-in for utils/counters: takes one number per attempt and stops
+// on the first the caller's isTaken says is free, so a billing path that stops
+// asking—or a probe that stops looking—fails here instead of filing a
+// duplicate invoice number. The real walk is invoice-number-collision.test.js.
+const mockYear = new Date().getFullYear();
+const mockFmt  = (seq) => `INV-${mockYear}-${String(seq).padStart(6, '0')}`;
+let mockSeq;
+jest.mock('../utils/counters', () => ({
+  nextInvoiceNumber: jest.fn(async (schoolId, isTaken) => {
+    for (let attempt = 0; attempt < 200; attempt++) {
+      mockSeq += 1;
+      const candidate = mockFmt(mockSeq);
+      if (!isTaken || !(await isTaken(candidate))) return candidate;
+    }
+    throw new Error('Could not find a free invoice number');
+  }),
+}));
 jest.mock('../utils/archival', () => ({ isYearArchived: jest.fn().mockResolvedValue(false) }));
 const mockAuditLog = jest.fn();
 jest.mock('../services/audit', () => ({ log: (...args) => mockAuditLog(...args) }));
@@ -78,6 +99,7 @@ const STUDENT = { id: 'stu_new', schoolId: SCHOOL, firstName: 'Amara', lastName:
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockSeq = 0;
   isYearArchived.mockResolvedValue(false);
   mockInvoices          = makeFakeCollection([]);
   mockDiscountPolicies  = makeFakeCollection([]);
@@ -196,4 +218,26 @@ test('multiple qualifying structures each produce their own draft invoice', asyn
   const result = await generateEnrollmentInvoices(SCHOOL, {}, STUDENT, 'usr_admin', {});
   expect(result).toHaveLength(2);
   expect(mockInvoices._docs()).toHaveLength(2);
+});
+
+test('the drafted invoice skips a number this school already holds', async () => {
+  // A school that arrived with paper history: an existing invoice already
+  // numbered INV-{year}-000001, on a different student so the idempotency
+  // guard above doesn't fire. Without the probe the counter, starting at 0,
+  // would hand the new draft the same number.
+  mockInvoices = makeFakeCollection([
+    { id: 'inv_paper_1', _id: 'oid_paper_1', schoolId: SCHOOL, studentId: 'stu_elder',
+      feeStructureId: 'fs_other', invoiceNumber: mockFmt(1), status: 'draft' },
+  ]);
+  mockFeeStructures = makeFakeCollection([
+    { id: 'fs_admission', schoolId: SCHOOL, name: 'Admission Package', scopeType: 'all', autoGenerateOnEnroll: true, lineItems: [{ description: 'Admission Fee', quantity: 1, unitPrice: 15000 }] },
+  ]);
+
+  const result = await generateEnrollmentInvoices(SCHOOL, {}, STUDENT, 'usr_admin', {});
+
+  expect(result[0].invoiceNumber).toBe(mockFmt(2));
+  // and it really looked, per school
+  const lookedUp = mockInvoices.exists.mock.calls.map(c => c[0]);
+  expect(lookedUp.length).toBeGreaterThan(0);
+  expect(lookedUp.every(f => f.schoolId === SCHOOL && f.invoiceNumber)).toBe(true);
 });

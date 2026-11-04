@@ -53,10 +53,26 @@ jest.mock('../../utils/tenant-model', () => ({
   tenantContext: (req) => ({ schoolId: req?.jwtUser?.schoolId ?? SCHOOL }),
   tenantModel: jest.fn((col) => mockStores[col]),
 }));
+// Faithful stand-in for utils/counters' bulk invoice walk: takes one number
+// per attempt and keeps only the ones the caller's isTaken says are free, so
+// an importer that stops asking — or stops loading the numbers the school
+// already holds — fails here instead of filing a duplicate invoice number.
+// The real walk is invoice-number-collision.test.js.
+let mockInvSeq;
 jest.mock('../../utils/counters', () => ({
   reserveFreeAdmissionNumbers: jest.fn((schoolId, n) => Promise.resolve(Array.from({ length: n }, (_, i) => `ADM-${i + 1}`))),
   reserveStaffIds: jest.fn(),
   reserveInvoiceNumbers: jest.fn((schoolId, n) => Promise.resolve(Array.from({ length: n }, (_, i) => `INV-${i + 1}`))),
+  reserveFreeInvoiceNumbers: jest.fn(async (schoolId, count, isTaken) => {
+    const out = [];
+    for (let guard = 0; out.length < count && guard < 1000; guard++) {
+      mockInvSeq += 1;
+      const candidate = `INV-${mockInvSeq}`;
+      if (!isTaken || !(await isTaken(candidate))) out.push(candidate);
+    }
+    if (out.length < count) throw new Error('Could not reserve enough free invoice numbers');
+    return out;
+  }),
 }));
 
 let mockCurrentPeriod;
@@ -69,6 +85,7 @@ jest.mock('../../services/audit', () => ({ log: (...args) => mockAuditLog(...arg
 
 const express   = require('express');
 const supertest = require('supertest');
+const { reserveFreeInvoiceNumbers } = require('../../utils/counters');
 const importExportRouter = require('../../routes/import-export');
 
 function buildApp() {
@@ -81,6 +98,7 @@ function buildApp() {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockInvSeq = 0;
   mockCurrentUser = { userId: 'usr_admin', schoolId: SCHOOL, role: 'admin', roles: ['admin'] };
   mockCurrentPeriod = { academicYearId: 'ay_2026', termId: 'term_1' };
   mockStores = {
@@ -231,6 +249,30 @@ describe('POST /api/import-export/students — opening-fee invoice creation is n
       .send({ rows: [row()] });
 
     expect(mockAuditLog).not.toHaveBeenCalled();
+  });
+
+  test('an opening-fee invoice skips a number this school already holds', async () => {
+    // Opening balances are migration data: they are filed with
+    // server-generated numbers but never advance the invoice counter, so a
+    // school that arrived with paper invoices numbered from 1 would get INV-1
+    // issued a second time — and invoices has no unique index on
+    // invoiceNumber to catch it.
+    mockStores.invoices = makeStore([
+      { id: 'inv_paper', _id: 'oid_paper', schoolId: SCHOOL, invoiceNumber: 'INV-1', studentId: 'stu_existing' },
+      { id: 'inv_theirs', _id: 'oid_theirs', schoolId: 'school_elsewhere', invoiceNumber: 'INV-2' },
+    ]);
+
+    const res = await supertest(buildApp())
+      .post('/api/import-export/students')
+      .set('Content-Type', 'application/json')
+      .send({ rows: [row({ openingFeeAmount: '45000', openingFeePaid: '20000' })] });
+
+    expect(res.status).toBe(201);
+    const created = mockStores.invoices._docs().filter(d => d.id !== 'inv_paper' && d.id !== 'inv_theirs');
+    expect(created).toHaveLength(1);
+    // past this school's INV-1; the other school's INV-2 is not ours to avoid
+    expect(created[0].invoiceNumber).toBe('INV-2');
+    expect(reserveFreeInvoiceNumbers).toHaveBeenCalledWith(SCHOOL, 1, expect.any(Function));
   });
 });
 

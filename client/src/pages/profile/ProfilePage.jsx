@@ -3,6 +3,7 @@ import { Camera, Trash2, Save, Lock, User, CheckCircle, AlertCircle, Briefcase, 
 import useAuthStore from '@/store/auth.js';
 import { auth as authApi, profile as profileApi, settings as settingsApi } from '@/api/client.js';
 import { roleLabel as resolveRoleLabel } from '@/utils/roleLabels.js';
+import AppLockPinCard from '@/pages/settings/components/AppLockPinCard.jsx';
 
 /* ── client-side image resize using Canvas ────────────────────────────────── */
 function resizeImageToBase64(file, maxPx = 256, quality = 0.82) {
@@ -524,6 +525,13 @@ export default function ProfilePage() {
           </div>
         </form>
       </Card>
+
+      {/* ── App-lock PIN ───────────────────────────────────────────
+          Personal account security, so it belongs beside Change Password
+          rather than behind the admin-only Settings tab: the API accepts any
+          signed-in session, and a teacher who cannot see Settings in the
+          sidebar still needs to set the lock on their own phone. */}
+      <AppLockPinCard />
 
       {/* ── Staff Details card — only shown when a staff record exists ── */}
       {staffData && (

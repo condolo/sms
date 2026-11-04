@@ -69,7 +69,7 @@ jest.mock('../../utils/tenant-model', () => ({
   tenantModel: jest.fn((col) => mockStores[col]),
 }));
 jest.mock('../../utils/counters', () => ({
-  reserveAdmissionNumbers: jest.fn(), reserveStaffIds: jest.fn(), reserveInvoiceNumbers: jest.fn(),
+  reserveAdmissionNumbers: jest.fn(), reserveStaffIds: jest.fn(), reserveInvoiceNumbers: jest.fn(), reserveFreeInvoiceNumbers: jest.fn(),
 }));
 
 let mockCurrentPeriod;

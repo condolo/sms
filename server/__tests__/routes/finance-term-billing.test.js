@@ -23,8 +23,22 @@ jest.mock('../../middleware/rbac', () => ({
 }));
 jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) => next() }));
 jest.mock('../../middleware/module-gate', () => ({ moduleGate: () => (_req, _res, next) => next() }));
+// Faithful stand-in for utils/counters: takes one number per attempt and stops
+// on the first the caller's isTaken says is free, so a billing path that stops
+// asking — or a probe that stops looking — fails here instead of filing a
+// duplicate invoice number. The real walk is invoice-number-collision.test.js.
+const mockYear = new Date().getFullYear();
+const mockFmt  = (seq) => `INV-${mockYear}-${String(seq).padStart(6, '0')}`;
+let mockSeq;
 jest.mock('../../utils/counters', () => ({
-  nextInvoiceNumber: jest.fn().mockResolvedValue('INV-1'),
+  nextInvoiceNumber: jest.fn(async (schoolId, isTaken) => {
+    for (let attempt = 0; attempt < 200; attempt++) {
+      mockSeq += 1;
+      const candidate = mockFmt(mockSeq);
+      if (!isTaken || !(await isTaken(candidate))) return candidate;
+    }
+    throw new Error('Could not find a free invoice number');
+  }),
   nextReceiptNumber: jest.fn().mockResolvedValue('RCPT-1'),
 }));
 jest.mock('../../services/audit', () => ({ log: jest.fn() }));
@@ -62,6 +76,11 @@ function mockFakeCollection(seed = []) {
       return mockChainObj(d);
     }),
     distinct: jest.fn((field, filter) => Promise.resolve([...new Set(docs.filter(d => matchesFilter(d, filter)).map(d => d[field]))])),
+    // Real mongoose semantics: resolves to the document's _id, or null.
+    exists:   jest.fn(async (filter) => {
+      const hit = docs.find(d => matchesFilter(d, filter));
+      return hit ? { _id: hit._id } : null;
+    }),
     create:   jest.fn((doc) => { docs.push(doc); return Promise.resolve(doc); }),
   };
 }
@@ -123,6 +142,7 @@ function seed(overrides = {}) {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockSeq = 0;
   mockExplicitGrant = true;
   seed();
 });
@@ -303,5 +323,36 @@ describe('POST /term-billing/generate', () => {
   test('a term must be named', async () => {
     const res = await supertest(buildApp()).post('/api/finance/term-billing/generate').send({});
     expect(res.status).toBe(422);
+  });
+});
+
+describe('term-billing invoice numbering against a drifted counter', () => {
+  test('the batch skips numbers this school already issued instead of duplicating them', async () => {
+    // Paper history: the school came in with invoices already numbered from 1,
+    // which the invoice counter never heard about. Billing a term on top of
+    // that without asking would re-issue INV-{year}-000001 to a live student.
+    seed({ invoices: [
+      { id: 'inv_paper_1', _id: 'oid_p1', schoolId: SCHOOL, studentId: 'stu_z', invoiceNumber: mockFmt(1), termBillingTermId: 'term_old' },
+      { id: 'inv_paper_2', _id: 'oid_p2', schoolId: SCHOOL, studentId: 'stu_y', invoiceNumber: mockFmt(2), termBillingTermId: 'term_old' },
+      { id: 'inv_theirs',  _id: 'oid_t1', schoolId: 'school_B', studentId: 'stu_x', invoiceNumber: mockFmt(3) },
+    ] });
+    // A second billable student, so one run exercises the walk more than once.
+    mockStores.transport_assignments = mockFakeCollection([
+      ...mockStores.transport_assignments._docs(),
+      { id: 'as2', schoolId: SCHOOL, studentId: 'stu2', routeId: 'r_a', fareType: 'two_way', status: 'active', startDate: '2026-08-01' },
+    ]);
+
+    const res = await supertest(buildApp()).post('/api/finance/term-billing/generate').send({ termId: 'term_1' });
+    expect(res.status).toBe(200);
+
+    const issued = mockStores.invoices._docs().filter(d => d.termBillingTermId === 'term_1').map(d => d.invoiceNumber).sort();
+    expect(issued).toHaveLength(2); // stu1 and stu2; stu3 has no fare type
+    // walks past this school's 1 and 2; school B's 3 is irrelevant, so it is
+    // taken here — which is what makes the lookup per-school, not global.
+    expect(issued).toEqual([mockFmt(3), mockFmt(4)]);
+    // and it looked per school, never as a global scan
+    const lookedUp = mockStores.invoices.exists.mock.calls.map(c => c[0]);
+    expect(lookedUp.length).toBeGreaterThan(0);
+    expect(lookedUp.every(f => f.schoolId === SCHOOL && f.invoiceNumber)).toBe(true);
   });
 });

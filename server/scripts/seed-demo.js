@@ -187,10 +187,12 @@ async function seedDemo() {
       exams: RCU, grades: RCU, admissions: R, timetable: RCU, messages: RCU, settings: R,
       assessment: RCU, report_cards: RCU, lessons: FULL, analytics: R, events: R,
     }),
+    // classes/events create are demo-only: they let the teacher persona walk the
+    // mobile Create Event / Create Class flows. Real schools grant these themselves.
     teacher: canonical('teacher', {
-      students: R, teachers: R, classes: R, attendance: RCU, finance: [], behaviour: RCU,
+      students: R, teachers: R, classes: ['read', 'create'], attendance: RCU, finance: [], behaviour: RCU,
       exams: RCU, grades: RCU, admissions: [], timetable: R, messages: RCU, settings: [],
-      assessment: RCU, report_cards: R, lessons: FULL, events: R,
+      assessment: RCU, report_cards: R, lessons: FULL, events: ['read', 'create'],
     }),
     finance: canonical('finance', {
       students: R, teachers: [], classes: [], attendance: [], finance: FULL, behaviour: [],

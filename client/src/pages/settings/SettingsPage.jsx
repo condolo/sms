@@ -41,6 +41,7 @@ import { FField, Toast, iCls, RolePill, SYSTEM_ROLE_COLORS, SYSTEM_ROLES, PROTEC
 import UsersTab from './components/UsersTab.jsx';
 import AuditLogTab from './components/AuditLogTab.jsx';
 import MessageTemplatesTab from './components/MessageTemplatesTab.jsx';
+import AppLockPinCard from './components/AppLockPinCard.jsx';
 
 /* ── Tab config ─────────────────────────────────────────────── */
 const TABS = [
@@ -2478,6 +2479,9 @@ function AccountTab() {
           {changingPw ? 'Updating…' : 'Change password'}
         </button>
       </form>
+
+      {/* App-lock PIN */}
+      <AppLockPinCard />
     </div>
   );
 }
@@ -3353,7 +3357,7 @@ function PChk({ checked, onChange, color }) {
   );
 }
 
-function RolesTab() {
+export function RolesTab() {
   const qc       = useQueryClient();
   const userRole = useAuthStore(s => s.session?.user?.role ?? '');
   const can      = useAuthStore(s => s.can);

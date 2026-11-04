@@ -13,6 +13,7 @@ const monitoring = require('./utils/monitoring');
 const { connect }             = require('./config/db');
 const { ensureIndexes }       = require('./utils/indexes');
 const { backfillFinanceSubPermissions } = require('./utils/finance-permission-backfill');
+const { backfillPaymentPaidAt } = require('./utils/payment-paid-at-backfill');
 const { repairPermissions }   = require('./utils/repairPermissions');
 const { provisionOrganizations } = require('./utils/provision-organizations');
 const { provisionMemberships } = require('./utils/provision-memberships');
@@ -272,6 +273,7 @@ console.log('[Security] rate limiting active — general: 10000/15min per user (
 /* ── API Routes ─────────────────────────────────────────────── */
 app.use('/api/public',      require('./routes/public'));   // no auth - school branding
 app.use('/api/demo',        require('./routes/demo'));     // no auth - self-serve demo requests
+app.use('/api/auth/pin',    require('./routes/pin'));      // the app-lock PIN, on the account
 app.use('/api/auth',        require('./routes/auth'));
 app.use('/api/onboard',     require('./routes/onboard'));
 app.use('/api/sync',        require('./routes/sync'));
@@ -790,8 +792,20 @@ async function start() {
     console.log(`   Mode:    ${process.env.NODE_ENV || 'development'}\n`);
 
     // Self-healing: run non-blocking AFTER HTTP is serving.
-    // Detects and repairs broken role_permissions (legacy object → array format).
-    // Idempotent — becomes a sub-1ms no-op once all schools are repaired.
+    // Receipts written before `paidAt` existed (the demo seed used `date`) are
+    // invisible to every date-sorted or date-ranged payment query until this
+    // gives them one (see utils/payment-paid-at-backfill.js). Non-blocking on
+    // purpose: it is a repair, not a precondition for serving, and a first run
+    // over a large ledger must not hold the health check open. Set
+    // SKIP_PAYMENT_PAID_AT_BACKFILL=true to run it by hand instead.
+    if (String(process.env.SKIP_PAYMENT_PAID_AT_BACKFILL).toLowerCase() === 'true') {
+      console.log('[startup] payment paidAt backfill: skipped (SKIP_PAYMENT_PAID_AT_BACKFILL=true)');
+    } else {
+      backfillPaymentPaidAt()
+        .then(r => { if (r && r.updated) console.log(`[startup] payment paidAt backfill: ${r.updated} receipt(s) dated`); })
+        .catch(err => console.error('[startup] payment paidAt backfill failed:', err.message));
+    }
+
     repairPermissions()
       .catch(err => console.error('[repairPermissions] Unhandled error:', err));
 

@@ -1,0 +1,26 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - generic [ref=e5]: M
+      - generic [ref=e6]: Msingi
+    - generic [ref=e7]:
+      - generic [ref=e8]:
+        - heading "Find your school" [level=1] [ref=e9]
+        - paragraph [ref=e10]: Start typing your school name and select it from the list.
+      - generic [ref=e11]:
+        - generic [ref=e12]:
+          - generic [ref=e13]: School name or address
+          - textbox "e.g. Greenwood Academy" [active] [ref=e18]
+        - button "Find School" [disabled] [ref=e19]
+    - generic [ref=e23]:
+      - button "Explore the demo school →" [ref=e24] [cursor=pointer]
+      - generic [ref=e25]: ·
+      - link "New school? Contact us →" [ref=e26] [cursor=pointer]:
+        - /url: /contact
+      - link "← Back to msingi.io" [ref=e27] [cursor=pointer]:
+        - /url: /
+  - generic [ref=e28]:
+    - button "Scroll to top"
+    - link "Chat with us on WhatsApp" [ref=e29] [cursor=pointer]:
+      - /url: https://wa.me/254769024153?text=Hello%20Msingi%2C%20I%20would%20like%20to%20learn%20more%20about%20the%20platform.
+  - button "Open Tanstack query devtools" [ref=e82] [cursor=pointer]
