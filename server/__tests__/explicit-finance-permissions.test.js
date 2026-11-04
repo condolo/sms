@@ -180,6 +180,27 @@ describe('backfillFinanceSubPermissions — self-healing on every run, never ove
     expect(admin.permissions.finance__early_payment).toEqual(['update', 'create']);
     expect(admin.permissions.finance__activities).toEqual(['create', 'update']);
   });
+
+  // The startup order this repo actually has: the backfill runs, then the
+  // demo seed and the permissions repair write role documents afterwards.
+  // A seed that rewrites a whole permissions object would otherwise delete
+  // what the backfill had just derived, and the school would stay locked out
+  // of Term Billing until the NEXT restart. The second run below is what
+  // server/index.js now performs after those writers settle.
+  test('a role rewritten after a run is healed by the next run', async () => {
+    mockStores.role_permissions = mockMakeCollection([
+      { _id: 'rp_admin', schoolId: 'sch_1', roleKey: 'admin', permissions: { finance: ['read', 'create', 'update', 'delete'] } },
+    ]);
+    await backfillFinanceSubPermissions();
+    expect(mockStores.role_permissions._docs()[0].permissions.finance__term_billing).toEqual(['read', 'create']);
+
+    // A late writer replaces the object wholesale, as seed-demo used to.
+    mockStores.role_permissions._docs()[0].permissions = { finance: ['read', 'create', 'update', 'delete'] };
+
+    const second = await backfillFinanceSubPermissions();
+    expect(second.updated).toBe(1);
+    expect(mockStores.role_permissions._docs()[0].permissions.finance__term_billing).toEqual(['read', 'create']);
+  });
 });
 
 describe('extra-curricular writes need the explicit activities grant', () => {
