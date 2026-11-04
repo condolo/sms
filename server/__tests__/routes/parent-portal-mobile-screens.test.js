@@ -299,7 +299,7 @@ describe('GET /api/parent-portal/report/:childId', () => {
     expect(res.body.data.latest.averageScore).toBe(88);
     expect(res.body.data.latest.classTeacherRemark).toBe('Brian has grown in confidence this term.');
     expect(res.body.data.subjects).toEqual([
-      { subjectId: 'sub_math', subjectName: 'Mathematics', finalScore: 82, grade: 'A-' },
+      { subjectId: 'sub_math', subjectName: 'Mathematics', finalScore: 82, grade: 'A-', breakdown: null, classAverage: null, deviation: null },
     ]);
     expect(res.body.data.trend).toEqual([
       { label: '2026 T2', average: 82 },
