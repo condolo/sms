@@ -703,7 +703,7 @@ router.delete('/:id', rbac('messages', 'delete'), async (req, res) => {
    put the file there: without it, a document on your own Sent bubble — the
    teacher's thread read and the inbox detail both render one — answered
    404 and the card looked broken. */
-router.get('/attachments/:attachmentId', async (req, res) => {
+router.get('/attachments/:attachmentId', async (req, res) => { // rbac: member-scoped — sender or recipient of the message, enforced inline below
   try {
     const { schoolId, userId, role } = req.jwtUser;
     const att = await tenantModel('message_attachments', tenantContext(req))
@@ -736,7 +736,7 @@ router.get('/attachments/:attachmentId', async (req, res) => {
    keep in sync. Re-voting replaces the caller's choice; a closed poll
    refuses. Any recipient of the message may vote — that is the same
    membership _inboxQuery() already defines. */
-router.post('/:id/vote', async (req, res) => {
+router.post('/:id/vote', async (req, res) => { // rbac: recipient-scoped — the same _inboxQuery membership the message itself uses
   try {
     const { schoolId, userId, role } = req.jwtUser;
     const optionId = typeof req.body?.optionId === 'string' ? req.body.optionId.trim() : '';

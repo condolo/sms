@@ -125,7 +125,7 @@ async function _checkPin(User, user, pin, now) {
 }
 
 /* ── GET /api/auth/pin — is a PIN set, and is it locked? ─────────── */
-router.get('/', async (req, res) => {
+router.get('/', async (req, res) => { // rbac: account-level (your OWN app-lock PIN) — no module grant can express it; user comes from req.jwtUser only
   try {
     const { user } = await _loadUser(req);
     if (!user) return res.status(404).json({ error: 'User not found' });
@@ -144,7 +144,7 @@ router.get('/', async (req, res) => {
 });
 
 /* ── POST /api/auth/pin — set it, or change it with the old one ──── */
-router.post('/', async (req, res) => {
+router.post('/', async (req, res) => { // rbac: account-level (your OWN app-lock PIN) — see GET / above
   try {
     const { pin, currentPin } = req.body || {};
     const problem = pinProblem(pin);
@@ -188,7 +188,7 @@ router.post('/', async (req, res) => {
    No session is minted here: the caller already holds one. This only
    answers whether the PIN is right, so it cannot become a login path
    for the 10,000-value space. */
-router.post('/verify', async (req, res) => {
+router.post('/verify', async (req, res) => { // rbac: account-level (your OWN app-lock PIN) — no session is minted; the caller only checks their own
   try {
     const { pin } = req.body || {};
     if (typeof pin !== 'string' || pin.length === 0) {
@@ -221,7 +221,7 @@ router.post('/verify', async (req, res) => {
    permission — the session can already read everything it gates — so
    re-authentication is the right bar for removing it, and a forgotten
    4-digit code can never become a permanent lock-out. */
-router.post('/forgot', async (req, res) => {
+router.post('/forgot', async (req, res) => { // rbac: account-level (your OWN app-lock PIN) — removal is about control of this account
   try {
     const { User, user } = await _loadUser(req);
     if (!user) return res.status(404).json({ error: 'User not found' });
@@ -243,7 +243,7 @@ router.post('/forgot', async (req, res) => {
 /* ── DELETE /api/auth/pin — turning the lock off ──────────────────
    The current PIN is required: turning the lock off is exactly what a
    handed-over phone would try first. */
-router.delete('/', async (req, res) => {
+router.delete('/', async (req, res) => { // rbac: account-level (your OWN app-lock PIN) — current PIN required, see below
   try {
     const { pin } = req.body || {};
     const { User, user } = await _loadUser(req);
