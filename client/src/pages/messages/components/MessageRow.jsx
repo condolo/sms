@@ -1,11 +1,15 @@
 import clsx from 'clsx';
-import { Megaphone, MessageSquare, Users } from 'lucide-react';
+import { CalendarClock, Megaphone, MessageSquare, Paperclip, PieChart, Users } from 'lucide-react';
 import { fmtListDate, recipientSummary } from '../constants.js';
 import Avatar from './Avatar.jsx';
+import { KindBadge } from './RichBlocks.jsx';
 
 export default function MessageRow({ msg, selected, unread, sent, onClick }) {
   const isAnnouncement = msg.type === 'announcement';
   const isGroup = !!msg.groupId;
+  const hasDue = Boolean(msg.dueAt);
+  const hasAttachment = Boolean(msg.attachment?.id);
+  const hasPoll = Boolean(msg.poll?.options?.length);
   const preview = (msg.body ?? '').replace(/\s+/g, ' ').trim().slice(0, 110);
   const title = sent
     ? `To: ${recipientSummary(msg)}`
@@ -88,6 +92,22 @@ export default function MessageRow({ msg, selected, unread, sent, onClick }) {
             {peopleCount > 1 && (
               <span className="text-[9px] font-medium text-slate-400">
                 {peopleCount} people
+              </span>
+            )}
+            <KindBadge kind={msg.kind} />
+            {hasDue && (
+              <span className="inline-flex items-center gap-0.5 text-[9px] font-medium text-amber-600">
+                <CalendarClock size={9} /> Due
+              </span>
+            )}
+            {hasAttachment && (
+              <span className="inline-flex items-center gap-0.5 text-[9px] font-medium text-violet-600">
+                <Paperclip size={9} /> File
+              </span>
+            )}
+            {hasPoll && (
+              <span className="inline-flex items-center gap-0.5 text-[9px] font-medium text-violet-600">
+                <PieChart size={9} /> Poll
               </span>
             )}
             {unread && (

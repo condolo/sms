@@ -35,17 +35,38 @@ const TODAY_ISO = new Date().toISOString().slice(0, 10);
 
 /* ── mock helpers (same pattern as the lessons-coverage suite) ── */
 function mockChain(result) {
+  // findOne hands us one doc, not a list; sort/limit only apply to the lists.
+  let data = Array.isArray(result) ? [...result] : result;
   const c = {
-    select: () => c, sort: () => c, limit: () => c, skip: () => c,
-    lean: () => Promise.resolve(result),
-    catch: (fn) => Promise.resolve(result).catch(fn),
+    select: () => c,
+    // Honours the sort/limit the route asks for, so a test can pin "the three
+    // newest notices" rather than whatever order the fixture happened to be
+    // in — which is what makes a pushed-down audience filter distinguishable
+    // from one applied after the limit.
+    sort: (spec) => {
+      if (Array.isArray(data)) {
+        const [field, dir] = Object.entries(spec ?? {})[0] ?? [];
+        if (field) {
+          data = [...data].sort((a, b) => {
+            if (a[field] === b[field]) return 0;
+            return (a[field] > b[field] ? 1 : -1) * (dir < 0 ? -1 : 1);
+          });
+        }
+      }
+      return c;
+    },
+    limit: (n) => { if (Array.isArray(data)) data = data.slice(0, n); return c; },
+    skip:  (n) => { if (Array.isArray(data)) data = data.slice(n);   return c; },
+    lean: () => Promise.resolve(data),
+    catch: (fn) => Promise.resolve(data).catch(fn),
   };
   return c;
 }
 
 function mockMatchesFilter(doc, filter) {
   return Object.entries(filter || {}).every(([k, v]) => {
-    if (k === '$or') return v.some(sub => mockMatchesFilter(doc, sub));
+    if (k === '$or')  return v.some(sub => mockMatchesFilter(doc, sub));
+    if (k === '$and') return v.every(sub => mockMatchesFilter(doc, sub));
     if (v && typeof v === 'object' && !Array.isArray(v)) {
       // Every operator on this key must hold — a single early return here
       // (as this helper used to do) silently drops every operator after
@@ -53,8 +74,10 @@ function mockMatchesFilter(doc, filter) {
       // checked its lower bound. See teacher-portal.js's attendance fix.
       return Object.entries(v).every(([op, opVal]) => {
         switch (op) {
-          case '$in':  return opVal.includes(doc[k]);
-          case '$nin': return !opVal.includes(doc[k]);
+          // Mongo matches an array field when ANY element is in $in, and
+          // $nin is the negation of that same rule — not of exact equality.
+          case '$in':  return Array.isArray(doc[k]) ? doc[k].some(x => opVal.includes(x)) : opVal.includes(doc[k]);
+          case '$nin': return Array.isArray(doc[k]) ? !doc[k].some(x => opVal.includes(x)) : !opVal.includes(doc[k]);
           case '$exists': {
             const has = Object.prototype.hasOwnProperty.call(doc, k) && doc[k] !== undefined;
             return opVal ? has : !has;
@@ -64,10 +87,22 @@ function mockMatchesFilter(doc, filter) {
           case '$ne':  return doc[k] !== opVal;
           case '$lt':  return doc[k] < opVal;
           case '$lte': return doc[k] <= opVal;
-          default: return true;
+          // Mongo applies $regex to every element of an array field, and an
+          // unsupported operator returning `true` here would silently widen
+          // every filter, so anything new has to be taught on purpose.
+          case '$regex': {
+            const re = new RegExp(opVal, v.$options || '');
+            const test = (x) => typeof x === 'string' && re.test(x);
+            return Array.isArray(doc[k]) ? doc[k].some(test) : test(doc[k]);
+          }
+          case '$options': return true;   // consumed by the $regex branch
+          default:
+            throw new Error(`student-portal-dashboard mock: unsupported query operator "${op}" on "${k}" — add it deliberately rather than letting it match everything`);
         }
       });
     }
+    // An array-valued field equals a scalar condition when it contains it.
+    if (Array.isArray(doc[k])) return doc[k].includes(v);
     return doc[k] === v;
   });
 }
@@ -600,6 +635,61 @@ describe('GET /dashboard — announcements', () => {
     ];
     const res = await supertest(buildApp()).get('/api/student-portal/dashboard');
     expect(res.body.data.announcements).toHaveLength(0);
+  });
+
+  // Defect: the student board selected on schoolId + expiry only, so a notice
+  // the office addressed to families landed on a student's screen.
+  test('a notice addressed to parents, teachers or staff never reaches a student', async () => {
+    mockAnnouncementDocs = [
+      { schoolId: SCHOOL_A, title: 'Fee clearance letters', body: 'Collect at the office.', createdAt: '2026-10-20', audience: ['parents'] },
+      { schoolId: SCHOOL_A, title: 'Staff briefing',        body: 'Internal only.',        createdAt: '2026-10-19', audience: ['staff'] },
+      { schoolId: SCHOOL_A, title: 'Exam invigilation',     body: 'Duty roster attached.', createdAt: '2026-10-18', audience: ['teachers'] },
+      { schoolId: SCHOOL_A, title: 'Library closes',        body: 'Stock-take week.',      createdAt: '2026-10-17', audience: ['staff', 'teachers'] },
+    ];
+    const res = await supertest(buildApp()).get('/api/student-portal/dashboard');
+    expect(res.body.data.announcements).toHaveLength(0);
+  });
+
+  test('school-wide, student-addressed and legacy (no audience) notices all still show', async () => {
+    mockAnnouncementDocs = [
+      { schoolId: SCHOOL_A, title: 'Exams begin Monday', createdAt: '2026-10-20', audience: ['all'] },
+      { schoolId: SCHOOL_A, title: 'Form 1 sports',      createdAt: '2026-10-19', audience: ['students'] },
+      { schoolId: SCHOOL_A, title: 'Written before the field existed', createdAt: '2026-10-18' },
+    ];
+    const res = await supertest(buildApp()).get('/api/student-portal/dashboard');
+    expect(res.body.data.announcements.map(a => a.title)).toEqual([
+      'Exams begin Monday', 'Form 1 sports', 'Written before the field existed',
+    ]);
+  });
+
+  test('a null audience, a bare string and a mixed-case import are all readable', async () => {
+    mockAnnouncementDocs = [
+      { schoolId: SCHOOL_A, title: 'Null audience means everyone', createdAt: '2026-10-17', audience: null },
+      { schoolId: SCHOOL_A, title: 'Saved as a bare string',       createdAt: '2026-10-16', audience: 'students' },
+      { schoolId: SCHOOL_A, title: 'Mixed case from a CSV import', createdAt: '2026-10-15', audience: ['Students'] },
+    ];
+    const res = await supertest(buildApp()).get('/api/student-portal/dashboard');
+    // The parent board has always lower-cased before comparing; a clause that
+    // silently tightened that would hide a notice from the people it was
+    // written for, so the student clause matches case-insensitively too.
+    expect(res.body.data.announcements.map(a => a.title)).toEqual([
+      'Null audience means everyone', 'Saved as a bare string', 'Mixed case from a CSV import',
+    ]);
+  });
+
+  test('hidden notices cannot occupy the board: the cut is in the query, so limit(3) counts visible posts', async () => {
+    // Newest three of the fixture below are parents-only. A post-filter applied
+    // after `.limit(3)` would return an empty board; the pushed-down clause
+    // returns the student post the office wrote last week.
+    mockAnnouncementDocs = [
+      { schoolId: SCHOOL_A, title: 'Fees — parents only 3', createdAt: '2026-10-22', audience: ['parents'] },
+      { schoolId: SCHOOL_A, title: 'Fees — parents only 2', createdAt: '2026-10-21', audience: ['parents'] },
+      { schoolId: SCHOOL_A, title: 'Fees — parents only 1', createdAt: '2026-10-20', audience: ['parents'] },
+      { schoolId: SCHOOL_A, title: 'Inter-house games',     createdAt: '2026-10-19', audience: ['students'] },
+      { schoolId: SCHOOL_A, title: 'Bus timetable',         createdAt: '2026-10-18', audience: ['all'] },
+    ];
+    const res = await supertest(buildApp()).get('/api/student-portal/dashboard');
+    expect(res.body.data.announcements.map(a => a.title)).toEqual(['Inter-house games', 'Bus timetable']);
   });
 });
 

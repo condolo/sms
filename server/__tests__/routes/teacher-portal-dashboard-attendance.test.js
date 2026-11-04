@@ -227,6 +227,36 @@ describe('GET /dashboard — myClasses[].attendancePct', () => {
   });
 });
 
+describe('GET /dashboard — myClasses comes from every way a school assigns a class', () => {
+  test('a class on the teacher’s timetable but with no assignment row still appears', async () => {
+    mockAssignments = [];
+    mockTimetableDocs = [
+      { schoolId: SCHOOL_A, teacherId: TEACHER_USER, classId: CLASS_ID, subjectId: 'subj_math', subject: 'Mathematics', isActive: true, day: 'monday' },
+    ];
+    const res = await supertest(buildApp()).get('/api/teacher-portal/dashboard');
+    const cls = res.body.data.myClasses.find(c => c.id === CLASS_ID);
+    expect(cls).toBeTruthy();
+    expect(cls.subjects).toEqual(['Mathematics']);
+  });
+
+  test('a class this teacher is form teacher of still appears with no assignment or timetable row', async () => {
+    mockAssignments = [];
+    mockTimetableDocs = [];
+    mockClassDocs = [{ id: CLASS_ID, schoolId: SCHOOL_A, name: 'Standard 4A', formTeacherId: TEACHER_ID, studentCount: 0 }];
+    const res = await supertest(buildApp()).get('/api/teacher-portal/dashboard');
+    expect(res.body.data.myClasses.find(c => c.id === CLASS_ID)).toBeTruthy();
+    expect(res.body.data.formClassData?.id).toBe(CLASS_ID);
+  });
+
+  test('a class is listed once when assignments and the timetable both name it', async () => {
+    mockTimetableDocs = [
+      { schoolId: SCHOOL_A, teacherId: TEACHER_USER, classId: CLASS_ID, subjectId: 'subj_math', subject: 'Mathematics', isActive: true, day: 'monday' },
+    ];
+    const res = await supertest(buildApp()).get('/api/teacher-portal/dashboard');
+    expect(res.body.data.myClasses.filter(c => c.id === CLASS_ID)).toHaveLength(1);
+  });
+});
+
 describe('GET /dashboard — atRiskStudents (3+ absences)', () => {
   test('a student with 3 in-term absences is flagged; an out-of-term absence does not count toward the threshold', async () => {
     mockStudentDocs = [

@@ -9,24 +9,34 @@
    The server owns the real authority checks; this page reflects them
    so nobody is offered a mode their role cannot use.
    ============================================================ */
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
-  Check, ChevronRight, Inbox, MessageSquare,
-  Plus, Search, Send, Sparkles, Users, X,
+  Check, ChevronRight, Inbox, MessageCircle, MessageSquare,
+  Plus, Search, Send, Sparkles, UserPlus, Users, X,
 } from 'lucide-react';
 import clsx from 'clsx';
-import { messages as msgsApi } from '@/api/client.js';
+import { messages as msgsApi, teacherPortalApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 import {
-  canBroadcast, isPortalRole, matchesSearch, reSubject, roleLabel,
+  canBroadcast, fmtListDate, isPortalRole, matchesSearch, reSubject, roleLabel,
 } from './constants.js';
 import Avatar from './components/Avatar.jsx';
 import ComposePanel from './components/ComposePanel.jsx';
 import GroupDetail from './components/GroupDetail.jsx';
 import MessageDetail from './components/MessageDetail.jsx';
 import MessageRow from './components/MessageRow.jsx';
+import ThreadView from './components/ThreadView.jsx';
+
+/* A conversation is the pair (this user, one counterpart). The server can
+   pair them for these two roles, and this page is the only place on the web
+   that reads them: ProtectedRoute sends parents, guardians and students to
+   their own portals, so a parent never reaches this screen (their inbox, with
+   no conversation view, is ParentDashboard's MessagesPanel; the parent-portal
+   thread routes serve the mobile app). A student account has no pairing route
+   at all, so it gets the inbox and sent tabs only. */
+const CHAT_ROLES = new Set(['teacher', 'staff']);
 
 const MESSAGE_FILTERS = [
   { id: 'all', label: 'All' },
@@ -166,15 +176,23 @@ export default function MessagesPage() {
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState(null);
   const [selectedGroupId, setSelectedGroupId] = useState(null);
+  const [selectedThreadId, setSelectedThreadId] = useState(null);
+  const [pickingChat, setPickingChat] = useState(false);
   const [showMobileDetail, setShowMobileDetail] = useState(false);
   const [composing, setComposing] = useState(null);
   const [toast, setToast] = useState(null);
   const toastTimer = useRef(null);
 
+  const chatCapable = CHAT_ROLES.has(userRole);
+  /* Only the teacher portal pairs conversations for a role that can reach
+     this page (see CHAT_ROLES above), so there is no parent branch here. */
+  const chatApi = teacherPortalApi;
+  const canStartChat = chatCapable;
+
   const messageQuery = useQuery({
     queryKey: ['messages', tab],
     queryFn: () => msgsApi.list({ tab, limit: 100 }),
-    enabled: tab !== 'groups',
+    enabled: tab !== 'groups' && tab !== 'chats',
     staleTime: 15_000,
   });
 
@@ -190,11 +208,41 @@ export default function MessagesPage() {
     staleTime: 20_000,
   });
 
-  const msgs = tab === 'groups' ? [] : (messageQuery.data?.data ?? []);
+  const threadsQuery = useQuery({
+    queryKey: ['message-threads'],
+    queryFn: () => chatApi.inbox(),
+    enabled: tab === 'chats' && chatCapable,
+    staleTime: 15_000,
+  });
+
+  const threadQuery = useQuery({
+    queryKey: ['message-thread', selectedThreadId],
+    queryFn: () => chatApi.threads.get(selectedThreadId),
+    enabled: tab === 'chats' && !!selectedThreadId && chatCapable,
+    staleTime: 0,
+  });
+
+  /* The address book behind "New chat". Only the teacher portal has one —
+     parents start a conversation from Compose, which lands as a thread. */
+  const contactsQuery = useQuery({
+    queryKey: ['teacher-message-contacts'],
+    queryFn: () => teacherPortalApi.messageContacts(),
+    enabled: pickingChat && canStartChat,
+    staleTime: 60_000,
+  });
+
+  const msgs = (tab === 'groups' || tab === 'chats') ? [] : (messageQuery.data?.data ?? []);
   const groups = groupsQuery.data?.data ?? [];
+  const threads = threadsQuery.data?.data?.threads ?? [];
+  const contacts = contactsQuery.data?.data?.contacts ?? [];
   const selected = msgs.find(m => msgKey(m) === selectedId) ?? null;
   const selectedGroup = groups.find(g => g.id === selectedGroupId) ?? null;
   const unreadCount = unreadQuery.data?.data?.count ?? 0;
+  /* Only conversations with a person count toward the Chats badge — see
+     filteredThreads below for why `system` is excluded. */
+  const threadUnread = threads
+    .filter(t => t.counterpartUserId !== 'system' && t.role)
+    .reduce((sum, t) => sum + (t.unread ?? 0), 0);
 
   const filteredMessages = useMemo(() => {
     return msgs.filter(m => {
@@ -262,7 +310,15 @@ export default function MessagesPage() {
     setSearch('');
     setSelectedId(null);
     setSelectedGroupId(null);
+    setSelectedThreadId(null);
+    setPickingChat(false);
     setShowMobileDetail(false);
+  }
+
+  function openThread(counterpartUserId) {
+    setSelectedThreadId(counterpartUserId);
+    setPickingChat(false);
+    setShowMobileDetail(true);
   }
 
   function selectGroup(group) {
@@ -301,6 +357,67 @@ export default function MessagesPage() {
     onError: err => flash(err.message || 'Reply failed', 'error'),
   });
 
+  /* ── poll vote ─────────────────────────────────────────── */
+  const votePoll = useMutation({
+    mutationFn: ({ messageId, optionId }) => msgsApi.vote(messageId, optionId),
+    onSuccess: (res, vars) => {
+      const poll = res?.data;
+      if (poll && vars?.messageId) {
+        /* The vote route answers with the poll as THIS reader sees it, so
+           patch it in place instead of refetching the whole list. */
+        qc.setQueriesData({ queryKey: ['messages'] }, old => {
+          if (!old?.data || !Array.isArray(old.data)) return old;
+          return {
+            ...old,
+            data: old.data.map(m => (msgKey(m) === vars.messageId ? { ...m, poll } : m)),
+          };
+        });
+        qc.setQueriesData({ queryKey: ['message-thread'] }, old => {
+          if (!old?.data?.messages) return old;
+          return {
+            ...old,
+            data: {
+              ...old.data,
+              messages: old.data.messages.map(m => (m.id === vars.messageId ? { ...m, poll } : m)),
+            },
+          };
+        });
+      }
+      flash('Vote saved');
+    },
+    onError: err => flash(err.message || 'Could not save your vote', 'error'),
+  });
+
+  /* ── attachment download (bytes on demand) ─────────────── */
+  const attachmentDownload = useMutation({
+    mutationFn: id => msgsApi.attachment(id),
+  });
+
+  /* ── thread reply ──────────────────────────────────────── */
+  const threadReply = useMutation({
+    /* `payload` already carries whatever the reply composer built — a plain
+       body for a parent, or body + kind/due/poll/document for a teacher
+       (only the teacher route accepts extras; see server/routes/teacher-portal.js). */
+    mutationFn: ({ counterpartId, payload }) => chatApi.threads.reply(counterpartId, payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['message-thread', selectedThreadId] });
+      qc.invalidateQueries({ queryKey: ['message-threads'] });
+      qc.invalidateQueries({ queryKey: ['messages'] });
+      flash('Reply sent');
+    },
+    onError: err => flash(err.message || 'Reply failed', 'error'),
+  });
+
+  /* Opening a conversation reads it server-side in one write; reflect that
+     here rather than leaving a stale unread badge behind. */
+  useEffect(() => {
+    if (!threadQuery.data) return;
+    qc.invalidateQueries({ queryKey: ['message-threads'] });
+    qc.invalidateQueries({ queryKey: ['messages', 'unread-count'] });
+    window.dispatchEvent(new CustomEvent('messages:read'));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadQuery.data]);
+
   /* ── groups ────────────────────────────────────────────── */
   const updateGroup = useMutation({
     mutationFn: ({ id, data }) => msgsApi.groups.update(id, data),
@@ -326,6 +443,29 @@ export default function MessagesPage() {
   function openCompose(initial = {}) {
     setComposing(initial);
   }
+
+  /* A hand-off from another page (today: the teacher's attendance sheet
+     "message the guardian") arrives as a one-shot payload in sessionStorage,
+     read and removed here so a reload cannot silently re-open the composer
+     with somebody else's draft. */
+  useEffect(() => {
+    let raw = null;
+    try {
+      raw = sessionStorage.getItem('messages:prefill');
+      if (raw) sessionStorage.removeItem('messages:prefill');
+    } catch {
+      return;
+    }
+    if (!raw) return;
+    try {
+      const prefill = JSON.parse(raw);
+      if (prefill && typeof prefill === 'object') openCompose(prefill);
+    } catch {
+      /* a corrupt payload is not worth an error screen */
+    }
+    // Runs once per mount: the payload is consumed, not observed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function replyPrefill(msg, includeAll = false) {
     const subject = reSubject(msg.subject);
@@ -382,11 +522,38 @@ export default function MessagesPage() {
   const messageTabs = [
     { id: 'inbox', label: 'Inbox', icon: Inbox },
     { id: 'sent', label: 'Sent', icon: Send },
+    ...(chatCapable ? [{ id: 'chats', label: 'Chats', icon: MessageCircle }] : []),
     ...(!portal ? [{ id: 'groups', label: 'Groups', icon: Users }] : []),
   ];
 
   const visibleFilters = MESSAGE_FILTERS.filter(f => f.id !== 'unread' || tab === 'inbox');
-  const listLoading = tab === 'groups' ? groupsQuery.isLoading : messageQuery.isLoading;
+  const listLoading = tab === 'groups'
+    ? groupsQuery.isLoading
+    : tab === 'chats'
+      ? threadsQuery.isLoading
+      : messageQuery.isLoading;
+
+  const filteredThreads = useMemo(() => {
+    /* A conversation needs a person. `system` is the synthetic sender behind
+       school notifications (weekly snapshots, notices) — the server resolves
+       no role for it and refuses a reply, so it belongs in the inbox, not in
+       a list of people to talk to. */
+    const people = threads.filter(t => t.counterpartUserId !== 'system' && t.role);
+    const needle = search.trim().toLowerCase();
+    if (!needle) return people;
+    const matches = (t) =>
+      (t.name ?? '').toLowerCase().includes(needle)
+      || (t.subject ?? '').toLowerCase().includes(needle)
+      || (t.preview ?? '').toLowerCase().includes(needle);
+    return people.filter(matches);
+  }, [threads, search]);
+
+  const filteredContacts = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    const sorted = [...contacts].sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''));
+    if (!needle) return sorted;
+    return sorted.filter(c => (c.name ?? '').toLowerCase().includes(needle));
+  }, [contacts, search]);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-slate-50/80">
@@ -466,6 +633,11 @@ export default function MessagesPage() {
                       {groups.length}
                     </span>
                   )}
+                  {id === 'chats' && threadUnread > 0 && (
+                    <span className="ml-0.5 rounded-full bg-violet-600 px-1.5 py-0.5 text-[8px] font-bold leading-none text-white">
+                      {threadUnread > 99 ? '99+' : threadUnread}
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
@@ -478,7 +650,11 @@ export default function MessagesPage() {
               <input
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                placeholder={tab === 'groups' ? 'Search groups or members…' : 'Search messages or people…'}
+                placeholder={
+                  tab === 'groups' ? 'Search groups or members…'
+                    : tab === 'chats' ? (pickingChat ? 'Search people…' : 'Search conversations…')
+                      : 'Search messages or people…'
+                }
                 className="w-full rounded-xl border border-slate-200 bg-slate-50/60 py-2 pr-8 text-xs text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:bg-white focus:ring-4 focus:ring-violet-100"
                 style={{ paddingLeft: '2.1rem' }}
               />
@@ -506,6 +682,23 @@ export default function MessagesPage() {
               >
                 <Plus size={10} /> New group
               </button>
+            </div>
+          ) : tab === 'chats' ? (
+            <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-3 pb-2.5">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                {pickingChat
+                  ? `${filteredContacts.length} ${filteredContacts.length === 1 ? 'person' : 'people'}`
+                  : `${threads.length} ${threads.length === 1 ? 'conversation' : 'conversations'}`}
+              </p>
+              {canStartChat && (
+                <button
+                  onClick={() => { setPickingChat(v => !v); setSearch(''); }}
+                  className="inline-flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-2 py-1 text-[10px] font-semibold text-violet-700 transition hover:bg-violet-100"
+                >
+                  {pickingChat ? <X size={10} /> : <UserPlus size={10} />}
+                  {pickingChat ? 'Cancel' : 'New chat'}
+                </button>
+              )}
             </div>
           ) : (
             <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-slate-100 px-3 pb-2.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
@@ -576,6 +769,119 @@ export default function MessagesPage() {
                   />
                 ))
               )
+            ) : tab === 'chats' ? (
+              pickingChat ? (
+                filteredContacts.length === 0 ? (
+                  <div className="flex flex-col items-center px-6 py-14 text-center">
+                    <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-300">
+                      <UserPlus size={22} />
+                    </div>
+                    <p className="text-xs font-semibold text-slate-600">No people match that name</p>
+                    <p className="mt-1 text-[11px] text-slate-400">
+                      Try a different spelling, or send a plain message from Compose.
+                    </p>
+                  </div>
+                ) : (
+                  filteredContacts.map(c => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => openThread(c.id)}
+                      className="group flex w-full items-center gap-3 border-b border-slate-100 px-4 py-3 text-left transition hover:bg-slate-50"
+                    >
+                      <Avatar name={c.name ?? '?'} size="md" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[13px] font-semibold text-slate-800">{c.name}</p>
+                        <p className="truncate text-[11px] text-slate-400">
+                          {[roleLabel(c.role), c.kind === 'parent' ? c.detail : null].filter(Boolean).join(' · ') || 'School account'}
+                        </p>
+                      </div>
+                      <ChevronRight size={15} className="shrink-0 text-slate-300 transition group-hover:translate-x-0.5" />
+                    </button>
+                  ))
+                )
+              ) : filteredThreads.length === 0 ? (
+                <div className="flex flex-col items-center px-6 py-14 text-center">
+                  <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-300">
+                    <MessageCircle size={22} />
+                  </div>
+                  <p className="text-xs font-semibold text-slate-600">
+                    {search ? 'No conversations match that search' : 'No conversations yet'}
+                  </p>
+                  <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+                    {search
+                      ? 'Try a different name or subject.'
+                      : 'Every direct message you exchange becomes a conversation here.'}
+                  </p>
+                  {canStartChat && !search && (
+                    <button
+                      onClick={() => setPickingChat(true)}
+                      className="mt-3 inline-flex items-center gap-1 rounded-lg bg-violet-600 px-3 py-1.5 text-[10px] font-semibold text-white hover:bg-violet-700"
+                    >
+                      <UserPlus size={11} /> Start a chat
+                    </button>
+                  )}
+                </div>
+              ) : (
+                filteredThreads.map(t => (
+                  <button
+                    key={t.counterpartUserId}
+                    type="button"
+                    onClick={() => openThread(t.counterpartUserId)}
+                    className={clsx(
+                      'group relative w-full border-b border-slate-100 px-3 py-3 text-left transition hover:bg-slate-50/90',
+                      selectedThreadId === t.counterpartUserId && 'bg-violet-50/80 hover:bg-violet-50',
+                      t.unread > 0 && selectedThreadId !== t.counterpartUserId && 'bg-violet-50/30',
+                    )}
+                  >
+                    <span className={clsx(
+                      'absolute inset-y-2 left-0 w-[3px] rounded-r-full transition',
+                      selectedThreadId === t.counterpartUserId
+                        ? 'bg-violet-600'
+                        : t.unread > 0 ? 'bg-violet-300' : 'bg-transparent group-hover:bg-slate-200',
+                    )} />
+                    <div className="flex items-start gap-3 pl-1.5">
+                      <div className="relative">
+                        <Avatar name={t.name ?? '?'} size="md" className={t.unread > 0 ? 'ring-violet-200' : undefined} />
+                        {t.unread > 0 && (
+                          <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-violet-600" />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="mb-0.5 flex items-baseline justify-between gap-2">
+                          <span className={clsx(
+                            'truncate text-[13px]',
+                            t.unread > 0 ? 'font-bold text-slate-900' : 'font-semibold text-slate-700',
+                          )}>
+                            {t.name ?? 'School office'}
+                          </span>
+                          <span className={clsx(
+                            'shrink-0 text-[10px]',
+                            t.unread > 0 ? 'font-semibold text-violet-600' : 'text-slate-400',
+                          )}>
+                            {fmtListDate(t.lastAt)}
+                          </span>
+                        </div>
+                        <p className="truncate text-[12px] font-medium text-slate-600">{t.subject}</p>
+                        <p className="mt-0.5 truncate text-[11px] leading-relaxed text-slate-400">{t.preview}</p>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                          <span className="rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[9px] font-semibold text-slate-500">
+                            {roleLabel(t.role) || 'School account'}
+                          </span>
+                          {(t.recipientCount ?? 0) > 1 && (
+                            <span className="text-[9px] font-medium text-slate-400">{t.recipientCount} people</span>
+                          )}
+                          {t.unread > 0 && (
+                            <span className="ml-auto rounded-full bg-violet-600 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-white">
+                              {t.unread} new
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                ))
+              )
             ) : filteredMessages.length === 0 ? (
               <div className="flex flex-col items-center px-6 py-14 text-center">
                 <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-300">
@@ -617,11 +923,13 @@ export default function MessagesPage() {
           {/* Footer hint */}
           <div className="hidden shrink-0 items-center gap-1.5 border-t border-slate-100 bg-slate-50/60 px-3 py-2 text-[9px] text-slate-400 lg:flex">
             <Sparkles size={10} className="text-violet-400" />
-            {portal
-              ? 'You can message staff directly. Saved groups are managed by staff.'
-              : broadcastAllowed
-                ? 'Tip: use saved groups for classes, teams and committees.'
-                : 'Direct messages support one or many recipients.'}
+            {tab === 'chats'
+              ? 'Conversations group every direct message you exchange with one person.'
+              : portal
+                ? 'You can message staff directly. Saved groups are managed by staff.'
+                : broadcastAllowed
+                  ? 'Tip: use saved groups for classes, teams and committees.'
+                  : 'Direct messages support one or many recipients.'}
           </div>
         </div>
 
@@ -650,6 +958,46 @@ export default function MessagesPage() {
                 onCompose={() => openCompose({})}
               />
             )
+          ) : tab === 'chats' ? (
+            selectedThreadId ? (
+              <ThreadView
+                key={selectedThreadId}
+                thread={threadQuery.data?.data ?? null}
+                loading={threadQuery.isLoading}
+                userId={userId}
+                onBack={() => { setShowMobileDetail(false); setSelectedThreadId(null); }}
+                onReply={payload => threadReply.mutateAsync({ counterpartId: selectedThreadId, payload })}
+                replying={threadReply.isPending}
+                richReply={canStartChat}
+                onVote={(m, optionId) => votePoll.mutate({ messageId: msgKey(m), optionId })}
+                votingId={votePoll.isPending ? votePoll.variables?.messageId : null}
+                onDownloadAttachment={a => attachmentDownload.mutateAsync(a.id)}
+                downloadingAttachment={attachmentDownload.isPending}
+              />
+            ) : (
+              <div className="relative flex h-full flex-col items-center justify-center overflow-hidden bg-slate-50 px-8 text-center">
+                <div className="pointer-events-none absolute -right-16 -top-20 h-64 w-64 rounded-full bg-violet-100/70 blur-3xl" />
+                <div className="relative mb-5">
+                  <div className="absolute inset-0 rounded-3xl bg-gradient-to-br from-violet-200 to-blue-200 blur-2xl" />
+                  <div className="relative flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-violet-600 via-indigo-600 to-blue-600 text-white shadow-xl shadow-violet-200">
+                    <MessageCircle size={34} />
+                  </div>
+                </div>
+                <h3 className="relative text-sm font-bold text-slate-800">Pick up where you left off</h3>
+                <p className="relative mt-1 max-w-xs text-xs leading-relaxed text-slate-400">
+                  Choose a conversation on the left to read it and reply. Every direct
+                  message becomes part of a conversation automatically.
+                </p>
+                {canStartChat && (
+                  <button
+                    onClick={() => setPickingChat(true)}
+                    className="relative mt-4 inline-flex items-center gap-1.5 rounded-xl bg-violet-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm shadow-violet-200 transition hover:bg-violet-700"
+                  >
+                    <UserPlus size={13} /> Start a chat
+                  </button>
+                )}
+              </div>
+            )
           ) : selected ? (
             <MessageDetail
               key={selectedId}
@@ -663,6 +1011,10 @@ export default function MessagesPage() {
               onReplyAll={m => replyPrefill(m, true)}
               onQuickReply={(m, text) => quickReply.mutateAsync({ msg: m, body: text })}
               replying={quickReply.isPending}
+              onVote={(m, optionId) => votePoll.mutate({ messageId: msgKey(m), optionId })}
+              voting={votePoll.isPending}
+              onDownloadAttachment={a => attachmentDownload.mutateAsync(a.id)}
+              downloadingAttachment={attachmentDownload.isPending}
             />
           ) : (
             <EmptyDetail

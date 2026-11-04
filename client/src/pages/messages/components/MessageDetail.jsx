@@ -5,9 +5,10 @@ import {
 } from 'lucide-react';
 import useAuthStore from '@/store/auth.js';
 import {
-  audienceLabel, fmtFullDate, roleLabel,
+  audienceLabel, extrasFor, fmtFullDate, roleLabel,
 } from '../constants.js';
 import Avatar from './Avatar.jsx';
+import MessageExtras, { KindBadge } from './RichBlocks.jsx';
 
 function RecipientPills({ msg }) {
   const audiences = (msg.recipients ?? []).filter(r => r === 'all' || ['teachers', 'parents', 'students', 'staff'].includes(r));
@@ -48,11 +49,14 @@ function RecipientPills({ msg }) {
 export default function MessageDetail({
   msg, userId, userRole, onDelete, deleting, onBack,
   onReply, onReplyAll, onQuickReply, replying,
+  onVote, voting, onDownloadAttachment, downloadingAttachment,
 }) {
   const can = useAuthStore(s => s.can.bind(s));
   const [confirmDel, setConfirmDel] = useState(false);
   const [replyText, setReplyText] = useState('');
   const [replyError, setReplyError] = useState('');
+
+  const extras = extrasFor(msg, userId);
 
   const isModerateFloor = ['superadmin', 'admin', 'deputy_principal'].includes(userRole);
   const canDelete = msg.senderId === userId || isModerateFloor || can('messages__moderate', 'delete');
@@ -99,6 +103,7 @@ export default function MessageDetail({
             {msg.createdAt && (
               <span className="text-[10px] text-slate-400">{fmtFullDate(msg.createdAt)}</span>
             )}
+            <KindBadge kind={extras.kind} />
           </div>
           <h2 className="truncate text-base font-bold text-slate-900">{msg.subject}</h2>
         </div>
@@ -177,6 +182,16 @@ export default function MessageDetail({
             <div className="h-1 bg-gradient-to-r from-violet-500 via-indigo-500 to-blue-500" />
             <div className="px-5 py-6 sm:px-7 sm:py-8">
               <p className="whitespace-pre-wrap text-[13.5px] leading-7 text-slate-700">{msg.body}</p>
+              <MessageExtras
+                msg={msg}
+                userId={userId}
+                own={isMine}
+                onVote={onVote}
+                voting={voting}
+                onDownload={onDownloadAttachment}
+                downloading={downloadingAttachment}
+                className="mt-5"
+              />
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 bg-slate-50/60 px-5 py-2.5 text-[10px] text-slate-400">
               <span className="inline-flex items-center gap-1">

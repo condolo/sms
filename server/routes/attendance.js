@@ -126,6 +126,11 @@ const BulkAttendanceSchema = z.object({
   period:     z.string().optional(),
   // Set for an elective group register (French across streams). Omitted = the class/stream register.
   subjectId:  z.string().optional(),
+  // Deliberate office correction of an already-filed register. The mobile app
+  // never sends this: once a class's register is filed for a day, the app
+  // refuses to file it again and the server refuses too unless this flag says
+  // the caller is amending on purpose.
+  amend:      z.boolean().optional(),
   records:    z.array(z.object({
     studentId: z.string().min(1),
     status:    z.enum(['present', 'absent', 'late', 'authorised_absence', 'excluded', 'holiday']),
@@ -841,6 +846,31 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('attendance', 'create')
     req.scope = originalScope; // scope checks done — restore before the write below
 
     const Attendance = tenantModel('attendance', tenantContext(req));
+
+    // ── A register is filed once a day ──────────────────────────────
+    // Before this guard the bulk write was a plain upsert, so opening the
+    // same day again and tapping Save silently replaced the register the
+    // office had already read (and the guardian absence alerts already sent).
+    // If ANY submitted student already has a record for this class on this
+    // date, the register exists: refuse a second filing unless the caller
+    // explicitly says it is amending (the office's correction path).
+    // Elective registers (subjectId) return above and are unaffected — they
+    // are per-lesson registers, not the class day register.
+    if (!data.amend) {
+      const filed = await Attendance.findOne({
+        schoolId,
+        classId,
+        date,
+        studentId: { $in: allowedRecords.map(r => r.studentId) },
+      }).select('id').lean()
+        .catch(() => null);
+      if (filed) {
+        return E.conflict(
+          res,
+          `Attendance for ${date} is already filed for this class. A register can only be filed once a day — the office can amend it if something is wrong.`
+        );
+      }
+    }
 
     // Build bulk upsert operations
     const ops = allowedRecords.map(r => ({

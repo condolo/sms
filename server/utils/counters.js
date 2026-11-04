@@ -142,23 +142,69 @@ async function nextStaffId(schoolId) {
 }
 
 /**
+ * Shared walk for the numbered documents whose counter can drift behind the
+ * data — receipts and invoices. Take the next number; if the caller says this
+ * school already holds it, take the next one.
+ *
+ * The drift is structural: `nextId` only advances when *this* function is
+ * called, so any row written another way — the demo seed numbering documents
+ * from its own index, a CSV import, a school continuing a paper counterfoil
+ * book — leaves the counter behind, and the next number handed out is one the
+ * ledger already holds. Neither collection has a unique index on its number, so
+ * nothing at the DB layer stops it either. Same drift, same remedy as
+ * reserveFreeAdmissionNumbers above.
+ *
+ * One number per attempt, so walking past a taken run costs one indexed lookup
+ * per number but never reserves further than it consumes — a book that skips
+ * from 000021 to 000040 with nothing in between is an audit question a bursar
+ * should not have to answer. Bounded rather than infinite, in case every
+ * candidate really is taken.
+ *
+ * @param {string}   key      the counter's document id
+ * @param {(seq:number) => string} fmt
+ * @param {((n:string) => boolean|Promise<boolean>)} [isTaken]  omit for the old, unchecked behaviour
+ */
+async function _nextFreeNumber(key, fmt, isTaken, label, schoolId) {
+  if (!isTaken) return fmt(await nextId(key));
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const candidate = fmt(await nextId(key));
+    if (!(await isTaken(candidate))) return candidate;
+  }
+  throw new Error(`Could not find a free ${label} number for school ${schoolId} — check the ${label} counter state`);
+}
+
+/**
  * Generate a formatted invoice number.
  * Format: INV-{year}-{6-digit seq}, e.g. INV-2026-000001
+ *
+ * @param {string} schoolId
+ * @param {(invoiceNumber: string) => boolean|Promise<boolean>} [isTaken]
+ *        See _nextFreeNumber. Pass it on every path that files a real invoice.
  */
-async function nextInvoiceNumber(schoolId) {
+async function nextInvoiceNumber(schoolId, isTaken) {
   const year = new Date().getFullYear();
-  const seq  = await nextId(`invoice_${schoolId}_${year}`);
-  return `INV-${year}-${String(seq).padStart(6, '0')}`;
+  return _nextFreeNumber(
+    `invoice_${schoolId}_${year}`,
+    (seq) => `INV-${year}-${String(seq).padStart(6, '0')}`,
+    isTaken, 'invoice', schoolId,
+  );
 }
 
 /**
  * Generate a receipt number for payments.
  * Format: RCP-{year}-{6-digit seq}, e.g. RCP-2026-000001
+ *
+ * @param {string} schoolId
+ * @param {(receiptNumber: string) => boolean|Promise<boolean>} [isTaken]
+ *        See _nextFreeNumber. Pass it on every path that files a real receipt.
  */
-async function nextReceiptNumber(schoolId) {
+async function nextReceiptNumber(schoolId, isTaken) {
   const year = new Date().getFullYear();
-  const seq  = await nextId(`receipt_${schoolId}_${year}`);
-  return `RCP-${year}-${String(seq).padStart(6, '0')}`;
+  return _nextFreeNumber(
+    `receipt_${schoolId}_${year}`,
+    (seq) => `RCP-${year}-${String(seq).padStart(6, '0')}`,
+    isTaken, 'receipt', schoolId,
+  );
 }
 
 /**
@@ -214,6 +260,40 @@ async function reserveInvoiceNumbers(schoolId, count) {
   return Array.from({ length: count }, (_, i) =>
     `INV-${year}-${String(start + i).padStart(6, '0')}`
   );
+}
+
+/**
+ * Reserve `count` invoice numbers, skipping any this school already holds.
+ * The bulk counterpart of nextInvoiceNumber's walk, and the same shape as
+ * reserveFreeAdmissionNumbers: one round-trip reserves the whole range in the
+ * common case, and only a collision costs another round — which also leaves the
+ * counter past the drifted run for next time.
+ *
+ * @param {string} schoolId
+ * @param {number} count
+ * @param {(invoiceNumber: string) => boolean|Promise<boolean>} isTaken
+ *        Pass a Set.has bound function when the caller already loaded the
+ *        existing numbers (bulk import); an async DB lookup for a small batch.
+ * @returns {Promise<string[]>}
+ */
+async function reserveFreeInvoiceNumbers(schoolId, count, isTaken) {
+  const out = [];
+  let remaining = count;
+  let round = 0;
+  // Bounded: each round only repeats because a collision was found, so this
+  // only loops long if the counter is drifting deep into used territory.
+  while (remaining > 0 && round < 20) {
+    round++;
+    for (const candidate of await reserveInvoiceNumbers(schoolId, remaining)) {
+      if (await isTaken(candidate)) continue; // already issued — walk past it
+      out.push(candidate);
+    }
+    remaining = count - out.length;
+  }
+  if (out.length < count) {
+    throw new Error(`Could not reserve enough free invoice numbers for school ${schoolId} — check the invoice counter state`);
+  }
+  return out;
 }
 
 /**
@@ -285,4 +365,5 @@ module.exports = {
   reserveAdmissionNumbers,
   reserveStaffIds,
   reserveInvoiceNumbers,
+  reserveFreeInvoiceNumbers,
 };

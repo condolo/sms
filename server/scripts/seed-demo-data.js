@@ -228,7 +228,7 @@ const PERIODS_PRI = ['1','2','Break','3','4','5'];
 
 const F1A_TIMETABLE = [
   // Monday
-  { day:'monday',    period:'1', periodNumber:1, subjectId:'subj_demo_math', subject:'Mathematics',         teacherId:'u_demo_t2',  room:'F1A' },
+  { day:'monday',    period:'1', periodNumber:1, subjectId:'subj_demo_math', subject:'Mathematics',         teacherId:'u_demo_teacher',  room:'F1A' },
   { day:'monday',    period:'2', periodNumber:2, subjectId:'subj_demo_eng',  subject:'English Language',    teacherId:'u_demo_t3',  room:'F1A' },
   { day:'monday',    period:'3', periodNumber:3, subjectId:'subj_demo_kisw', subject:'Kiswahili',           teacherId:'u_demo_t4',  room:'F1A' },
   { day:'monday',    period:'4', periodNumber:4, subjectId:'subj_demo_bio',  subject:'Biology',             teacherId:'u_demo_t6',  room:'F1A' },
@@ -236,13 +236,13 @@ const F1A_TIMETABLE = [
   { day:'monday',    period:'6', periodNumber:6, subjectId:'subj_demo_pe',   subject:'PE & Sports',         teacherId:'u_demo_t10', room:'Field' },
   // Tuesday
   { day:'tuesday',   period:'1', periodNumber:1, subjectId:'subj_demo_phy',  subject:'Physics',             teacherId:'u_demo_t5',  room:'Lab 1' },
-  { day:'tuesday',   period:'2', periodNumber:2, subjectId:'subj_demo_math', subject:'Mathematics',         teacherId:'u_demo_t2',  room:'F1A' },
+  { day:'tuesday',   period:'2', periodNumber:2, subjectId:'subj_demo_math', subject:'Mathematics',         teacherId:'u_demo_teacher',  room:'F1A' },
   { day:'tuesday',   period:'3', periodNumber:3, subjectId:'subj_demo_eng',  subject:'English Language',    teacherId:'u_demo_t3',  room:'F1A' },
   { day:'tuesday',   period:'4', periodNumber:4, subjectId:'subj_demo_chem', subject:'Chemistry',           teacherId:'u_demo_t5',  room:'Lab 1' },
   { day:'tuesday',   period:'5', periodNumber:5, subjectId:'subj_demo_geo',  subject:'Geography',           teacherId:'u_demo_t7',  room:'F1A' },
   { day:'tuesday',   period:'6', periodNumber:6, subjectId:'subj_demo_ict',  subject:'ICT',                 teacherId:'u_demo_t9',  room:'Computer Lab' },
   // Wednesday
-  { day:'wednesday', period:'1', periodNumber:1, subjectId:'subj_demo_math', subject:'Mathematics',         teacherId:'u_demo_t2',  room:'F1A' },
+  { day:'wednesday', period:'1', periodNumber:1, subjectId:'subj_demo_math', subject:'Mathematics',         teacherId:'u_demo_teacher',  room:'F1A' },
   { day:'wednesday', period:'2', periodNumber:2, subjectId:'subj_demo_kisw', subject:'Kiswahili',           teacherId:'u_demo_t4',  room:'F1A' },
   { day:'wednesday', period:'3', periodNumber:3, subjectId:'subj_demo_bio',  subject:'Biology',             teacherId:'u_demo_t6',  room:'Lab 2' },
   { day:'wednesday', period:'4', periodNumber:4, subjectId:'subj_demo_eng',  subject:'English Language',    teacherId:'u_demo_t3',  room:'F1A' },
@@ -250,14 +250,14 @@ const F1A_TIMETABLE = [
   { day:'wednesday', period:'6', periodNumber:6, subjectId:'subj_demo_cre',  subject:'CRE',                 teacherId:'u_demo_t3',  room:'F1A' },
   // Thursday
   { day:'thursday',  period:'1', periodNumber:1, subjectId:'subj_demo_phy',  subject:'Physics',             teacherId:'u_demo_t5',  room:'Lab 1' },
-  { day:'thursday',  period:'2', periodNumber:2, subjectId:'subj_demo_math', subject:'Mathematics',         teacherId:'u_demo_t2',  room:'F1A' },
+  { day:'thursday',  period:'2', periodNumber:2, subjectId:'subj_demo_math', subject:'Mathematics',         teacherId:'u_demo_teacher',  room:'F1A' },
   { day:'thursday',  period:'3', periodNumber:3, subjectId:'subj_demo_hist', subject:'History & Government',teacherId:'u_demo_t7',  room:'F1A' },
   { day:'thursday',  period:'4', periodNumber:4, subjectId:'subj_demo_kisw', subject:'Kiswahili',           teacherId:'u_demo_t4',  room:'F1A' },
   { day:'thursday',  period:'5', periodNumber:5, subjectId:'subj_demo_ict',  subject:'ICT',                 teacherId:'u_demo_t9',  room:'Computer Lab' },
   { day:'thursday',  period:'6', periodNumber:6, subjectId:'subj_demo_chem', subject:'Chemistry',           teacherId:'u_demo_t5',  room:'Lab 1' },
   // Friday
   { day:'friday',    period:'1', periodNumber:1, subjectId:'subj_demo_eng',  subject:'English Language',    teacherId:'u_demo_t3',  room:'F1A' },
-  { day:'friday',    period:'2', periodNumber:2, subjectId:'subj_demo_math', subject:'Mathematics',         teacherId:'u_demo_t2',  room:'F1A' },
+  { day:'friday',    period:'2', periodNumber:2, subjectId:'subj_demo_math', subject:'Mathematics',         teacherId:'u_demo_teacher',  room:'F1A' },
   { day:'friday',    period:'3', periodNumber:3, subjectId:'subj_demo_geo',  subject:'Geography',           teacherId:'u_demo_t7',  room:'F1A' },
   { day:'friday',    period:'4', periodNumber:4, subjectId:'subj_demo_bio',  subject:'Biology',             teacherId:'u_demo_t6',  room:'Lab 2' },
   { day:'friday',    period:'5', periodNumber:5, subjectId:'subj_demo_bs',   subject:'Business Studies',    teacherId:'u_demo_t8',  room:'F1A' },
@@ -265,28 +265,28 @@ const F1A_TIMETABLE = [
 ];
 
 const STD4A_TIMETABLE = [
-  { day:'monday',    period:'1', periodNumber:1, subjectId:'subj_demo_math', subject:'Mathematics',      teacherId:'u_demo_t2',  room:'P4A' },
+  { day:'monday',    period:'1', periodNumber:1, subjectId:'subj_demo_math', subject:'Mathematics',      teacherId:'u_demo_teacher',  room:'P4A' },
   { day:'monday',    period:'2', periodNumber:2, subjectId:'subj_demo_eng',  subject:'English Language', teacherId:'u_demo_t3',  room:'P4A' },
   { day:'monday',    period:'3', periodNumber:3, subjectId:'subj_demo_sci',  subject:'Science',          teacherId:'u_demo_t6',  room:'P4A' },
   { day:'monday',    period:'4', periodNumber:4, subjectId:'subj_demo_kisw', subject:'Kiswahili',        teacherId:'u_demo_t4',  room:'P4A' },
   { day:'monday',    period:'5', periodNumber:5, subjectId:'subj_demo_pe',   subject:'PE & Sports',      teacherId:'u_demo_t10', room:'Field' },
   { day:'tuesday',   period:'1', periodNumber:1, subjectId:'subj_demo_eng',  subject:'English Language', teacherId:'u_demo_t3',  room:'P4A' },
-  { day:'tuesday',   period:'2', periodNumber:2, subjectId:'subj_demo_math', subject:'Mathematics',      teacherId:'u_demo_t2',  room:'P4A' },
+  { day:'tuesday',   period:'2', periodNumber:2, subjectId:'subj_demo_math', subject:'Mathematics',      teacherId:'u_demo_teacher',  room:'P4A' },
   { day:'tuesday',   period:'3', periodNumber:3, subjectId:'subj_demo_ss',   subject:'Social Studies',   teacherId:'u_demo_t10', room:'P4A' },
   { day:'tuesday',   period:'4', periodNumber:4, subjectId:'subj_demo_sci',  subject:'Science',          teacherId:'u_demo_t6',  room:'P4A' },
   { day:'tuesday',   period:'5', periodNumber:5, subjectId:'subj_demo_ict',  subject:'ICT',              teacherId:'u_demo_t9',  room:'Computer Lab' },
-  { day:'wednesday', period:'1', periodNumber:1, subjectId:'subj_demo_math', subject:'Mathematics',      teacherId:'u_demo_t2',  room:'P4A' },
+  { day:'wednesday', period:'1', periodNumber:1, subjectId:'subj_demo_math', subject:'Mathematics',      teacherId:'u_demo_teacher',  room:'P4A' },
   { day:'wednesday', period:'2', periodNumber:2, subjectId:'subj_demo_kisw', subject:'Kiswahili',        teacherId:'u_demo_t4',  room:'P4A' },
   { day:'wednesday', period:'3', periodNumber:3, subjectId:'subj_demo_eng',  subject:'English Language', teacherId:'u_demo_t3',  room:'P4A' },
   { day:'wednesday', period:'4', periodNumber:4, subjectId:'subj_demo_cre',  subject:'CRE',              teacherId:'u_demo_t3',  room:'P4A' },
   { day:'wednesday', period:'5', periodNumber:5, subjectId:'subj_demo_ss',   subject:'Social Studies',   teacherId:'u_demo_t10', room:'P4A' },
   { day:'thursday',  period:'1', periodNumber:1, subjectId:'subj_demo_sci',  subject:'Science',          teacherId:'u_demo_t6',  room:'P4A' },
-  { day:'thursday',  period:'2', periodNumber:2, subjectId:'subj_demo_math', subject:'Mathematics',      teacherId:'u_demo_t2',  room:'P4A' },
+  { day:'thursday',  period:'2', periodNumber:2, subjectId:'subj_demo_math', subject:'Mathematics',      teacherId:'u_demo_teacher',  room:'P4A' },
   { day:'thursday',  period:'3', periodNumber:3, subjectId:'subj_demo_eng',  subject:'English Language', teacherId:'u_demo_t3',  room:'P4A' },
   { day:'thursday',  period:'4', periodNumber:4, subjectId:'subj_demo_kisw', subject:'Kiswahili',        teacherId:'u_demo_t4',  room:'P4A' },
   { day:'thursday',  period:'5', periodNumber:5, subjectId:'subj_demo_pe',   subject:'PE & Sports',      teacherId:'u_demo_t10', room:'Field' },
   { day:'friday',    period:'1', periodNumber:1, subjectId:'subj_demo_eng',  subject:'English Language', teacherId:'u_demo_t3',  room:'P4A' },
-  { day:'friday',    period:'2', periodNumber:2, subjectId:'subj_demo_math', subject:'Mathematics',      teacherId:'u_demo_t2',  room:'P4A' },
+  { day:'friday',    period:'2', periodNumber:2, subjectId:'subj_demo_math', subject:'Mathematics',      teacherId:'u_demo_teacher',  room:'P4A' },
   { day:'friday',    period:'3', periodNumber:3, subjectId:'subj_demo_ss',   subject:'Social Studies',   teacherId:'u_demo_t10', room:'P4A' },
   { day:'friday',    period:'4', periodNumber:4, subjectId:'subj_demo_sci',  subject:'Science',          teacherId:'u_demo_t6',  room:'P4A' },
   { day:'friday',    period:'5', periodNumber:5, subjectId:'subj_demo_cre',  subject:'CRE',              teacherId:'u_demo_t3',  room:'P4A' },
@@ -600,23 +600,51 @@ const LIBRARY_LOANS = [
   { id:'ll_demo_8', bookId:'lb_demo_9', bookTitle:'Physics for High Schools',        borrowerId:'std_demo_10', borrowerType:'student', borrowerName:'Brian Onyango',      borrowerClass:'Form 4A',     issuedAt:d(21), dueDate:pastDue(1),    status:'returned', fineAmount:0,   finePaid:false, returnedAt:d(2),  daysOverdue:0 },
 ];
 
+/* ── Fleet: the vehicles ─────────────────────────────────────── */
+const TRANSPORT_VEHICLES = [
+  { id:'tv_demo_1', registration:'KDH 485Z', vehicleType:'bus',    make:'Toyota',  model:'Coaster',    year:2021, capacity:40, ownership:'owned', status:'active',
+    insuranceExpiry:`${YEAR}-12-31`, inspectionExpiry:`${YEAR}-09-30`, notes:'Serviced every 5,000 km.' },
+  { id:'tv_demo_2', registration:'KBZ 921F', vehicleType:'bus',    make:'Isuzu',   model:'FRR',        year:2019, capacity:33, ownership:'owned', status:'active',
+    insuranceExpiry:`${YEAR}-11-15`, inspectionExpiry:`${YEAR + 1}-01-31`, notes:'' },
+  { id:'tv_demo_3', registration:'KCY 033M', vehicleType:'van',    make:'Nissan',  model:'Urvan',      year:2022, capacity:14, ownership:'owned', status:'active',
+    insuranceExpiry:`${YEAR}-10-31`, inspectionExpiry:`${YEAR}-10-31`, notes:'Premium Karen / Langata run.' },
+];
+
+/* ── Drivers ─────────────────────────────────────────────────── */
+const TRANSPORT_DRIVERS = [
+  { id:'td_demo_1', name:'Mr. John Nderitu',    phone:'+254 712 345 678', licenceNumber:'DL-2019-44812', licenceExpiry:`${YEAR + 1}-03-31`, status:'active', notes:'' },
+  { id:'td_demo_2', name:'Mr. Peter Muthoni',   phone:'+254 722 567 890', licenceNumber:'DL-2020-51907', licenceExpiry:`${YEAR}-12-31`,     status:'active', notes:'' },
+  { id:'td_demo_3', name:'Mr. David Kiprotich', phone:'+254 733 901 234', licenceNumber:'DL-2018-30255', licenceExpiry:`${YEAR + 1}-06-30`, status:'active', notes:'Handles the Karen van.' },
+];
+
 /* ── Transport routes (3) ────────────────────────────────────── */
+/* `fares` is what assignment and billing actually read: a student is charged
+   the fare for the type on their assignment, and a route with no fare for a
+   type cannot be assigned — so the demo routes carry both. `feePerTerm` is
+   kept because it is the figure the office still quotes on the phone.
+   `vehicleId` / `driverId` point at the fleet and driver records above; the
+   display fields beside them are the copies the server keeps in step (and the
+   ones the parent/student portal cards read without a join). */
 const TRANSPORT_ROUTES = [
-  { id:'tr_demo_1', name:'Westlands Express',       origin:'Westlands Roundabout',   destination:'Msingi Academy', stops:['Sarit Centre','ABC Place','Village Market','Ridgeways'], departureTime:'06:15', arrivalTime:'07:15', vehicleType:'bus',  vehicleReg:'KDH 485Z', driverName:'Mr. John Nderitu',    driverPhone:'+254 712 345 678', capacity:40, feePerTerm:12000, notes:'Morning pickup serving Westlands, Parklands and Ridgeways.' },
-  { id:'tr_demo_2', name:'Eastlands Shuttle',        origin:'Pipeline Stage',         destination:'Msingi Academy', stops:['Embakasi','Donholm','Umoja','Jogoo Road'],               departureTime:'06:30', arrivalTime:'07:20', vehicleType:'bus',  vehicleReg:'KBZ 921F', driverName:'Mr. Peter Muthoni',   driverPhone:'+254 722 567 890', capacity:33, feePerTerm:10000, notes:'Serves Eastlands — Embakasi, Donholm and Umoja zones.' },
-  { id:'tr_demo_3', name:'Karen & Langata Runner',   origin:'Karen Shopping Centre',  destination:'Msingi Academy', stops:['Hardy','Langata Road','Bomas Junction'],                departureTime:'06:45', arrivalTime:'07:30', vehicleType:'van',  vehicleReg:'KCY 033M', driverName:'Mr. David Kiprotich', driverPhone:'+254 733 901 234', capacity:14, feePerTerm:14000, notes:'Premium van service for Karen, Hardy and Langata students.' },
+  { id:'tr_demo_1', name:'Westlands Express',       origin:'Westlands Roundabout',   destination:'Msingi Academy', stops:['Sarit Centre','ABC Place','Village Market','Ridgeways'], departureTime:'06:15', arrivalTime:'07:15', vehicleId:'tv_demo_1', driverId:'td_demo_1', vehicleType:'bus',  vehicleReg:'KDH 485Z', driverName:'Mr. John Nderitu',    driverPhone:'+254 712 345 678', capacity:40, feePerTerm:12000, fares:[{ fareType:'one_way', amount:7200 },{ fareType:'two_way', amount:12000 }], notes:'Morning pickup serving Westlands, Parklands and Ridgeways.' },
+  { id:'tr_demo_2', name:'Eastlands Shuttle',        origin:'Pipeline Stage',         destination:'Msingi Academy', stops:['Embakasi','Donholm','Umoja','Jogoo Road'],               departureTime:'06:30', arrivalTime:'07:20', vehicleId:'tv_demo_2', driverId:'td_demo_2', vehicleType:'bus',  vehicleReg:'KBZ 921F', driverName:'Mr. Peter Muthoni',   driverPhone:'+254 722 567 890', capacity:33, feePerTerm:10000, fares:[{ fareType:'one_way', amount:6000 },{ fareType:'two_way', amount:10000 }], notes:'Serves Eastlands — Embakasi, Donholm and Umoja zones.' },
+  { id:'tr_demo_3', name:'Karen & Langata Runner',   origin:'Karen Shopping Centre',  destination:'Msingi Academy', stops:['Hardy','Langata Road','Bomas Junction'],                departureTime:'06:45', arrivalTime:'07:30', vehicleId:'tv_demo_3', driverId:'td_demo_3', vehicleType:'van',  vehicleReg:'KCY 033M', driverName:'Mr. David Kiprotich', driverPhone:'+254 733 901 234', capacity:14, feePerTerm:14000, fares:[{ fareType:'one_way', amount:8400 },{ fareType:'two_way', amount:14000 }], notes:'Premium van service for Karen, Hardy and Langata students.' },
 ];
 
 /* ── Transport assignments (8) ───────────────────────────────── */
+/* `fareType` is required by the API for a new assignment and is what the
+   invoice charges, so every seeded row states it. One family has left the
+   route (inactive + end date) so the "Inactive" view and the parent portal's
+   "Ended" state have something real to show. */
 const TRANSPORT_ASSIGNMENTS = [
-  { id:'ta_demo_1', routeId:'tr_demo_1', routeName:'Westlands Express',     studentId:'std_demo_1',  studentName:'Amara Osei',          studentClass:'Form 1A',      pickupStop:'Village Market',          direction:'both', status:'active' },
-  { id:'ta_demo_2', routeId:'tr_demo_2', routeName:'Eastlands Shuttle',      studentId:'std_demo_4',  studentName:'David Mutai',         studentClass:'Form 2A',      pickupStop:'Donholm',                 direction:'both', status:'active' },
-  { id:'ta_demo_3', routeId:'tr_demo_3', routeName:'Karen & Langata Runner', studentId:'std_demo_7',  studentName:'Naledi Dlamini',      studentClass:'Form 3A',      pickupStop:'Hardy',                   direction:'both', status:'active' },
-  { id:'ta_demo_4', routeId:'tr_demo_1', routeName:'Westlands Express',     studentId:'std_demo_10', studentName:'Brian Onyango',       studentClass:'Form 4A',      pickupStop:'Ridgeways',               direction:'both', status:'active' },
-  { id:'ta_demo_5', routeId:'tr_demo_1', routeName:'Westlands Express',     studentId:'std_demo_11', studentName:'Miriam Gitau',        studentClass:'Form 4A',      pickupStop:'Sarit Centre',            direction:'both', status:'active' },
-  { id:'ta_demo_6', routeId:'tr_demo_2', routeName:'Eastlands Shuttle',      studentId:'std_demo_15', studentName:'Patience Adhiambo',   studentClass:'Standard 5A',  pickupStop:'Umoja',                   direction:'both', status:'active' },
-  { id:'ta_demo_7', routeId:'tr_demo_3', routeName:'Karen & Langata Runner', studentId:'std_demo_18', studentName:'Joseph Omondi',       studentClass:'Standard 6A',  pickupStop:'Bomas Junction',          direction:'both', status:'active' },
-  { id:'ta_demo_8', routeId:'tr_demo_3', routeName:'Karen & Langata Runner', studentId:'std_demo_19', studentName:'Christine Chebet',    studentClass:'Standard 6A',  pickupStop:'Karen Shopping Centre',   direction:'both', status:'active' },
+  { id:'ta_demo_1', routeId:'tr_demo_1', routeName:'Westlands Express',     studentId:'std_demo_1',  studentName:'Amara Osei',          studentClass:'Form 1A',      pickupStop:'Village Market',          direction:'both', status:'active',   fareType:'two_way' },
+  { id:'ta_demo_2', routeId:'tr_demo_2', routeName:'Eastlands Shuttle',      studentId:'std_demo_4',  studentName:'David Mutai',         studentClass:'Form 2A',      pickupStop:'Donholm',                 direction:'both', status:'active',   fareType:'two_way', notes:'Picked up at the Donholm stage, next to the shops.' },
+  { id:'ta_demo_3', routeId:'tr_demo_3', routeName:'Karen & Langata Runner', studentId:'std_demo_7',  studentName:'Naledi Dlamini',      studentClass:'Form 3A',      pickupStop:'Hardy',                   direction:'both', status:'active',   fareType:'two_way' },
+  { id:'ta_demo_4', routeId:'tr_demo_1', routeName:'Westlands Express',     studentId:'std_demo_10', studentName:'Brian Onyango',       studentClass:'Form 4A',      pickupStop:'Ridgeways',               direction:'both', status:'active',   fareType:'two_way' },
+  { id:'ta_demo_5', routeId:'tr_demo_1', routeName:'Westlands Express',     studentId:'std_demo_11', studentName:'Miriam Gitau',        studentClass:'Form 4A',      pickupStop:'Sarit Centre',            direction:'both', status:'active',   fareType:'one_way', notes:'Morning run only — collected in the evening by a guardian.' },
+  { id:'ta_demo_6', routeId:'tr_demo_2', routeName:'Eastlands Shuttle',      studentId:'std_demo_15', studentName:'Patience Adhiambo',   studentClass:'Standard 5A',  pickupStop:'Umoja',                   direction:'both', status:'active',   fareType:'two_way' },
+  { id:'ta_demo_7', routeId:'tr_demo_3', routeName:'Karen & Langata Runner', studentId:'std_demo_18', studentName:'Joseph Omondi',       studentClass:'Standard 6A',  pickupStop:'Bomas Junction',          direction:'both', status:'active',   fareType:'two_way' },
+  { id:'ta_demo_8', routeId:'tr_demo_3', routeName:'Karen & Langata Runner', studentId:'std_demo_19', studentName:'Christine Chebet',    studentClass:'Standard 6A',  pickupStop:'Karen Shopping Centre',   direction:'both', status:'inactive', fareType:'two_way', endDate:`${YEAR}-08-31`, notes:'Left the route at the end of term 2 — family relocated.' },
 ];
 
 /* ── Hostels (2) + rooms (6) + assignments (6 active residents) ─ */
@@ -1232,6 +1260,116 @@ async function seedDemoData() {
       { $set: { className: 'Standard 4A' } }
     );
 
+    /* 7h. Teaching assignments derived from the timetable.
+       teaching_assignments is what the marks write path authorises a
+       teacher against (server/utils/subject-scope.js matches
+       teacherId = the teacher's LOGIN id, u_demo_tN). Without these rows a
+       teacher can see a class on the timetable but every save 403s "You are
+       not assigned to teach…". The timetable IS the assignment; mirror it. */
+    const TeachingAssignments = _model('teaching_assignments');
+    const TIMETABLES = [
+      ['cls_demo_f1a', F1A_TIMETABLE], ['cls_demo_4a',  STD4A_TIMETABLE],
+      ['cls_demo_5a',  STD5A_TIMETABLE], ['cls_demo_6a', STD6A_TIMETABLE],
+      ['cls_demo_f2a', F2A_TIMETABLE], ['cls_demo_f3a', F3A_TIMETABLE],
+      ['cls_demo_f4a', F4A_TIMETABLE],
+    ];
+    const assignmentRows = new Map();
+    const classNameById = Object.fromEntries(CLASSES.map(c => [c.id, c.name]));
+    for (const [classId, slots] of TIMETABLES) {
+      for (const slot of slots) {
+        if (!slot.teacherId || !slot.subjectId) continue;
+        const key = `${slot.teacherId}_${classId}_${slot.subjectId}`;
+        if (assignmentRows.has(key)) continue;
+        assignmentRows.set(key, {
+          teacherId:   slot.teacherId,
+          classId,
+          subjectId:   slot.subjectId,
+          subjectName: slot.subject,
+          className:   classNameById[classId] ?? '',
+          streamId:    null,
+          updatedBy:   ADMIN_ID,
+        });
+      }
+    }
+    /* Drop the seed's own assignments that no longer describe the timetable:
+       a slot's teacher moved, or the row is one of the duplicates this block
+       used to create (see the identity match below) and a richer row for the
+       same teacher+class+subject+stream already exists. Cleanup is by
+       identity, not by id: matching only on `ta_demo_` ids left a seed row
+       standing beside the web-created row it had since folded into, which is
+       exactly the doubled class the operator kept seeing. */
+    const identityOf = (r) => `${r.teacherId}|${r.classId}|${r.subjectId}|${r.streamId ?? ''}`;
+    const wanted = new Map([...assignmentRows.entries()].map(([key, a]) => [identityOf(a), key]));
+    const [seedRows, otherRows] = await Promise.all([
+      TeachingAssignments.find({ schoolId: SCHOOL_ID, id: { $regex: /^ta_demo_/ } }).select('id teacherId classId subjectId streamId').lean(),
+      TeachingAssignments.find({ schoolId: SCHOOL_ID, id: { $not: { $regex: /^ta_demo_/ } } }).select('id teacherId classId subjectId streamId').lean(),
+    ]);
+    const shadowedByOther = new Set(otherRows.map(identityOf));
+    const staleIds = seedRows
+      .filter(r => !wanted.has(identityOf(r)) || shadowedByOther.has(identityOf(r)))
+      .map(r => r.id);
+    if (staleIds.length) {
+      await TeachingAssignments.deleteMany({ schoolId: SCHOOL_ID, id: { $in: staleIds } });
+    }
+    await Promise.all([...assignmentRows.entries()].map(([key, a]) =>
+      /* Match on the assignment's own identity — teacher + class + subject +
+         stream, the exact tuple POST /api/teaching-assignments rejects a
+         second copy of — not on the seed's synthetic id. A school that already
+         assigned this teacher through the web UI holds a rich row for this
+         tuple whose id the seed cannot know; matching on id inserted a second
+         row beside it, and GET /api/lessons/my-classes maps every row, so the
+         teacher saw the same class twice — once named, once blank. */
+      TeachingAssignments.updateOne(
+        { schoolId: SCHOOL_ID, teacherId: a.teacherId, classId: a.classId, subjectId: a.subjectId, streamId: null },
+        { $set: { ...a, schoolId: SCHOOL_ID, updatedAt: nowISO },
+          $setOnInsert: { id: `ta_demo_${key}`, createdBy: ADMIN_ID, createdAt: nowISO } },
+        { upsert: true, timestamps: false }
+      )
+    ));
+
+    /* 7h2. Re-assert each slot's teacher from the constants above.
+       The insert-only `upsert()` never touches a row that already exists, so
+       changing a slot's `teacherId` here had no effect on a database seeded
+       before the change — that is how teacher@demo.msingi.io ended up with no
+       maths slots at all. The draft must agree with the constants before the
+       publish below copies it. */
+    await Promise.all(
+      TIMETABLES.flatMap(([classId, slots]) =>
+        slots.map(slot =>
+          _model('timetable').updateOne(
+            { schoolId: SCHOOL_ID, classId, day: slot.day, period: slot.period },
+            { $set: { teacherId: slot.teacherId } }
+          )
+        )
+      )
+    );
+
+    /* 7i. Publish the demo timetable. Non-editors read `timetable_published`
+       (one live version), never the draft, so without this the teacher
+       "Today" widgets, My Routine, and the student/parent timetables all read
+       empty in the demo. Rebuilt each run against one fixed version id. */
+    const PUB_VERSION = 'ttv_demo_seed';
+    const PublishedTimetable = _model('timetable_published');
+    const draftSlots = await _model('timetable').find({ schoolId: SCHOOL_ID, isActive: true }).lean();
+    await PublishedTimetable.deleteMany({ schoolId: SCHOOL_ID });
+    if (draftSlots.length) {
+      await PublishedTimetable.insertMany(
+        draftSlots.map(({ _id, __v, ...slot }) => ({ ...slot, schoolId: SCHOOL_ID, versionId: PUB_VERSION })),
+        { ordered: false }
+      );
+    }
+    await _model('schools').updateOne({ id: SCHOOL_ID }, {
+      $set: {
+        'timetableStatus.published':          true,
+        'timetableStatus.publishedAt':        nowISO,
+        'timetableStatus.publishedBy':        ADMIN_ID,
+        'timetableStatus.termLabel':          'Term 2',
+        'timetableStatus.publishedVersionId': PUB_VERSION,
+        'timetableStatus.draftRevision':      0,
+        'timetableStatus.publishedRevision':  0,
+      },
+    });
+
     /* 8. Invoices + payments */
     const term  = 'Term 2';
     const yearS = String(YEAR);
@@ -1270,6 +1408,7 @@ async function seedDemoData() {
       /* Payment record only if something was paid */
       if (s.paid > 0) {
         const rcpNum = `RCP-${YEAR}-${String(idx + 1).padStart(6, '0')}`;
+        const paidOn = d(crypto.randomInt(1, 31));
         await upsert(Payment, `pay_demo_${s.id}`, {
           invoiceId:     invId,
           studentId:     s.id,
@@ -1277,7 +1416,13 @@ async function seedDemoData() {
           amount:        s.paid,
           method:        ['mpesa', 'bank_transfer', 'cash', 'cheque'][idx % 4],
           receiptNumber: rcpNum,
-          date:          d(crypto.randomInt(1, 31)),
+          date:          paidOn,
+          // Every read path sorts or date-filters on paidAt (GET /finance/payments,
+          // the parent portal's recent payments, the collection-over-period
+          // summary) — a receipt with only `date` sorts as if it were missing and
+          // falls off the end of a date-ranged query. Real writes set it in
+          // finance.js POST /payments; the seed has to match.
+          paidAt:        paidOn,
           note:          'Term 2 fees payment',
           createdBy:     ADMIN_ID,
         });
@@ -1419,6 +1564,14 @@ async function seedDemoData() {
     /* 19. Transport — routes + assignments */
     const TrRoute  = _model('transport_routes');
     const TrAssign = _model('transport_assignments');
+    const TrVehicle = _model('transport_vehicles');
+    const TrDriver  = _model('transport_drivers');
+    await Promise.all(TRANSPORT_VEHICLES.map(v =>
+      upsert(TrVehicle, v.id, { ...v, createdBy: ADMIN_ID, createdAt: nowISO, updatedAt: nowISO })
+    ));
+    await Promise.all(TRANSPORT_DRIVERS.map(d =>
+      upsert(TrDriver, d.id, { ...d, createdBy: ADMIN_ID, createdAt: nowISO, updatedAt: nowISO })
+    ));
     await Promise.all(TRANSPORT_ROUTES.map(r =>
       upsert(TrRoute, r.id, { ...r, status:'active', createdBy: ADMIN_ID, createdAt: nowISO, updatedAt: nowISO })
     ));
@@ -1494,7 +1647,7 @@ async function seedDemoData() {
        the 9 classes can generate and be reviewed end to end. */
     await seedReportCardReviewData();
 
-    console.log('[seed-demo-data] ✓ 9 classes · 6 departments · 18 subjects · 10 teacher profiles · 9 teacher users · 26 students · 25 behaviour · 20 invoices · 14 payments · 205 timetable slots (7 classes) · 8 admissions · 10 events · 20 payroll (Apr+May) · 4 leave · 96 class-subjects · ' + enrollmentDocs.length + ' enrollments · 4 subject-rules · 12 library books · 8 loans · 3 transport routes · 8 transport assignments · 2 hostels · 6 rooms · 6 hostel residents · 4 student portal + 4 parent portal accounts · report-card scales + marks + attendance for 9 classes');
+    console.log('[seed-demo-data] ✓ 9 classes · 6 departments · 18 subjects · 10 teacher profiles · 9 teacher users · 26 students · 25 behaviour · 20 invoices · 14 payments · 205 timetable slots (7 classes) · ' + assignmentRows.size + ' teaching assignments · 8 admissions · 10 events · 20 payroll (Apr+May) · 4 leave · 96 class-subjects · ' + enrollmentDocs.length + ' enrollments · 4 subject-rules · 12 library books · 8 loans · 3 transport routes · 8 transport assignments · 2 hostels · 6 rooms · 6 hostel residents · 4 student portal + 4 parent portal accounts · report-card scales + marks + attendance for 9 classes');
 
   } catch (err) {
     console.warn('[seed-demo-data] Warning:', err.stack || err.message);

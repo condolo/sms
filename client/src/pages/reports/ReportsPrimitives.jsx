@@ -49,13 +49,21 @@ export function Card({ title, children, action }) {
   );
 }
 
-export function ChartTip({ active, payload, label }) {
+/**
+ * ChartTip — the tooltip every reports chart shares.
+ * `format(value, entry)` is optional: callers that plot money, percentages or
+ * counts pass one so the tooltip says "KSh 884K" / "83%" rather than the raw
+ * number the axis is drawn from. Omitted, it prints the plain value as before.
+ */
+export function ChartTip({ active, payload, label, format }) {
   if (!active || !payload?.length) return null;
   return (
     <div className="bg-slate-900 text-white text-xs rounded-lg px-3 py-2 shadow-xl">
       {label && <p className="font-medium mb-1">{label}</p>}
       {payload.map((p, i) => (
-        <p key={i} className="text-slate-300">{p.name}: <span className="text-white font-semibold">{p.value?.toLocaleString()}</span></p>
+        <p key={i} className="text-slate-300">{p.name}: <span className="text-white font-semibold">{
+          format ? format(p.value, p) : p.value?.toLocaleString()
+        }</span></p>
       ))}
     </div>
   );

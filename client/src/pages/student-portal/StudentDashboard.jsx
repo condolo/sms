@@ -6,13 +6,13 @@
  * Sidebar becomes an off-canvas drawer below the lg breakpoint.
  * Data: all fetched from /api/student-portal/dashboard (unchanged).
  */
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import useAuthStore from '@/store/auth.js';
 import { useSchoolTheme } from '@/hooks/useSchoolTheme.js';
 import {
-  LayoutDashboard, Calendar, BookCheck, CheckCircle, Clock,
+  LayoutDashboard, Calendar, BookCheck, Bus, CheckCircle, Clock,
   Download, GraduationCap, LogOut, AlertCircle,
   BookOpen, Lock, Bell, MessageSquare, Activity, Star,
   MapPin, Play, MonitorPlay, CalendarCheck, Menu, X, LifeBuoy,
@@ -20,7 +20,8 @@ import {
 } from 'lucide-react';
 import NotificationBell from '@/components/layout/NotificationBell.jsx';
 import FloatingHelp from '@/components/help/FloatingHelp.jsx';
-import { auth as authApi } from '@/api/client.js';
+import TransportRideCard from '@/components/transport/TransportRideCard.jsx';
+import { auth as authApi, studentPortalApi } from '@/api/client.js';
 
 /* ── API ────────────────────────────────────────────────────────── */
 const API_BASE = import.meta.env.VITE_API_BASE || '';
@@ -104,6 +105,9 @@ const MY_SPACE_NAV = [
   { id: 'section-attendance',  label: 'Attendance',   Icon: Activity        },
   { id: 'section-messages',    label: 'Messages',     Icon: MessageSquare   },
 ];
+/* Shown only to a student who actually rides: a nav item that scrolls to an
+   empty "no transport" card is noise on a dashboard. */
+const TRANSPORT_NAV = { id: 'section-transport', label: 'Transport', Icon: Bus };
 const LEARNING_NAV = [
   { id: 'section-lessons',     label: 'Lesson Notes', Icon: BookOpen      },
   { id: 'section-exams',       label: 'Exams',        Icon: CalendarCheck },
@@ -248,6 +252,17 @@ export default function StudentDashboard() {
   const [downloading, setDownloading] = useState(null);
   const [dlError,     setDlError]     = useState('');
   const [latestWeek,  setLatestWeek]  = useState(null); // most recent Weekly Snapshot, or undefined if none generated yet
+  // The dashboard payload carries only the next 4 exams — a glance, not a
+  // list. GET /student-portal/exams is the wider read (a real window, up to
+  // 200 rows), fetched on demand when the student asks to see them all.
+  const [allExams,     setAllExams]     = useState(null);
+  const [examsLoading, setExamsLoading] = useState(false);
+  const [examsError,   setExamsError]   = useState('');
+  // The bus this student rides. Its own read (the dashboard payload does not
+  // carry transport), and the section only exists once we know there is a ride.
+  const [ride,         setRide]         = useState(null);
+  const [rideLoading,  setRideLoading]  = useState(false);
+  const [rideError,    setRideError]    = useState('');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   // Self-service password change — see ChangePasswordModal's own comment above.
@@ -298,19 +313,62 @@ export default function StudentDashboard() {
     _fetch('/api/student-portal/weekly-snapshot/weeks')
       .then(({ weeks }) => setLatestWeek(weeks?.[0] ?? undefined))
       .catch(() => setLatestWeek(undefined));
+    // The bus this student rides — its own endpoint (the dashboard payload does
+    // not carry transport). A failure leaves the section hidden; a dashboard is
+    // no place for a red box about a bus.
+    setRideLoading(true);
+    studentPortalApi.transport()
+      .then(r => { setRide(r?.data ?? null); setRideError(''); })
+      .catch(err => {
+        setRide(null);
+        if (err?.code === 'auth_expired') { logout(); navigate('/login', { replace: true }); return; }
+        setRideError(err?.message || 'Transport details could not be loaded.');
+      })
+      .finally(() => setRideLoading(false));
   }, []);
+
+  /* ── "See all exams" ──     One request for the whole window, not a second dashboard payload: the
+     route clamps to 120 days and 200 rows itself, so the client asks plainly
+     and shows whatever comes back. Collapsing restores the dashboard's 4. */
+  async function loadAllExams() {
+    setExamsLoading(true);
+    setExamsError('');
+    try {
+      const from = new Date().toISOString().slice(0, 10);
+      const to = new Date(Date.now() + 120 * 86400000).toISOString().slice(0, 10);
+      const res = await studentPortalApi.exams({ from, to });
+      setAllExams(Array.isArray(res?.data) ? res.data : []);
+    } catch (err) {
+      setExamsError(err?.message || 'Could not load the full exam list.');
+    } finally {
+      setExamsLoading(false);
+    }
+  }
+
+  function toggleAllExams() {
+    if (allExams) { setAllExams(null); setExamsError(''); return; }
+    loadAllExams();
+  }
 
   /* ── Scroll to section helper ──
      scrollIntoView (not el.offsetTop math) — robust regardless of any
      transformed/positioned ancestor between the anchor and mainRef, and
      regardless of the topbar's height offsetting main from the document
      origin. See ParentDashboard.jsx's scrollToSection for the full story. */
-  function scrollToSection(sectionId) {
-    setActiveNav(sectionId);
+  function scrollToSection(sectionId) {    setActiveNav(sectionId);
     setMobileNavOpen(false);
     const el = document.getElementById(sectionId);
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
+
+  /* The sidebar (and the scroll-spy below) gain a Transport entry only when
+     there is a ride to show — see TRANSPORT_NAV. Declared BEFORE the spy,
+     which lists it in its dependency array. */
+  const hasRide  = (ride?.assignments ?? []).length > 0;
+  const mySpaceNav = useMemo(
+    () => (hasRide ? [...MY_SPACE_NAV, TRANSPORT_NAV] : MY_SPACE_NAV),
+    [hasRide],
+  );
 
   /* ── Scroll-spy — keep the sidebar highlight in sync with the section
      actually in view. Without this the highlight went stale the moment a
@@ -324,7 +382,7 @@ export default function StudentDashboard() {
   useEffect(() => {
     const main = mainRef.current;
     if (!main) return;
-    const ids = [...MY_SPACE_NAV, ...LEARNING_NAV].map(n => n.id);
+    const ids = [...mySpaceNav, ...LEARNING_NAV].map(n => n.id);
 
     function onScroll() {
       const mainTop = main.getBoundingClientRect().top;
@@ -346,7 +404,7 @@ export default function StudentDashboard() {
 
     main.addEventListener('scroll', onScroll, { passive: true });
     return () => main.removeEventListener('scroll', onScroll);
-  }, [data]);
+  }, [data, mySpaceNav]);
 
   /* ── Loading state ── */
   if (loading) return (
@@ -485,7 +543,7 @@ export default function StudentDashboard() {
             My Space
           </p>
 
-          {MY_SPACE_NAV.map(({ id, label, Icon }) => (
+          {mySpaceNav.map(({ id, label, Icon }) => (
             <button
               key={id}
               id={`nav-btn-${id}`}
@@ -658,7 +716,7 @@ export default function StudentDashboard() {
               subHighlight={null}
               sub={
                 upcomingExams?.[0]
-                  ? `Next: ${upcomingExams[0].subjectName} · ${_weekday(upcomingExams[0].date)}`
+                  ? `Next: ${upcomingExams[0].subjectName ?? upcomingExams[0].title ?? 'Exam'} · ${_weekday(upcomingExams[0].date)}${upcomingExams[0].venue ? ` · ${upcomingExams[0].venue}` : ''}`
                   : 'None scheduled'
               }
             />
@@ -944,28 +1002,65 @@ export default function StudentDashboard() {
               {/* Upcoming Exams — id matches the sidebar's "Exams" nav item
                   (was section-assignments, which mislabelled this card). */}
               <div id="section-exams" className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden">
-                <div className="px-[18px] py-3.5 border-b border-slate-100 flex items-center justify-between">
+                <div className="px-[18px] py-3.5 border-b border-slate-100 flex items-center justify-between gap-2">
                   <h2 className="text-[13px] font-bold text-slate-900">Upcoming Exams</h2>
-                  {upcomingExams?.length > 0 && (
-                    <span
-                      id="exams-count-badge"
-                      className="text-[11px] font-semibold text-amber-600 bg-amber-50 px-2.5 py-[5px] rounded-full"
+                  <div className="flex items-center gap-2">
+                    {upcomingExams?.length > 0 && (
+                      <span
+                        id="exams-count-badge"
+                        className="text-[11px] font-semibold text-amber-600 bg-amber-50 px-2.5 py-[5px] rounded-full"
+                      >
+                        {allExams ? `${allExams.length} ahead` : `${upcomingExams.length} scheduled`}
+                      </span>
+                    )}
+                    {/* The card shows the next 4; this opens the real window
+                        (up to 120 days) from GET /student-portal/exams. */}
+                    <button
+                      id="exams-view-all"
+                      type="button"
+                      onClick={toggleAllExams}
+                      disabled={examsLoading}
+                      className="text-[11px] font-semibold text-blue-600 hover:text-blue-800 disabled:opacity-50 inline-flex items-center gap-1"
                     >
-                      {upcomingExams.length} scheduled
-                    </span>
-                  )}
+                      {examsLoading
+                        ? <><Loader2 size={11} className="animate-spin" /> Loading…</>
+                        : allExams ? 'Show fewer' : 'View all'}
+                    </button>
+                  </div>
                 </div>
 
                 <div id="exams-list" className="px-[18px] py-3.5">
-                  {!upcomingExams?.length ? (
-                    <p id="exams-empty" className="text-[12px] text-slate-400 text-center py-4">
-                      No upcoming exams
+                  {examsError && (
+                    <p className="mb-2 flex items-center gap-1 text-[11px] text-rose-600">
+                      <AlertCircle size={11} /> {examsError}
                     </p>
-                  ) : (
+                  )}
+                  {allExams && (
+                    <p className="mb-2 text-[10px] text-slate-400">
+                      Showing every exam in the next 120 days.
+                    </p>
+                  )}
+                  {(() => {
+                    const examsToShow = allExams ?? upcomingExams ?? [];
+                    const isUpcoming   = !allExams;
+                    if (!examsToShow.length) {
+                      return (
+                        <p id="exams-empty" className="text-[12px] text-slate-400 text-center py-4">
+                          {isUpcoming ? 'No upcoming exams' : 'No exams in the next 120 days'}
+                        </p>
+                      );
+                    }
+                    return (
                     <div className="space-y-3.5">
-                      {upcomingExams.map((ex, i) => {
-                        const days = _daysUntil(ex.date);
+                      {examsToShow.map((ex, i) => {
+                        const days = ex.daysUntil ?? _daysUntil(ex.date);
                         const dotColor = days === 0 ? '#ef4444' : days != null && days <= 3 ? '#f59e0b' : '#22c55e';
+                        const topics = Array.isArray(ex.topics)
+                          ? ex.topics.filter(Boolean)
+                          : (typeof ex.topics === 'string' && ex.topics.trim()
+                            ? ex.topics.split(',').map(t => t.trim()).filter(Boolean)
+                            : []);
+                        const heading = ex.title || ex.subjectName || 'Exam';
                         return (
                           <div
                             key={`exam-${ex.id ?? i}`}
@@ -977,7 +1072,24 @@ export default function StudentDashboard() {
                               style={{ background: dotColor }}
                             />
                             <div className="flex-1 min-w-0">
-                              <p className="text-[12px] font-semibold text-slate-800">{ex.subjectName}</p>
+                              <div className="flex items-start justify-between gap-2">
+                                <p className="text-[12px] font-semibold text-slate-800 truncate">{heading}</p>
+                                <div className="flex shrink-0 items-center gap-1">
+                                  {ex.status === 'in_progress' && (
+                                    <span className="rounded-full bg-amber-50 px-2 py-[2px] text-[9px] font-bold uppercase tracking-wide text-amber-700">
+                                      In progress
+                                    </span>
+                                  )}
+                                  {ex.type && (
+                                    <span className="rounded-full bg-slate-100 px-2 py-[2px] text-[9px] font-semibold uppercase tracking-wide text-slate-500">
+                                      {ex.type}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              {ex.title && ex.subjectName && ex.title !== ex.subjectName && (
+                                <p className="text-[11px] text-slate-500 mt-0.5">{ex.subjectName}</p>
+                              )}
                               <p className="text-[11px] text-slate-400 mt-0.5">
                                 {_weekday(ex.date)}, {_fmtDate(ex.date)}
                                 {days === 0
@@ -987,17 +1099,57 @@ export default function StudentDashboard() {
                                   : days != null
                                   ? ` · ${days} days left`
                                   : ''}
-                                {ex.type ? ` · ${ex.type}` : ''}
-                                {ex.startTime ? ` · ${ex.startTime}` : ''}
+                                {ex.startTime ? ` · ${ex.startTime}${ex.endTime ? `–${ex.endTime}` : ''}` : ''}
                               </p>
+                              {(ex.venue || ex.durationMinutes) && (
+                                <p className="text-[11px] text-slate-400 mt-0.5">
+                                  {ex.venue ? `Venue: ${ex.venue}` : ''}
+                                  {ex.venue && ex.durationMinutes ? ' · ' : ''}
+                                  {ex.durationMinutes ? `${ex.durationMinutes} min` : ''}
+                                </p>
+                              )}
+                              {topics.length > 0 && (
+                                <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                                  {topics.slice(0, 4).map(topic => (
+                                    <span
+                                      key={topic}
+                                      className="rounded-full border border-slate-200 bg-slate-50 px-2 py-[2px] text-[10px] text-slate-500"
+                                    >
+                                      {topic}
+                                    </span>
+                                  ))}
+                                  {topics.length > 4 && (
+                                    <span className="text-[10px] text-slate-400">+{topics.length - 4} more</span>
+                                  )}
+                                </div>
+                              )}
+                              {ex.instructions && (
+                                <p className="mt-1 line-clamp-2 text-[11px] italic text-slate-400">
+                                  {ex.instructions}
+                                </p>
+                              )}
                             </div>
                           </div>
                         );
                       })}
                     </div>
-                  )}
+                    );
+                  })()}
                 </div>
               </div>
+
+              {/* The bus this student rides — only for a student who rides one. */}
+              {hasRide && (
+                <div id="section-transport">
+                  <TransportRideCard
+                    assignments={ride?.assignments ?? []}
+                    loading={rideLoading}
+                    error={rideError}
+                    emptyMessage="No school transport is on file for you. The school office can add you to a route."
+                    title="My Transport"
+                  />
+                </div>
+              )}
 
               {/* Borrowed Books */}
               <div id="section-library" className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden">

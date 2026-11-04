@@ -36,7 +36,7 @@ const { PURCHASE_ORIGINS } = require('../utils/purchase-origin');
 const {
   reserveFreeAdmissionNumbers,
   reserveStaffIds,
-  reserveInvoiceNumbers,
+  reserveFreeInvoiceNumbers,
 } = require('../utils/counters');
 const { ok, fail, E }         = require('../utils/response');
 const { provisionIdentityForUser } = require('../utils/provision-identities');
@@ -868,9 +868,16 @@ async function _importStudents(rows, schoolId, userId, req) {
     .filter(({ idx, r }) => !failedStudentIndices.has(idx) && r.openingFeeAmount?.trim());
 
   if (feeRows.length > 0) {
-    const invoiceNums = await reserveInvoiceNumbers(schoolId, feeRows.length);
     const Invoices    = tenantModel('invoices', { schoolId });
     const Payments    = tenantModel('payments', { schoolId });
+    // Opening balances are filed with server-generated numbers but never
+    // advance the invoice counter, so the counter can already be sitting
+    // behind a number one of these rows would take — the same drift the
+    // admission-number walk fixes. Check against every number this school
+    // already holds, same as the student rows above.
+    const knownInvNos = new Set((await Invoices.find({ schoolId }).select('invoiceNumber').lean())
+      .map(i => i.invoiceNumber?.trim()).filter(Boolean));
+    const invoiceNums = await reserveFreeInvoiceNumbers(schoolId, feeRows.length, n => knownInvNos.has(n));
     const now         = new Date().toISOString();
 
     const invoiceDocs = [];
@@ -1783,9 +1790,14 @@ async function _importFinance(rows, schoolId, userId, req) {
     validRows.push({ r, row, unitPrice: _round(amount), paidAmount: _round(paidAmount), student });
   }
 
-  // Reserve all invoice numbers in one atomic DB call
+  // Reserve all invoice numbers in one atomic DB call, skipping any this
+  // school already holds — imported historical balances never advanced the
+  // counter, so it can be pointing at a number a real invoice is using.
+  const knownInvNos = new Set((await Invoices.find({ schoolId }).select('invoiceNumber').lean())
+    .map(i => i.invoiceNumber?.trim()).filter(Boolean));
   const invoiceNumbers = validRows.length > 0
-    ? await reserveInvoiceNumbers(schoolId, validRows.length)
+    ? await reserveFreeInvoiceNumbers(schoolId, validRows.length,
+        n => knownInvNos.has(n))
     : [];
 
   // Cross-module import audit (2026-08) — same two deliberate differences

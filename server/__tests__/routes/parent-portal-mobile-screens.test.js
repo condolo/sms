@@ -82,6 +82,13 @@ function valueMatches(docVal, cond) {
         ? docVal.some((v) => cond.$in.includes(v))
         : cond.$in.includes(docVal);
     }
+    if ('$regex' in cond) {
+      // Mongo tests an array field element-wise; the notice-board audience
+      // clause relies on that to cover ['parents'] and 'parents' alike.
+      const re = new RegExp(cond.$regex, cond.$options || '');
+      const test = (x) => typeof x === 'string' && re.test(x);
+      return Array.isArray(docVal) ? docVal.some(test) : test(docVal);
+    }
     if ('$ne' in cond) return docVal !== cond.$ne;
     if ('$exists' in cond) return cond.$exists ? docVal !== undefined : docVal === undefined;
     if ('$gte' in cond || '$lte' in cond) {
@@ -100,7 +107,8 @@ function valueMatches(docVal, cond) {
 
 function matchesFilter(doc, filter) {
   return Object.entries(filter || {}).every(([key, cond]) => {
-    if (key === '$or') return cond.some((sub) => matchesFilter(doc, sub));
+    if (key === '$or')  return cond.some((sub) => matchesFilter(doc, sub));
+    if (key === '$and') return cond.every((sub) => matchesFilter(doc, sub));
     return valueMatches(doc[key], cond);
   });
 }
@@ -327,6 +335,27 @@ describe('GET /api/parent-portal/notices', () => {
   test('a notice with no audience is for everyone — absence is not "staff only"', async () => {
     const res = await supertest(buildApp()).get('/api/parent-portal/notices');
     expect(res.body.data.notices.map((n) => n.id)).toContain('an_2');
+  });
+
+  test('the cut is per portal: a students-only post is not a parent\'s either', async () => {
+    mockCollections.announcements._seed.push(
+      { id: 'an_5', schoolId: SCHOOL, title: 'Uniform inspection', body: 'Students only.', createdAt: '2026-10-16', priority: 'normal', audience: ['students'] },
+    );
+    const res = await supertest(buildApp()).get('/api/parent-portal/notices');
+    const titles = res.body.data.notices.map((n) => n.title);
+    expect(titles).not.toContain('Uniform inspection');
+    expect(titles).toContain('Parents meeting');       // 'parents' still passes
+    expect(titles).toContain('Fee reminder');          // no audience still passes
+  });
+
+  test('a hand-written synonym survives the move from the JS filter into the query', async () => {
+    mockCollections.announcements._seed.push(
+      { id: 'an_6', schoolId: SCHOOL, title: 'PTA AGM', body: 'Guardians welcome.', createdAt: '2026-10-15', priority: 'normal', audience: ['Guardians'] },
+      { id: 'an_7', schoolId: SCHOOL, title: 'Family open day', body: 'Bring the family.', createdAt: '2026-10-14', priority: 'normal', audience: 'family' },
+    );
+    const res = await supertest(buildApp()).get('/api/parent-portal/notices');
+    const titles = res.body.data.notices.map((n) => n.title);
+    expect(titles).toEqual(expect.arrayContaining(['PTA AGM', 'Family open day']));
   });
 });
 

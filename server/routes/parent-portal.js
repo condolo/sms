@@ -37,6 +37,9 @@ const AuditService = require('../services/audit');
 const { _helpers: weeklySnapshotHelpers } = require('./weekly-snapshots');
 const { resolveMessageCategories, resolveOneCategory } = require('../utils/parent-message-recipients');
 const { recipientSummary } = require('../utils/message-audience');
+const { audienceClause } = require('../utils/announcement-audience');
+const { messageExtras } = require('../utils/message-extras');
+const { transportRidesFor } = require('../utils/transport-ride');
 const { createDirectMessage } = require('./messages');
 
 const router = express.Router();
@@ -415,7 +418,14 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
         : [],
       Announcements.find({
         schoolId,
-        $or: [{ expiresAt: { $gte: new Date() } }, { expiresAt: { $exists: false } }, { expiresAt: null }],
+        $and: [
+          { $or: [{ expiresAt: { $gte: new Date() } }, { expiresAt: { $exists: false } }, { expiresAt: null }] },
+          // Same clause as GET /notices below: an announcement addressed to
+          // staff must not reach a parent's dashboard either, and the limit(3)
+          // is applied after the filter so the three shown are three visible
+          // posts rather than three posts minus the staff-only ones.
+          audienceClause('parents'),
+        ],
       }).sort({ createdAt: -1 }).limit(3)
         .select('title body createdAt priority').lean()
         .catch(() => []),
@@ -820,7 +830,13 @@ router.get('/notices', authMiddleware, PLAN, async (req, res) => {
     const [announcements, events] = await Promise.all([
       Announcements.find({
         schoolId,
-        $or: [{ expiresAt: { $gte: new Date() } }, { expiresAt: { $exists: false } }, { expiresAt: null }],
+        $and: [
+          { $or: [{ expiresAt: { $gte: new Date() } }, { expiresAt: { $exists: false } }, { expiresAt: null }] },
+          // An announcement addressed to staff only must not appear in a
+          // parent's board. In the query, so the `limit` below counts visible
+          // posts — see utils/announcement-audience.js.
+          audienceClause('parents'),
+        ],
       }).sort({ priority: -1, createdAt: -1 }).limit(limit)
         .select('id title body createdAt priority expiresAt category type audience')
         .lean().catch(() => []),
@@ -830,15 +846,6 @@ router.get('/notices', authMiddleware, PLAN, async (req, res) => {
         .lean().catch(() => []),
     ]);
 
-    // An announcement addressed to staff only must not appear in a parent's
-    // board. `audience` is optional in the collection, so absence = everyone.
-    const forParents = (a) => {
-      const aud = a.audience;
-      if (!aud) return true;
-      const list = Array.isArray(aud) ? aud : [aud];
-      return list.some(v => ['all', 'parents', 'guardians', 'family'].includes(String(v).toLowerCase()));
-    };
-
     // "Money" notices are the board's amber card that jumps to Fees. Derived
     // from an explicit category when the school sets one, and otherwise from
     // the wording — never from a hard-coded id, so a new fee notice works the
@@ -846,7 +853,7 @@ router.get('/notices', authMiddleware, PLAN, async (req, res) => {
     const MONEY_RE = /\b(fee|fees|invoice|balance|payment|payments|mpesa|m-pesa|arrears|outstanding)\b/i;
 
     return ok(res, {
-      notices: announcements.filter(forParents).map(a => {
+      notices: announcements.map(a => {
         const category = String(a.category || a.type || '').toLowerCase();
         return {
           id: a.id,
@@ -999,6 +1006,38 @@ router.get('/receipts/:paymentId', authMiddleware, PLAN, async (req, res) => {
   }
 });
 
+/* ── Parent transport: the bus this child rides ─────────────────── */
+
+/*
+   Parents ask transport one question: where do I stand, and when. The answer is
+   already filed — the assignment holds the stop and the direction, the route
+   holds the vehicle, the driver and the times — so the join itself lives in
+   utils/transport-ride.js, shared with the student portal's own read so the two
+   faces cannot disagree about the same child. This route adds only what is
+   parent-specific: the child guard.
+
+   Two things it deliberately does not pretend (stated in full on the util):
+   live tracking does not exist in this data, and a deleted route is reported as
+   missing rather than as a run with empty times.
+
+   The driver's number IS returned. Calling the driver is the reason a parent
+   opens this screen at all; withholding it turns the screen into a timetable
+   nobody reads. A school that wants it hidden wants a setting, not a rewrite.
+*/
+router.get('/transport/:childId', authMiddleware, PLAN, async (req, res) => {
+  if (!_requireParent(req, res)) return;
+  try {
+    const childId = req.params.childId;
+    if (_unlinked(req, res, childId)) return;
+
+    const { student, assignments } = await transportRidesFor(req, childId);
+    return ok(res, { child: student, assignments });
+  } catch (err) {
+    console.error('[parent-portal GET /transport/:childId]', err);
+    return E.serverError(res);
+  }
+});
+
 /* ── Screens 11 & 12: inbox and one conversation ───────────────── */
 
 /* The messages collection has no thread document — a "thread" is the pair
@@ -1111,7 +1150,7 @@ router.get('/threads/:counterpartUserId', authMiddleware, PLAN, async (req, res)
         { senderId: counterpartUserId, ..._inboxQuery({ schoolId, userId, role }) },
       ],
     }).sort({ createdAt: 1 }).limit(300)
-      .select('id senderId senderName senderRole subject body isRead createdAt recipients groupId groupName')
+      .select('id senderId senderName senderRole subject body isRead createdAt recipients groupId groupName kind dueAt context attachment poll')
       .lean();
 
     // Opening a conversation IS reading it — the same single write the web
@@ -1143,6 +1182,8 @@ router.get('/threads/:counterpartUserId', authMiddleware, PLAN, async (req, res)
            same claim as "the group read it", so the app has to know the
            difference rather than showing one person's tick as everyone's. */
         ...recipientSummary(m),
+        // kind/due/context/attachment plus the poll as THIS parent sees it.
+        ...messageExtras(m, userId),
         // Two different questions, and conflating them is how an app ends up
         // telling a parent their message was read when nobody opened it:
         //   - my own message → has the OTHER person read it?

@@ -5,12 +5,20 @@
    Collections:
      transport_routes      — route definitions (bus runs)
      transport_assignments — student ↔ route assignments
+     transport_vehicles    — the fleet (registration, type, capacity,
+                             insurance/inspection dates, status)
+     transport_drivers     — the people who drive it (licence, expiry, status)
+
+   A route may point at a fleet vehicle and a driver (`vehicleId` / `driverId`).
+   When it does, the server copies the display fields onto the route
+   (vehicleReg, vehicleType, capacity, driverName, driverPhone) and keeps them
+   in step when the vehicle or driver is edited. That denormalisation is
+   deliberate: the parent and student portal cards read the route alone, and a
+   portal read should never depend on a second collection being reachable.
 
    Plan:  standard | RBAC: rbac('transport', action, subKey) — 'manage' for
-          route writes, 'assign' for assignment writes, 'delete' for route
-          deletes. Every role with transport:read (the school-wide default)
-          can browse routes and their own assignment; only a role with
-          assignment-management access sees every student's assignment.
+          route/vehicle/driver writes, 'assign' for assignment writes, 'delete'
+          for deletes.
    ============================================================ */
 const express        = require('express');
 const { z }          = require('zod');
@@ -37,6 +45,12 @@ const RouteSchema = z.object({
   stops:         z.array(z.string().max(200).trim()).optional().default([]),
   departureTime: z.string().max(10).trim().optional().default(''),   // e.g. "06:30"
   arrivalTime:   z.string().max(10).trim().optional().default(''),
+  // The fleet vehicle and driver this run uses. When either is given, the
+  // server fills the display fields below from the record — a client cannot
+  // name its own bus. Both are optional so a school with nothing registered
+  // yet can still describe a run in words.
+  vehicleId:     z.string().max(60).trim().optional().default(''),
+  driverId:      z.string().max(60).trim().optional().default(''),
   vehicleType:   z.enum(['bus', 'van', 'matatu', 'other']).optional().default('bus'),
   vehicleReg:    z.string().max(20).trim().optional().default(''),
   driverName:    z.string().max(200).trim().optional().default(''),
@@ -74,6 +88,291 @@ function _validate(schema, data) {
   if (!r.success) return { error: r.error.issues.map(i => ({ field: i.path.join('.'), message: i.message })) };
   return { data: r.data };
 }
+
+/* A date the office may not know yet arrives as '' from a date input, and must
+   not be stored as an empty string — a blank is "not on file", and only null
+   says that unambiguously to every reader. */
+const _dateField = z.union([z.literal(''), z.null(), z.string().regex(/^\d{4}-\d{2}-\d{2}$/)]).optional();
+const _dateOrNull = (v) => (v ? v : null);
+
+/* ── Fleet: the vehicles a school runs ────────────────────────── */
+const VehicleSchema = z.object({
+  registration:     z.string().min(1).max(20).trim(),
+  vehicleType:      z.enum(['bus', 'van', 'matatu', 'other']).optional().default('bus'),
+  make:             z.string().max(60).trim().optional().default(''),
+  model:            z.string().max(60).trim().optional().default(''),
+  year:             z.coerce.number().int().min(1950).max(2100).optional().nullable(),
+  capacity:         z.coerce.number().int().min(1).max(200).optional().nullable(),
+  ownership:        z.enum(['owned', 'hired']).optional().default('owned'),
+  status:           z.enum(['active', 'maintenance', 'retired']).optional().default('active'),
+  insuranceExpiry:  _dateField,
+  inspectionExpiry: _dateField,
+  notes:            z.string().max(300).trim().optional().default(''),
+});
+
+/* ── Drivers ──────────────────────────────────────────────────── */
+const DriverSchema = z.object({
+  name:          z.string().min(1).max(200).trim(),
+  phone:         z.string().max(30).trim().optional().default(''),
+  licenceNumber: z.string().max(40).trim().optional().default(''),
+  licenceExpiry: _dateField,
+  status:        z.enum(['active', 'suspended', 'left']).optional().default('active'),
+  notes:         z.string().max(300).trim().optional().default(''),
+});
+
+/* ══════════════════════════════════════════════════════════════
+   FLEET — the vehicles
+   ══════════════════════════════════════════════════════════════ */
+
+/* Which routes each vehicle/driver is on, in one read for the whole page —
+   a per-row lookup would be one query per vehicle. */
+async function _routeLinksFor(req) {
+  const { schoolId } = req.jwtUser;
+  const rows = await tenantModel('transport_routes', tenantContext(req))
+    .find({ schoolId }).select('id name vehicleId driverId').lean().catch(() => []);
+  const byVehicle = new Map();
+  const byDriver  = new Map();
+  for (const r of rows) {
+    const ref = { id: r.id, name: r.name };
+    if (r.vehicleId) byVehicle.set(r.vehicleId, [...(byVehicle.get(r.vehicleId) ?? []), ref]);
+    if (r.driverId)  byDriver.set(r.driverId,  [...(byDriver.get(r.driverId)  ?? []), ref]);
+  }
+  return { byVehicle, byDriver };
+}
+
+/* GET /api/transport/vehicles */
+router.get('/vehicles', rbac('transport', 'read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const { page, limit, skip } = parsePagination(req.query);
+    const { q, status } = req.query;
+
+    const filter = { schoolId };
+    if (status) filter.status = status;
+    if (q) {
+      const re = new RegExp(q.trim(), 'i');
+      filter.$or = [{ registration: re }, { make: re }, { model: re }, { notes: re }];
+    }
+
+    const Vehicles = tenantModel('transport_vehicles', tenantContext(req));
+    const [docs, total, links] = await Promise.all([
+      Vehicles.find(filter).sort({ registration: 1 }).skip(skip).limit(limit).select('-__v').lean(),
+      Vehicles.countDocuments(filter),
+      _routeLinksFor(req),
+    ]);
+
+    return ok(res, docs.map(v => ({ ...v, routes: links.byVehicle.get(v.id) ?? [] })), paginate(page, limit, total));
+  } catch (err) {
+    console.error('[transport/vehicles GET]', err);
+    return E.serverError(res);
+  }
+});
+
+/* POST /api/transport/vehicles */
+router.post('/vehicles', rbac('transport', 'create', 'manage'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const { data, error } = _validate(VehicleSchema, req.body);
+    if (error) return E.validation(res, error);
+
+    const Vehicles = tenantModel('transport_vehicles', tenantContext(req));
+    const clash = await Vehicles.findOne({ schoolId, registration: data.registration }).lean();
+    if (clash) return E.conflict(res, `${data.registration} is already on the fleet`);
+
+    const doc = await Vehicles.create({
+      id: uuidv4(),
+      schoolId,
+      ...data,
+      insuranceExpiry:  _dateOrNull(data.insuranceExpiry),
+      inspectionExpiry: _dateOrNull(data.inspectionExpiry),
+      createdBy: userId,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    const saved = doc.toObject ? doc.toObject() : doc;
+    AuditService.log({ action: 'transport.vehicle_created', actor: req.jwtUser, schoolId, target: { type: 'vehicle', id: saved.id, label: saved.registration }, req });
+    return created(res, { ...saved, routes: [] });
+  } catch (err) {
+    console.error('[transport/vehicles POST]', err);
+    return E.serverError(res);
+  }
+});
+
+/* PUT /api/transport/vehicles/:id
+   Editing a vehicle also refreshes the copy of it that every route carries, so
+   a corrected plate or a bigger bus reaches the parent portal immediately
+   instead of at the next route edit. */
+router.put('/vehicles/:id', rbac('transport', 'update', 'manage'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const { data, error } = _validate(VehicleSchema, req.body);
+    if (error) return E.validation(res, error);
+
+    const Vehicles = tenantModel('transport_vehicles', tenantContext(req));
+    const existing = await Vehicles.findOne({ id: req.params.id, schoolId }).lean();
+    if (!existing) return E.notFound(res, 'Vehicle not found');
+
+    const clash = await Vehicles.findOne({ schoolId, registration: data.registration, id: { $ne: req.params.id } }).lean();
+    if (clash) return E.conflict(res, `${data.registration} is already on the fleet`);
+
+    const doc = await Vehicles.findOneAndUpdate(
+      { id: req.params.id, schoolId },
+      { $set: {
+        ...data,
+        insuranceExpiry:  _dateOrNull(data.insuranceExpiry),
+        inspectionExpiry: _dateOrNull(data.inspectionExpiry),
+        updatedBy: userId,
+        updatedAt: new Date().toISOString(),
+      } },
+      { new: true },
+    ).lean();
+
+    await tenantModel('transport_routes', tenantContext(req)).updateMany(
+      { schoolId, vehicleId: req.params.id },
+      { $set: {
+        vehicleReg:  doc.registration,
+        vehicleType: doc.vehicleType,
+        capacity:    doc.capacity ?? null,
+        updatedAt:   new Date().toISOString(),
+      } },
+    ).catch(err => console.error('[transport/vehicles PUT] route sync failed:', err.message));
+
+    AuditService.log({ action: 'transport.vehicle_updated', actor: req.jwtUser, schoolId, target: { type: 'vehicle', id: doc.id, label: doc.registration }, req });
+    return ok(res, doc);
+  } catch (err) {
+    console.error('[transport/vehicles PUT]', err);
+    return E.serverError(res);
+  }
+});
+
+/* DELETE /api/transport/vehicles/:id */
+router.delete('/vehicles/:id', rbac('transport', 'delete', 'delete'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const onRoutes = await tenantModel('transport_routes', tenantContext(req))
+      .countDocuments({ schoolId, vehicleId: req.params.id });
+    if (onRoutes > 0) {
+      return E.badRequest(res, `Cannot delete — this vehicle is on ${onRoutes} route${onRoutes === 1 ? '' : 's'}. Take it off them first.`);
+    }
+    const doc = await tenantModel('transport_vehicles', tenantContext(req))
+      .findOneAndDelete({ id: req.params.id, schoolId }).lean();
+    if (!doc) return E.notFound(res, 'Vehicle not found');
+
+    AuditService.log({ action: 'transport.vehicle_deleted', actor: req.jwtUser, schoolId, target: { type: 'vehicle', id: doc.id, label: doc.registration }, req });
+    return ok(res, { id: req.params.id, deleted: true });
+  } catch (err) {
+    console.error('[transport/vehicles DELETE]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   DRIVERS
+   ══════════════════════════════════════════════════════════════ */
+
+/* GET /api/transport/drivers */
+router.get('/drivers', rbac('transport', 'read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const { page, limit, skip } = parsePagination(req.query);
+    const { q, status } = req.query;
+
+    const filter = { schoolId };
+    if (status) filter.status = status;
+    if (q) {
+      const re = new RegExp(q.trim(), 'i');
+      filter.$or = [{ name: re }, { phone: re }, { licenceNumber: re }];
+    }
+
+    const Drivers = tenantModel('transport_drivers', tenantContext(req));
+    const [docs, total, links] = await Promise.all([
+      Drivers.find(filter).sort({ name: 1 }).skip(skip).limit(limit).select('-__v').lean(),
+      Drivers.countDocuments(filter),
+      _routeLinksFor(req),
+    ]);
+
+    return ok(res, docs.map(d => ({ ...d, routes: links.byDriver.get(d.id) ?? [] })), paginate(page, limit, total));
+  } catch (err) {
+    console.error('[transport/drivers GET]', err);
+    return E.serverError(res);
+  }
+});
+
+/* POST /api/transport/drivers */
+router.post('/drivers', rbac('transport', 'create', 'manage'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const { data, error } = _validate(DriverSchema, req.body);
+    if (error) return E.validation(res, error);
+
+    const doc = await tenantModel('transport_drivers', tenantContext(req)).create({
+      id: uuidv4(),
+      schoolId,
+      ...data,
+      licenceExpiry: _dateOrNull(data.licenceExpiry),
+      createdBy: userId,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    const saved = doc.toObject ? doc.toObject() : doc;
+    AuditService.log({ action: 'transport.driver_created', actor: req.jwtUser, schoolId, target: { type: 'driver', id: saved.id, label: saved.name }, req });
+    return created(res, { ...saved, routes: [] });
+  } catch (err) {
+    console.error('[transport/drivers POST]', err);
+    return E.serverError(res);
+  }
+});
+
+/* PUT /api/transport/drivers/:id — also refreshes the copy on every route it drives. */
+router.put('/drivers/:id', rbac('transport', 'update', 'manage'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const { data, error } = _validate(DriverSchema, req.body);
+    if (error) return E.validation(res, error);
+
+    const Drivers = tenantModel('transport_drivers', tenantContext(req));
+    const existing = await Drivers.findOne({ id: req.params.id, schoolId }).lean();
+    if (!existing) return E.notFound(res, 'Driver not found');
+
+    const doc = await Drivers.findOneAndUpdate(
+      { id: req.params.id, schoolId },
+      { $set: { ...data, licenceExpiry: _dateOrNull(data.licenceExpiry), updatedBy: userId, updatedAt: new Date().toISOString() } },
+      { new: true },
+    ).lean();
+
+    await tenantModel('transport_routes', tenantContext(req)).updateMany(
+      { schoolId, driverId: req.params.id },
+      { $set: { driverName: doc.name, driverPhone: doc.phone ?? '', updatedAt: new Date().toISOString() } },
+    ).catch(err => console.error('[transport/drivers PUT] route sync failed:', err.message));
+
+    AuditService.log({ action: 'transport.driver_updated', actor: req.jwtUser, schoolId, target: { type: 'driver', id: doc.id, label: doc.name }, req });
+    return ok(res, doc);
+  } catch (err) {
+    console.error('[transport/drivers PUT]', err);
+    return E.serverError(res);
+  }
+});
+
+/* DELETE /api/transport/drivers/:id */
+router.delete('/drivers/:id', rbac('transport', 'delete', 'delete'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const onRoutes = await tenantModel('transport_routes', tenantContext(req))
+      .countDocuments({ schoolId, driverId: req.params.id });
+    if (onRoutes > 0) {
+      return E.badRequest(res, `Cannot delete — this driver is on ${onRoutes} route${onRoutes === 1 ? '' : 's'}. Take them off first.`);
+    }
+    const doc = await tenantModel('transport_drivers', tenantContext(req))
+      .findOneAndDelete({ id: req.params.id, schoolId }).lean();
+    if (!doc) return E.notFound(res, 'Driver not found');
+
+    AuditService.log({ action: 'transport.driver_deleted', actor: req.jwtUser, schoolId, target: { type: 'driver', id: doc.id, label: doc.name }, req });
+    return ok(res, { id: req.params.id, deleted: true });
+  } catch (err) {
+    console.error('[transport/drivers DELETE]', err);
+    return E.serverError(res);
+  }
+});
 
 /* ══════════════════════════════════════════════════════════════
    ROUTES — bus/van route definitions
@@ -116,6 +415,35 @@ router.get('/routes/:id', rbac('transport', 'read'), async (req, res) => {
   }
 });
 
+/* Resolve the vehicle/driver a route points at into the fields every reader
+   (portals included) already expects. Returns the merged route data, or an
+   error response payload when an id does not belong to this school. */
+async function _resolveRouteLinks(req, data) {
+  const { schoolId } = req.jwtUser;
+  const out = { ...data };
+
+  if (data.vehicleId) {
+    const vehicle = await tenantModel('transport_vehicles', tenantContext(req))
+      .findOne({ id: data.vehicleId, schoolId }).lean();
+    if (!vehicle) return { error: { status: 400, message: 'That vehicle is not on this school\'s fleet.' } };
+    out.vehicleReg  = vehicle.registration;
+    out.vehicleType = vehicle.vehicleType;
+    out.capacity    = vehicle.capacity ?? null;
+  } else {
+    out.capacity = data.capacity ?? null;
+  }
+
+  if (data.driverId) {
+    const driver = await tenantModel('transport_drivers', tenantContext(req))
+      .findOne({ id: data.driverId, schoolId }).lean();
+    if (!driver) return { error: { status: 400, message: 'That driver is not on this school\'s list.' } };
+    out.driverName  = driver.name;
+    out.driverPhone = driver.phone ?? '';
+  }
+
+  return { data: out };
+}
+
 /* POST /api/transport/routes */
 router.post('/routes', rbac('transport', 'create', 'manage'), async (req, res) => {
   try {
@@ -124,10 +452,13 @@ router.post('/routes', rbac('transport', 'create', 'manage'), async (req, res) =
     const { data, error } = _validate(RouteSchema, req.body);
     if (error) return E.validation(res, error);
 
+    const linked = await _resolveRouteLinks(req, data);
+    if (linked.error) return res.status(linked.error.status).json({ error: linked.error.message });
+
     const doc = await tenantModel('transport_routes', tenantContext(req)).create({
       id:        uuidv4(),
       schoolId,
-      ...data,
+      ...linked.data,
       createdBy: userId,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -150,9 +481,12 @@ router.put('/routes/:id', rbac('transport', 'update', 'manage'), async (req, res
     const { data, error } = _validate(RouteSchema, req.body);
     if (error) return E.validation(res, error);
 
+    const linked = await _resolveRouteLinks(req, data);
+    if (linked.error) return res.status(linked.error.status).json({ error: linked.error.message });
+
     const doc = await tenantModel('transport_routes', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
-      { $set: { ...data, updatedBy: userId, updatedAt: new Date().toISOString() } },
+      { $set: { ...linked.data, updatedBy: userId, updatedAt: new Date().toISOString() } },
       { new: true }
     ).lean();
     return ok(res, doc);
@@ -414,8 +748,10 @@ router.get('/summary', rbac('transport', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
 
-    const [routeCount, assignmentAgg] = await Promise.all([
+    const [routeCount, vehicleCount, driverCount, assignmentAgg] = await Promise.all([
       tenantModel('transport_routes', tenantContext(req)).countDocuments({ schoolId }),
+      tenantModel('transport_vehicles', tenantContext(req)).countDocuments({ schoolId }),
+      tenantModel('transport_drivers', tenantContext(req)).countDocuments({ schoolId }),
       tenantModel('transport_assignments', tenantContext(req)).aggregate([
         { $match: { schoolId } },
         { $group: {
@@ -431,6 +767,8 @@ router.get('/summary', rbac('transport', 'read'), async (req, res) => {
 
     return ok(res, {
       totalRoutes:       routeCount,
+      totalVehicles:     vehicleCount,
+      totalDrivers:      driverCount,
       totalAssignments:  aa.total,
       activeAssignments: aa.active,
       inactiveAssignments: aa.inactive,

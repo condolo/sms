@@ -87,6 +87,10 @@ export default function AttendancePage() {
     setTimeout(() => setToast(null), 3500);
   }
 
+  /* Set when Save is pressed on a day whose register is already filed; the
+     dialog is the only path that sends `amend`. */
+  const [amendPrompt, setAmendPrompt] = useState(false);
+
   /* ── Classes dropdown ──────────────────────────────────────────
      attendanceScope narrows this to the caller's own real teaching/
      homeroom assignments — a DIFFERENT, narrower flag than classes.js's
@@ -302,23 +306,48 @@ export default function AttendancePage() {
   const attendRate = total > 0 ? Math.round(((counts.present + counts.late) / total) * 100) : 0;
 
   /* ── Bulk save ─────────────────────────────────────────────── */
+  /* A register is filed once a day (server/routes/attendance.js). `rows` is
+     the day's saved register, so a non-empty register here means this day is
+     already filed and the next Save is a correction, not a filing. Corrections
+     are deliberately possible — but they replace a register the office has
+     read and guardians have already been alerted about, so they are never
+     silent: the Save button asks first and only then sends `amend`. */
+  const registerFiled = !electiveSubjectId && rows.length > 0;
+
   const { mutate: save, isPending: saving } = useMutation({
-    mutationFn: () => {
+    mutationFn: (vars = {}) => {
       const records = merged.map(r => ({
         studentId: r.studentId,
         classId,
         date,
         status: edits[r.studentId] ?? r.status ?? 'absent',
       }));
-      return attendanceApi.bulkMark({ classId, ...(electiveSubjectId ? { subjectId: electiveSubjectId } : (effectiveStreamId ? { streamId: effectiveStreamId } : {})), date, records });
+      const amend = registerFiled && vars.amend === true;
+      return attendanceApi.bulkMark({
+        classId,
+        ...(electiveSubjectId ? { subjectId: electiveSubjectId } : (effectiveStreamId ? { streamId: effectiveStreamId } : {})),
+        date,
+        records,
+        ...(amend ? { amend: true } : {}),
+      });
     },
     onSuccess: () => {
       setEdits({});
+      setAmendPrompt(false);
       qc.invalidateQueries({ queryKey: ['attendance'] });
-      showToast('success', 'Attendance register saved successfully.');
+      showToast('success', registerFiled ? 'Register amended.' : 'Attendance register saved successfully.');
     },
-    onError: err => showToast('error', err?.message ?? 'Failed to save attendance'),
+    onError: err => {
+      setAmendPrompt(false);
+      showToast('error', err?.message ?? 'Failed to save attendance');
+    },
   });
+
+  /* Save for a day that is already filed goes through the confirmation. */
+  function requestSave() {
+    if (registerFiled) { setAmendPrompt(true); return; }
+    save();
+  }
 
   const hasEdits   = Object.keys(edits).length > 0;
   const selectedClass  = classList.find(c => (c.id ?? c._id) === classId);
@@ -571,7 +600,7 @@ export default function AttendancePage() {
             {/* Save button */}
             {hasEdits && classId && (
               <button
-                onClick={() => save()}
+                onClick={requestSave}
                 disabled={saving}
                 className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
               >
@@ -765,7 +794,7 @@ export default function AttendancePage() {
                 </p>
                 {hasEdits ? (
                   <button
-                    onClick={() => save()}
+                    onClick={requestSave}
                     disabled={saving}
                     className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-xs font-medium px-4 py-2 rounded-lg transition-colors"
                   >
@@ -784,6 +813,65 @@ export default function AttendancePage() {
         )}
       </div>
       )}
+
+      {/* Amend confirmation — the only path that sends `amend`. Filed once a
+          day (server/routes/attendance.js), and a save over a filed register
+          replaces what the office has already read, so it is never silent. */}
+      <AnimatePresence>
+        {amendPrompt && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-[2px]"
+            onClick={e => { if (e.target === e.currentTarget) setAmendPrompt(false); }}
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 10, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 8, scale: 0.98 }}
+              className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"
+            >
+              <div className="mb-4 flex items-start gap-3">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+                  <AlertTriangle size={18} />
+                </span>
+                <div>
+                  <p className="text-sm font-bold text-slate-900">
+                    This register is already filed for {fmtDate(date)}
+                  </p>
+                  <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                    {selectedClass?.name
+                      ? `${selectedClass.name}${selectedStream?.name ? ` ${selectedStream.name}` : ''} has a saved register for this day`
+                      : 'This class has a saved register for this day'}.
+                    Amending it replaces that register — and any absence alerts already sent
+                    to guardians are not sent again. A register is filed once a day; continue
+                    only to correct it.
+                  </p>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAmendPrompt(false)}
+                  className="rounded-lg px-3 py-2 text-xs font-medium text-slate-600 transition hover:bg-slate-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => save({ amend: true })}
+                  disabled={saving}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:opacity-50"
+                >
+                  {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                  {saving ? 'Amending...' : 'Amend register'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

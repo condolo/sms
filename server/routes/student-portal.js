@@ -21,6 +21,7 @@ const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { isTimetablePublished, publishedReader } = require('../utils/timetable-publish');
 const { resolveCurrentPeriod } = require('./academic-config');
 const { audienceClause }        = require('../utils/announcement-audience');
+const { transportRidesFor }     = require('../utils/transport-ride');
 const { _getMpesaConfig } = require('./mpesa');
 const { ok, E }          = require('../utils/response');
 // Weekly Snapshot's read logic is shared with weekly-snapshots.js's own
@@ -295,23 +296,30 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
       student.classId
         ? Exams.find({
             schoolId,
-            classId: student.classId,
+            // Whole-school papers carry no classId; a class paper is this
+            // student's own — the same union exams.js scopes for staff.
+            $or: [
+              { classId: student.classId },
+              { classId: { $exists: false } },
+              { classId: null },
+            ],
             date: { $gte: todayISO },
             // A sitting that is over, or that the office deleted — delete is a
             // soft delete: status 'cancelled' with `deletedAt` stamped, the
             // same leak the staff Exams screen had — is not an exam to look
             // forward to. A mid-sitting exam (in_progress) still shows.
-            $or: [
-              { status: { $exists: false } },
-              { status: 'scheduled' },
-              { status: 'in_progress' },
-            ],
             $and: [
+              { $or: [{ status: { $exists: false } }, { status: 'scheduled' }, { status: 'in_progress' }] },
               { $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }] },
             ],
           })
             .sort({ date: 1 }).limit(4)
-            .select('title subjectName date startTime type').lean()
+            // F4: the detail fields a student acts on. invigilatorId, maxScore,
+            // passMark and ownerId are deliberately NOT selected — a student
+            // seeing the total before sitting a paper is a leak, and the
+            // invigilator is staff data.
+            .select('id title subjectName date startTime endTime duration room instructions topics type status')
+            .lean()
             .catch(() => [])
         : [],
       // A student sees the notices addressed to students — and only those.
@@ -414,7 +422,7 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
       reportCards: reportCardsOut,
       classTeacher,
       behaviourSummary: { totalPoints, badgeLevel, latestReward, latestComment },
-      upcomingExams:    upcomingExamsDocs,
+      upcomingExams:    upcomingExamsDocs.map(_examForStudent),
       announcements:    announcementsDocs,
       upcomingEvents:   upcomingEventsDocs,
       /* An active loan whose due date has passed IS overdue — derived here so
@@ -461,6 +469,34 @@ router.get('/me', authMiddleware, PLAN, async (req, res) => {
    list silently merges the same period across days. */
 
 const WEEK_DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'];
+
+/* --- Exam details (F4) --------------------------------------------------
+   One projection for both the dashboard tile and the exam list, so a row is
+   the same shape wherever a student meets it. invigilatorId, maxScore,
+   passMark and ownerId are never selected in the first place -- a student
+   should not see the total before sitting the paper. `room` becomes `venue`
+   because that is what a student reads it as. */
+function _examForStudent(doc) {
+  const today = new Date().toISOString().slice(0, 10);
+  const daysUntil = doc?.date
+    ? Math.round((Date.parse(`${String(doc.date).slice(0, 10)}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86400000)
+    : null;
+  return {
+    id:            doc?.id ?? null,
+    title:         doc?.title ?? '',
+    subjectName:   doc?.subjectName ?? null,
+    type:          doc?.type ?? 'test',
+    date:          doc?.date ?? null,
+    startTime:     doc?.startTime ?? null,
+    endTime:       doc?.endTime ?? null,
+    durationMinutes: typeof doc?.duration === 'number' ? doc.duration : null,
+    venue:         doc?.room ?? null,
+    instructions:  doc?.instructions ?? null,
+    topics:        doc?.topics ?? null,
+    status:        doc?.status ?? 'scheduled',
+    daysUntil,
+  };
+}
 
 function _mondayOf(value) {
   const base = /^\d{4}-\d{2}-\d{2}$/.test(String(value ?? ''))
@@ -684,6 +720,82 @@ router.get('/weekly-snapshot/:weekStart/pdf', authMiddleware, PLAN, async (req, 
     await weeklySnapshotHelpers.streamSnapshotPdf(req, res, req.jwtUser.studentId, req.params.weekStart);
   } catch (err) {
     console.error('[student-portal GET /weekly-snapshot/:weekStart/pdf]', err);
+    return E.serverError(res);
+  }
+});
+
+/* GET /api/student-portal/exams?from=&to= - the exam week, in full detail.
+   Default window is today to +30 days, capped at 120. `from` in the past is
+   allowed (last week's paper is still worth reading back to); only the span
+   is clamped, never the books. */
+router.get('/exams', authMiddleware, PLAN, async (req, res) => {
+  if (!_requireStudent(req, res)) return;
+  try {
+    const { schoolId, studentId } = req.jwtUser;
+    const student = await tenantModel('students', tenantContext(req))
+      .findOne({ id: studentId, schoolId })
+      .select('classId')
+      .lean();
+    if (!student) return E.notFound(res, 'Student record not found.');
+
+    const today = new Date().toISOString().slice(0, 10);
+    const isoOk = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v ?? ''));
+    const from = isoOk(req.query.from) ? req.query.from : today;
+    let to = isoOk(req.query.to)
+      ? req.query.to
+      : new Date(Date.parse(`${from}T00:00:00Z`) + 30 * 86400000).toISOString().slice(0, 10);
+    // A window past 120 days is a data question, not a browser question.
+    const spanDays = Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000);
+    if (spanDays > 120) {
+      to = new Date(Date.parse(`${from}T00:00:00Z`) + 120 * 86400000).toISOString().slice(0, 10);
+    }
+
+    const filter = {
+      schoolId,
+      date: { $gte: from, $lte: to },
+      $and: [
+        { $or: [{ status: { $exists: false } }, { status: 'scheduled' }, { status: 'in_progress' }] },
+        { $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }] },
+      ],
+    };
+    if (student.classId) {
+      filter.$or = [
+        { classId: student.classId },
+        { classId: { $exists: false } },
+        { classId: null },
+      ];
+    } else {
+      filter.$or = [{ classId: { $exists: false } }, { classId: null }];
+    }
+
+    const rows = await tenantModel('exams', tenantContext(req))
+      .find(filter)
+      .sort({ date: 1, startTime: 1 })
+      .limit(200)
+      .select('id title subjectName date startTime endTime duration room instructions topics type status')
+      .lean();
+
+    return ok(res, rows.map(_examForStudent));
+  } catch (err) {
+    console.error('[student-portal GET /exams]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   GET /api/student-portal/transport
+   The bus this student rides — the same read join the parent portal shows a
+   parent for their child (utils/transport-ride.js), scoped to the account's
+   own record. The dashboard payload does not carry it, so it is its own call
+   and only asks for what the screen shows.
+   ══════════════════════════════════════════════════════════════ */
+router.get('/transport', authMiddleware, PLAN, async (req, res) => {
+  if (!_requireStudent(req, res)) return;
+  try {
+    const { assignments } = await transportRidesFor(req, req.jwtUser.studentId);
+    return ok(res, { assignments });
+  } catch (err) {
+    console.error('[student-portal GET /transport]', err);
     return E.serverError(res);
   }
 });

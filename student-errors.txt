@@ -1,0 +1,96 @@
+Total messages: 12 (Errors: 8, Warnings: 1)
+Returning 8 messages for level "error"
+
+[ERROR] Error handled by React Router default ErrorBoundary: ReferenceError: Cannot access 'mySpaceNav' before initialization
+    at StudentDashboard (http://localhost:5173/src/pages/student-portal/StudentDashboard.jsx?t=1793774257639:617:13)
+    at renderWithHooks (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:11548:26)
+    at updateFunctionComponent (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:14582:28)
+    at mountLazyComponent (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:14833:23)
+    at beginWork (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:15918:22)
+    at beginWork$1 (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:19753:22)
+    at performUnitOfWork (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:19198:20)
+    at workLoopConcurrent (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:19189:13)
+    at renderRootConcurrent (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:19164:15)
+    at performConcurrentWorkOnRoot (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:18678:46) @ http://localhost:5173/node_modules/.vite/deps/react-router-dom.js?v=a6fc537e:4072
+[ERROR] Error handled by React Router default ErrorBoundary: ReferenceError: Cannot access 'mySpaceNav' before initialization
+    at StudentDashboard (http://localhost:5173/src/pages/student-portal/StudentDashboard.jsx?t=1793774257639:617:13)
+    at renderWithHooks (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:11548:26)
+    at updateFunctionComponent (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:14582:28)
+    at mountLazyComponent (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:14833:23)
+    at beginWork (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:15918:22)
+    at beginWork$1 (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:19753:22)
+    at performUnitOfWork (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:19198:20)
+    at workLoopConcurrent (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:19189:13)
+    at renderRootConcurrent (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:19164:15)
+    at performConcurrentWorkOnRoot (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:18678:46) @ http://localhost:5173/node_modules/.vite/deps/react-router-dom.js?v=a6fc537e:4072
+[ERROR] Error handled by React Router default ErrorBoundary: ReferenceError: Cannot access 'mySpaceNav' before initialization
+    at StudentDashboard (http://localhost:5173/src/pages/student-portal/StudentDashboard.jsx?t=1793774257639:617:13)
+    at renderWithHooks (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:11548:26)
+    at updateFunctionComponent (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:14582:28)
+    at mountLazyComponent (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:14833:23)
+    at beginWork (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:15918:22)
+    at beginWork$1 (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:19753:22)
+    at performUnitOfWork (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:19198:20)
+    at workLoopSync (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:19137:13)
+    at renderRootSync (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:19116:15)
+    at recoverFromConcurrentError (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:18736:28) @ http://localhost:5173/node_modules/.vite/deps/react-router-dom.js?v=a6fc537e:4072
+[ERROR] Error handled by React Router default ErrorBoundary: ReferenceError: Cannot access 'mySpaceNav' before initialization
+    at StudentDashboard (http://localhost:5173/src/pages/student-portal/StudentDashboard.jsx?t=1793774257639:617:13)
+    at renderWithHooks (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:11548:26)
+    at updateFunctionComponent (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:14582:28)
+    at mountLazyComponent (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:14833:23)
+    at beginWork (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:15918:22)
+    at beginWork$1 (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:19753:22)
+    at performUnitOfWork (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:19198:20)
+    at workLoopSync (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:19137:13)
+    at renderRootSync (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:19116:15)
+    at recoverFromConcurrentError (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:18736:28) @ http://localhost:5173/node_modules/.vite/deps/react-router-dom.js?v=a6fc537e:4072
+[ERROR] The above error occurred in the <StudentDashboard> component:
+
+    at StudentDashboard (http://localhost:5173/src/pages/student-portal/StudentDashboard.jsx?t=1793774257639:471:20)
+    at Suspense
+    at SuspenseWrapper (http://localhost:5173/src/App.jsx?t=1793774257639:131:28)
+    at RenderedRoute (http://localhost:5173/node_modules/.vite/deps/react-router-dom.js?v=a6fc537e:4131:5)
+    at RenderErrorBoundary (http://localhost:5173/node_modules/.vite/deps/react-router-dom.js?v=a6fc537e:4091:5)
+    at DataRoutes (http://localhost:5173/node_modules/.vite/deps/react-router-dom.js?v=a6fc537e:5282:5)
+    at Router (http://localhost:5173/node_modules/.vite/deps/react-router-dom.js?v=a6fc537e:4544:15)
+    at RouterProvider (http://localhost:5173/node_modules/.vite/deps/react-router-dom.js?v=a6fc537e:5096:5)
+    at QueryClientProvider (http://localhost:5173/node_modules/.vite/deps/chunk-U4GZSPMF.js?v=a6fc537e:3235:3)
+    at ErrorBoundary (http://localhost:5173/src/components/guards/ErrorBoundary.jsx:7:5)
+    at _a (http://localhost:5173/node_modules/.vite/deps/react-helmet-async.js?v=a6fc537e:627:5)
+
+React will try to recreate this component tree from scratch using the error boundary you provided, RenderErrorBoundary. @ http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:14031
+[ERROR] React Router caught the following error during render ReferenceError: Cannot access 'mySpaceNav' before initialization
+    at StudentDashboard (http://localhost:5173/src/pages/student-portal/StudentDashboard.jsx?t=1793774257639:617:13)
+    at renderWithHooks (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:11548:26)
+    at updateFunctionComponent (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:14582:28)
+    at mountLazyComponent (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:14833:23)
+    at beginWork (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:15918:22)
+    at beginWork$1 (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:19753:22)
+    at performUnitOfWork (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:19198:20)
+    at workLoopSync (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:19137:13)
+    at renderRootSync (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:19116:15)
+    at recoverFromConcurrentError (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:18736:28) {componentStack: 
+    at StudentDashboard (http://localhost:5173/sr…vite/deps/react-helmet-async.js?v=a6fc537e:627:5)} @ http://localhost:5173/node_modules/.vite/deps/react-router-dom.js?v=a6fc537e:4117
+ReferenceError: Cannot access 'mySpaceNav' before initialization
+    at StudentDashboard (http://localhost:5173/src/pages/student-portal/StudentDashboard.jsx?t=1793774257639:617:13)
+    at renderWithHooks (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:11548:26)
+    at updateFunctionComponent (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:14582:28)
+    at mountLazyComponent (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:14833:23)
+    at beginWork (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:15918:22)
+    at HTMLUnknownElement.callCallback2 (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:3674:22)
+    at Object.invokeGuardedCallbackDev (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:3699:24)
+    at invokeGuardedCallback (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:3733:39)
+    at beginWork$1 (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:19765:15)
+    at performUnitOfWork (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:19198:20)
+ReferenceError: Cannot access 'mySpaceNav' before initialization
+    at StudentDashboard (http://localhost:5173/src/pages/student-portal/StudentDashboard.jsx?t=1793774257639:617:13)
+    at renderWithHooks (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:11548:26)
+    at updateFunctionComponent (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:14582:28)
+    at mountLazyComponent (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:14833:23)
+    at beginWork (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:15918:22)
+    at HTMLUnknownElement.callCallback2 (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:3674:22)
+    at Object.invokeGuardedCallbackDev (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:3699:24)
+    at invokeGuardedCallback (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:3733:39)
+    at beginWork$1 (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:19765:15)
+    at performUnitOfWork (http://localhost:5173/node_modules/.vite/deps/chunk-RPCDYKBN.js?v=a6fc537e:19198:20)

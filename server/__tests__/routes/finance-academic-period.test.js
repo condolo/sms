@@ -23,8 +23,22 @@ jest.mock('../../middleware/auth', () => ({
 }));
 jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => next() }));
 jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) => next() }));
+// Faithful stand-in for utils/counters: takes one number per attempt and stops
+// on the first the caller's isTaken says is free, so a write path that stops
+// asking — or a probe that stops looking — fails here instead of filing a
+// duplicate invoice number. The real walk is invoice-number-collision.test.js.
+const mockYear = new Date().getFullYear();
+const mockFmt  = (seq) => `INV-${mockYear}-${String(seq).padStart(6, '0')}`;
+let mockSeq;
 jest.mock('../../utils/counters', () => ({
-  nextInvoiceNumber: jest.fn().mockResolvedValue('INV-1'),
+  nextInvoiceNumber: jest.fn(async (schoolId, isTaken) => {
+    for (let attempt = 0; attempt < 200; attempt++) {
+      mockSeq += 1;
+      const candidate = mockFmt(mockSeq);
+      if (!isTaken || !(await isTaken(candidate))) return candidate;
+    }
+    throw new Error('Could not find a free invoice number');
+  }),
   nextReceiptNumber: jest.fn().mockResolvedValue('RCPT-1'),
 }));
 jest.mock('../../services/audit', () => ({ log: jest.fn() }));
@@ -55,6 +69,11 @@ function makeFakeCollection(seed = []) {
     find:    jest.fn((filter) => mockChainArr(docs.filter(d => matchesFilter(d, filter)))),
     findOne: jest.fn((filter) => mockChainObj(docs.find(d => matchesFilter(d, filter)) || null)),
     distinct: jest.fn(() => Promise.resolve([])),
+    // Real mongoose semantics: resolves to the document's _id, or null.
+    exists:   jest.fn(async (filter) => {
+      const hit = docs.find(d => matchesFilter(d, filter));
+      return hit ? { _id: hit._id } : null;
+    }),
     create:  jest.fn((doc) => { docs.push(doc); return Promise.resolve(doc); }),
     findOneAndUpdate: jest.fn((filter, update) => {
       const idx = docs.findIndex(d => matchesFilter(d, filter));
@@ -124,6 +143,7 @@ const OTHER_YEAR = {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockSeq = 0;
   mockAcademicYears = makeFakeCollection([CURRENT_YEAR, OTHER_YEAR]);
   mockInvoices      = makeFakeCollection();
   mockFeeStructures = makeFakeCollection();
@@ -302,5 +322,43 @@ describe('Archival guard — every finance write path', () => {
     const res = await supertest(buildApp()).post('/api/finance/fee-structures/fs_1/generate');
     expect(res.status).toBe(400);
     expect(mockInvoices.create).not.toHaveBeenCalled();
+  });
+});
+
+/* ── Invoice numbering against a drifted counter ──────────────────
+   The /generate loop draws one number per student from a counter that
+   seeded, imported and hand-numbered invoices never advanced — so the first
+   bulk run after a school migration re-issued numbers its ledger already
+   held. invoices has no unique index on invoiceNumber (deliberately: a school
+   already holding a repeat must still build its indexes), so the write path
+   is the only place that can catch it. */
+describe('bulk /generate invoice numbering', () => {
+  test('every generated invoice skips the numbers this school already issued', async () => {
+    mockFeeStructures = makeFakeCollection([{
+      id: 'fs_1', schoolId: SCHOOL_A, name: 'Term 1 Fees', scopeType: 'all',
+      academicYearId: 'ay_2025', termId: 'term_2025_1',
+      lineItems: [{ description: 'Tuition', quantity: 1, unitPrice: 1000 }],
+    }]);
+    mockStudents = makeFakeCollection([
+      { id: 's1', schoolId: SCHOOL_A, status: 'active', firstName: 'A', lastName: 'One' },
+      { id: 's2', schoolId: SCHOOL_A, status: 'active', firstName: 'B', lastName: 'Two' },
+    ]);
+    mockInvoices = makeFakeCollection([
+      // Paper history the counter never heard about, plus another school's
+      // identical number — which must not push this school's walk on.
+      { id: 'inv_paper', _id: 'oid_paper', schoolId: SCHOOL_A, studentId: 's_other',
+        feeStructureId: 'fs_old', invoiceNumber: mockFmt(1) },
+      { id: 'inv_theirs', _id: 'oid_theirs', schoolId: 'school_B', studentId: 's_x',
+        invoiceNumber: mockFmt(2) },
+    ]);
+
+    const res = await supertest(buildApp()).post('/api/finance/fee-structures/fs_1/generate');
+    expect(res.status).toBe(201);
+    const issued = res.body.data.invoices.map(i => i.invoiceNumber).sort();
+    expect(issued).toEqual([mockFmt(2), mockFmt(3)]);
+
+    const lookedUp = mockInvoices.exists.mock.calls.map(c => c[0]);
+    expect(lookedUp.length).toBeGreaterThan(0);
+    expect(lookedUp.every(f => f.schoolId === SCHOOL_A && f.invoiceNumber)).toBe(true);
   });
 });

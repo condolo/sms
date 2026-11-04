@@ -21,6 +21,7 @@ import {
 } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 import { Stat, Card, ChartTip, COLORS } from './ReportsPrimitives.jsx';
+import TrendsCard from './TrendsCard.jsx';
 
 /* ── Helpers ──────────────────────────────────────────────── */
 const MONTHS  = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -56,6 +57,10 @@ export default function ReportsPage() {
   const canFinance    = can('reports', 'read', 'finance_analytics');
   const canBehaviour  = can('reports', 'read', 'behaviour_analytics');
   const canEnrollment = can('reports', 'read', 'enrollment_analytics');
+  /* The time-series route is gated on its own 'analytics' permission (plus the
+     analytics plan and the reports module), so the trend card must not appear
+     just because the Overview tab is readable. */
+  const canAnalytics  = can('analytics', 'read');
 
   const tabAllowed = {
     overview: canOverview, attendance: canAttendance, finance: canFinance,
@@ -280,6 +285,12 @@ export default function ReportsPage() {
               ) : <p className="text-center text-slate-400 text-sm py-10">No data available</p>}
             </Card>
           </div>
+
+          {/* Trends — the same window sliced by time. Renders only for a role
+              holding the analytics permission (the route's own gate). */}
+          {canAnalytics && (
+            <TrendsCard sym={sym} enabled={canOverview} />
+          )}
         </div>
       )}
 

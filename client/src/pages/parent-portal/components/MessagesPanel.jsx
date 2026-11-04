@@ -17,7 +17,8 @@
  * no extra endpoint, no per-row requests.
  */
 import { useMemo } from 'react';
-import { CheckCheck, Inbox, MessageSquare, Reply, Send, Users } from 'lucide-react';
+import { AlertTriangle, CalendarClock, CheckCheck, Inbox, MessageSquare, Paperclip, PieChart, Reply, Send, Users } from 'lucide-react';
+import MessageExtras, { KindBadge } from '@/pages/messages/components/RichBlocks.jsx';
 
 /* ── Sender presentation ──────────────────────────────────────────
    The role decides the avatar colour and the chip under the name, so a
@@ -104,6 +105,8 @@ export default function MessagesPanel({
   messages, loading, hasMore, onLoadMore, total,
   myUserId, primary, openId, onToggle, onCompose, onReply,
   unreadOnly, onUnreadOnlyChange, unreadCount,
+  onVote, pollVotingId, pollError, onDownloadAttachment,
+  threads = [], threadsLoading = false, threadsError = '', onOpenThread,
 }) {
   const groups = useMemo(() => {
     const out = [];
@@ -117,6 +120,11 @@ export default function MessagesPanel({
   }, [messages]);
 
   const isSent = tab === 'sent';
+  const isChats = tab === 'chats';
+  /* School notifications come from the synthetic `system` sender — no role, no
+     one to reply to — so they are not conversations (see ThreadView's guard). */
+  const chatThreads = threads.filter(t => t.counterpartUserId !== 'system' && t.role);
+  const threadUnread = chatThreads.reduce((sum, t) => sum + (t.unread ?? 0), 0);
 
   return (
     <div className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden" id="section-messages">
@@ -126,14 +134,19 @@ export default function MessagesPanel({
         <div className="flex items-center gap-2 min-w-0">
           <Inbox size={15} className="flex-shrink-0 text-slate-400" />
           <h2 className="text-[13px] font-bold text-slate-900 truncate">
-            {isSent ? 'Sent' : 'Inbox'}
+            {isChats ? 'Conversations' : isSent ? 'Sent' : 'Inbox'}
           </h2>
-          {!isSent && unreadCount > 0 && (
+          {!isSent && !isChats && unreadCount > 0 && (
             <span id="messages-unread-badge" className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-[3px] rounded-full">
               {unreadCount} unread
             </span>
           )}
-          {!isSent && total > 0 && (
+          {isChats && threadUnread > 0 && (
+            <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-[3px] rounded-full">
+              {threadUnread} new
+            </span>
+          )}
+          {!isSent && !isChats && total > 0 && (
             <span className="text-[11px] text-slate-400 hidden sm:inline">{total} message{total === 1 ? '' : 's'}</span>
           )}
         </div>
@@ -166,12 +179,29 @@ export default function MessagesPanel({
           >
             Sent
           </button>
+          {/* A conversation is all the messages with one person, read as a
+              conversation rather than as separate inbox rows — the same
+              pairing the parent app's Messages screen uses. */}
+          <button
+            id="messages-tab-chats"
+            onClick={() => onTabChange('chats')}
+            className={`text-[11px] font-semibold px-3 py-[5px] rounded-md transition inline-flex items-center gap-1 ${
+              isChats ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            Chats
+            {threadUnread > 0 && (
+              <span className="min-w-[14px] rounded-full bg-amber-500 px-1 text-[9px] font-bold leading-[14px] text-white">
+                {threadUnread > 9 ? '9+' : threadUnread}
+              </span>
+            )}
+          </button>
         </div>
 
         {/* The toggle stays visible while it is switched on, even if the
             last unread message is read from here — otherwise the parent
             would be stuck in an empty filtered list with no way back. */}
-        {!isSent && (unreadCount > 0 || unreadOnly) && (
+        {!isSent && !isChats && (unreadCount > 0 || unreadOnly) && (
           <button
             onClick={() => onUnreadOnlyChange(!unreadOnly)}
             className={`text-[11px] font-semibold px-2.5 py-[5px] rounded-full border transition ${
@@ -187,7 +217,84 @@ export default function MessagesPanel({
       </div>
 
       {/* ── Body ─────────────────────────────────────────────────── */}
-      {loading && messages.length === 0 ? (
+      {isChats ? (
+        <div id="messages-chats">
+          {threadsLoading && threads.length === 0 ? (
+            <div className="p-4 space-y-3">
+              {[...Array(3)].map((_, i) => (
+                <div key={i} className="flex gap-3 items-start">
+                  <div className="w-9 h-9 rounded-full bg-slate-100 animate-pulse flex-shrink-0" />
+                  <div className="flex-1 space-y-2 pt-1">
+                    <div className="h-2.5 w-1/3 rounded bg-slate-100 animate-pulse" />
+                    <div className="h-2.5 w-2/3 rounded bg-slate-100 animate-pulse" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : threadsError ? (
+            <p className="px-6 py-12 text-center text-[12px] text-red-600">{threadsError}</p>
+          ) : threads.length === 0 ? (
+            <div className="px-6 py-12 text-center">
+              <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-300 flex items-center justify-center mx-auto">
+                <MessageSquare size={22} />
+              </div>
+              <p className="text-[13px] font-semibold text-slate-700 mt-3">No conversations yet</p>
+              <p className="text-[12px] text-slate-400 mt-1 max-w-[280px] mx-auto leading-relaxed">
+                Every message you exchange with the school becomes a conversation here, so
+                you can follow one thread instead of hunting through the inbox.
+              </p>
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-50">
+              {chatThreads.map(t => {
+                const role = ROLE_PRESENTATION[t.role] ?? FALLBACK_ROLE;
+                const name = t.name || 'School office';
+                return (
+                  <button
+                    key={t.counterpartUserId}
+                    id={`thread-${t.counterpartUserId}`}
+                    type="button"
+                    onClick={() => onOpenThread?.(t.counterpartUserId)}
+                    className="w-full text-left px-[18px] py-3.5 flex items-start gap-3 hover:bg-slate-50 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-inset"
+                  >
+                    <div
+                      className="w-9 h-9 rounded-full flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0"
+                      style={{ background: role.bg }}
+                      aria-hidden="true"
+                    >
+                      {_initials(name)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className={`text-[12.5px] leading-snug truncate ${t.unread > 0 ? 'font-bold text-slate-900' : 'font-semibold text-slate-700'}`}>
+                          {name}
+                        </p>
+                        <span className="text-[9.5px] font-bold uppercase tracking-[0.04em] text-slate-400 bg-slate-100 rounded px-1.5 py-[2px]">
+                          {role.label}
+                        </span>
+                        {t.unread > 0 && (
+                          <span className="ml-auto text-[10px] font-bold text-white rounded-full px-1.5 py-[2px]" style={{ background: primary }}>
+                            {t.unread} new
+                          </span>
+                        )}
+                      </div>
+                      <p className={`text-[12.5px] mt-0.5 truncate ${t.unread > 0 ? 'font-semibold text-slate-800' : 'font-medium text-slate-600'}`}>
+                        {t.subject || '(no subject)'}
+                      </p>
+                      <div className="flex items-center justify-between gap-3 mt-0.5">
+                        <p className="text-[11.5px] text-slate-400 leading-relaxed line-clamp-2 min-w-0">{t.preview}</p>
+                        <span className="text-[10.5px] text-slate-400 whitespace-nowrap flex-shrink-0">
+                          {_timeLabel(t.lastAt)}
+                        </span>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      ) : loading && messages.length === 0 ? (
         <div className="p-4 space-y-3">
           {[...Array(3)].map((_, i) => (
             <div key={i} className="flex gap-3 items-start">
@@ -277,6 +384,22 @@ export default function MessagesPanel({
                               <Users size={9} /> Group
                             </span>
                           )}
+                          {m.kind && m.kind !== 'text' && <KindBadge kind={m.kind} />}
+                          {m.dueAt && (
+                            <span className="inline-flex items-center gap-0.5 text-[9.5px] font-bold uppercase tracking-[0.04em] text-amber-600">
+                              <CalendarClock size={9} /> Due
+                            </span>
+                          )}
+                          {m.attachment?.id && (
+                            <span className="inline-flex items-center gap-0.5 text-[9.5px] font-bold uppercase tracking-[0.04em] text-violet-500">
+                              <Paperclip size={9} /> File
+                            </span>
+                          )}
+                          {m.poll?.options?.length > 0 && (
+                            <span className="inline-flex items-center gap-0.5 text-[9.5px] font-bold uppercase tracking-[0.04em] text-violet-500">
+                              <PieChart size={9} /> Poll
+                            </span>
+                          )}
                           {unread && (
                             <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: primary }} aria-label="Unread" />
                           )}
@@ -312,6 +435,26 @@ export default function MessagesPanel({
                           <p className="text-[12.5px] text-slate-700 leading-relaxed whitespace-pre-line break-words">
                             {m.body || 'This message has no text.'}
                           </p>
+
+                          {/* A reminder's deadline, a homework sheet, or a poll to
+                              answer — the same renderer the staff workspace uses,
+                              so both sides see one message the same way. */}
+                          <MessageExtras
+                            msg={m}
+                            userId={myUserId}
+                            own={m.senderId === myUserId}
+                            onVote={onVote}
+                            voting={pollVotingId === m.id}
+                            onDownload={onDownloadAttachment}
+                            className="mt-3"
+                          />
+
+                          {pollError && open && (
+                            <p className="mt-2 flex items-center gap-1.5 text-[11px] text-red-600">
+                              <AlertTriangle size={11} /> {pollError}
+                            </p>
+                          )}
+
                           <div className="flex items-center justify-between gap-3 mt-3 pt-3 border-t border-slate-100 flex-wrap">
                             <p className="text-[10.5px] text-slate-400">
                               {isSent ? 'Sent' : (m.senderName || 'School')} · {m.createdAt ? new Date(m.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}
@@ -348,7 +491,7 @@ export default function MessagesPanel({
         </div>
       )}
 
-      {!isSent && !loading && messages.length > 0 && (
+      {!isSent && !isChats && !loading && messages.length > 0 && (
         <div className="px-[18px] py-2.5 border-t border-slate-100 bg-slate-50/60 flex items-center gap-1.5 text-[10.5px] text-slate-400">
           <CheckCheck size={11} className="text-emerald-500 flex-shrink-0" />
           Everything here is private to you and the school.
