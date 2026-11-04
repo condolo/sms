@@ -31,6 +31,8 @@ const { rbac, hasPermission } = require('../middleware/rbac');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 const AuditService = require('../services/audit');
+const { fareAmountFor } = require('../utils/transport-invoicing');
+const { notifyRouteChange } = require('../utils/change-alerts');
 
 const router = express.Router();
 const PLAN   = planGate('transport');
@@ -81,6 +83,12 @@ const AssignmentSchema = z.object({
   startDate:    z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   endDate:      z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   notes:        z.string().max(300).trim().optional().default(''),
+  // The fare in force when the student was put on the bus — the amount
+  // Finance actually bills. Deliberately immutable afterwards: the
+  // assignment edit route refuses to change it (see PATCH's `allowed`),
+  // because repricing a family retroactively is not an edit. Take them
+  // off the route and assign them again to bill a new fare.
+  fareAmount:   z.coerce.number().min(0).optional().nullable(),
 });
 
 function _validate(schema, data) {
@@ -489,6 +497,12 @@ router.put('/routes/:id', rbac('transport', 'update', 'manage'), async (req, res
       { $set: { ...linked.data, updatedBy: userId, updatedAt: new Date().toISOString() } },
       { new: true }
     ).lean();
+
+    // A bus that leaves ten minutes earlier is found out at the gate.
+    // Fire-and-forget: the route is saved, and this must never fail the edit.
+    notifyRouteChange({ ctx: tenantContext(req), schoolId, before: existing, after: doc })
+      .catch(err => console.error('[transport] route change alert failed:', err.message));
+
     return ok(res, doc);
   } catch (err) {
     console.error('[transport/routes PUT]', err);
@@ -582,6 +596,10 @@ router.post('/assignments', rbac('transport', 'create', 'assign'), async (req, r
     }
 
     const now = new Date().toISOString();
+    // Freeze the fare now, exactly as the bulk route does: without this a
+    // single assign would be billed at whatever the route says when term
+    // billing runs, not at the price the family agreed to.
+    const fareAmount = fareAmountFor(route, data.fareType);
     const doc = await tenantModel('transport_assignments', tenantContext(req)).create({
       id:           uuidv4(),
       schoolId,
@@ -593,6 +611,7 @@ router.post('/assignments', rbac('transport', 'create', 'assign'), async (req, r
       pickupStop:   data.pickupStop,
       direction:    data.direction,
       fareType:     data.fareType,
+      ...(fareAmount != null ? { fareAmount } : {}),
       startDate:    data.startDate ?? now.slice(0, 10),
       endDate:      data.endDate   ?? null,
       notes:        data.notes,
@@ -672,6 +691,9 @@ router.post('/assignments/bulk', rbac('transport', 'create', 'assign'), async (r
     }
 
     const now = new Date().toISOString();
+    // The fare this ride will be billed at, frozen now: a price raised next
+    // week must not reprice a family already put on the bus.
+    const fareAmount = fareAmountFor(route, data.fareType);
     const docs = toCreate.map(s => ({
       id:           uuidv4(),
       schoolId,
@@ -686,6 +708,7 @@ router.post('/assignments/bulk', rbac('transport', 'create', 'assign'), async (r
       startDate:    data.startDate ?? now.slice(0, 10),
       endDate:      data.endDate   ?? null,
       notes:        data.notes,
+      ...(fareAmount != null ? { fareAmount } : {}),
       status:       'active',
       createdBy:    userId,
       createdAt:    now,
@@ -693,6 +716,10 @@ router.post('/assignments/bulk', rbac('transport', 'create', 'assign'), async (r
     }));
     if (docs.length) await Assignments.insertMany(docs);
 
+    /* Transport is billed per term via Finance → Term Billing (utils/term-billing.js).
+       Assigning a student only records the ride and freezes the fare snapshot;
+       it no longer drafts a separate invoice. This keeps transport billing in
+       one place (the term invoice) and avoids a second receivable to reconcile. */
     AuditService.log({ action: 'transport.assignments_bulk_created', actor: req.jwtUser, schoolId, target: { type: 'route', id: data.routeId, label: route.name }, details: { fareType: data.fareType, created: docs.length, skipped: skipped.length }, req });
     return ok(res, { created: docs.length, skipped });
   } catch (err) {
@@ -709,6 +736,16 @@ router.patch('/assignments/:id', rbac('transport', 'update', 'assign'), async (r
     const existing = await tenantModel('transport_assignments', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!existing) return E.notFound(res, 'Assignment not found');
 
+    // Route and fare are NOT editable here. Repricing a family retroactively
+    // is not an edit, it is a new bill — take them off the route and assign
+    // them again, which records a new ride at the current fare. Refused
+    // explicitly rather than silently ignored.
+    for (const frozen of ['routeId', 'fareType', 'fareAmount']) {
+      if (req.body[frozen] !== undefined && String(req.body[frozen]) !== String(existing[frozen] ?? '')) {
+        return E.badRequest(res, 'The route and the fare are set when the student is assigned. To change either, remove this ride and assign them again.');
+      }
+    }
+
     const allowed = ['pickupStop', 'direction', 'endDate', 'notes', 'status', 'studentName', 'studentClass'];
     const update  = {};
     for (const k of allowed) {
@@ -722,6 +759,7 @@ router.patch('/assignments/:id', rbac('transport', 'update', 'assign'), async (r
       { $set: update },
       { new: true }
     ).lean();
+
     return ok(res, doc);
   } catch (err) {
     console.error('[transport/assignments PATCH]', err);
@@ -736,6 +774,7 @@ router.delete('/assignments/:id', rbac('transport', 'delete', 'assign'), async (
 
     const doc = await tenantModel('transport_assignments', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId }).lean();
     if (!doc) return E.notFound(res, 'Assignment not found');
+
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) {
     console.error('[transport/assignments DELETE]', err);

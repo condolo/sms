@@ -375,6 +375,9 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
         subjectName: markSubjectNameMap[subjectId] || subjectId,
         finalScore:  latestSubjects[subjectId]?.finalScore ?? null,
         grade:       latestSubjects[subjectId]?.grade ?? null,
+        breakdown:    latestSubjects[subjectId]?.breakdown ?? null,
+        classAverage: latestSubjects[subjectId]?.classAverage ?? null,
+        deviation:    latestSubjects[subjectId]?.deviation ?? null,
       }))
       .sort((a, b) => a.subjectName.localeCompare(b.subjectName));
     // The per-type breakdown stays internal to this computation — the
@@ -757,6 +760,9 @@ router.get('/report/:childId', authMiddleware, PLAN, async (req, res) => {
         subjectName: nameOf[subjectId] || subjectId,
         finalScore:  snapshotSubjects[subjectId]?.finalScore ?? null,
         grade:       snapshotSubjects[subjectId]?.grade ?? null,
+        breakdown:    snapshotSubjects[subjectId]?.breakdown ?? null,
+        classAverage: snapshotSubjects[subjectId]?.classAverage ?? null,
+        deviation:    snapshotSubjects[subjectId]?.deviation ?? null,
       }))
       .sort((a, b) => a.subjectName.localeCompare(b.subjectName));
 
@@ -893,7 +899,7 @@ router.get('/fees/:childId', authMiddleware, PLAN, async (req, res) => {
         .lean(),
       FeePayments.find({ schoolId, studentId: childId })
         .sort({ paidAt: -1 }).limit(50)
-        .select('id amount paidAt mpesaCode method reference invoiceId status')
+        .select('id receiptNumber amount paidAt mpesaCode method reference invoiceId status')
         .lean(),
       Schools.findOne({ id: schoolId }).select('name logoUrl mpesa').lean(),
     ]);
@@ -931,7 +937,7 @@ router.get('/fees/:childId', authMiddleware, PLAN, async (req, res) => {
       })),
       receipts: payments.map(p => ({
         id: p.id,
-        code: p.mpesaCode || p.reference || p.id,
+        code: p.receiptNumber || p.mpesaCode || p.reference || '',
         amount: p.amount ?? 0,
         paidAt: p.paidAt || null,
         method: p.method || (p.mpesaCode ? 'mpesa' : 'other'),
@@ -976,7 +982,7 @@ router.get('/receipts/:paymentId', authMiddleware, PLAN, async (req, res) => {
     return ok(res, {
       receipt: {
         id: payment.id,
-        code: payment.mpesaCode || payment.reference || payment.id,
+        code: payment.receiptNumber || payment.mpesaCode || payment.reference || '',
         amount: payment.amount ?? 0,
         paidAt: payment.paidAt || payment.createdAt || null,
         method: payment.method || (payment.mpesaCode ? 'mpesa' : 'other'),

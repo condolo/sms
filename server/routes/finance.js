@@ -1051,7 +1051,10 @@ async function _runTermBilling(req, res, { dryRun }) {
     tenantModel('transport_routes', ctx).find({ schoolId }).lean(),
     tenantModel('activity_enrolments', ctx).find({ schoolId, status: 'active' }).lean(),
     tenantModel('activities', ctx).find({ schoolId }).lean(),
-    tenantModel('students', ctx).find({ schoolId, status: 'active' }).select('firstName middleName lastName').lean(),
+    // `id` is the domain id every plan row is keyed by. Selecting only the
+    // name fields left studentById keyed by ObjectId, so every lookup missed
+    // and the whole run reported "Student is not active in this school".
+    tenantModel('students', ctx).find({ schoolId, status: 'active' }).select('id firstName middleName lastName').lean(),
     Invoices.distinct('studentId', { schoolId, termBillingTermId: period.termId }),
   ]);
   const alreadyBilled = new Set(alreadyBilledIds);
