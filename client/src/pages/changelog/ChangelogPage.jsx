@@ -6,6 +6,18 @@ import { Tag, Zap, Bug, Shield, Sparkles } from 'lucide-react';
 
 const RELEASES = [
   {
+    version: '4.65.0',
+    date: '2026-11-04',
+    label: 'Smart Reminders — and a guardian report drafted from real data',
+    changes: [
+      { type: 'new', text: 'Settings → Smart Reminders — a console for the nudges the school sends on its own: an exam a week ahead and again the day before (to students and guardians), today\'s classes that still have no register (to the teacher at 15:00, then to the office after 16:00), a weekly nudge to anyone who has not opened an announcement from the last seven days, a weekly note to a form teacher about students who have stopped turning up or started collecting incidents, and a two-days-out note to the office with the fees about to fall due. Each rule shows who it would reach right now, when it last ran, and can be run once by hand; the same window never goes out twice.' },
+      { type: 'new', text: 'Timetable and Transport — families now hear about a change instead of finding out at the gate: editing a lesson\'s day, period, time, room or teacher messages that class\'s guardians (and the incoming teacher), and changing a route\'s departure, arrival or stops messages the guardians of every student on it. An edit that changes nothing says nothing.' },
+      { type: 'new', text: 'Settings → Notifications — three new events (Exam Coming Up, Register Not Marked, Notice Not Opened) so the school chooses the channel for each one. A rule that is switched off here stays quiet, and every reminder fires in the school\'s own timezone rather than the server\'s.' },
+      { type: 'new', text: 'Dashboard → Students Needing Attention — "Draft report" opens the composer with the guardian message already written from the last 30 days: attendance as a percentage and a count, merits and demerits with the most recent one named, and the average across published marks. The teacher edits it before sending; nothing goes out on its own.' },
+      { type: 'fix', text: 'Smart Reminders — lesson-plan reminders are listed alongside the rest so the whole picture is in one place. They stay on their existing Friday/Saturday schedule and are deliberately not runnable from a single school\'s console, because that job works across every school at once.' },
+    ],
+  },
+  {
     version: '4.64.0',
     date: '2026-11-03',
     label: 'Messaging — reminders, homework, polls and documents, plus conversations',

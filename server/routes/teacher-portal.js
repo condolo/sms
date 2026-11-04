@@ -26,6 +26,7 @@ const router    = express.Router();
 // one). A capitalized array here silently broke "Today's Timetable" on
 // this dashboard for every teacher, every day, since this route shipped.
 const DAY_NAMES = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+const { loadStudentDigest } = require('../utils/student-digest');
 
 function _requireTeacher(req, res) {
   const role = req.jwtUser?.role;
@@ -401,6 +402,35 @@ router.get('/students/:studentId/attendance', authMiddleware, async (req, res) =
    GET /api/teacher-portal/dashboard
    One-shot payload for the teacher Command Centre.
    ══════════════════════════════════════════════════════════════ */
+/* GET /api/teacher-portal/students/:studentId/digest
+   The facts behind a drafted report: attendance, behaviour and published
+   marks over one window, already worded. Read-only — the teacher still
+   edits and sends; this only spares them assembling it from four screens.
+   Same audience guard as the attendance sheet: a teacher sees their own
+   classes, never the whole school. */
+router.get('/students/:studentId/digest', authMiddleware, async (req, res) => {
+  if (!_requireTeacher(req, res)) return;
+  try {
+    const { schoolId } = req.jwtUser;
+    const audience = await _teacherAudience(req);
+    const student = audience.studentById[req.params.studentId];
+    if (!student) return E.notFound(res, 'That student is not in one of your classes.');
+
+    const days = Math.min(Math.max(Number(req.query.days) || 30, 7), 120);
+    const className = audience.classById?.[student.classId]?.name || '';
+    const digest = await loadStudentDigest({
+      schoolId,
+      student: { ...student, className },
+      days,
+    });
+
+    return ok(res, { digest });
+  } catch (err) {
+    console.error('[teacher-portal GET /students/:id/digest]', err);
+    return E.serverError(res);
+  }
+});
+
 router.get('/dashboard', authMiddleware, async (req, res) => {
   if (!_requireTeacher(req, res)) return;
   try {

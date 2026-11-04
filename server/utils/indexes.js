@@ -14,6 +14,18 @@ const { _model } = require('./model');
 const { isConnected } = require('../config/db');
 
 const INDEXES = [
+  /* ── smart_reminder_runs ────────────────────────────────────────
+     The idempotency lock for utils/smart-reminders.js: one row per
+     (school, rule, window). The unique index IS the guarantee — two
+     ticks racing both try to insert, and the loser gets E11000 instead
+     of sending a second copy of the same reminder. */
+  {
+    col: 'smart_reminder_runs',
+    indexes: [
+      { key: { schoolId: 1, ruleKey: 1, windowKey: 1 }, name: 'smart_run_window', unique: true },
+      { key: { schoolId: 1, ranAt: -1 },                name: 'smart_run_recent' },
+    ],
+  },
   /* ── report_card_snapshots ──────────────────────────────────
      Primary query pattern: find current snapshots by class/term
      Secondary:            find by student + term

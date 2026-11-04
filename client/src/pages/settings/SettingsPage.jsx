@@ -16,6 +16,7 @@ import {
   RefreshCcw, Info, Server, Check, ChevronDown, ChevronUp,
   CreditCard, Smartphone, Zap, ArrowRight, Layers, Pencil,
   Bell, MessageSquare, BookOpen, Calendar, CalendarDays, Clock,
+  BellRing,
   Upload, ImageIcon, KeyRound,
   PlusCircle, ChevronRight, AlertCircle, Archive,
   MonitorPlay, WifiOff, ClipboardList,
@@ -42,6 +43,7 @@ import UsersTab from './components/UsersTab.jsx';
 import AuditLogTab from './components/AuditLogTab.jsx';
 import MessageTemplatesTab from './components/MessageTemplatesTab.jsx';
 import AppLockPinCard from './components/AppLockPinCard.jsx';
+import SmartRemindersTab from './components/SmartRemindersTab.jsx';
 
 /* ── Tab config ─────────────────────────────────────────────── */
 const TABS = [
@@ -51,6 +53,7 @@ const TABS = [
   { id: 'roles',          label: 'Roles & Permissions', Icon: ShieldCheck,    adminOnly: true  },
   { id: 'modules',        label: 'Modules',             Icon: Layers,         adminOnly: true  },
   { id: 'notifications',  label: 'Notifications',       Icon: Bell,           adminOnly: true  },
+  { id: 'reminders',      label: 'Smart Reminders',     Icon: BellRing,       adminOnly: true  },
   { id: 'message_templates', label: 'Message Templates', Icon: MessageSquare, adminOnly: true  },
   { id: 'system',         label: 'System',              Icon: Database,       adminOnly: true  },
   { id: 'audit_log',      label: 'Audit Log',           Icon: ClipboardList,  adminOnly: true  },
@@ -4997,6 +5000,7 @@ export default function SettingsPage() {
             {tab === 'roles'          && <RolesTab />}
             {tab === 'modules'        && <ModulesTab />}
             {tab === 'notifications'  && <NotificationsTab />}
+            {tab === 'reminders'      && <SmartRemindersTab />}
             {tab === 'message_templates' && <MessageTemplatesTab />}
             {tab === 'system'         && <SystemTab />}
             {tab === 'audit_log'      && <AuditLogTab />}
