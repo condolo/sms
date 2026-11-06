@@ -126,9 +126,19 @@ const SMTP_OUTCOME_THROTTLE_MS = 5 * 60 * 1000;
 
 async function _recordSmtpOutcome(schoolId, { ok, error } = {}) {
   if (!schoolId) return;
-  const last = _smtpOutcomeThrottle.get(schoolId) || 0;
-  if (Date.now() - last < SMTP_OUTCOME_THROTTLE_MS) return;
-  _smtpOutcomeThrottle.set(schoolId, Date.now());
+  /* A SUCCESS is never throttled. The throttle exists only to stop one bad
+     credential from turning a school-wide send into a DB write storm — but
+     throttling the recovery meant a school that fixed its SMTP kept showing
+     the red "Falling back to platform" badge for up to 5 minutes after emails
+     were actually flowing again. Recovery should be immediate. */
+  if (!ok) {
+    const last = _smtpOutcomeThrottle.get(schoolId) || 0;
+    if (Date.now() - last < SMTP_OUTCOME_THROTTLE_MS) return;
+    _smtpOutcomeThrottle.set(schoolId, Date.now());
+  } else {
+    // Any success clears the throttle window so the next failure records again.
+    _smtpOutcomeThrottle.delete(schoolId);
+  }
 
   try {
     const Schools = _model('schools');
@@ -196,6 +206,24 @@ async function _resolveTransporter(schoolId, { schoolName, schoolEmail } = {}) {
   const platformResult  = { transporter: _platformTransporter, from: platformFrom, replyTo: platformReplyTo, isCustom: false };
 
   if (!smtpEncryptReady() || !school?.smtpEnabled || !school?.smtpHost || !school?.smtpUser || !school?.smtpPassEnc) {
+    /* A school that SAVED a full custom-SMTP config (host+user+password all
+       present) but is falling back here is NOT "not configured" — either
+       `smtpEnabled` was turned off, or the server cannot decrypt the saved
+       password (SMTP_ENCRYPTION_KEY missing/rotated). Without recording that,
+       the Settings badge stays GREEN ("Custom SMTP active") while every email
+       silently leaves through the platform account, and the admin cannot
+       re-save (the save route 503s without the key). Reported directly. */
+    const configSaved = !!(school?.smtpHost && school?.smtpUser && school?.smtpPassEnc);
+    if (configSaved && !smtpEncryptReady()) {
+      _recordSmtpOutcome(schoolId, {
+        ok: false,
+        error: new Error('SMTP_ENCRYPTION_KEY is not set on the server — saved credentials cannot be decrypted, emails are using the platform sender.'),
+      }).catch(() => {});
+      // Never cache a key-missing fallback: the env var may be restored on the
+      // next deploy and a 60-minute stale entry would keep the school on
+      // platform SMTP long after the real cause was fixed.
+      return platformResult;
+    }
     _smtpCache.set(schoolId, { value: platformResult, expiresAt: Date.now() + SMTP_CACHE_TTL });
     return platformResult;   // custom SMTP not configured (or decryption unavailable) — use platform
   }
@@ -225,7 +253,9 @@ async function _resolveTransporter(schoolId, { schoolName, schoolEmail } = {}) {
   } catch (err) {
     console.error(`[EMAIL] ⚠️ Failed to load custom SMTP for school ${schoolId}: ${err.message} — falling back to platform`);
     _recordSmtpOutcome(schoolId, { ok: false, error: err }).catch(() => {});
-    _smtpCache.set(schoolId, { value: platformResult, expiresAt: Date.now() + SMTP_CACHE_TTL });
+    // Do NOT cache a decrypt-failure fallback. A rotated/restored key is fixed
+    // out-of-band; caching the failure for 60 minutes kept every school on
+    // platform SMTP long after the key was correct again.
     return platformResult;
   }
 }
