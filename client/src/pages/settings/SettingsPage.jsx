@@ -17,7 +17,7 @@ import {
   CreditCard, Smartphone, Zap, ArrowRight, Layers, Pencil,
   Bell, MessageSquare, BookOpen, Calendar, CalendarDays, Clock,
   BellRing,
-  Upload, ImageIcon, KeyRound,
+  Upload, ImageIcon, KeyRound, RefreshCw,
   PlusCircle, ChevronRight, AlertCircle, Archive,
   MonitorPlay, WifiOff, ClipboardList,
 } from 'lucide-react';
@@ -1629,12 +1629,19 @@ function SmtpCard({ school = {}, onSaved }) {
       smtpPort:      f.smtpPort,
       smtpSecure:    f.smtpSecure,
       smtpUser:      f.smtpUser,
-      smtpPass:      f.smtpPass,
+      smtpPass:      f.smtpPass === PASS_PLACEHOLDER ? '' : f.smtpPass,
+      keepPassword:  f.smtpPass === PASS_PLACEHOLDER,   // explicit flag — avoids the "•••••" collision
       smtpFromEmail: f.smtpFromEmail,
       sendTo:        f.sendTo || f.smtpUser,
     }),
     onSuccess: res => setTestMsg({ ok: true,  text: res?.message ?? 'Test email sent.' }),
     onError:   err => setTestMsg({ ok: false, text: err?.message ?? 'Connection failed.' }),
+  });
+
+  const { mutate: retryConn, isPending: retrying } = useMutation({
+    mutationFn: () => settingsApi.school.smtp.retry(),
+    onSuccess: res => setTestMsg({ ok: true, text: res?.message ?? 'SMTP cache cleared.' }),
+    onError:   err => setTestMsg({ ok: false, text: err?.message ?? 'Retry failed.' }),
   });
 
   const { mutate: remove, isPending: removing } = useMutation({
@@ -1811,15 +1818,27 @@ function SmtpCard({ school = {}, onSaved }) {
           {saving ? 'Saving…' : 'Save SMTP settings'}
         </button>
         {hasSavedConfig && (
-          <button
-            type="button"
-            onClick={() => { if (window.confirm('Remove custom SMTP? Emails will revert to the Msingi platform sender.')) remove(); }}
-            disabled={removing}
-            className="flex items-center gap-1.5 text-sm font-medium text-red-600 hover:text-red-700 px-3 py-2 rounded-lg hover:bg-red-50 transition"
-          >
-            {removing ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
-            Remove
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={() => { setTestMsg(null); retryConn(); }}
+              disabled={retrying}
+              title="Clear the cached SMTP connection so the next email re-checks your configuration"
+              className="flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-800 px-3 py-2 rounded-lg hover:bg-slate-50 transition"
+            >
+              {retrying ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+              {retrying ? 'Clearing…' : 'Retry now'}
+            </button>
+            <button
+              type="button"
+              onClick={() => { if (window.confirm('Remove custom SMTP? Emails will revert to the Msingi platform sender.')) remove(); }}
+              disabled={removing}
+              className="flex items-center gap-1.5 text-sm font-medium text-red-600 hover:text-red-700 px-3 py-2 rounded-lg hover:bg-red-50 transition"
+            >
+              {removing ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+              Remove
+            </button>
+          </>
         )}
       </div>
     </div>

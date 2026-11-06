@@ -1805,18 +1805,25 @@ router.post('/school/smtp/test', authMiddleware, rbac('settings', 'update'), asy
     return res.status(503).json({ success: false, error: { code: 'SMTP_ENCRYPT_NOT_CONFIGURED', message: 'SMTP_ENCRYPTION_KEY is not set on the server.' } });
   }
 
-  const { smtpHost, smtpPort, smtpSecure, smtpUser, smtpPass, smtpFromEmail, sendTo } = req.body;
+  const { smtpHost, smtpPort, smtpSecure, smtpUser, smtpPass, smtpFromEmail, sendTo, keepPassword } = req.body;
   const schoolId = req.jwtUser.schoolId;
+  /* Legacy masked placeholder. Retained only for old clients; the current
+     client sends an explicit `keepPassword: true` flag and a blank password
+     instead, so a real password that happens to be "••••••••" is no longer
+     mistaken for "use the saved one". */
   const PASS_PLACEHOLDER = '••••••••'; // ••••••••
 
-  if (!smtpHost || !smtpUser || !smtpPass) {
-    return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'smtpHost, smtpUser and smtpPass are required.' } });
+  if (!smtpHost || !smtpUser) {
+    return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'smtpHost and smtpUser are required.' } });
   }
 
   let pass = smtpPass;
-  if (smtpPass === PASS_PLACEHOLDER) {
+  if (keepPassword === true || smtpPass === PASS_PLACEHOLDER) {
     // Client is using the masked placeholder — load the real password from DB
     try {
+      if (!smtpPass) {
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'No password supplied — enter your password to test.' } });
+      }
       const Schools = _model('schools');
       const school  = await Schools.findOne({ id: schoolId }, { smtpPassEnc: 1 }).lean();
       if (!school?.smtpPassEnc) {
@@ -1827,6 +1834,10 @@ router.post('/school/smtp/test', authMiddleware, rbac('settings', 'update'), asy
     } catch (e) {
       return res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Failed to load saved SMTP password.' } });
     }
+  }
+
+  if (!pass) {
+    return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'smtpPass is required.' } });
   }
 
   try {
@@ -1883,6 +1894,33 @@ router.delete('/school/smtp', authMiddleware, rbac('settings', 'update'), async 
   } catch (err) {
     console.error('[settings] DELETE /school/smtp error:', err);
     return res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Failed to remove SMTP config.' } });
+  }
+});
+
+/* POST /api/settings/school/smtp/retry — clear the cached transporter and
+   force a fresh resolve on the next send.
+
+   Why this exists: the per-school transporter is cached for 60 minutes. A
+   decrypt failure (server-side SMTP_ENCRYPTION_KEY was missing or rotated)
+   used to poison that cache, so a school stayed on the platform sender long
+   after the key was fixed. The cache poison is gone, but an admin still needs
+   a one-tap "re-check now" that doesn't force them to re-enter their SMTP
+   password (which they may not remember or be able to retrieve) just to clear
+   a stale state. This only clears the in-memory cache — it does NOT touch the
+   saved config, so it's always safe. */
+router.post('/school/smtp/retry', authMiddleware, rbac('settings', 'update'), async (req, res) => {
+  const schoolId = req.jwtUser.schoolId;
+  try {
+    emailUtil.invalidateSmtpCache(schoolId);
+    AuditService.log({
+      action: 'settings.school_updated', actor: req.jwtUser, schoolId,
+      target: { type: 'school', id: schoolId },
+      details: { field: 'smtp', op: 'retry' }, req,
+    });
+    return res.json({ success: true, message: 'SMTP cache cleared. The next email will re-check your custom configuration.' });
+  } catch (err) {
+    console.error('[settings] POST /school/smtp/retry error:', err);
+    return res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Failed to clear SMTP cache.' } });
   }
 });
 

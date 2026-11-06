@@ -694,6 +694,7 @@ export const settings = {
       save:   (data) => _post('/settings/school/smtp', data),
       test:   (data) => _post('/settings/school/smtp/test', data),
       remove: ()     => _delete('/settings/school/smtp'),
+      retry:  ()     => _post('/settings/school/smtp/retry', {}),
     },
   },
   users: {
