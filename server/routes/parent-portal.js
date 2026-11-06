@@ -393,6 +393,23 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
     // report-card LIST itself still only ever needs the summary fields.
     const reportCardsOut = reportCards.map(({ subjects, ...rc }) => rc);
 
+    // Per-subject improvement/drop vs previous published report card.
+    const previousReportCard = reportCards.length >= 2 ? reportCards[1] : null;
+    const previousSubjects = previousReportCard?.subjects || {};
+    const subjectDeltas = markSubjectIds.map(subjectId => {
+      const current = latestSubjects[subjectId]?.finalScore ?? null;
+      const previous = previousSubjects[subjectId]?.finalScore ?? null;
+      const delta = (current != null && previous != null) ? Math.round((current - previous) * 10) / 10 : null;
+      return {
+        subjectId,
+        subjectName: markSubjectNameMap[subjectId] || subjectId,
+        currentScore: current,
+        previousScore: previous,
+        delta,
+        improving: delta != null ? delta > 0 : null,
+      };
+    }).sort((a, b) => (b.delta ?? 0) - (a.delta ?? 0));
+
     // ── Academic trend (chronological term averages) ─────────
     const academicTrend = [...reportCards]
       .sort((a, b) => {
@@ -507,6 +524,7 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
       recentPayments,
       lessonsCoverage,
       subjectMarks,
+      subjectDeltas,
       reportCards: reportCardsOut,
       academicTrend,
       classTeacher,
@@ -882,6 +900,46 @@ router.get('/report/:childId', authMiddleware, PLAN, async (req, res) => {
       }))
       .sort((a, b) => a.subjectName.localeCompare(b.subjectName));
 
+    // Per-subject historical trend + delta vs previous term.
+    // Build a map: subjectId -> [{ termLabel, score }]
+    const subjectHistory = new Map();
+    const sortedCards = [...cards].sort((a, b) => {
+      const ay = (s) => String(s.academicYear || '').replace('/', '');
+      if (ay(a) !== ay(b)) return ay(a).localeCompare(ay(b));
+      return (a.termNumber ?? 0) - (b.termNumber ?? 0);
+    });
+    for (const rc of sortedCards) {
+      const rcSubjects = rc.subjects || {};
+      const termLabel = `${rc.academicYear || ''} T${rc.termNumber ?? ''}`.trim();
+      for (const [sid, sub] of Object.entries(rcSubjects)) {
+        if (!subjectHistory.has(sid)) subjectHistory.set(sid, []);
+        const score = typeof sub.finalScore === 'number' ? sub.finalScore : (typeof sub.score === 'number' ? sub.score : null);
+        if (score != null) {
+          subjectHistory.get(sid).push({ term: termLabel, score });
+        }
+      }
+    }
+    const subjectTrend = ids.map(subjectId => ({
+      subjectId,
+      subjectName: nameOf[subjectId] || subjectId,
+      scores: subjectHistory.get(subjectId) || [],
+    }));
+    // Delta: current vs previous term (for subjects present in both)
+    const previousCard = sortedCards.length >= 2 ? sortedCards[sortedCards.length - 2] : null;
+    const subjectDeltas = ids.map(subjectId => {
+      const current = latest?.subjects?.[subjectId]?.finalScore ?? null;
+      const previous = previousCard?.subjects?.[subjectId]?.finalScore ?? null;
+      const delta = (current != null && previous != null) ? Math.round((current - previous) * 10) / 10 : null;
+      return {
+        subjectId,
+        subjectName: nameOf[subjectId] || subjectId,
+        currentScore: current,
+        previousScore: previous,
+        delta,
+        improving: delta != null ? delta > 0 : null,
+      };
+    }).sort((a, b) => (b.delta ?? 0) - (a.delta ?? 0));
+
     const trend = [...cards]
       .sort((a, b) => {
         const ay = (s) => String(s.academicYear || '').replace('/', '');
@@ -935,6 +993,8 @@ router.get('/report/:childId', authMiddleware, PLAN, async (req, res) => {
         principalRemark: latest.principalRemark || '',
       } : null,
       subjects,
+      subjectTrend,
+      subjectDeltas,
       trend,
       classTeacher,
       assistantClassTeacher,

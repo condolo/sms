@@ -13,6 +13,7 @@ import {
   Search, UserPlus, UserMinus,
 } from 'lucide-react';
 import { classes as classesApi, streams as streamsApi, teachers as teachersApi, students as studentsApi } from '@/api/client.js';
+import { teacherPortalApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 import { useSections } from '@/hooks/useSections.js';
 
@@ -78,6 +79,17 @@ export default function ClassDetail() {
   const classRoster       = rosterData?.data ?? [];
   const classStudentTotal = rosterData?.pagination?.total ?? classRoster.length;
   const unstreamedRoster  = classRoster.filter(s => !s.streamId);
+
+  // Class overview (class teacher only) — shows attendance %, subject averages,
+  // top performers, and students needing attention.
+  const { data: overviewData } = useQuery({
+    queryKey: ['teacher', 'class-overview', classId],
+    queryFn: () => teacherPortalApi.classOverview(classId),
+    staleTime: 60_000,
+    enabled: !!classId,
+    retry: false,
+  });
+  const overview = overviewData?.data ?? null;
 
   const { mutate: deleteStream, isPending: deleting } = useMutation({
     mutationFn: id => streamsApi.remove(id),
@@ -160,6 +172,188 @@ export default function ClassDetail() {
           </div>
         </div>
       </div>
+
+      {/* Class overview (class teacher only) */}
+      {overview && (
+        <div className="max-w-screen-2xl mx-auto px-6 pt-6">
+          <div className="bg-white rounded-xl border border-slate-200 p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-semibold text-slate-900">Class overview</h2>
+              <span className="text-xs text-slate-400">Class teacher view</span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+              <div className="bg-slate-50 rounded-lg p-3 text-center">
+                <div className="text-2xl font-bold text-slate-900">{overview.studentCount}</div>
+                <div className="text-[11px] text-slate-500 mt-0.5">Students</div>
+              </div>
+              <div className="bg-slate-50 rounded-lg p-3 text-center">
+                <div className={"text-2xl font-bold " + (overview.attendancePct >= 90 ? "text-emerald-600" : overview.attendancePct >= 75 ? "text-amber-600" : "text-red-600")}>
+                  {overview.attendancePct ?? "—"}%
+                </div>
+                <div className="text-[11px] text-slate-500 mt-0.5">Attendance</div>
+              </div>
+              <div className="bg-slate-50 rounded-lg p-3 text-center">
+                <div className="text-2xl font-bold text-slate-900">{overview.subjects?.length ?? 0}</div>
+                <div className="text-[11px] text-slate-500 mt-0.5">Subjects</div>
+              </div>
+              <div className="bg-slate-50 rounded-lg p-3 text-center">
+                <div className={"text-2xl font-bold " + ((overview.needsAttention?.length ?? 0) > 0 ? "text-red-600" : "text-emerald-600")}>
+                  {overview.needsAttention?.length ?? 0}
+                </div>
+                <div className="text-[11px] text-slate-500 mt-0.5">Need attention</div>
+              </div>
+            </div>
+
+            {overview.subjects?.length > 0 && (
+              <div className="mb-5">
+            {/* Attendance trend */}
+            {overview.attendanceTrend?.length > 0 && (
+              <div className="mb-5">
+                <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Attendance trend (monthly)</h3>
+                <div className="flex items-end gap-2 h-20">
+                  {overview.attendanceTrend.map((t) => {
+                    const pct = t.pct ?? 0;
+                    const barH = Math.max(4, Math.round((pct / 100) * 64));
+                    const barColor = pct >= 90 ? 'bg-emerald-500' : pct >= 75 ? 'bg-amber-500' : 'bg-red-500';
+                    return (
+                      <div key={t.month} className="flex-1 flex flex-col items-center gap-1">
+                        <div className={barColor + ' w-full rounded-t'} style={{ height: barH + 'px' }} />
+                        <span className="text-[9px] text-slate-400">{t.month.slice(5)}</span>
+                        <span className="text-[9px] font-bold text-slate-600">{pct}%</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Behaviour summary */}
+            {overview.behaviour && (overview.behaviour.merits > 0 || overview.behaviour.demerits > 0) && (
+              <div className="mb-5">
+                <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Behaviour summary</h3>
+                <div className="flex gap-4 mb-2">
+                  <div className="flex items-center gap-2 bg-emerald-50 rounded-lg px-3 py-2">
+                    <span className="text-lg font-bold text-emerald-700">{overview.behaviour.merits}</span>
+                    <span className="text-xs text-emerald-600">Merits</span>
+                  </div>
+                  <div className="flex items-center gap-2 bg-red-50 rounded-lg px-3 py-2">
+                    <span className="text-lg font-bold text-red-700">{overview.behaviour.demerits}</span>
+                    <span className="text-xs text-red-600">Demerits</span>
+                  </div>
+                  <div className="flex items-center gap-2 bg-violet-50 rounded-lg px-3 py-2">
+                    <span className="text-lg font-bold text-violet-700">{overview.behaviour.points}</span>
+                    <span className="text-xs text-violet-600">Points</span>
+                  </div>
+                </div>
+                {overview.behaviour.trend?.length > 0 && (
+                  <div className="flex gap-3 flex-wrap">
+                    {overview.behaviour.trend.map((t) => (
+                      <div key={t.month} className="text-xs text-slate-500">
+                        {t.month}: +{t.merits} merits, -{t.demerits} demerits
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+                <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Subject performance (sorted lowest first)</h3>
+                <div className="space-y-2">
+                  {[...overview.subjects].sort((a, b) => (a.classAverage ?? 0) - (b.classAverage ?? 0)).map((s) => {
+                    const pct = s.classAverage ?? 0;
+                    const barColor = pct >= 70 ? 'bg-emerald-500' : pct >= 50 ? 'bg-amber-500' : 'bg-red-500';
+                    const textColor = pct >= 70 ? 'text-emerald-700' : pct >= 50 ? 'text-amber-700' : 'text-red-700';
+                    return (
+                      <div key={s.subjectId} className="flex items-center gap-3">
+                        <div className="w-32 text-xs text-slate-600 truncate" title={s.subjectName}>{s.subjectName}</div>
+                        <div className="flex-1 h-5 bg-slate-100 rounded-full overflow-hidden">
+                          <div className={"h-full " + barColor + " rounded-full transition-all"} style={{ width: pct + '%' }} />
+                        </div>
+                        <div className={"w-10 text-right text-xs font-bold " + textColor}>{pct}</div>
+                        <div className="w-16 text-right text-[10px] text-slate-400">{s.assessedCount} assessed</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            <div className="grid sm:grid-cols-2 gap-4">
+              {overview.topPerformers?.length > 0 && (
+                <div>
+                  <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Top performers</h3>
+                  <div className="space-y-1.5">
+                    {overview.topPerformers.map((p, i) => (
+                      <div key={p.studentId} className="flex items-center gap-2 bg-emerald-50/60 rounded-lg px-3 py-2">
+                        <span className="text-xs font-bold text-emerald-700 w-5">#{i + 1}</span>
+                        <span className="text-sm text-slate-700 flex-1 truncate">{p.name}</span>
+                        <span className="text-sm font-bold text-emerald-700">{p.average}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {overview.needsAttention?.length > 0 && (
+                <div>
+                  <h3 className="text-xs font-semibold text-red-500 uppercase tracking-wide mb-2">Needs attention</h3>
+                  <div className="space-y-1.5">
+                    {overview.needsAttention.map((p) => (
+                      <div key={p.studentId} className="flex items-center gap-2 bg-red-50/60 rounded-lg px-3 py-2">
+                        <span className="text-xs font-bold text-red-600">!</span>
+                        <span className="text-sm text-slate-700 flex-1 truncate">{p.name}</span>
+                        <span className="text-xs text-red-600 truncate max-w-[120px]">{p.reason}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Student progress (term-over-term) */}
+            {overview.studentProgress?.length > 0 && (
+              <div className="mt-5">
+                <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Student progress (term-over-term)</h3>
+                <div className="space-y-1.5">
+                  {overview.studentProgress.slice(0, 8).map((p) => (
+                    <div key={p.studentId} className="flex items-center gap-2 bg-slate-50 rounded-lg px-3 py-2">
+                      <span className="text-sm text-slate-700 flex-1 truncate">{p.name}</span>
+                      {p.previousAverage != null && (
+                        <span className="text-xs text-slate-400">{p.previousAverage} →</span>
+                      )}
+                      <span className="text-sm font-bold text-slate-900">{p.currentAverage}</span>
+                      {p.delta != null && (
+                        <span className={"text-xs font-bold " + (p.improving ? "text-emerald-600" : p.delta < 0 ? "text-red-600" : "text-slate-400")}>
+                          {p.improving ? "\u2191" : p.delta < 0 ? "\u2193" : "\u2192"} {Math.abs(p.delta)}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Subject trend (term-over-term) */}
+            {overview.subjectTrend?.some((s) => s.terms.length > 1) && (
+              <div className="mt-5">
+                <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Subject trend (term-over-term)</h3>
+                <div className="space-y-1.5">
+                  {overview.subjectTrend.filter((s) => s.terms.length > 1).map((s) => (
+                    <div key={s.subjectId} className="flex items-center gap-2 bg-slate-50 rounded-lg px-3 py-2">
+                      <span className="text-sm text-slate-700 w-32 truncate">{s.subjectName}</span>
+                      <div className="flex gap-2 flex-1">
+                        {s.terms.map((t) => (
+                          <span key={t.term} className="text-xs text-slate-500">{t.term}: <span className="font-bold text-slate-700">{t.average}</span></span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Streams grid */}
       <div className="max-w-screen-2xl mx-auto px-6 py-6">

@@ -811,6 +811,18 @@ export const teacherPortalApi = {
 
   /** The facts behind a drafted report: attendance, behaviour, published marks. */
   studentDigest: (studentId, params) => _get(`/teacher-portal/students/${studentId}/digest`, params),
+
+  /** Full student detail for a teacher (basic, guardian, medical, portal state). */
+  studentDetail: (studentId) => _get(`/teacher-portal/students/${studentId}`),
+
+  /** Per-subject scores for a student (class teacher = all; subject teacher = own only). */
+  studentGrades: (studentId) => _get(`/teacher-portal/students/${studentId}/grades`),
+
+  /** Behaviour summary + incidents (class teacher only). */
+  studentBehaviour: (studentId) => _get(`/teacher-portal/students/${studentId}/behaviour`),
+
+  /** Class-level aggregation (class teacher only). */
+  classOverview: (classId) => _get(`/teacher-portal/classes/${classId}/overview`),
 };
 
 export const hr = {

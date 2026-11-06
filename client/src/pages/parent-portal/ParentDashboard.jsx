@@ -1033,6 +1033,21 @@ export default function ParentDashboard() {
                 Overall average: <span className="font-bold text-indigo-600">{myAvg}%</span>
               </div>
             )}
+            {d.subjectDeltas?.some(sd => sd.delta != null) && (
+              <div className="mt-3 px-3 py-2 bg-slate-50 rounded-[7px]">
+                <div className="text-[11px] font-semibold text-slate-600 mb-1.5">Progress vs last term</div>
+                <div className="space-y-1">
+                  {d.subjectDeltas.filter(sd => sd.delta != null).map((sd) => (
+                    <div key={sd.subjectId} className="flex items-center justify-between text-[11px]">
+                      <span className="text-slate-600 truncate flex-1">{sd.subjectName}</span>
+                      <span className={sd.improving ? 'text-emerald-600 font-bold' : sd.delta < 0 ? 'text-red-600 font-bold' : 'text-slate-400'}>
+                        {sd.improving ? '\u2191' : sd.delta < 0 ? '\u2193' : '\u2192'} {Math.abs(sd.delta)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </Card>
 
