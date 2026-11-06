@@ -65,17 +65,22 @@ async function _teacherAudience(req) {
   const teacher = await _resolveTeacher(userId, email, schoolId).catch(() => null);
   const ownerIds = [...new Set([teacher?.userId, teacher?.id, userId].filter(Boolean))];
 
-  const [assignments, timetable, formStreams] = await Promise.all([
+  const [assignments, timetable, formStreams, formClasses] = await Promise.all([
     tenantModel('teaching_assignments', tenantContext(req))
       .find({ schoolId, teacherId: { $in: ownerIds } }).select('classId').lean().catch(() => []),
     tenantModel('timetable', tenantContext(req))
       .find({ schoolId, teacherId: { $in: ownerIds }, isActive: true }).select('classId').lean().catch(() => []),
-    // The form-teacher arm reads the streams — classes.formTeacherId is a
+    // The form-teacher arm reads the streams - classes.formTeacherId is a
     // legacy, never-written field, so a probe there matched nothing, ever.
     teacher
       ? tenantModel('streams', tenantContext(req))
           .find({ schoolId, $or: [{ formTeacherId: teacher.id }, { assistantFormTeacherId: teacher.id }] })
           .select('classId').lean().catch(() => [])
+      : Promise.resolve([]),
+    // Also check classes.formTeacherId directly (demo/legacy data stores it there).
+    teacher
+      ? tenantModel('classes', tenantContext(req))
+          .find({ schoolId, formTeacherId: teacher.id }).select('id').lean().catch(() => [])
       : Promise.resolve([]),
   ]);
 
@@ -83,12 +88,13 @@ async function _teacherAudience(req) {
     ...assignments.map(a => a.classId),
     ...timetable.map(t => t.classId),
     ...formStreams.map(s => s.classId),
+    ...formClasses.map(c => c.id),
   ].filter(Boolean))];
 
   const [classDocs, staff] = await Promise.all([
     classIds.length
       ? tenantModel('classes', tenantContext(req))
-          .find({ schoolId, id: { $in: classIds } }).select('id name').sort({ name: 1 }).lean().catch(() => [])
+          .find({ schoolId, id: { $in: classIds } }).select('id name formTeacherId formTeacherName').sort({ name: 1 }).lean().catch(() => [])
       : Promise.resolve([]),
     tenantModel('users', tenantContext(req))
       .find({ schoolId, isActive: { $ne: false }, role: { $nin: [...PORTAL_ROLES] } })
@@ -402,6 +408,443 @@ router.get('/students/:studentId/attendance', authMiddleware, async (req, res) =
    GET /api/teacher-portal/dashboard
    One-shot payload for the teacher Command Centre.
    ══════════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════════════
+   GET /api/teacher-portal/students/:studentId
+   Full student detail for a teacher, scoped to their own classes.
+   A subject teacher sees basic info, guardian contact, medical flags.
+   A class (homeroom) teacher also sees portal account state and medical
+   detail. The audience guard (via _teacherAudience) ensures a teacher
+   can never read a student outside their own classes.
+   ═══════════════════════════════════════════════════════════════════ */
+router.get('/students/:studentId', authMiddleware, async (req, res) => {
+  if (!_requireTeacher(req, res)) return;
+  try {
+    const { schoolId } = req.jwtUser;
+    const audience = await _teacherAudience(req);
+    const student = audience.studentById[req.params.studentId];
+    if (!student) return E.notFound(res, 'That student is not in one of your classes.');
+
+    // Resolve full student record from the students collection.
+    const Students = tenantModel('students', tenantContext(req));
+    const doc = await Students.findOne({ schoolId, id: student.id }).lean().catch(() => null);
+    if (!doc) return E.notFound(res, 'Student record not found.');
+
+    // Resolve class name + stream name.
+    const cls = audience.classById[student.classId];
+    const className = cls?.name ?? doc.className ?? null;
+
+    // Portal account state — only for class (homeroom) teachers.
+    const teacher = await _resolveTeacher(req.jwtUser.userId, req.jwtUser.email, schoolId).catch(() => null);
+    const streams = await tenantModel('streams', tenantContext(req))
+      .find({ schoolId, classId: student.classId }).select('formTeacherId assistantFormTeacherId').lean().catch(() => []);
+    const clsDoc = await tenantModel('classes', tenantContext(req)).findOne({ schoolId, id: student.classId }).select('formTeacherId').lean().catch(() => null);
+    const isClassTeacher = streams.some(s =>
+      s.formTeacherId === teacher?.id || s.assistantFormTeacherId === teacher?.id
+    ) || clsDoc?.formTeacherId === teacher?.id;
+
+    // Portal account status (reuse the same helper the admin route uses).
+    let portalAccountActive = null;
+    let parentAccountActive = null;
+    if (isClassTeacher) {
+      try {
+        const Users = tenantModel('users', tenantContext(req));
+        const studentUser = await Users.findOne({ schoolId, studentId: student.id, role: 'student' }).select('isActive').lean().catch(() => null);
+        portalAccountActive = studentUser ? (studentUser.isActive !== false) : null;
+        if (doc.parentEmail) {
+          const parentUser = await Users.findOne({ schoolId, email: doc.parentEmail.toLowerCase().trim(), role: 'parent' }).select('isActive').lean().catch(() => null);
+          parentAccountActive = parentUser ? (parentUser.isActive !== false) : null;
+        }
+      } catch (_) { /* best-effort */ }
+    }
+
+    // Guardian lookup (from audience).
+    const guardianIds = audience.parentsByStudent[student.id] ?? [];
+    const guardians = guardianIds
+      .map(id => audience.byId.get(id))
+      .filter(Boolean)
+      .map(p => ({ id: p.id, name: p.name, role: p.role }));
+
+    // Medical alert (from dashboard alerts or student doc).
+    const medicalAlert = doc.medicalAlert ?? doc.medicalNotes ?? null;
+
+    return ok(res, {
+      id: student.id,
+      firstName: doc.firstName ?? '',
+      lastName: doc.lastName ?? '',
+      name: student.name,
+      admissionNumber: doc.admissionNumber ?? '',
+      classId: student.classId,
+      className,
+      streamId: doc.streamId ?? null,
+      streamName: doc.streamName ?? null,
+      gender: doc.gender ?? '',
+      dateOfBirth: doc.dateOfBirth ?? null,
+      status: doc.status ?? 'active',
+      enrollmentDate: doc.enrollmentDate ?? null,
+      photoUrl: doc.photo ?? doc.photoUrl ?? null,
+      parentName: doc.parentName ?? guardians[0]?.name ?? '',
+      parentEmail: doc.parentEmail ?? '',
+      parentPhone: doc.parentPhone ?? '',
+      medicalAlert,
+      guardians,
+      portalAccountActive,
+      parentAccountActive,
+      isClassTeacher,
+    });
+  } catch (err) {
+    console.error('[teacher-portal GET /students/:id]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ═══════════════════════════════════════════════════════════════════
+   GET /api/teacher-portal/students/:studentId/grades
+   Per-subject scores for a student. A class (homeroom) teacher sees all
+   subjects. A subject teacher sees only their own subjects; others are
+   returned with score=null and locked=true.
+   ═══════════════════════════════════════════════════════════════════ */
+router.get('/students/:studentId/grades', authMiddleware, async (req, res) => {
+  if (!_requireTeacher(req, res)) return;
+  try {
+    const { schoolId } = req.jwtUser;
+    const audience = await _teacherAudience(req);
+    const student = audience.studentById[req.params.studentId];
+    if (!student) return E.notFound(res, 'That student is not in one of your classes.');
+
+    const teacher = await _resolveTeacher(req.jwtUser.userId, req.jwtUser.email, schoolId).catch(() => null);
+    const streams = await tenantModel('streams', tenantContext(req))
+      .find({ schoolId, classId: student.classId }).select('formTeacherId assistantFormTeacherId').lean().catch(() => []);
+    const clsDoc = await tenantModel('classes', tenantContext(req)).findOne({ schoolId, id: student.classId }).select('formTeacherId').lean().catch(() => null);
+    const isClassTeacher = streams.some(s =>
+      s.formTeacherId === teacher?.id || s.assistantFormTeacherId === teacher?.id
+    ) || clsDoc?.formTeacherId === teacher?.id;
+
+    // Teaching assignments for this teacher in this class.
+    const assignments = await tenantModel('teaching_assignments', tenantContext(req))
+      .find({ schoolId, teacherId: { $in: [...new Set([teacher?.userId, teacher?.id, req.jwtUser.userId].filter(Boolean))] }, classId: student.classId })
+      .select('subjectId').lean().catch(() => []);
+    const taughtSubjectIds = new Set(assignments.map(a => a.subjectId));
+
+    // Get the latest published report card for this student.
+    const ReportCards = tenantModel('report_card_snapshots', tenantContext(req));
+    const snap = await ReportCards.findOne({ schoolId, studentId: student.id, superseded: { $ne: true } })
+      .sort({ publishedAt: -1, createdAt: -1 }).lean().catch(() => null);
+
+    // Resolve subject names.
+    const Subjects = tenantModel('subjects', tenantContext(req));
+    const subjectIds = snap?.subjects ? Object.keys(snap.subjects) : [];
+    const subjectDocs = subjectIds.length
+      ? await Subjects.find({ schoolId, id: { $in: subjectIds } }).select('id name code').lean().catch(() => [])
+      : [];
+    const subjectMap = Object.fromEntries(subjectDocs.map(s => [s.id, s]));
+
+    // Build subjects array.
+    const subjects = subjectIds.map(sid => {
+      const sub = snap.subjects[sid] ?? {};
+      const score = typeof sub.finalScore === 'number' ? sub.finalScore : (typeof sub.score === 'number' ? sub.score : null);
+      const grade = sub.grade ?? null;
+      const locked = !isClassTeacher && !taughtSubjectIds.has(sid);
+      return {
+        subjectId: sid,
+        subjectName: subjectMap[sid]?.name ?? sub.subjectName ?? sid,
+        score: locked ? null : score,
+        grade: locked ? null : grade,
+        termNumber: snap?.termNumber ?? null,
+        locked,
+      };
+    });
+
+    // Term average (class teacher only, or if teacher teaches at least one subject).
+    const visibleScores = subjects.filter(s => !s.locked && s.score != null).map(s => s.score);
+    const termAverage = visibleScores.length
+      ? Math.round(visibleScores.reduce((a, b) => a + b, 0) / visibleScores.length)
+      : null;
+
+    return ok(res, {
+      studentId: student.id,
+      subjects,
+      termAverage,
+      classRank: isClassTeacher ? (snap?.rankings?.class ?? null) : null,
+      termNumber: snap?.termNumber ?? null,
+      isClassTeacher,
+    });
+  } catch (err) {
+    console.error('[teacher-portal GET /students/:id/grades]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ═══════════════════════════════════════════════════════════════════
+   GET /api/teacher-portal/students/:studentId/behaviour
+   Behaviour summary + recent incidents. Class (homeroom) teacher only.
+   ═══════════════════════════════════════════════════════════════════ */
+router.get('/students/:studentId/behaviour', authMiddleware, async (req, res) => {
+  if (!_requireTeacher(req, res)) return;
+  try {
+    const { schoolId } = req.jwtUser;
+    const audience = await _teacherAudience(req);
+    const student = audience.studentById[req.params.studentId];
+    if (!student) return E.notFound(res, 'That student is not in one of your classes.');
+
+    const teacher = await _resolveTeacher(req.jwtUser.userId, req.jwtUser.email, schoolId).catch(() => null);
+    const streams = await tenantModel('streams', tenantContext(req))
+      .find({ schoolId, classId: student.classId }).select('formTeacherId assistantFormTeacherId').lean().catch(() => []);
+    const clsDoc = await tenantModel('classes', tenantContext(req)).findOne({ schoolId, id: student.classId }).select('formTeacherId').lean().catch(() => null);
+    const isClassTeacher = streams.some(s =>
+      s.formTeacherId === teacher?.id || s.assistantFormTeacherId === teacher?.id
+    ) || clsDoc?.formTeacherId === teacher?.id;
+
+    if (!isClassTeacher) {
+      return E.forbidden(res, 'Behaviour details are available to the class teacher only.');
+    }
+
+    const Behaviour = tenantModel('behaviour_incidents', tenantContext(req));
+    const incidents = await Behaviour.find({ schoolId, studentId: student.id })
+      .sort({ date: -1, createdAt: -1 }).limit(50).lean().catch(() => []);
+
+    let merits = 0, demerits = 0, points = 0;
+    for (const inc of incidents) {
+      if (inc.type === 'merit') merits += 1;
+      else if (inc.type === 'demerit') demerits += 1;
+      points += Number(inc.points) || 0;
+    }
+
+    return ok(res, {
+      merits,
+      demerits,
+      points,
+      incidents: incidents.map(inc => ({
+        id: inc.id ?? inc._id?.toString(),
+        type: inc.type ?? 'neutral',
+        category: inc.category ?? inc.categoryLabel ?? '',
+        title: inc.title ?? inc.label ?? '',
+        points: Number(inc.points) || 0,
+        date: inc.date ?? inc.createdAt ?? null,
+      })),
+    });
+  } catch (err) {
+    console.error('[teacher-portal GET /students/:id/behaviour]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ═══════════════════════════════════════════════════════════════════
+   GET /api/teacher-portal/classes/:classId/overview
+   Class-level aggregation for class (homeroom) teachers only.
+   ═══════════════════════════════════════════════════════════════════ */
+router.get('/classes/:classId/overview', authMiddleware, async (req, res) => {
+  if (!_requireTeacher(req, res)) return;
+  try {
+    const { schoolId } = req.jwtUser;
+    const audience = await _teacherAudience(req);
+    const cls = audience.classById[req.params.classId];
+    if (!cls) return E.forbidden(res, 'That class is not in your assigned classes.');
+
+    const teacher = await _resolveTeacher(req.jwtUser.userId, req.jwtUser.email, schoolId).catch(() => null);
+    const streams = await tenantModel('streams', tenantContext(req))
+      .find({ schoolId, classId: req.params.classId }).select('formTeacherId assistantFormTeacherId').lean().catch(() => []);
+    const clsDoc = await tenantModel('classes', tenantContext(req)).findOne({ schoolId, id: req.params.classId }).select('formTeacherId').lean().catch(() => null);
+    const isClassTeacher = streams.some(s =>
+      s.formTeacherId === teacher?.id || s.assistantFormTeacherId === teacher?.id
+    ) || clsDoc?.formTeacherId === teacher?.id;
+
+    if (!isClassTeacher) {
+      return E.forbidden(res, 'Class overview is available to the class teacher only.');
+    }
+
+    // Determine which streams this teacher is form/assistant teacher of.
+    // If streams exist, scope the overview to those streams only.
+    const teacherStreams = streams.filter(s =>
+      s.formTeacherId === teacher?.id || s.assistantFormTeacherId === teacher?.id
+    );
+    const streamIds = teacherStreams.map(s => s.id).filter(Boolean);
+    const hasStreamScope = streamIds.length > 0;
+
+    const Students = tenantModel('students', tenantContext(req));
+    const Attendance = tenantModel('attendance', tenantContext(req));
+    const ReportCards = tenantModel('report_card_snapshots', tenantContext(req));
+
+    // Filter students by stream if scoped.
+    const studentFilter = { schoolId, classId: req.params.classId, status: 'active' };
+    if (hasStreamScope) {
+      studentFilter.streamId = { $in: streamIds };
+    }
+    const students = await Students.find(studentFilter)
+      .select('id firstName lastName name streamId').lean().catch(() => []);
+
+    // Attendance summary (last 30 days) — class-level (attendance may not have streamId).
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const attFilter = { schoolId, classId: req.params.classId, date: { $gte: thirtyDaysAgo.toISOString().slice(0, 10) } };
+    const [attTotal, attPresent] = await Promise.all([
+      Attendance.countDocuments(attFilter).catch(() => 0),
+      Attendance.countDocuments({ ...attFilter, status: 'present' }).catch(() => 0),
+    ]);
+    const attendancePct = attTotal > 0 ? Math.round((attPresent / attTotal) * 100) : null;
+
+    // Attendance trend — monthly aggregation over all available history.
+    const attTrendRaw = await Attendance.aggregate([
+      { $match: { schoolId, classId: req.params.classId } },
+      { $group: { _id: { $substr: ['$date', 0, 7] }, total: { $sum: 1 }, present: { $sum: { $cond: [{ $eq: ['$status', 'present'] }, 1, 0] } } } },
+      { $sort: { _id: 1 } },
+    ]).catch(() => []);
+    const attendanceTrend = attTrendRaw.map(r => ({
+      month: r._id,
+      total: r.total,
+      present: r.present,
+      pct: r.total > 0 ? Math.round((r.present / r.total) * 100) : null,
+    }));
+
+    // Behaviour summary for this class.
+    const Behaviour = tenantModel('behaviour_incidents', tenantContext(req));
+    const behaviourDocs = await Behaviour.find({ schoolId, classId: req.params.classId }).lean().catch(() => []);
+    let bMerits = 0, bDemerits = 0, bPoints = 0;
+    const behaviourByMonth = new Map();
+    for (const doc of behaviourDocs) {
+      if (doc.type === 'merit') bMerits += 1;
+      else if (doc.type === 'demerit') bDemerits += 1;
+      bPoints += Number(doc.points) || 0;
+      const month = String(doc.date || doc.createdAt || '').slice(0, 7);
+      if (month) {
+        const agg = behaviourByMonth.get(month) ?? { merits: 0, demerits: 0, points: 0 };
+        if (doc.type === 'merit') agg.merits += 1;
+        else if (doc.type === 'demerit') agg.demerits += 1;
+        agg.points += Number(doc.points) || 0;
+        behaviourByMonth.set(month, agg);
+      }
+    }
+    const behaviourTrend = [...behaviourByMonth.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([month, agg]) => ({ month, ...agg }));
+
+    // Subject trend: per-subject class average across terms.
+    const subjectByTerm = new Map(); // subjectId -> [{ term, average }]
+    const termSnaps = new Map(); // termLabel -> Map(subjectId -> {sum, count})
+    for (const snap of snaps) {
+      const termLabel = `${snap.academicYear || ''} T${snap.termNumber ?? ''}`.trim();
+      if (!snap.subjects) continue;
+      for (const [sid, sub] of Object.entries(snap.subjects)) {
+        const score = typeof sub.finalScore === 'number' ? sub.finalScore : (typeof sub.score === 'number' ? sub.score : null);
+        if (score == null) continue;
+        if (!termSnaps.has(termLabel)) termSnaps.set(termLabel, new Map());
+        const termMap = termSnaps.get(termLabel);
+        const agg = termMap.get(sid) ?? { sum: 0, count: 0 };
+        agg.sum += score;
+        agg.count += 1;
+        termMap.set(sid, agg);
+      }
+    }
+    const allSubjectIds2 = new Set();
+    for (const snap of snaps) { if (snap.subjects) for (const sid of Object.keys(snap.subjects)) allSubjectIds2.add(sid); }
+    const subjectDocs2 = allSubjectIds2.size
+      ? await tenantModel('subjects', tenantContext(req)).find({ schoolId, id: { $in: [...allSubjectIds2] } }).select('id name').lean().catch(() => [])
+      : [];
+    const subjectNameMap2 = Object.fromEntries(subjectDocs2.map(s => [s.id, s.name]));
+    const subjectTrend = [...allSubjectIds2].map(sid => {
+      const terms = [...termSnaps.entries()].map(([termLabel, termMap]) => {
+        const agg = termMap.get(sid);
+        return agg && agg.count > 0 ? { term: termLabel, average: Math.round(agg.sum / agg.count) } : null;
+      }).filter(Boolean);
+      return {
+        subjectId: sid,
+        subjectName: subjectNameMap2[sid] ?? sid,
+        terms,
+      };
+    }).filter(s => s.terms.length > 0);
+
+    // Student progress: per-student term-over-term average delta.
+    const studentTermMap = new Map(); // studentId -> [{ term, average, name }]
+    for (const snap of snaps) {
+      if (snap.studentId && typeof snap.averageScore === 'number') {
+        const termLabel = `${snap.academicYear || ''} T${snap.termNumber ?? ''}`.trim();
+        if (!studentTermMap.has(snap.studentId)) studentTermMap.set(snap.studentId, []);
+        studentTermMap.get(snap.studentId).push({ term: termLabel, average: snap.averageScore, name: snap.studentName ?? '' });
+      }
+    }
+    const studentProgress = [...studentTermMap.entries()].map(([studentId, terms]) => {
+      const sorted = terms.sort((a, b) => a.term.localeCompare(b.term));
+      const current = sorted[sorted.length - 1];
+      const previous = sorted.length >= 2 ? sorted[sorted.length - 2] : null;
+      const delta = previous ? Math.round((current.average - previous.average) * 10) / 10 : null;
+      return {
+        studentId,
+        name: current.name,
+        currentTerm: current.term,
+        currentAverage: current.average,
+        previousTerm: previous?.term ?? null,
+        previousAverage: previous?.average ?? null,
+        delta,
+        improving: delta != null ? delta > 0 : null,
+      };
+    }).sort((a, b) => (b.delta ?? 0) - (a.delta ?? 0));
+    if (hasStreamScope) {
+      snapFilter.streamId = { $in: streamIds };
+    }
+    const snaps = await ReportCards.find(snapFilter)
+      .sort({ publishedAt: -1 }).lean().catch(() => []);
+    // Resolve subject names from the subjects collection.
+    const allSubjectIds = new Set();
+    for (const snap of snaps) {
+      if (snap.subjects) for (const sid of Object.keys(snap.subjects)) allSubjectIds.add(sid);
+    }
+    const subjectDocs = allSubjectIds.size
+      ? await tenantModel('subjects', tenantContext(req)).find({ schoolId, id: { $in: [...allSubjectIds] } }).select('id name').lean().catch(() => [])
+      : [];
+    const subjectNameMap = Object.fromEntries(subjectDocs.map(s => [s.id, s.name]));
+
+    const subjectAgg = new Map();
+    for (const snap of snaps) {
+      if (!snap.subjects) continue;
+      for (const [sid, sub] of Object.entries(snap.subjects)) {
+        const score = typeof sub.finalScore === 'number' ? sub.finalScore : (typeof sub.score === 'number' ? sub.score : null);
+        if (score == null) continue;
+        const agg = subjectAgg.get(sid) ?? { sum: 0, count: 0, name: subjectNameMap[sid] ?? sub.subjectName ?? sid };
+        agg.sum += score;
+        agg.count += 1;
+        subjectAgg.set(sid, agg);
+      }
+    }
+    const subjects = [...subjectAgg.entries()].map(([sid, agg]) => ({
+      subjectId: sid,
+      subjectName: agg.name,
+      classAverage: agg.count > 0 ? Math.round(agg.sum / agg.count) : null,
+      assessedCount: agg.count,
+    }));
+
+    // Top performers (by term average from report cards).
+    const studentAverages = new Map();
+    for (const snap of snaps) {
+      if (snap.studentId && typeof snap.averageScore === 'number') {
+        const existing = studentAverages.get(snap.studentId);
+        if (!existing || snap.averageScore > existing.average) {
+          studentAverages.set(snap.studentId, { studentId: snap.studentId, name: snap.studentName ?? '', average: snap.averageScore });
+        }
+      }
+    }
+    const sorted = [...studentAverages.values()].sort((a, b) => b.average - a.average);
+    const topPerformers = sorted.slice(0, 5);
+    const needsAttention = sorted.filter(s => s.average < 50).slice(0, 5);
+
+return ok(res, {
+      classId: req.params.classId,
+      className: cls.name,
+      studentCount: students.length,
+      attendancePct,
+      attendanceTrend,
+      behaviour: { merits: bMerits, demerits: bDemerits, points: bPoints, trend: behaviourTrend },
+      subjects,
+      subjectTrend,
+      topPerformers,
+      studentProgress,
+      needsAttention,
+      isClassTeacher: true,
+    });
+  } catch (err) {
+    console.error('[teacher-portal GET /classes/:id/overview]', err);
+    return E.serverError(res);
+  }
+});
+
 /* GET /api/teacher-portal/students/:studentId/digest
    The facts behind a drafted report: attendance, behaviour and published
    marks over one window, already worded. Read-only — the teacher still
@@ -672,7 +1115,7 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     // ── Classes info ─────────────────────────────────────────
     const [classDocs, subjectDocs] = await Promise.all([
       classIds.length ? Classes.find({ id: { $in: classIds }, schoolId })
-        .select('id name').lean().catch(() => []) : [],
+        .select('id name formTeacherId formTeacherName').lean().catch(() => []) : [],
       subjectIds.length ? Subjects.find({ id: { $in: subjectIds }, schoolId })
         .select('id name code').lean().catch(() => []) : [],
     ]);
@@ -680,6 +1123,27 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     const subjectMap = Object.fromEntries(subjectDocs.map(s => [s.id, s]));
 
     // Student counts and attendance % per class
+    // Also resolve form/class teacher per class (from streams), so the app
+    // can distinguish a subject teacher from a class (homeroom) teacher.
+    const classStreams = classIds.length
+      ? await Streams.find({ schoolId, classId: { $in: classIds } })
+          .select('id classId formTeacherId assistantFormTeacherId name').lean().catch(() => [])
+      : [];
+    const streamsByClass = new Map();
+    for (const s of classStreams) {
+      if (!streamsByClass.has(s.classId)) streamsByClass.set(s.classId, []);
+      streamsByClass.get(s.classId).push(s);
+    }
+    // Resolve form teacher names for all streams in one query.
+    const formTeacherIds = [...new Set([
+      ...classStreams.flatMap(s => [s.formTeacherId, s.assistantFormTeacherId].filter(Boolean)),
+      ...classIds.map(cid => classMap[cid]?.formTeacherId).filter(Boolean),
+    ])];
+    const formTeacherDocs = formTeacherIds.length
+      ? await Teachers.find({ schoolId, id: { $in: formTeacherIds } }).select('id firstName lastName name').lean().catch(() => [])
+      : [];
+    const formTeacherNameById = new Map(formTeacherDocs.map(t => [t.id, [t.firstName, t.lastName].filter(Boolean).join(' ') || t.name || '']));
+
     const myClasses = await Promise.all(classIds.map(async classId => {
       const cls = classMap[classId];
       if (!cls) return null;
@@ -704,12 +1168,29 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
           .map(s => subjectMap[s.subjectId]?.name ?? s.subject),
       ].filter(Boolean))];
 
+      // Form/class teacher resolution for this class.
+      // Check both streams (production) and the class document itself
+      // (demo/legacy data stores formTeacherId on the class).
+      const streams = streamsByClass.get(classId) || [];
+      const streamIsClassTeacher = streams.some(s =>
+        s.formTeacherId === teacher?.id || s.assistantFormTeacherId === teacher?.id
+      );
+      const classIsClassTeacher = cls.formTeacherId === teacher?.id;
+      const isClassTeacher = streamIsClassTeacher || classIsClassTeacher;
+      // Primary form teacher name.
+      const primaryFormStream = streams.find(s => s.formTeacherId);
+      const classTeacherName = primaryFormStream
+        ? (formTeacherNameById.get(primaryFormStream.formTeacherId) || null)
+        : (cls.formTeacherName || (cls.formTeacherId ? formTeacherNameById.get(cls.formTeacherId) : null) || null);
+
       return {
-        id:           classId,
-        name:         cls.name,
+        id:             classId,
+        name:           cls.name,
         studentCount,
-        attendancePct: attPct,
-        subjects:     classSubjects,
+        attendancePct:  attPct,
+        subjects:       classSubjects,
+        classTeacher:   classTeacherName,
+        isClassTeacher,
       };
     }));
     const myClassesList = myClasses.filter(Boolean);
