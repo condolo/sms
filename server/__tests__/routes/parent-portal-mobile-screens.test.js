@@ -377,7 +377,7 @@ describe('GET /api/parent-portal/fees/:childId', () => {
   test('overdue is derived from the due date, and a paid invoice is not "outstanding"', async () => {
     mockCollections.invoices._seed.push(
       { id: 'inv_1', schoolId: SCHOOL, studentId: CHILD, invoiceNumber: 'INV-1041', total: 20000, balance: 0,     dueDate: '2026-06-05', currency: 'KES' },
-      { id: 'inv_2', schoolId: SCHOOL, studentId: CHILD, invoiceNumber: 'INV-1042', total: 25000, balance: 12500, dueDate: '2026-11-05', currency: 'KES' },
+      { id: 'inv_2', schoolId: SCHOOL, studentId: CHILD, invoiceNumber: 'INV-1042', total: 25000, balance: 12500, dueDate: (() => { const d = new Date(); d.setDate(d.getDate() + 30); return d.toISOString().slice(0, 10); })(), currency: 'KES' },
       { id: 'inv_3', schoolId: SCHOOL, studentId: CHILD, invoiceNumber: 'INV-1039', total: 10000, balance: 3000,  dueDate: '2026-01-05', currency: 'KES', status: 'outstanding' },
     );
     mockCollections.payments._seed.push(
