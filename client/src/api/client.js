@@ -500,6 +500,7 @@ export const assignments = {
   remove:      (id)         => _delete(`/assignments/${id}`),
   submissions: (id)         => _get(`/assignments/${id}/submissions`),
   grade:       (id, data)   => _post(`/assignments/${id}/grade`, data),
+  reopen:      (id, studentId) => _post(`/assignments/${id}/submissions/${studentId}/reopen`, {}),
   submit:      (id, data)   => _post(`/assignments/${id}/submit`, data),
   exceptions:  (params)     => _get('/assignments/exceptions', params),
 

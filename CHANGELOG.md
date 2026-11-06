@@ -20,6 +20,10 @@ Assignments no longer require Google Classroom. A teacher issues work to a class
 - **Answer modes:** written, file upload, text + file, and quizzes. File bytes go to S3-compatible storage with presigned PUT/GET when configured, and to `server/uploads` with an access-checked download route in development; metadata is tenant-scoped in `assignment_attachments`.
 - **Quizzes:** single/multi choice, short/long text and file questions; the answer key never reaches a student payload; MCQ answers are marked on submit and the teacher confirms/adjusts the total. A reusable question bank, per-question points and timed attempts are included.
 - **Pages, not modals:** `/elearning/assignments/new` (builder), `/elearning/assignments/:id` (teacher workspace with KPIs, expandable answers, attachments, grading) and `/student-assignments/:id` (student answer page with timer).
+- **Reopen:** a teacher can reopen a graded submission; the mark this assignment wrote is withdrawn, exceptions cleared, and the student can submit again.
+- **Parent portal:** `GET /api/parent-portal/assignments/:childId` plus a **Current Assignments** card on the web Grades page and the mobile Learning tab (status and score, answer key stripped).
+- **Google Classroom read-sync:** `POST /api/elearning/sync` mirrors coursework and submissions into the native tables, and the Pub/Sub webhook now mirrors before writing the mark. Also fixed a long-standing `_getToken`/`_refreshIfNeeded` bug that referenced a free `req` (every Classroom API call would have thrown).
+- **Mobile quiz builder:** teachers can build a quiz (single/multi/written/file questions, points and a time limit) from the phone, not only the web console.
 - Upload design and the 100-student concurrency model are documented in `docs/design/native-assignments-gc-sync.md` §12–13.
 
 ## [v5.262.0] - 2026-11-04 - feat(reminders): Smart Reminders on the web, and a guardian report drafted from real data

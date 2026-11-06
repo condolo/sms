@@ -39,6 +39,7 @@ const { planClassroomMark } = require('../utils/classroom-mark-plan');
 const { firstArchivedYear } = require('../utils/archival');
 const { deadlinePassed } = require('../utils/school-deadline');
 const storage = require('../utils/assignment-storage');
+const { forStudent } = require('../utils/assignment-view');
 
 const router = express.Router();
 const PLAN = planGate('elearning');
@@ -160,18 +161,7 @@ async function _deadlinePassed(req, assignment) {
   return deadlinePassed(assignment.dueDate, assignment.dueTime, tz);
 }
 
-/** Student-facing assignment: the answer key never leaves the server. */
-function _forStudent(a) {
-  if (!a) return a;
-  if (!Array.isArray(a.questions) || a.questions.length === 0) return a;
-  return {
-    ...a,
-    questions: a.questions.map(q => {
-      const { correctOptionIds, ...safe } = q;
-      return safe;
-    }),
-  };
-}
+const _forStudent = forStudent;
 
 function _normaliseQuestions(input) {
   return (input || []).map(q => ({
@@ -1276,6 +1266,72 @@ router.post('/:id/grade', authMiddleware, PLAN, MODGATE, rbac('elearning', 'upda
   } catch (err) {
     console.error('[assignments/:id/grade POST]', err);
     return E.serverError(res, 'Could not save the grade.');
+  }
+});
+
+/* ── Reopen a graded submission ──────────────────────────────── */
+
+router.post('/:id/submissions/:studentId/reopen', authMiddleware, PLAN, MODGATE, rbac('elearning', 'update'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const assignment = await tenantModel('assignments', tenantContext(req))
+      .findOne({ schoolId, id: req.params.id }).lean();
+    if (!assignment) return E.notFound(res, 'Assignment not found.');
+    if (!(await canWriteSubject(req, assignment.classId, assignment.subjectId, assignment.streamId ?? null))) {
+      return _bad(res, `You are not assigned to teach: ${assignment.subjectId}`, 403);
+    }
+
+    const Submissions = tenantModel('assignment_submissions', tenantContext(req));
+    const submission = await Submissions.findOne({
+      schoolId, assignmentId: assignment.id, studentId: req.params.studentId, attemptNo: 1,
+    }).lean();
+    if (!submission) return E.notFound(res, 'Submission not found.');
+
+    // Withdraw the mark this assignment wrote, but never an unrelated mark:
+    // the label must match this assignment's title.
+    if (assignment.assessmentScheduleId) {
+      const schedule = await tenantModel('assessment_schedule', tenantContext(req))
+        .findOne({ schoolId, id: assignment.assessmentScheduleId }).lean();
+      if (schedule) {
+        await tenantModel('assessment_marks', tenantContext(req)).deleteOne({
+          schoolId,
+          classId: assignment.classId,
+          subjectId: assignment.subjectId,
+          termNumber: schedule.termNumber,
+          assessmentType: schedule.assessmentType,
+          instance: schedule.instance ?? 1,
+          academicYearId: schedule.academicYearId ?? null,
+          studentId: req.params.studentId,
+          label: assignment.title,
+        });
+      }
+    }
+    await tenantModel('assignment_sync_exceptions', tenantContext(req))
+      .deleteMany({ schoolId, assignmentId: assignment.id, studentId: req.params.studentId });
+
+    const now = new Date().toISOString();
+    await Submissions.updateOne(
+      { schoolId, assignmentId: assignment.id, studentId: req.params.studentId, attemptNo: 1 },
+      {
+        $set: {
+          status: 'TURNED_IN',
+          assignedGrade: null,
+          rawScore: null,
+          gradedAt: null,
+          gradedBy: null,
+          markWriteStatus: 'PENDING',
+          skipReason: null,
+          updatedAt: now,
+        },
+      },
+    );
+    const updated = await Submissions.findOne({
+      schoolId, assignmentId: assignment.id, studentId: req.params.studentId, attemptNo: 1,
+    }).lean();
+    return ok(res, { submission: updated, reopened: true });
+  } catch (err) {
+    console.error('[assignments reopen POST]', err);
+    return E.serverError(res, 'Could not reopen the submission.');
   }
 });
 

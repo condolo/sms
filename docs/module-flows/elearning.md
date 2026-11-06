@@ -17,6 +17,9 @@ Assignments do not need a Google account. Open **eLearning → Assignments**, ch
 3. The teacher opens the assignment to see the full roster — submitted / not submitted / graded — and saves a score per student. Feedback is shown to the student with the grade.
 4. Deadlines are enforced on the server in the **school's timezone**, at submission time. Use **Accept late submissions** if work may still come in after the due time; leave it off for a hard deadline. A graded submission cannot be resubmitted.
 5. If the assignment was linked to an **assessment window** (the optional "Feeds Markbook" field), the score is written to the Markbook as an unpublished mark and follows the same locks and publish flow as a typed mark. If the window is locked, the grade is kept on the assignment and the reason appears under the amber "could not reach the Markbook" banner.
+6. A graded submission can be **reopened** from the assignment page (web or mobile). Reopening withdraws the mark this assignment wrote and lets the student submit again.
+7. Parents see the child's current assignments with status and score under **Grades & Reports → Current Assignments** (web) and **Learning → Assignments** (mobile). Quiz answer keys are never sent to a parent.
+8. With Google Classroom connected, **Sync now** mirrors coursework and submissions into the same assignment tables; the Pub/Sub webhook does the same automatically as grades arrive.
 
 **Access:** staff need the eLearning grant (`read` to view, `create` to issue, `update` to grade); the canonical teacher role now includes these. A subject teacher only sees their own class+subject pairs; a class teacher sees every subject in their class. Students are self-scoped to their own class.
 

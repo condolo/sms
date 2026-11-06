@@ -1,6 +1,6 @@
 # Design: Native assignments + Google Classroom read-sync (survive on our own)
 
-Status: **native slice built (2026-11-06).** Implemented on `feat/native-assignments`: written/file/both modes, S3-or-local file uploads, structured quizzes (single/multi choice, short/long text, file questions) with server-side auto-marking, question bank, timed attempts, teacher workspace page, student assignment page, and mobile screens. The Google Classroom read-sync (PR-1) remains a proposal. Points marked **DECIDE** still need answers for that phase. Verified facts were checked against the code on 2026-11-06.
+Status: **built (2026-11-06).** Implemented on `feat/native-assignments`: written/file/both modes, S3-or-local file uploads, structured quizzes (single/multi choice, short/long text, file questions) with server-side auto-marking, question bank, timed attempts, reopen-after-grading, parent-portal assignment lists, teacher workspace page, student assignment page, mobile screens including the quiz builder, and the **Google Classroom read-sync** (manual `POST /api/elearning/sync` + the Pub/Sub webhook now mirrors coursework/submissions before writing marks). An hourly poll can wrap the same sync route later. Points marked **DECIDE** still need answers for edge policy. Verified facts were checked against the code on 2026-11-06.
 
 ## 1. Problem
 

@@ -725,6 +725,14 @@ const INDEXES = [
       { key: { schoolId: 1, classId: 1, subjectId: 1, createdAt: -1 }, name: 'asg_class_sub_created' },
       { key: { schoolId: 1, classId: 1, status: 1, dueDate: 1 },        name: 'asg_class_status_due' },
       { key: { schoolId: 1, teacherId: 1, createdAt: -1 },              name: 'asg_teacher_created' },
+      // Partial, not sparse: native assignments may carry null gc fields,
+      // and sparse still indexes explicit nulls. Only real GC ids collide.
+      {
+        key: { schoolId: 1, gcCourseId: 1, gcCourseWorkId: 1 },
+        name: 'asg_gc_coursework',
+        unique: true,
+        partialFilterExpression: { gcCourseWorkId: { $type: 'string' } },
+      },
       { key: { id: 1 },                                                  name: 'asg_id', unique: true, sparse: true },
     ],
   },

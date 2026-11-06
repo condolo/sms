@@ -12,7 +12,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle, ArrowLeft, Award, CheckCircle2, ChevronDown, ChevronRight,
   ClipboardCheck, Clock, FileText, ListChecks, Loader2, Paperclip, Percent,
-  RefreshCw, Trash2, Users,
+  RefreshCw, RotateCcw, Trash2, Users,
 } from 'lucide-react';
 import { assignments as api } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
@@ -97,11 +97,15 @@ export default function AssignmentDetailPage() {
   }, [rows]);
 
   const grade = useMutation({
-    mutationFn: ({ studentId }) => api.grade(id, {
-      studentId,
-      assignedGrade: Number(grades[studentId]),
-      feedback: feedback[studentId] || '',
-    }),
+    mutationFn: ({ studentId }) => {
+      const sub = rows.find(r => r.studentId === studentId)?.submission;
+      const value = grades[studentId] ?? sub?.assignedGrade ?? sub?.autoScore;
+      return api.grade(id, {
+        studentId,
+        assignedGrade: Number(value),
+        feedback: feedback[studentId] || sub?.feedback || '',
+      });
+    },
     onSuccess: (res, vars) => {
       const mw = res?.data?.markWrite;
       const who = rows.find(r => r.studentId === vars.studentId)?.name || 'Student';
@@ -111,6 +115,17 @@ export default function AssignmentDetailPage() {
           ? `${who}: grade saved, but not written to the Markbook (${String(mw.reason).replace(/_/g, ' ')}).`
           : `${who}: grade saved on the assignment (no Markbook window linked).`;
       setToast({ type: mw?.status === 'SKIPPED' ? 'error' : 'success', msg });
+      qc.invalidateQueries({ queryKey: ['assignments', id, 'workspace'] });
+      qc.invalidateQueries({ queryKey: ['assignments'] });
+    },
+    onError: err => setToast({ type: 'error', msg: err.message }),
+  });
+
+  const reopen = useMutation({
+    mutationFn: ({ studentId }) => api.reopen(id, studentId),
+    onSuccess: (_res, vars) => {
+      const who = rows.find(r => r.studentId === vars.studentId)?.name || 'Student';
+      setToast({ type: 'success', msg: `${who}: reopened — they can submit again.` });
       qc.invalidateQueries({ queryKey: ['assignments', id, 'workspace'] });
       qc.invalidateQueries({ queryKey: ['assignments'] });
     },
@@ -332,6 +347,21 @@ export default function AssignmentDetailPage() {
                           >
                             Save
                           </button>
+                          {graded && (
+                            <button
+                              type="button"
+                              disabled={reopen.isPending}
+                              onClick={() => {
+                                if (window.confirm(`Reopen ${row.name}'s submission? They can submit again.`)) {
+                                  reopen.mutate({ studentId: row.studentId });
+                                }
+                              }}
+                              className="flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                              title="Reopen for another submission"
+                            >
+                              <RotateCcw size={12} /> Reopen
+                            </button>
+                          )}
                         </div>
                       )}
                     </div>

@@ -1069,6 +1069,7 @@ function ClassroomView({ statusData, connected }) {
   const [activeTab,    setActiveTab]    = useState('classwork');
   const [showLink,     setShowLink]     = useState(false);
   const [toast,        setToast]        = useState(null);
+  const [syncing,      setSyncing]      = useState(false);
 
   const { data: coursesData, isLoading: coursesLoading } = useQuery({
     queryKey: ['elearning-courses'],
@@ -1086,6 +1087,24 @@ function ClassroomView({ statusData, connected }) {
   });
   const gcCourses = gcCoursesData?.courses || [];
   const linkedIds = new Set(linkedCourses.map(c => c.gcCourseId));
+
+  async function handleSync() {
+    setSyncing(true);
+    setToast(null);
+    try {
+      const result = await apiFetch('/sync', { method: 'POST' });
+      setToast({
+        type: 'success',
+        msg: `Synced ${result.mirrored ?? 0} coursework and ${result.submissions ?? 0} submissions${result.errors?.length ? ` · ${result.errors.length} course error(s)` : ''}.`,
+      });
+      qc.invalidateQueries({ queryKey: ['elearning-courses'] });
+      qc.invalidateQueries({ queryKey: ['assignments'] });
+    } catch (err) {
+      setToast({ type: 'error', msg: err.message });
+    } finally {
+      setSyncing(false);
+    }
+  }
 
   async function handleUnlink(id) {
     if (!window.confirm('Unlink this course from Msingi? The course stays in Google Classroom.')) return;
@@ -1149,7 +1168,14 @@ function ClassroomView({ statusData, connected }) {
           }
         </div>
 
-        <div className="px-3 py-3 border-t border-slate-100">
+        <div className="px-3 py-3 border-t border-slate-100 space-y-2">
+          <button
+            onClick={handleSync}
+            disabled={syncing}
+            className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl bg-green-600 text-white text-xs font-semibold hover:bg-green-700 disabled:opacity-50 transition"
+          >
+            <RefreshCcw size={12} className={syncing ? 'animate-spin' : ''} /> {syncing ? 'Syncing…' : 'Sync now'}
+          </button>
           <button onClick={() => setShowLink(true)}
             className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl border border-dashed border-green-400 text-green-700 text-xs font-semibold hover:bg-green-50 transition">
             <Link2 size={12} /> Link a course
