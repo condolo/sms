@@ -66,6 +66,7 @@ function CreateModal({ open, onClose, onCreated, classList }) {
     dueTime: '23:59',
     maxPoints: '20',
     assessmentScheduleId: '',
+    allowLate: false,
   });
   const [toast, setToast] = useState(null);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -108,13 +109,14 @@ function CreateModal({ open, onClose, onCreated, classList }) {
       dueTime: form.dueTime || null,
       maxPoints: form.type === 'MATERIAL' ? null : Number(form.maxPoints || 100),
       assessmentScheduleId: form.assessmentScheduleId || null,
+      allowLate: form.allowLate,
     }),
     onSuccess: () => {
       onCreated();
       onClose();
       setForm({
         type: 'ASSIGNMENT', title: '', description: '', classId: '', subjectId: '',
-        dueDate: isoPlusDays(7), dueTime: '23:59', maxPoints: '20', assessmentScheduleId: '',
+        dueDate: isoPlusDays(7), dueTime: '23:59', maxPoints: '20', assessmentScheduleId: '', allowLate: false,
       });
     },
     onError: err => setToast({ type: 'error', msg: err.message }),
@@ -217,6 +219,23 @@ function CreateModal({ open, onClose, onCreated, classList }) {
                 Linking a window lets the grade reach the Markbook under its normal locks and publish flow.
               </p>
             </div>
+          )}
+
+          {form.type !== 'MATERIAL' && (
+            <label className="flex items-start gap-2.5 rounded-xl border border-slate-200 px-3 py-2.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.allowLate}
+                onChange={e => set('allowLate', e.target.checked)}
+                className="mt-0.5 accent-indigo-600"
+              />
+              <span>
+                <span className="block text-sm font-medium text-slate-700">Accept late submissions</span>
+                <span className="block text-[11px] text-slate-400">
+                  Off by default: the deadline is enforced in the school's timezone.
+                </span>
+              </span>
+            </label>
           )}
         </div>
 

@@ -29,6 +29,7 @@ const { authMiddleware } = require('../middleware/auth');
 const { rbac } = require('../middleware/rbac');
 const { planGate } = require('../middleware/plan');
 const { moduleGate } = require('../middleware/module-gate');
+const { _model } = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created: createdRes, E } = require('../utils/response');
 const { resolveTeacher } = require('../utils/resolveTeacher');
@@ -36,6 +37,7 @@ const { isManagement, canWriteSubject, unassignedPairs } = require('../utils/sub
 const { taughtPairs } = require('../utils/teaching-scope');
 const { planClassroomMark } = require('../utils/classroom-mark-plan');
 const { firstArchivedYear } = require('../utils/archival');
+const { deadlinePassed } = require('../utils/school-deadline');
 
 const router = express.Router();
 const PLAN = planGate('elearning');
@@ -96,6 +98,27 @@ const GradeSchema = z.object({
 
 function _bad(res, msg, code = 400) {
   return res.status(code).json({ error: msg });
+}
+
+/* ── Deadline in the school's timezone ─────────────────────────
+   A due time is a wall-clock instruction ("23:59 on 13 Nov") in the
+   school's timezone (schools.timezone, e.g. Africa/Nairobi), never the
+   server's. Interpreting it with the host clock made a 23:59 Nairobi
+   deadline fall at 23:59 UTC on a UTC server — three hours late. */
+const _tzCache = new Map(); // schoolId -> { tz, expiresAt }
+async function _schoolTimeZone(schoolId) {
+  const hit = _tzCache.get(schoolId);
+  if (hit && Date.now() < hit.expiresAt) return hit.tz;
+  const school = await _model('schools').findOne({ id: schoolId }).select('timezone').lean().catch(() => null);
+  const tz = school?.timezone || 'UTC';
+  _tzCache.set(schoolId, { tz, expiresAt: Date.now() + 5 * 60_000 });
+  return tz;
+}
+
+async function _deadlinePassed(req, assignment) {
+  if (!assignment.dueDate) return false;
+  const tz = await _schoolTimeZone(req.jwtUser.schoolId);
+  return deadlinePassed(assignment.dueDate, assignment.dueTime, tz);
 }
 
 async function _teacherClassIds(req, teacher) {
@@ -523,11 +546,8 @@ router.post('/:id/submit', authMiddleware, PLAN, MODGATE, async (req, res) => {
       return E.forbidden(res, 'This assignment is not for your stream.');
     }
 
-    if (assignment.dueDate && !assignment.allowLate) {
-      const deadline = new Date(`${assignment.dueDate}T${assignment.dueTime || '23:59'}:00`);
-      if (Number.isFinite(deadline.getTime()) && Date.now() > deadline.getTime()) {
-        return _bad(res, 'The deadline has passed. Ask your teacher to reopen it.', 403);
-      }
+    if (assignment.dueDate && !assignment.allowLate && await _deadlinePassed(req, assignment)) {
+      return _bad(res, 'The deadline has passed. Ask your teacher to reopen it.', 403);
     }
 
     const Submissions = tenantModel('assignment_submissions', tenantContext(req));

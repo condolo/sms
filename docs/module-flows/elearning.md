@@ -14,7 +14,8 @@ Assignments do not need a Google account. Open **eLearning → Assignments**, ch
 1. The assignment is published immediately unless a future publish time is set. Students in that class see it on the web student portal (**My assignments**) and in the mobile app; parents see it on the parent portal.
 2. A student opens the card, types an answer and submits. One attempt is kept; the teacher can grade it, after which the student cannot resubmit.
 3. The teacher opens the assignment to see the full roster — submitted / not submitted / graded — and saves a score per student. Feedback is shown to the student with the grade.
-4. If the assignment was linked to an **assessment window** (the optional "Feeds Markbook" field), the score is written to the Markbook as an unpublished mark and follows the same locks and publish flow as a typed mark. If the window is locked, the grade is kept on the assignment and the reason appears under the amber "could not reach the Markbook" banner.
+4. Deadlines are enforced on the server in the **school's timezone**, at submission time. Use **Accept late submissions** if work may still come in after the due time; leave it off for a hard deadline. A graded submission cannot be resubmitted.
+5. If the assignment was linked to an **assessment window** (the optional "Feeds Markbook" field), the score is written to the Markbook as an unpublished mark and follows the same locks and publish flow as a typed mark. If the window is locked, the grade is kept on the assignment and the reason appears under the amber "could not reach the Markbook" banner.
 
 **Access:** staff need the eLearning grant (`read` to view, `create` to issue, `update` to grade); the canonical teacher role now includes these. A subject teacher only sees their own class+subject pairs; a class teacher sees every subject in their class. Students are self-scoped to their own class.
 

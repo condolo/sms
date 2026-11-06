@@ -15,7 +15,9 @@ Assignments no longer require Google Classroom. A teacher issues work to a class
 - `client/src/pages/student-portal/StudentAssignmentsPage.jsx` — "My assignments" at `/student-assignments`.
 - Mobile: teacher assignments + grading screens and the student list/submit sheet, reachable from the teacher's quick actions and the student Learning tab.
 - Teacher role now carries `elearning: read/create/update` (repairPermissions + onboard defaults), so the module is reachable without an admin granting it case by case.
-- 9 route tests + the existing planner suite; RBAC and tenant gates stay at 100% / 35.
+- Deadlines are enforced in the **school's** timezone (`server/utils/school-deadline.js`), not the server's, with an explicit "accept late submissions" switch on both create forms.
+- 9 route tests + 6 deadline tests + the existing planner suite; RBAC and tenant gates stay at 100% / 35.
+- Files: submissions are text-only in this slice. The upload design (S3 presigned PUT/GET, metadata in Mongo, 100-student concurrency) is written up in `docs/design/native-assignments-gc-sync.md` §12; message attachments' base64-in-Mongo pattern is deliberately not reused.
 
 ## [v5.262.0] - 2026-11-04 - feat(reminders): Smart Reminders on the web, and a guardian report drafted from real data
 

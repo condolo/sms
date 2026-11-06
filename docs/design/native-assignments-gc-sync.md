@@ -360,6 +360,51 @@ Unit: planner (`classroom-mark-plan.test.js` generalized), sync idempotency (sam
 
 Copying submission binaries (see principle 2); replacing Google Classroom for GC-native schools (import path only); Zoom API sessions (PMI flow already covers live).
 
+## 12. Uploads, deadlines and 100-student concurrency
+
+**Today (honest):** assignment submissions hold `textAnswer` only. `attachmentIds` exists on the model but there is no upload endpoint, no storage bucket and no file picker — nothing is stored for assignments. Two existing patterns must not be copied:
+
+- `message_attachments` stores base64 blobs **inside MongoDB**, behind the global `express.json({ limit: '10mb' })`. That is fine for a report card sent to one parent; it is the wrong shape for 100 students × files (DB growth, 10 MB cap, whole file buffered in Node).
+- `backupStorage.js` already talks to S3-compatible storage (AWS S3 / R2 / B2 / MinIO) via `@aws-sdk/client-s3`, but only for encrypted backups.
+
+**Target design — direct-to-storage, metadata in Mongo:**
+
+```
+Student → POST /api/assignments/:id/attachments/presign {fileName,mimeType,size}
+            server checks: enrolment, published, school-time deadline/allowLate,
+            size ≤ 10 MB, count ≤ 5, MIME allowlist
+        ← { uploadUrl (presigned PUT, 5 min), objectKey, attachmentId }
+Student → PUT uploadUrl  (bytes go straight to the bucket, never through Node)
+Student → POST /:id/submit { textAnswer?, attachmentIds }
+            server HEADs each object, verifies size/type, writes assignment_attachments
+Teacher/Parent → GET /api/assignments/:id/attachments/:attId
+            access check (teaching scope / student self / parent child)
+            ← 302 to a 60-second presigned GET (or a CDN URL)
+```
+
+- **Key layout:** `schools/{schoolId}/assignments/{assignmentId}/{studentId}/{uuid}-{safeName}` — per-tenant, per-assignment, per-student. An orphan sweep can list a prefix and delete anything older than 24 h with no metadata row.
+- **Safety:** MIME allowlist (pdf, png/jpg, docx), extension check, `Content-Disposition: attachment`, async virus scan before a teacher opens it, no inline execution.
+- **Retention:** lifecycle rule keeps objects for the term + N days; deleting an assignment/student cascades metadata and enqueues object deletion.
+
+**100 students at once.** Concurrency is ~400 small operations, not 100 file streams:
+
+| Step | Load at 100 students | Where it runs |
+|---|---|---|
+| Presign | 100 × ~1 KB JSON | Node (stateless, ~ms each) |
+| Upload | 100 × ≤10 MB PUTs | Object storage, in parallel |
+| Submit | 100 × single upsert | Mongo, unique `(schoolId,assignmentId,studentId,attemptNo)` |
+| Read-back | 100 × signed GET | CDN/object storage; Node only signs |
+
+The app server never buffers a file, so memory stays flat; the 10 MB JSON limit is irrelevant because bytes bypass it. The only shared hot spot is the Mongo upsert, and the unique index makes retries idempotent. For a whole class downloading the same worksheet, a CDN caches the object — reads scale independently of the API.
+
+**Deadlines.** Server-authoritative, no client clock trust:
+
+- `dueDate`/`dueTime` are wall-clock values in the **school's** timezone (`schools.timezone`), converted with `server/utils/school-deadline.js`; a missing time means 23:59 local.
+- Enforced at **presign and submit** (the file cannot be uploaded after the bell, even if the form was already open).
+- `allowLate` is an explicit per-assignment switch (web + mobile create forms).
+- One attempt while `TURNED_IN`; after `GRADED` a resubmit is refused until the teacher reopens (reopen endpoint/UI is a follow-up).
+- A late file already in the bucket is harmless: without a submission row pointing at it, the orphan sweep removes it.
+
 ## 11. DECIDEs
 
 1. **Module/plan:** reuse `elearning` + core plan, or new entitlement? (Recommend: reuse.)
