@@ -68,7 +68,10 @@ describe('_computeReportSections — the IR itself, directly', () => {
     const fixture = golden.fixtures[0];
     const a = reportCardsRouter._computeReportSections(fixture.snap, fixture.config, fixture.attendance);
     const b = reportCardsRouter._computeReportSections(fixture.snap, fixture.config, fixture.attendance);
-    expect(a).toEqual(b);
+    // genLine carries a UTC timestamp that changes every second, so compare
+    // everything else.
+    const stripGenLine = (ir) => { const { footer, ...rest } = ir; const { genLine, ...footerRest } = footer; return { ...rest, footer: footerRest }; };
+    expect(stripGenLine(a)).toEqual(stripGenLine(b));
   });
 
   test('watermarkText is null for a published, non-superseded snapshot; set for draft/superseded', () => {

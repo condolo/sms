@@ -399,7 +399,8 @@ describe('GET /api/parent-portal/fees/:childId', () => {
 
     // The next date a parent can act on: the earliest outstanding due date
     // still ahead, never the past-due one.
-    expect(res.body.data.nextDueDate).toBe('2026-11-05');
+    const expectedNext = new Date(); expectedNext.setDate(expectedNext.getDate() + 30);
+    expect(res.body.data.nextDueDate).toBe(expectedNext.toISOString().slice(0, 10));
 
     expect(res.body.data.receipts[0]).toEqual({
       id: 'pay_1', code: 'QK47X2L9', amount: 7500, paidAt: '2026-08-12', method: 'mpesa', invoiceId: 'inv_2',
