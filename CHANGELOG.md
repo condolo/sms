@@ -6,6 +6,17 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.263.0] - 2026-11-06 - feat(assignments): native assignments — issue, submit, grade, write to the Markbook
+
+Assignments no longer require Google Classroom. A teacher issues work to a class+subject they hold, a student submits it from the web student portal or the mobile app, and the teacher grades it from a roster that shows every student's status. When the assignment names an assessment window, the score is written to `assessment_marks` through the same `planClassroomMark` planner the Classroom webhook uses — schedule lock, mark lock and under-review checks included — and stays unpublished until the normal report-card flow releases it. A skipped write is never silent: the submission carries `markWriteStatus`/`skipReason`, and the teacher sees an exceptions banner.
+
+- `server/routes/assignments.js` — list/detail/create/update/delete, roster, student submit, teacher grade; tenant-scoped, RBAC-gated, subject-teacher scope enforced via `canWriteSubject`.
+- `client/src/pages/elearning/AssignmentsPage.jsx` — teacher list, create modal with curriculum-filtered subjects and optional Markbook link, roster grading modal.
+- `client/src/pages/student-portal/StudentAssignmentsPage.jsx` — "My assignments" at `/student-assignments`.
+- Mobile: teacher assignments + grading screens and the student list/submit sheet, reachable from the teacher's quick actions and the student Learning tab.
+- Teacher role now carries `elearning: read/create/update` (repairPermissions + onboard defaults), so the module is reachable without an admin granting it case by case.
+- 9 route tests + the existing planner suite; RBAC and tenant gates stay at 100% / 35.
+
 ## [v5.262.0] - 2026-11-04 - feat(reminders): Smart Reminders on the web, and a guardian report drafted from real data
 
 Two gaps closed together. The school could already send a lot of automated mail, but **nothing ever followed up**: an announcement went out once and a parent who never opened it stayed uninformed; a lesson happened and its register was never marked; an exam sat on the timetable with nobody told. And a teacher who wanted to write home about a child had to assemble attendance, behaviour and marks from four different screens — so in practice they wrote nothing.

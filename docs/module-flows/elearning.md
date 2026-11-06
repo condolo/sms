@@ -7,6 +7,17 @@
 3. Confirm the displayed meeting link and passcode, then schedule. The flow may also create a calendar event.
 4. Review upcoming and past sessions; cancel a future session through the provided cancel action so linked calendar data can be updated.
 
+## Assignments (native)
+
+Assignments do not need a Google account. Open **eLearning → Assignments**, choose **New assignment**, then pick the class, subject, due date and points. The subject list is the class's own curriculum, and the server only accepts a class+subject the teacher actually holds.
+
+1. The assignment is published immediately unless a future publish time is set. Students in that class see it on the web student portal (**My assignments**) and in the mobile app; parents see it on the parent portal.
+2. A student opens the card, types an answer and submits. One attempt is kept; the teacher can grade it, after which the student cannot resubmit.
+3. The teacher opens the assignment to see the full roster — submitted / not submitted / graded — and saves a score per student. Feedback is shown to the student with the grade.
+4. If the assignment was linked to an **assessment window** (the optional "Feeds Markbook" field), the score is written to the Markbook as an unpublished mark and follows the same locks and publish flow as a typed mark. If the window is locked, the grade is kept on the assignment and the reason appears under the amber "could not reach the Markbook" banner.
+
+**Access:** staff need the eLearning grant (`read` to view, `create` to issue, `update` to grade); the canonical teacher role now includes these. A subject teacher only sees their own class+subject pairs; a class teacher sees every subject in their class. Students are self-scoped to their own class.
+
 ## Google Classroom content
 
 Connect the school's Google Classroom integration before using course links. Select a course, create classwork/material using the form, and verify it in Classroom. Deletion may affect the external Classroom item, so confirm before proceeding.

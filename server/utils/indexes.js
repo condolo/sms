@@ -715,6 +715,47 @@ const INDEXES = [
     ],
   },
 
+  /* ── assignments (2026-11) ──────────────────────────────────
+     Native assignments. Primary: a teacher's list is class+subject,
+     sorted by due date. Secondary: the student/parent portals read a
+     class's published work. */
+  {
+    col: 'assignments',
+    indexes: [
+      { key: { schoolId: 1, classId: 1, subjectId: 1, createdAt: -1 }, name: 'asg_class_sub_created' },
+      { key: { schoolId: 1, classId: 1, status: 1, dueDate: 1 },        name: 'asg_class_status_due' },
+      { key: { schoolId: 1, teacherId: 1, createdAt: -1 },              name: 'asg_teacher_created' },
+      { key: { id: 1 },                                                  name: 'asg_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── assignment_submissions (2026-11) ───────────────────────
+     One row per (assignment, student, attempt). The unique key is what
+     makes a double submit idempotent; the assignmentId+status key feeds
+     the roster and the submitted/graded counters. */
+  {
+    col: 'assignment_submissions',
+    indexes: [
+      { key: { schoolId: 1, assignmentId: 1, studentId: 1, attemptNo: 1 }, name: 'asub_assignment_student_attempt', unique: true },
+      { key: { schoolId: 1, assignmentId: 1, status: 1 },                  name: 'asub_assignment_status' },
+      { key: { schoolId: 1, studentId: 1, createdAt: -1 },                 name: 'asub_student_created' },
+      { key: { id: 1 },                                                    name: 'asub_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── assignment_sync_exceptions (2026-11) ───────────────────
+     A grade that could not reach the Markbook, kept visible instead of
+     vanishing into a console warning. Unresolved rows drive the
+     "Review exceptions" panel. */
+  {
+    col: 'assignment_sync_exceptions',
+    indexes: [
+      { key: { schoolId: 1, resolvedAt: 1, createdAt: -1 }, name: 'asex_school_open_created' },
+      { key: { schoolId: 1, assignmentId: 1, studentId: 1 }, name: 'asex_assignment_student' },
+      { key: { id: 1 },                                       name: 'asex_id', unique: true, sparse: true },
+    ],
+  },
+
   /* ── assessment_marks ───────────────────────────────────────
      High-volume CA marks collection (replaces legacy grades for new CA system).
      Primary: mark entry grid loads by class+subject+term simultaneously.

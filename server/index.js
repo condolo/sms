@@ -347,6 +347,9 @@ app.use('/api/report-card-templates', require('./routes/report-card-templates'))
 /* ── eLearning — Google Classroom integration ── */
 app.use('/api/elearning', require('./routes/elearning'));
 
+/* ── Assignments — native work, submissions and grading ── */
+app.use('/api/assignments', require('./routes/assignments'));
+
 /* ── Billing — platform subscription invoicing ── */
 app.use('/api/billing',        require('./routes/billing'));
 

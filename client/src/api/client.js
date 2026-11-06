@@ -492,6 +492,18 @@ export const exams = {
   statusHistory: (id)       => _get(`/exams/${id}/status-history`),
 };
 
+export const assignments = {
+  list:        (params)     => _get('/assignments', params),
+  get:         (id)         => _get(`/assignments/${id}`),
+  create:      (data)       => _post('/assignments', data),
+  update:      (id, data)   => _patch(`/assignments/${id}`, data),
+  remove:      (id)         => _delete(`/assignments/${id}`),
+  submissions: (id)         => _get(`/assignments/${id}/submissions`),
+  grade:       (id, data)   => _post(`/assignments/${id}/grade`, data),
+  submit:      (id, data)   => _post(`/assignments/${id}/submit`, data),
+  exceptions:  ()           => _get('/assignments/exceptions'),
+};
+
 export const assessment = {
   // Config
   getConfig:    (params)     => _get('/assessment/config', params),

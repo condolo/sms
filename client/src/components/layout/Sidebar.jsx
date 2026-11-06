@@ -20,7 +20,7 @@ import { useEffect, useState } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Settings, LogOut, Tag, HelpCircle,
-  X, MonitorPlay, ChevronDown, Video,
+  X, MonitorPlay, ChevronDown, Video, ClipboardList,
 } from 'lucide-react';
 import clsx from 'clsx';
 import useAuthStore from '@/store/auth.js';
@@ -125,6 +125,12 @@ function labelStyle(collapsed) {
 
 /* ── eLearning sub-items ─────────────────────────────────────── */
 const ELEARNING_ITEMS = [
+  {
+    to:       '/elearning/assignments',
+    label:    'Assignments',
+    upcoming: false,
+    icon: <ClipboardList className="w-3.5 h-3.5 shrink-0" />,
+  },
   {
     to:       '/elearning/sessions',
     label:    'Online Sessions',
