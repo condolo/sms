@@ -38,6 +38,7 @@ const Dashboard      = lazy(() => import('@/pages/Dashboard.jsx'));
 const StudentList    = lazy(() => import('@/pages/students/StudentList.jsx'));
 const StudentProfile = lazy(() => import('@/pages/students/StudentProfile.jsx'));
 const TeacherList    = lazy(() => import('@/pages/teachers/TeacherList.jsx'));
+const TeacherStudents = lazy(() => import('@/pages/teacher/TeacherStudents.jsx'));
 const ClassList      = lazy(() => import('@/pages/classes/ClassList.jsx'));
 const ClassDetail    = lazy(() => import('@/pages/classes/ClassDetail.jsx'));
 const AttendancePage = lazy(() => import('@/pages/attendance/AttendancePage.jsx'));
@@ -226,6 +227,7 @@ export const router = createBrowserRouter([
 
       // Teachers
       { path: 'teachers',              element: <SuspenseWrapper><TeacherList /></SuspenseWrapper> },
+      { path: 'teacher/students',      element: <SuspenseWrapper><TeacherStudents /></SuspenseWrapper> },
 
       // Classes
       { path: 'classes',               element: <SuspenseWrapper><ClassList /></SuspenseWrapper> },

@@ -377,7 +377,7 @@ describe('GET /api/parent-portal/fees/:childId', () => {
   test('overdue is derived from the due date, and a paid invoice is not "outstanding"', async () => {
     mockCollections.invoices._seed.push(
       { id: 'inv_1', schoolId: SCHOOL, studentId: CHILD, invoiceNumber: 'INV-1041', total: 20000, balance: 0,     dueDate: '2026-06-05', currency: 'KES' },
-      { id: 'inv_2', schoolId: SCHOOL, studentId: CHILD, invoiceNumber: 'INV-1042', total: 25000, balance: 12500, dueDate: '2026-11-05', currency: 'KES' },
+      { id: 'inv_2', schoolId: SCHOOL, studentId: CHILD, invoiceNumber: 'INV-1042', total: 25000, balance: 12500, dueDate: (() => { const d = new Date(); d.setDate(d.getDate() + 30); return d.toISOString().slice(0, 10); })(), currency: 'KES' },
       { id: 'inv_3', schoolId: SCHOOL, studentId: CHILD, invoiceNumber: 'INV-1039', total: 10000, balance: 3000,  dueDate: '2026-01-05', currency: 'KES', status: 'outstanding' },
     );
     mockCollections.payments._seed.push(
@@ -399,7 +399,8 @@ describe('GET /api/parent-portal/fees/:childId', () => {
 
     // The next date a parent can act on: the earliest outstanding due date
     // still ahead, never the past-due one.
-    expect(res.body.data.nextDueDate).toBe('2026-11-05');
+    const expectedNext = new Date(); expectedNext.setDate(expectedNext.getDate() + 30);
+    expect(res.body.data.nextDueDate).toBe(expectedNext.toISOString().slice(0, 10));
 
     expect(res.body.data.receipts[0]).toEqual({
       id: 'pay_1', code: 'QK47X2L9', amount: 7500, paidAt: '2026-08-12', method: 'mpesa', invoiceId: 'inv_2',
