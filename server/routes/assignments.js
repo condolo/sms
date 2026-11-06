@@ -618,6 +618,10 @@ router.post('/:id/grade', authMiddleware, PLAN, MODGATE, rbac('elearning', 'upda
       if (!schedule) {
         markWriteStatus = 'SKIPPED';
         skipReason = 'no_markbook_target';
+        await _upsertException(req, _exceptionDoc(
+          req, assignment, student.id, skipReason,
+          'The linked assessment window no longer exists for this school.',
+        ));
       } else {
         if (schedule.academicYearId) {
           const archived = await firstArchivedYear(schoolId, [schedule.academicYearId]);
