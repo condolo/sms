@@ -68,8 +68,8 @@ function _gcRedirectUri() {
 }
 
 /* ── Token helpers ──────────────────────────────────────────── */
-async function _getToken(userId) {
-  const Tokens = tenantModel('elearning_tokens', tenantContext(req));
+async function _getToken(userId, schoolId) {
+  const Tokens = tenantModel('elearning_tokens', { schoolId });
   return Tokens.findOne({ userId }).lean();
 }
 
@@ -96,7 +96,7 @@ async function _refreshIfNeeded(tokenDoc) {
     googleAccessToken: json.access_token,
     expiresAt: new Date(Date.now() + (json.expires_in ?? 3600) * 1000).toISOString(),
   };
-  const Tokens = tenantModel('elearning_tokens', tenantContext(req));
+  const Tokens = tenantModel('elearning_tokens', { schoolId: tokenDoc.schoolId });
   await Tokens.updateOne({ userId: tokenDoc.userId }, { $set: updated });
   return { ...tokenDoc, ...updated };
 }
@@ -225,7 +225,7 @@ router.get('/auth/callback', async (req, res) => {
 /* GET /api/elearning/auth/status */
 router.get('/auth/status', authMiddleware, async (req, res) => {
   try {
-    const tok = await _getToken(req.jwtUser.userId);
+    const tok = await _getToken(req.jwtUser.userId, req.jwtUser.schoolId);
     if (!tok) return res.json({ connected: false });
     res.json({
       connected:   true,
@@ -256,7 +256,7 @@ router.delete('/auth/disconnect', authMiddleware, async (req, res) => {
 /* GET /api/elearning/gc/courses — fetch courses from Google Classroom */
 router.get('/gc/courses', authMiddleware, async (req, res) => { // rbac: self-scoped to the caller's own connected Google account — no cross-user data
   try {
-    const tok = await _getToken(req.jwtUser.userId);
+    const tok = await _getToken(req.jwtUser.userId, req.jwtUser.schoolId);
     if (!tok) return res.status(403).json({ error: 'Google Classroom not connected.' });
 
     const data = await _gcFetch(tok, '/v1/courses?teacherId=me&courseStates=ACTIVE&pageSize=50');
@@ -332,7 +332,7 @@ router.delete('/courses/:id', authMiddleware, rbac('elearning', 'delete'), async
 /* GET /api/elearning/courses/:id/coursework — list coursework from GC */
 router.get('/courses/:id/coursework', authMiddleware, rbac('elearning', 'read'), async (req, res) => {
   try {
-    const tok = await _getToken(req.jwtUser.userId);
+    const tok = await _getToken(req.jwtUser.userId, req.jwtUser.schoolId);
     if (!tok) return res.status(403).json({ error: 'Google Classroom not connected.' });
 
     const data = await _gcFetch(tok, `/v1/courses/${req.params.id}/courseWork?orderBy=updateTime%20desc&pageSize=50`);
@@ -361,7 +361,7 @@ router.get('/courses/:id/coursework', authMiddleware, rbac('elearning', 'read'),
 */
 router.post('/courses/:id/coursework', authMiddleware, rbac('elearning', 'create'), async (req, res) => {
   try {
-    const tok = await _getToken(req.jwtUser.userId);
+    const tok = await _getToken(req.jwtUser.userId, req.jwtUser.schoolId);
     if (!tok) return res.status(403).json({ error: 'Google Classroom not connected.' });
 
     const {
@@ -453,7 +453,7 @@ router.post('/courses/:id/coursework', authMiddleware, rbac('elearning', 'create
 /* DELETE /api/elearning/courses/:id/coursework/:cwId */
 router.delete('/courses/:id/coursework/:cwId', authMiddleware, rbac('elearning', 'delete'), async (req, res) => {
   try {
-    const tok = await _getToken(req.jwtUser.userId);
+    const tok = await _getToken(req.jwtUser.userId, req.jwtUser.schoolId);
     if (!tok) return res.status(403).json({ error: 'Google Classroom not connected.' });
 
     await _gcFetch(tok, `/v1/courses/${req.params.id}/courseWork/${req.params.cwId}`, {
@@ -481,7 +481,7 @@ router.delete('/courses/:id/coursework/:cwId', authMiddleware, rbac('elearning',
 */
 router.post('/drive/upload', authMiddleware, rbac('elearning', 'create'), async (req, res) => {
   try {
-    const tok = await _getToken(req.jwtUser.userId);
+    const tok = await _getToken(req.jwtUser.userId, req.jwtUser.schoolId);
     if (!tok) return res.status(403).json({ error: 'Google Classroom not connected.' });
 
     const fresh = await _refreshIfNeeded(tok);
@@ -537,7 +537,7 @@ router.post('/drive/upload', authMiddleware, rbac('elearning', 'create'), async 
 /* GET /api/elearning/courses/:id/coursework/:cwId/submissions */
 router.get('/courses/:id/coursework/:cwId/submissions', authMiddleware, rbac('elearning', 'read'), async (req, res) => {
   try {
-    const tok = await _getToken(req.jwtUser.userId);
+    const tok = await _getToken(req.jwtUser.userId, req.jwtUser.schoolId);
     if (!tok) return res.status(403).json({ error: 'Google Classroom not connected.' });
 
     const data = await _gcFetch(
@@ -551,15 +551,194 @@ router.get('/courses/:id/coursework/:cwId/submissions', authMiddleware, rbac('el
 });
 
 /* ══════════════════════════════════════════════════════════════
-   GRADE WEBHOOK — Google Pub/Sub push
-   Google posts here when a submission is graded in GC.
-   We extract the grade and write it to the Msingi Grades module.
+   CLASSROOM MIRROR — coursework and submissions into the native
+   assignment tables, then grades into the Markbook.
+   Shared by the Pub/Sub webhook and the manual /sync route.
    ══════════════════════════════════════════════════════════════ */
 
-/* POST /api/elearning/gc-webhook */
+function _gcDueDate(cw) {
+  if (!cw?.dueDate) return { dueDate: null, dueTime: null };
+  const dueDate = `${cw.dueDate.year}-${String(cw.dueDate.month).padStart(2, '0')}-${String(cw.dueDate.day).padStart(2, '0')}`;
+  const dueTime = cw.dueTime
+    ? `${String(cw.dueTime.hours ?? 0).padStart(2, '0')}:${String(cw.dueTime.minutes ?? 0).padStart(2, '0')}`
+    : null;
+  return { dueDate, dueTime };
+}
+
+async function _mirrorClassroomAssignment(req, cwLink, courseLink, courseWork = {}) {
+  if (!courseLink?.classId || !courseLink?.subjectId) return null;
+  const { schoolId } = cwLink;
+  const Assignments = tenantModel('assignments', tenantContext(req));
+  const existing = await Assignments.findOne({
+    schoolId, gcCourseId: cwLink.gcCourseId, gcCourseWorkId: cwLink.gcCourseWorkId,
+  }).lean();
+
+  const due = _gcDueDate(courseWork);
+  const doc = {
+    classId: courseLink.classId,
+    subjectId: courseLink.subjectId,
+    streamId: null,
+    source: 'google_classroom',
+    type: cwLink.type === 'MATERIAL' ? 'MATERIAL' : 'ASSIGNMENT',
+    answerMode: 'written',
+    title: cwLink.gcCourseWorkTitle || courseWork.title || 'Google Classroom work',
+    description: courseWork.description || existing?.description || '',
+    status: courseWork.state === 'DRAFT' ? 'DRAFT' : 'PUBLISHED',
+    maxPoints: cwLink.maxScore ?? courseWork.maxPoints ?? null,
+    dueDate: due.dueDate || cwLink.dueDate || existing?.dueDate || null,
+    dueTime: due.dueTime || existing?.dueTime || null,
+    assessmentScheduleId: cwLink.markbookScheduleId || existing?.assessmentScheduleId || null,
+    teacherId: courseLink.teacherId || cwLink.createdBy || null,
+    updatedAt: new Date().toISOString(),
+  };
+
+  if (existing) {
+    await Assignments.updateOne({ schoolId, id: existing.id }, { $set: doc });
+    return { ...existing, ...doc };
+  }
+  const created = {
+    id: uuidv4(),
+    schoolId,
+    gcCourseId: cwLink.gcCourseId,
+    gcCourseWorkId: cwLink.gcCourseWorkId,
+    gcCourseWorkTitle: cwLink.gcCourseWorkTitle || courseWork.title || null,
+    createdBy: 'google_classroom',
+    createdAt: new Date().toISOString(),
+    ...doc,
+  };
+  await Assignments.create(created);
+  return created;
+}
+
+async function _mirrorClassroomSubmission(req, assignment, cwLink, sub, studentRec) {
+  if (!assignment || !studentRec) return null;
+  const { schoolId } = cwLink;
+  const maxScore = cwLink.maxScore || assignment.maxPoints;
+  const assignedGrade = sub.assignedGrade ?? null;
+  const rawScore = assignedGrade != null && maxScore > 0
+    ? Math.round(Math.min(100, Math.max(0, (Number(assignedGrade) / Number(maxScore)) * 100)) * 100) / 100
+    : null;
+  const status = assignedGrade != null
+    ? 'GRADED'
+    : sub.state === 'TURNED_IN' ? 'TURNED_IN' : 'ASSIGNED';
+
+  const Submissions = tenantModel('assignment_submissions', tenantContext(req));
+  const existing = await Submissions.findOne({
+    schoolId, assignmentId: assignment.id, studentId: studentRec.id, attemptNo: 1,
+  }).lean();
+
+  await Submissions.updateOne(
+    { schoolId, assignmentId: assignment.id, studentId: studentRec.id, attemptNo: 1 },
+    {
+      $set: {
+        source: 'google_classroom',
+        gcSubmissionId: sub.id || null,
+        status,
+        assignedGrade,
+        rawScore,
+        submittedAt: sub.updateTime || existing?.submittedAt || null,
+        updatedAt: new Date().toISOString(),
+      },
+      $setOnInsert: {
+        id: uuidv4(),
+        schoolId,
+        assignmentId: assignment.id,
+        studentId: studentRec.id,
+        classId: assignment.classId,
+        subjectId: assignment.subjectId,
+        streamId: studentRec.streamId ?? null,
+        attemptNo: 1,
+        markWriteStatus: 'PENDING',
+        createdAt: new Date().toISOString(),
+      },
+    },
+    { upsert: true },
+  );
+  return { status, rawScore, assignedGrade };
+}
+
+async function _writeClassroomMark(req, { cwLink, courseLink, studentRec, assignedGrade, maxScore, courseWorkId }) {
+  if (!courseLink?.classId || !courseLink?.subjectId || !studentRec) {
+    return { status: 'SKIPPED', reason: 'no_course_link' };
+  }
+  const schoolId = cwLink.schoolId;
+  const ctx = tenantContext(req);
+  const schedule = cwLink.markbookScheduleId
+    ? await tenantModel('assessment_schedule', ctx).findOne({ schoolId, id: cwLink.markbookScheduleId }).lean()
+    : null;
+  if (!schedule) return { status: 'SKIPPED', reason: 'no_markbook_target' };
+
+  const period = {
+    schoolId,
+    classId: courseLink.classId,
+    subjectId: courseLink.subjectId,
+    termNumber: schedule.termNumber,
+    assessmentType: schedule.assessmentType,
+    instance: schedule.instance ?? 1,
+    academicYearId: schedule.academicYearId ?? null,
+  };
+  const Marks = tenantModel('assessment_marks', ctx);
+  const existing = await Marks.findOne({ ...period, studentId: studentRec.id }).lean();
+  const underReview = !!(await tenantModel('mark_submissions', ctx)
+    .findOne({ ...period, status: { $in: ['submitted', 'approved'] } }).lean());
+
+  const plan = planClassroomMark({
+    assignedGrade,
+    maxScore,
+    schedule,
+    courseLink,
+    studentRec,
+    locks: { scheduleLocked: !!schedule.isLocked, markLocked: !!existing?.isLocked, underReview },
+  });
+
+  if (plan.action !== 'upsert') {
+    const Exceptions = tenantModel('assignment_sync_exceptions', ctx);
+    const already = await Exceptions.findOne({
+      schoolId, kind: String(plan.reason).toUpperCase(), assignmentId: null,
+      studentId: studentRec.id, gcCourseWorkId: courseWorkId || null, resolvedAt: null,
+    }).lean().catch(() => null);
+    if (!already) {
+      await Exceptions.create({
+        id: uuidv4(),
+        schoolId,
+        kind: String(plan.reason).toUpperCase(),
+        assignmentId: null,
+        teacherId: courseLink.teacherId || null,
+        studentId: studentRec.id,
+        gcCourseId: cwLink.gcCourseId,
+        gcCourseWorkId: courseWorkId || null,
+        detail: `Classroom grade ${assignedGrade}/${maxScore} could not reach the Markbook.`,
+        createdAt: new Date().toISOString(),
+        resolvedAt: null,
+      }).catch(() => {});
+    }
+    return { status: 'SKIPPED', reason: plan.reason };
+  }
+
+  await Marks.updateOne(
+    { ...period, studentId: studentRec.id },
+    {
+      $set: {
+        rawScore: plan.rawScore,
+        markState: plan.markState,
+        classId: courseLink.classId,
+        streamId: studentRec.streamId ?? null,
+        label: cwLink.gcCourseWorkTitle,
+        gcCourseWorkId: courseWorkId || null,
+        isPublished: true,
+        updatedBy: 'google_classroom',
+      },
+      $setOnInsert: { id: uuidv4(), createdBy: 'google_classroom' },
+      $inc: { _v: 1 },
+    },
+    { upsert: true },
+  );
+  return { status: 'WRITTEN', rawScore: plan.rawScore };
+}
+
+/* POST /api/elearning/gc-webhook — Pub/Sub push: mirror + mark */
 router.post('/gc-webhook', async (req, res) => {
   try {
-    // Google Pub/Sub sends: { message: { data: base64, messageId, publishTime } }
     const rawData = req.body?.message?.data;
     if (!rawData) return res.sendStatus(204);
 
@@ -570,108 +749,159 @@ router.post('/gc-webhook', async (req, res) => {
       return res.sendStatus(204);
     }
 
-    // Notification shape: { courseId, courseWorkId, userId, changeType }
     const { courseId, courseWorkId, userId: gcStudentId } = notification;
     if (!courseId || !courseWorkId || !gcStudentId) return res.sendStatus(204);
 
-    // Find the coursework link to get schoolId + maxScore
     const CwLinks = tenantModel('elearning_coursework_links', tenantContext(req));
-    const cwLink  = await CwLinks.findOne({ gcCourseId: courseId, gcCourseWorkId: courseWorkId }).lean();
+    const cwLink = await CwLinks.findOne({ gcCourseId: courseId, gcCourseWorkId: courseWorkId }).lean();
     if (!cwLink) return res.sendStatus(204);
 
-    // Find the school's token to query submission details
-    const Tokens  = tenantModel('elearning_tokens', tenantContext(req));
-    const tok     = await Tokens.findOne({ schoolId: cwLink.schoolId }).lean();
+    const Tokens = tenantModel('elearning_tokens', tenantContext(req));
+    const tok = await Tokens.findOne({ schoolId: cwLink.schoolId }).lean();
     if (!tok) return res.sendStatus(204);
 
-    // Fetch submission to get the grade
     const fresh = await _refreshIfNeeded(tok);
     if (!fresh) return res.sendStatus(204);
 
     const subRes = await fetch(
       `https://classroom.googleapis.com/v1/courses/${courseId}/courseWork/${courseWorkId}/studentSubmissions?userId=${gcStudentId}`,
-      { headers: { Authorization: `Bearer ${fresh.googleAccessToken}` } }
+      { headers: { Authorization: `Bearer ${fresh.googleAccessToken}` } },
     );
     const subData = await subRes.json();
     const sub = subData?.studentSubmissions?.[0];
-    if (!sub?.assignedGrade && sub?.assignedGrade !== 0) return res.sendStatus(204);
+    if (!sub) return res.sendStatus(204);
 
-    // Resolve Msingi student by Google email
-    const Users   = tenantModel('users', tenantContext(req));
-    const student = await Users.findOne({ schoolId: cwLink.schoolId, googleId: gcStudentId }).lean();
-    if (!student) return res.sendStatus(204);
+    const Users = tenantModel('users', tenantContext(req));
+    const studentUser = await Users.findOne({ schoolId: cwLink.schoolId, googleId: gcStudentId }).lean();
+    if (!studentUser) return res.sendStatus(204);
 
-    // Find course link to get subjectId + classId
     const CourseLinks = tenantModel('elearning_course_links', tenantContext(req));
-    const courseLink  = await CourseLinks.findOne({ gcCourseId: courseId, schoolId: cwLink.schoolId }).lean();
+    const courseLink = await CourseLinks.findOne({ gcCourseId: courseId, schoolId: cwLink.schoolId }).lean();
 
-    // Deterministic mapping only: the coursework names a configured Markbook
-    // assessment window (markbookScheduleId), and the student must be a real
-    // record in the course's class. Anything else is skipped and logged for
-    // admin resolution — never guessed, never auto-created.
-    const schoolId = cwLink.schoolId;
-    const ctx = tenantContext(req);
-    const schedule = cwLink.markbookScheduleId
-      ? await tenantModel('assessment_schedule', ctx).findOne({ schoolId, id: cwLink.markbookScheduleId }).lean()
-      : null;
-    const studentRec = await tenantModel('students', ctx).findOne({ schoolId, id: student.id })
+    const studentRec = await tenantModel('students', tenantContext(req))
+      .findOne({ schoolId: cwLink.schoolId, id: studentUser.studentId || studentUser.id })
       .select('id classId streamId').lean();
 
-    const period = schedule ? {
-      schoolId, classId: courseLink?.classId, subjectId: courseLink?.subjectId,
-      termNumber: schedule.termNumber, assessmentType: schedule.assessmentType,
-      instance: schedule.instance ?? 1, academicYearId: schedule.academicYearId ?? null,
-    } : null;
+    const assignment = await _mirrorClassroomAssignment(req, cwLink, courseLink);
+    await _mirrorClassroomSubmission(req, assignment, cwLink, sub, studentRec);
 
-    const Marks = tenantModel('assessment_marks', ctx);
-    const existing = period && studentRec ? await Marks.findOne({ ...period, studentId: studentRec.id }).lean() : null;
-    const underReview = period
-      ? !!(await tenantModel('mark_submissions', ctx).findOne({ ...period, status: { $in: ['submitted', 'approved'] } }).lean())
-      : false;
-
-    const plan = planClassroomMark({
-      assignedGrade: sub.assignedGrade,
-      maxScore: cwLink.maxScore || sub.maxPoints,
-      schedule,
-      courseLink,
-      studentRec,
-      locks: { scheduleLocked: !!schedule?.isLocked, markLocked: !!existing?.isLocked, underReview },
-    });
-    if (plan.action !== 'upsert') {
-      console.warn(`[elearning/gc-webhook] Classroom grade not written to Markbook (${plan.reason}) — student ${student.id}, coursework ${courseWorkId}`);
-      return res.sendStatus(204);
+    if (sub.assignedGrade != null && Number.isFinite(Number(sub.assignedGrade))) {
+      await _writeClassroomMark(req, {
+        cwLink, courseLink, studentRec,
+        assignedGrade: sub.assignedGrade,
+        maxScore: cwLink.maxScore || sub.maxPoints || assignment?.maxPoints,
+        courseWorkId,
+      });
     }
-
-    await Marks.updateOne(
-      { ...period, studentId: studentRec.id },
-      {
-        $set: {
-          rawScore:       plan.rawScore,
-          markState:      plan.markState,
-          classId:        courseLink.classId,
-          streamId:       studentRec.streamId ?? null,
-          label:          cwLink.gcCourseWorkTitle,
-          gcCourseWorkId: courseWorkId,
-          isPublished:    true,
-          updatedBy:      'google_classroom',
-        },
-        $setOnInsert: { id: uuidv4(), createdBy: 'google_classroom' },
-        $inc: { _v: 1 },
-      },
-      { upsert: true }
-    );
-
-    res.sendStatus(204);
+    return res.sendStatus(204);
   } catch (err) {
     console.error('[elearning/gc-webhook]', err);
-    res.sendStatus(204); // always 204 to Google so it doesn't retry
+    return res.sendStatus(204);
+  }
+});
+
+/* POST /api/elearning/sync — pull coursework + submissions for the caller's
+   linked courses. The fallback when Pub/Sub is not configured. */
+router.post('/sync', authMiddleware, rbac('elearning', 'update'), async (req, res) => {
+  try {
+    const { schoolId, userId, role } = req.jwtUser;
+    const tok = await _getToken(userId, schoolId);
+    if (!tok) return res.status(400).json({ error: 'Google Classroom is not connected for this account.' });
+
+    const management = ['admin', 'superadmin', 'principal', 'deputy_principal', 'deputy'].includes(role);
+    const CourseLinks = tenantModel('elearning_course_links', tenantContext(req));
+    const links = await CourseLinks.find(management ? { schoolId } : { schoolId, teacherId: userId }).lean();
+    if (links.length === 0) return ok(res, { mirrored: 0, submissions: 0, skipped: 0, errors: [] });
+
+    const CwLinks = tenantModel('elearning_coursework_links', tenantContext(req));
+    const result = { mirrored: 0, submissions: 0, skipped: 0, errors: [] };
+
+    for (const link of links) {
+      try {
+        const cwData = await _gcFetch(tok, `/v1/courses/${link.gcCourseId}/courseWork?pageSize=50`);
+        const courseWorks = cwData.courseWork || [];
+
+        for (const cw of courseWorks) {
+          const due = _gcDueDate(cw);
+          let cwLink = await CwLinks.findOne({
+            gcCourseId: link.gcCourseId, gcCourseWorkId: cw.id,
+          }).lean();
+          const cwDoc = {
+            schoolId,
+            teacherId: link.teacherId || userId,
+            gcCourseId: link.gcCourseId,
+            gcCourseWorkId: cw.id,
+            gcCourseWorkTitle: cw.title,
+            type: cw.workType,
+            dueDate: due.dueDate,
+            maxScore: cw.maxPoints ?? cwLink?.maxScore ?? null,
+            markbookScheduleId: cwLink?.markbookScheduleId ?? null,
+            createdBy: cwLink?.createdBy || userId,
+            createdAt: cwLink?.createdAt || new Date().toISOString(),
+          };
+          await CwLinks.updateOne(
+            { gcCourseId: link.gcCourseId, gcCourseWorkId: cw.id },
+            { $set: cwDoc },
+            { upsert: true },
+          );
+          cwLink = { ...(cwLink || {}), ...cwDoc };
+
+          const assignment = await _mirrorClassroomAssignment(req, cwLink, link, cw);
+          if (!assignment) { result.skipped += 1; continue; }
+          result.mirrored += 1;
+
+          const subData = await _gcFetch(
+            tok,
+            `/v1/courses/${link.gcCourseId}/courseWork/${cw.id}/studentSubmissions?pageSize=100`,
+          );
+          const submissions = subData.studentSubmissions || [];
+          const googleIds = [...new Set(submissions.map(s => s.userId).filter(Boolean))];
+          const users = googleIds.length
+            ? await tenantModel('users', tenantContext(req))
+              .find({ schoolId, googleId: { $in: googleIds } })
+              .select('id googleId studentId').lean()
+            : [];
+          const userByGoogleId = new Map(users.map(u => [u.googleId, u]));
+          const studentIds = [...new Set(users.map(u => u.studentId || u.id).filter(Boolean))];
+          const students = studentIds.length
+            ? await tenantModel('students', tenantContext(req))
+              .find({ schoolId, id: { $in: studentIds } })
+              .select('id classId streamId').lean()
+            : [];
+          const studentById = new Map(students.map(s => [s.id, s]));
+
+          for (const sub of submissions) {
+            const user = userByGoogleId.get(sub.userId);
+            const studentRec = user ? studentById.get(user.studentId || user.id) : null;
+            if (!studentRec) { result.skipped += 1; continue; }
+            await _mirrorClassroomSubmission(req, assignment, cwLink, sub, studentRec);
+            result.submissions += 1;
+            if (sub.assignedGrade != null) {
+              await _writeClassroomMark(req, {
+                cwLink, courseLink: link, studentRec,
+                assignedGrade: sub.assignedGrade,
+                maxScore: cwLink.maxScore || cw.maxPoints,
+                courseWorkId: cw.id,
+              });
+            }
+          }
+        }
+      } catch (err) {
+        result.errors.push(`${link.gcCourseName || link.gcCourseId}: ${err.message}`);
+      }
+    }
+
+    return ok(res, result);
+  } catch (err) {
+    console.error('[elearning/sync]', err);
+    return res.status(500).json({ error: err.message });
   }
 });
 
 /* GET /api/elearning/gc/students/:courseId — list students in a GC course */
 router.get('/gc/students/:courseId', authMiddleware, rbac('elearning', 'read'), async (req, res) => {
   try {
-    const tok = await _getToken(req.jwtUser.userId);
+    const tok = await _getToken(req.jwtUser.userId, req.jwtUser.schoolId);
     if (!tok) return res.status(403).json({ error: 'Google Classroom not connected.' });
 
     const data = await _gcFetch(tok, `/v1/courses/${req.params.courseId}/students?pageSize=100`);
@@ -1018,7 +1248,7 @@ router.post('/courses/:id/sessions', authMiddleware, rbac('elearning', 'create')
 
     if (platform === 'meet') {
       /* ── Google Meet via Calendar API ── */
-      const tok = await _getToken(req.jwtUser.userId);
+      const tok = await _getToken(req.jwtUser.userId, req.jwtUser.schoolId);
       if (!tok) return res.status(403).json({ error: 'Google account not connected.' });
 
       const { eventId, meetLink } = await _createMeetSession({
@@ -1135,7 +1365,7 @@ router.delete('/sessions/:sessionId', authMiddleware, rbac('elearning', 'delete'
     if (!session) return res.status(404).json({ error: 'Session not found.' });
 
     if (session.platform === 'meet' && session.meetEventId) {
-      const tok = await _getToken(req.jwtUser.userId);
+      const tok = await _getToken(req.jwtUser.userId, req.jwtUser.schoolId);
       if (tok) await _deleteMeetSession({ tok, eventId: session.meetEventId });
     } else if (session.zoomMeetingId) {
       await _zoomFetch(`/meetings/${session.zoomMeetingId}`, { method: 'DELETE' });

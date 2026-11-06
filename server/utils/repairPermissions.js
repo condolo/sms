@@ -44,6 +44,12 @@ const ROLE_DEFAULTS = {
     report_cards: R,    exams:        R,    lessons:      RCUD,
     resources:    RCU,  library:      R,    hostel:       R,
     transport:    R,
+    // eLearning is a teaching tool: assignments, coursework and live
+    // sessions are created by the teacher who holds the class+subject.
+    // Without this key the module was invisible to every teacher — the
+    // module registry exposed the grant, but the canonical teacher role
+    // never included it. Additive repair backfills existing schools.
+    elearning:    RCU,
     // Alerts only (severe allergy/asthma/epilepsy flags), never full
     // clinic-visit records — no top-level 'medical' key granted, so a
     // module-level permission check without the 'alerts' subKey stays

@@ -543,6 +543,7 @@ function _defaultPerms(role) {
         inventory__requisition: RCU, // raise + view own requisitions, not full inventory management
         weekly_snapshot: R, // system-generated digest, view only
         growth_profile: RCU, // matches repairPermissions.js's ROLE_DEFAULTS.teacher
+        elearning:    RCU, // native assignments + coursework + live sessions (teacher tool)
       };
 
     case 'finance':

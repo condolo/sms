@@ -492,6 +492,59 @@ export const exams = {
   statusHistory: (id)       => _get(`/exams/${id}/status-history`),
 };
 
+export const assignments = {
+  list:        (params)     => _get('/assignments', params),
+  get:         (id)         => _get(`/assignments/${id}`),
+  create:      (data)       => _post('/assignments', data),
+  update:      (id, data)   => _patch(`/assignments/${id}`, data),
+  remove:      (id)         => _delete(`/assignments/${id}`),
+  submissions: (id)         => _get(`/assignments/${id}/submissions`),
+  grade:       (id, data)   => _post(`/assignments/${id}/grade`, data),
+  reopen:      (id, studentId) => _post(`/assignments/${id}/submissions/${studentId}/reopen`, {}),
+  submit:      (id, data)   => _post(`/assignments/${id}/submit`, data),
+  exceptions:  (params)     => _get('/assignments/exceptions', params),
+
+  // Structured work + files (2026-11)
+  start:              (id)     => _post(`/assignments/${id}/start`, {}),
+  presignAttachment:  (id, data) => _post(`/assignments/${id}/attachments/presign`, data),
+  confirmAttachment:  (id, attId) => _post(`/assignments/${id}/attachments/${attId}/confirm`, {}),
+  attachmentUrl:      (id, attId) => `/api/assignments/${id}/attachments/${attId}`,
+  questionBank:       (params) => _get('/assignments/question-bank', params),
+  saveQuestion:       (data)   => _post('/assignments/question-bank', data),
+  deleteQuestion:     (id)     => _delete(`/assignments/question-bank/${id}`),
+};
+
+/** Upload one file for an assignment/submission. Returns the attachment id.
+ *  Uses the presigned URL when object storage is configured, otherwise the
+ *  server's local upload route. Both paths send the bytes, not JSON. */
+export async function uploadAssignmentFile(assignmentId, file) {
+  const presign = await assignments.presignAttachment(assignmentId, {
+    fileName: file.name,
+    mimeType: file.type || 'application/octet-stream',
+    size: file.size,
+  });
+  const meta = presign.data;
+  const headers = { 'Content-Type': file.type || 'application/octet-stream' };
+  if (meta.mode === 'local') {
+    const csrf = _csrfToken();
+    if (csrf) headers['X-CSRF-Token'] = csrf;
+  } else {
+    Object.assign(headers, meta.headers || {});
+  }
+  const put = await fetch(meta.uploadUrl, {
+    method: 'PUT',
+    headers,
+    credentials: 'include',
+    body: file,
+  });
+  if (!put.ok) {
+    const b = await put.json().catch(() => ({}));
+    throw new APIError('UPLOAD_FAILED', b.error?.message || b.error || 'The file upload failed.', put.status);
+  }
+  if (meta.mode === 's3') await assignments.confirmAttachment(assignmentId, meta.attachmentId);
+  return meta.attachmentId;
+}
+
 export const assessment = {
   // Config
   getConfig:    (params)     => _get('/assessment/config', params),

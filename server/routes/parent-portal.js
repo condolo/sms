@@ -41,6 +41,7 @@ const { audienceClause } = require('../utils/announcement-audience');
 const { messageExtras } = require('../utils/message-extras');
 const { transportRidesFor } = require('../utils/transport-ride');
 const { createDirectMessage } = require('./messages');
+const { forStudent } = require('../utils/assignment-view');
 
 const router = express.Router();
 
@@ -771,6 +772,55 @@ router.get('/attendance/:childId', authMiddleware, PLAN, async (req, res) => {
    deliberately never selected: those are the three fields that would
    turn "my child's own incident record" into "the staff's internal
    case file" if shown verbatim — see behaviour.js's IncidentSchema. */
+/* ══════════════════════════════════════════════════════════════
+   GET /api/parent-portal/assignments/:childId
+   The child's current native assignments with their own submission
+   status. The answer key is stripped — a parent must not see a quiz key.
+   ══════════════════════════════════════════════════════════════ */
+router.get('/assignments/:childId', authMiddleware, PLAN, async (req, res) => {
+  if (!_requireParent(req, res)) return;
+  try {
+    const { schoolId } = req.jwtUser;
+    const childId = req.params.childId;
+    if (_unlinked(req, res, childId)) return;
+
+    const child = await tenantModel('students', tenantContext(req))
+      .findOne({ schoolId, id: childId }).select('id name classId').lean();
+    if (!child) return E.notFound(res, 'Child not found.');
+
+    const assignments = await tenantModel('assignments', tenantContext(req))
+      .find({ schoolId, classId: child.classId, status: 'PUBLISHED', type: { $ne: 'MATERIAL' } })
+      .sort({ dueDate: 1, createdAt: -1 }).limit(50).lean();
+    if (assignments.length === 0) return ok(res, []);
+
+    const ids = assignments.map(a => a.id);
+    const submissions = await tenantModel('assignment_submissions', tenantContext(req))
+      .find({ schoolId, studentId: childId, assignmentId: { $in: ids } })
+      .select('assignmentId status assignedGrade rawScore feedback submittedAt markWriteStatus')
+      .lean();
+    const submissionByAssignment = new Map(submissions.map(s => [s.assignmentId, s]));
+
+    const classIds = [...new Set(assignments.map(a => a.classId))];
+    const subjectIds = [...new Set(assignments.map(a => a.subjectId))];
+    const [classDocs, subjectDocs] = await Promise.all([
+      tenantModel('classes', tenantContext(req)).find({ schoolId, id: { $in: classIds } }).select('id name').lean(),
+      tenantModel('subjects', tenantContext(req)).find({ schoolId, id: { $in: subjectIds } }).select('id name').lean(),
+    ]);
+    const classNames = Object.fromEntries(classDocs.map(c => [c.id, c.name]));
+    const subjectNames = Object.fromEntries(subjectDocs.map(s => [s.id, s.name]));
+
+    return ok(res, assignments.map(a => ({
+      ...forStudent(a),
+      className: classNames[a.classId] || null,
+      subjectName: subjectNames[a.subjectId] || null,
+      submission: submissionByAssignment.get(a.id) || null,
+    })));
+  } catch (err) {
+    console.error('[parent-portal assignments]', err);
+    return E.serverError(res, 'Could not load assignments.');
+  }
+});
+
 router.get('/behaviour/:childId', authMiddleware, PLAN, async (req, res) => {
   if (!_requireParent(req, res)) return;
   try {

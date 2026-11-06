@@ -35,3 +35,6 @@ backups/
 
 # Locally captured email (scripts/dev-mail.js)
 .mail/
+
+# Assignment attachment local storage (development fallback)
+server/uploads/

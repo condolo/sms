@@ -367,6 +367,7 @@ export default function ParentDashboard() {
   const [behaviourFull, setBehaviourFull] = useState(null);
   const [medicalVisits, setMedicalVisits] = useState(null);
   const [timetableWeek, setTimetableWeek] = useState(null);
+  const [assignments,   setAssignments]   = useState(null);
   const [inboxMessages, setInboxMessages] = useState(null); // real /api/messages inbox — per parent, not per child
   const [inboxLoading,  setInboxLoading]  = useState(false);
   const [inboxTotal,    setInboxTotal]    = useState(0);
@@ -526,6 +527,8 @@ export default function ParentDashboard() {
     setBehaviourFull(null);
     setMedicalVisits(null);
     setTimetableWeek(null);
+    setAssignments(null);
+    _fetch(`/api/parent-portal/assignments/${activeChildId}`).then(r => setAssignments(r ?? [])).catch(() => setAssignments([]));
     _fetch(`/api/parent-portal/behaviour/${activeChildId}`).then(setBehaviourFull).catch(() => setBehaviourFull([]));
     _fetch(`/api/parent-portal/medical/${activeChildId}`).then(setMedicalVisits).catch(() => setMedicalVisits([]));
     _fetch(`/api/parent-portal/timetable/${activeChildId}`).then(r => setTimetableWeek(r?.slots ?? [])).catch(() => setTimetableWeek([]));
@@ -1073,6 +1076,47 @@ export default function ParentDashboard() {
             </div>
           </Card>
         )}
+
+        {/* Current native assignments — the child's own status per task,
+            with the answer key stripped server-side. */}
+        <Card id="section-current-assignments">
+          <CardHeader
+            title="Current Assignments"
+            right={assignments?.length ? <span className="text-[11px] font-semibold text-indigo-600 bg-indigo-50 px-2.5 py-[5px] rounded-full shrink-0">{assignments.length}</span> : null}
+          />
+          <div id="current-assignments-list" className="divide-y divide-slate-50">
+            {assignments === null ? (
+              <p className="text-[12px] text-slate-400 text-center py-4">Loading…</p>
+            ) : assignments.length === 0 ? (
+              <p className="text-[12px] text-slate-400 text-center py-4">No current assignments</p>
+            ) : assignments.map(a => {
+              const sub = a.submission;
+              const graded = sub?.status === 'GRADED' || sub?.status === 'RETURNED';
+              const submitted = sub && sub.status !== 'ASSIGNED';
+              return (
+                <div key={a.id} className="flex items-start gap-3 px-[18px] py-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[13px] font-medium text-slate-800 truncate">{a.title}</p>
+                    <p className="text-[11px] text-slate-400">
+                      {[a.subjectName, a.className].filter(Boolean).join(' · ')}
+                      {a.dueDate ? ` · Due ${a.dueDate}` : ''}
+                      {a.maxPoints ? ` · ${a.maxPoints} pts` : ''}
+                    </p>
+                  </div>
+                  <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-full shrink-0 ${
+                    graded ? 'bg-emerald-50 text-emerald-700'
+                      : submitted ? 'bg-sky-50 text-sky-700'
+                        : 'bg-amber-50 text-amber-700'
+                  }`}>
+                    {graded
+                      ? (sub.assignedGrade != null ? `${sub.assignedGrade}/${a.maxPoints}` : 'Graded')
+                      : submitted ? 'Submitted' : 'To do'}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
 
         {/* Term-over-term trend — returned by the API (academicTrend) but
             previously rendered nowhere at all. */}

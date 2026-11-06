@@ -7,6 +7,22 @@
 3. Confirm the displayed meeting link and passcode, then schedule. The flow may also create a calendar event.
 4. Review upcoming and past sessions; cancel a future session through the provided cancel action so linked calendar data can be updated.
 
+## Assignments (native)
+
+Assignments do not need a Google account. Open **eLearning → Assignments**, choose **New assignment**, then pick the class, subject and **answer mode**: written, file upload, text + file, or quiz. The subject list is the class's own curriculum, and the server only accepts a class+subject the teacher actually holds.
+
+1. The assignment is published immediately unless a future publish time is set. Students in that class see it on the web student portal (**My assignments**) and in the mobile app; parents see it on the parent portal.
+2. A student opens the assignment page, answers in the mode the teacher chose, and submits. **Quizzes** can mix single-choice, multiple-choice, short answer, long answer and file questions; objective answers are marked on submit, the rest wait for the teacher. A **file** answer is uploaded to object storage (or local storage in development) and opened through an access-checked link.
+3. Timed quizzes show a countdown from the server's attempt start; the server refuses a submission after the attempt expires. One attempt is kept until the teacher grades it.
+3. The teacher opens the assignment to see the full roster — submitted / not submitted / graded — and saves a score per student. Feedback is shown to the student with the grade.
+4. Deadlines are enforced on the server in the **school's timezone**, at submission time. Use **Accept late submissions** if work may still come in after the due time; leave it off for a hard deadline. A graded submission cannot be resubmitted.
+5. If the assignment was linked to an **assessment window** (the optional "Feeds Markbook" field), the score is written to the Markbook as an unpublished mark and follows the same locks and publish flow as a typed mark. If the window is locked, the grade is kept on the assignment and the reason appears under the amber "could not reach the Markbook" banner.
+6. A graded submission can be **reopened** from the assignment page (web or mobile). Reopening withdraws the mark this assignment wrote and lets the student submit again.
+7. Parents see the child's current assignments with status and score under **Grades & Reports → Current Assignments** (web) and **Learning → Assignments** (mobile). Quiz answer keys are never sent to a parent.
+8. With Google Classroom connected, **Sync now** mirrors coursework and submissions into the same assignment tables; the Pub/Sub webhook does the same automatically as grades arrive.
+
+**Access:** staff need the eLearning grant (`read` to view, `create` to issue, `update` to grade); the canonical teacher role now includes these. A subject teacher only sees their own class+subject pairs; a class teacher sees every subject in their class. Students are self-scoped to their own class.
+
 ## Google Classroom content
 
 Connect the school's Google Classroom integration before using course links. Select a course, create classwork/material using the form, and verify it in Classroom. Deletion may affect the external Classroom item, so confirm before proceeding.
