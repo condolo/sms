@@ -756,6 +756,29 @@ const INDEXES = [
     ],
   },
 
+  /* ── assignment_attachments (2026-11) ───────────────────────
+     Metadata only; bytes live in S3 or server/uploads. The student
+     submission references these ids so access can be checked per file. */
+  {
+    col: 'assignment_attachments',
+    indexes: [
+      { key: { schoolId: 1, assignmentId: 1, studentId: 1 }, name: 'aatt_assignment_student' },
+      { key: { schoolId: 1, key: 1 },                          name: 'aatt_key' },
+      { key: { id: 1 },                                         name: 'aatt_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── assignment_question_bank (2026-11) ─────────────────────
+     Reusable questions a teacher can pull into a quiz. Embedded questions
+     stay on the assignment so a later bank edit cannot rewrite history. */
+  {
+    col: 'assignment_question_bank',
+    indexes: [
+      { key: { schoolId: 1, subjectId: 1, createdAt: -1 }, name: 'aqb_subject_created' },
+      { key: { id: 1 },                                     name: 'aqb_id', unique: true, sparse: true },
+    ],
+  },
+
   /* ── assessment_marks ───────────────────────────────────────
      High-volume CA marks collection (replaces legacy grades for new CA system).
      Primary: mark entry grid loads by class+subject+term simultaneously.

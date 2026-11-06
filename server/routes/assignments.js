@@ -38,6 +38,7 @@ const { taughtPairs } = require('../utils/teaching-scope');
 const { planClassroomMark } = require('../utils/classroom-mark-plan');
 const { firstArchivedYear } = require('../utils/archival');
 const { deadlinePassed } = require('../utils/school-deadline');
+const storage = require('../utils/assignment-storage');
 
 const router = express.Router();
 const PLAN = planGate('elearning');
@@ -45,6 +46,19 @@ const MODGATE = moduleGate('elearning');
 
 const TYPES = ['ASSIGNMENT', 'SHORT_ANSWER_QUESTION', 'MULTIPLE_CHOICE_QUESTION', 'MATERIAL'];
 const STUDENT_ROLES = new Set(['student']);
+const ANSWER_MODES = ['written', 'file', 'both', 'quiz'];
+const QUESTION_TYPES = ['MCQ_SINGLE', 'MCQ_MULTI', 'SHORT_TEXT', 'LONG_TEXT', 'FILE'];
+
+/* Uploads: per file, per submission. Enforced at presign and again on submit. */
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_FILES = 5;
+const ALLOWED_MIME = new Set([
+  'application/pdf',
+  'image/png', 'image/jpeg', 'image/webp',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'text/plain',
+]);
 
 /* A student holds no staff permission grants — their read is self-scoped by
    _listFilter/_canRead, so the staff rbac gate is skipped for that role only. */
@@ -55,6 +69,19 @@ function readAccess(req, res, next) {
 }
 
 /* ── Validation ─────────────────────────────────────────────── */
+
+const QuestionSchema = z.object({
+  id: z.string().optional(),
+  type: z.enum(QUESTION_TYPES),
+  prompt: z.string().trim().min(1).max(2000),
+  options: z.array(z.object({
+    id: z.string().optional(),
+    text: z.string().trim().min(1).max(500),
+  })).max(10).optional(),
+  correctOptionIds: z.array(z.string()).max(10).optional(),
+  points: z.number().positive().max(1000),
+  required: z.boolean().optional(),
+});
 
 const CreateSchema = z.object({
   classId: z.string().min(1),
@@ -69,6 +96,9 @@ const CreateSchema = z.object({
   scheduledTime: z.string().optional().nullable(),
   assessmentScheduleId: z.string().min(1).optional().nullable(),
   allowLate: z.boolean().optional(),
+  answerMode: z.enum(ANSWER_MODES).optional(),
+  questions: z.array(QuestionSchema).max(50).optional(),
+  timeLimitMinutes: z.number().int().positive().max(480).optional().nullable(),
 });
 
 const UpdateSchema = z.object({
@@ -83,15 +113,24 @@ const UpdateSchema = z.object({
   allowLate: z.boolean().optional(),
 });
 
-const SubmitSchema = z.object({
+const AnswerSchema = z.object({
+  questionId: z.string().min(1),
+  selectedOptionIds: z.array(z.string()).max(10).optional(),
   textAnswer: z.string().max(20000).optional(),
   attachmentIds: z.array(z.string()).max(10).optional(),
 });
 
+const SubmitSchema = z.object({
+  textAnswer: z.string().max(20000).optional(),
+  attachmentIds: z.array(z.string()).max(10).optional(),
+  answers: z.array(AnswerSchema).max(50).optional(),
+});
+
 const GradeSchema = z.object({
   studentId: z.string().min(1),
-  assignedGrade: z.number().min(0),
+  assignedGrade: z.number().min(0).optional(),
   feedback: z.string().max(2000).optional(),
+  questionScores: z.record(z.string(), z.number().min(0)).optional(),
 });
 
 /* ── Helpers ─────────────────────────────────────────────────── */
@@ -119,6 +158,108 @@ async function _deadlinePassed(req, assignment) {
   if (!assignment.dueDate) return false;
   const tz = await _schoolTimeZone(req.jwtUser.schoolId);
   return deadlinePassed(assignment.dueDate, assignment.dueTime, tz);
+}
+
+/** Student-facing assignment: the answer key never leaves the server. */
+function _forStudent(a) {
+  if (!a) return a;
+  if (!Array.isArray(a.questions) || a.questions.length === 0) return a;
+  return {
+    ...a,
+    questions: a.questions.map(q => {
+      const { correctOptionIds, ...safe } = q;
+      return safe;
+    }),
+  };
+}
+
+function _normaliseQuestions(input) {
+  return (input || []).map(q => ({
+    id: q.id || uuidv4(),
+    type: q.type,
+    prompt: q.prompt,
+    options: (q.options || []).map(o => ({ id: o.id || uuidv4(), text: o.text })),
+    correctOptionIds: q.correctOptionIds || [],
+    points: q.points,
+    required: q.required !== false,
+  }));
+}
+
+function _validateQuestions(questions) {
+  for (const q of questions) {
+    if (q.type === 'MCQ_SINGLE' || q.type === 'MCQ_MULTI') {
+      if (q.options.length < 2) return `Question "${q.prompt.slice(0, 40)}" needs at least two options.`;
+      const ids = new Set(q.options.map(o => o.id));
+      if (q.correctOptionIds.length === 0) return `Question "${q.prompt.slice(0, 40)}" needs a correct answer.`;
+      if (q.correctOptionIds.some(id => !ids.has(id))) return `Question "${q.prompt.slice(0, 40)}" has an unknown correct option.`;
+      if (q.type === 'MCQ_SINGLE' && q.correctOptionIds.length !== 1) {
+        return `Single-choice question "${q.prompt.slice(0, 40)}" must have exactly one correct answer.`;
+      }
+    } else {
+      q.options = [];
+      q.correctOptionIds = [];
+    }
+  }
+  return null;
+}
+
+/** Grade the auto-markable answers; written/file answers stay null. */
+function _autoGrade(questions, answers) {
+  const byQuestion = new Map(answers.map(a => [a.questionId, a]));
+  let autoScore = 0;
+  let autoMax = 0;
+  let missing = null;
+  const graded = [];
+
+  for (const q of questions) {
+    const a = byQuestion.get(q.id) || {};
+    const isMcq = q.type === 'MCQ_SINGLE' || q.type === 'MCQ_MULTI';
+    let awardedPoints = null;
+    let autoGraded = false;
+
+    if (isMcq) {
+      const selected = new Set(a.selectedOptionIds || []);
+      const correct = new Set(q.correctOptionIds || []);
+      const exact = selected.size === correct.size && [...correct].every(id => selected.has(id));
+      awardedPoints = exact ? q.points : 0;
+      autoGraded = true;
+      autoScore += awardedPoints;
+      autoMax += q.points;
+    }
+
+    graded.push({
+      questionId: q.id,
+      selectedOptionIds: a.selectedOptionIds || [],
+      textAnswer: a.textAnswer || '',
+      attachmentIds: a.attachmentIds || [],
+      awardedPoints,
+      autoGraded,
+    });
+
+    if (q.required !== false) {
+      if (isMcq && !(a.selectedOptionIds || []).length) missing = q.prompt;
+      if (!isMcq && !(a.textAnswer || '').trim() && !(a.attachmentIds || []).length) missing = q.prompt;
+    }
+  }
+
+  return { answers: graded, autoScore, autoMax, missing };
+}
+
+async function _validateAttachmentIds(req, assignment, studentId, ids) {
+  if (!ids || ids.length === 0) return { docs: [], error: null };
+  if (ids.length > MAX_FILES) return { docs: [], error: `At most ${MAX_FILES} files are allowed.` };
+  const docs = await tenantModel('assignment_attachments', tenantContext(req))
+    .find({
+      schoolId: req.jwtUser.schoolId,
+      assignmentId: assignment.id,
+      studentId,
+      id: { $in: ids },
+      uploaded: true,
+    }).lean();
+  if (docs.length !== ids.length) {
+    return { docs: [], error: 'One or more attachments are missing or not uploaded.' };
+  }
+  return { docs, error: null };
 }
 
 async function _teacherClassIds(req, teacher) {
@@ -300,7 +441,10 @@ router.get('/', authMiddleware, PLAN, MODGATE, readAccess, async (req, res) => {
         .select('assignmentId status assignedGrade rawScore submittedAt feedback markWriteStatus').lean();
       const byAssignment = new Map(own.map(s => [s.assignmentId, s]));
       return ok(res, {
-        assignments: rows.map(a => ({ ...a, submission: byAssignment.get(a.id) || null })),
+        assignments: rows.map(a => ({
+          ..._forStudent(a),
+          submission: byAssignment.get(a.id) || null,
+        })),
       });
     }
 
@@ -318,6 +462,7 @@ router.get('/exceptions', authMiddleware, PLAN, MODGATE, rbac('elearning', 'read
     const { schoolId, userId } = req.jwtUser;
     const filter = { schoolId, resolvedAt: null };
     if (!isManagement(req)) filter.teacherId = userId;
+    if (req.query.assignmentId) filter.assignmentId = req.query.assignmentId;
 
     // teacherId is denormalized onto the exception when it is raised; older
     // rows without it are still visible to management only.
@@ -327,6 +472,61 @@ router.get('/exceptions', authMiddleware, PLAN, MODGATE, rbac('elearning', 'read
   } catch (err) {
     console.error('[assignments exceptions GET]', err);
     return E.serverError(res, 'Could not load sync exceptions.');
+  }
+});
+
+/* ── Question bank ───────────────────────────────────────────── */
+
+router.get('/question-bank', authMiddleware, PLAN, MODGATE, rbac('elearning', 'read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const filter = { schoolId };
+    if (req.query.subjectId) filter.subjectId = req.query.subjectId;
+    const questions = await tenantModel('assignment_question_bank', tenantContext(req))
+      .find(filter).sort({ createdAt: -1 }).limit(200).lean();
+    return ok(res, { questions });
+  } catch (err) {
+    console.error('[assignments question-bank GET]', err);
+    return E.serverError(res, 'Could not load the question bank.');
+  }
+});
+
+router.post('/question-bank', authMiddleware, PLAN, MODGATE, rbac('elearning', 'create'), async (req, res) => {
+  try {
+    const parsed = QuestionSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return E.validation(res, parsed.error.issues.map(i => ({ path: i.path.join('.'), message: i.message })));
+    }
+    const { schoolId, userId } = req.jwtUser;
+    const question = _normaliseQuestions([parsed.data])[0];
+    const questionError = _validateQuestions([question]);
+    if (questionError) return _bad(res, questionError);
+
+    const doc = {
+      id: uuidv4(),
+      schoolId,
+      subjectId: req.body.subjectId || null,
+      ...question,
+      createdBy: userId,
+      createdAt: new Date().toISOString(),
+    };
+    await tenantModel('assignment_question_bank', tenantContext(req)).create(doc);
+    return createdRes(res, { question: doc });
+  } catch (err) {
+    console.error('[assignments question-bank POST]', err);
+    return E.serverError(res, 'Could not save the question.');
+  }
+});
+
+router.delete('/question-bank/:id', authMiddleware, PLAN, MODGATE, rbac('elearning', 'update'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    await tenantModel('assignment_question_bank', tenantContext(req))
+      .deleteOne({ schoolId, id: req.params.id });
+    return ok(res, { deleted: true });
+  } catch (err) {
+    console.error('[assignments question-bank DELETE]', err);
+    return E.serverError(res, 'Could not delete the question.');
   }
 });
 
@@ -355,7 +555,31 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('elearning', 'create'), asy
       if (!schedule) return _bad(res, 'assessmentScheduleId does not match a configured assessment for this school.');
     }
 
-    const maxPoints = type === 'MATERIAL' ? null : (d.maxPoints ?? 100);
+    const answerMode = d.answerMode || (d.questions?.length ? 'quiz' : 'written');
+    if (answerMode === 'quiz' && type === 'MATERIAL') {
+      return _bad(res, 'A material cannot be a quiz.');
+    }
+
+    let questions = [];
+    if (answerMode === 'quiz') {
+      if (!d.questions || d.questions.length === 0) return _bad(res, 'Add at least one question to a quiz.');
+      questions = _normaliseQuestions(d.questions);
+      const questionError = _validateQuestions(questions);
+      if (questionError) return _bad(res, questionError);
+    }
+
+    const questionTotal = questions.reduce((sum, q) => sum + Number(q.points), 0);
+    const maxPoints = type === 'MATERIAL'
+      ? null
+      : (answerMode === 'quiz' ? questionTotal : (d.maxPoints ?? 100));
+
+    if (answerMode === 'quiz' && d.maxPoints != null && Math.abs(Number(d.maxPoints) - questionTotal) > 0.01) {
+      return _bad(res, `Question points total ${questionTotal}, but maxPoints is ${d.maxPoints}. They must match.`);
+    }
+    if (answerMode === 'quiz' && d.timeLimitMinutes != null && !questions.length) {
+      return _bad(res, 'A time limit needs at least one question.');
+    }
+
     const status = d.scheduledTime && new Date(d.scheduledTime).getTime() > Date.now() ? 'DRAFT' : 'PUBLISHED';
 
     const doc = {
@@ -375,6 +599,9 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('elearning', 'create'), asy
       scheduledTime: d.scheduledTime || null,
       assessmentScheduleId: d.assessmentScheduleId || null,
       allowLate: d.allowLate === true,
+      answerMode,
+      questions,
+      timeLimitMinutes: answerMode === 'quiz' ? (d.timeLimitMinutes ?? null) : null,
       teacherId: userId,
       createdBy: userId,
       createdAt: new Date().toISOString(),
@@ -400,10 +627,19 @@ router.get('/:id', authMiddleware, PLAN, MODGATE, readAccess, async (req, res) =
     if (!assignment) return E.notFound(res, 'Assignment not found.');
     if (!(await _canRead(req, assignment))) return E.forbidden(res, 'You do not have access to this assignment.');
 
-    const payload = { assignment };
-    if (studentId && STUDENT_ROLES.has(req.jwtUser.role)) {
-      payload.submission = await tenantModel('assignment_submissions', tenantContext(req))
+    const isStudent = STUDENT_ROLES.has(req.jwtUser.role);
+    const [named] = await _withNames(req, [assignment]);
+    const payload = { assignment: isStudent ? _forStudent(named) : named };
+    if (studentId && isStudent) {
+      const submission = await tenantModel('assignment_submissions', tenantContext(req))
         .findOne({ schoolId, assignmentId: assignment.id, studentId }).lean();
+      payload.submission = submission;
+      if (submission?.startedAt) {
+        const expiresAt = assignment.timeLimitMinutes
+          ? new Date(new Date(submission.startedAt).getTime() + assignment.timeLimitMinutes * 60_000).toISOString()
+          : null;
+        payload.attempt = { startedAt: submission.startedAt, expiresAt };
+      }
     }
     return ok(res, payload);
   } catch (err) {
@@ -460,10 +696,14 @@ router.delete('/:id', authMiddleware, PLAN, MODGATE, rbac('elearning', 'update')
       return E.forbidden(res, 'Only the teacher who issued this assignment may delete it.');
     }
 
+    const attachments = await tenantModel('assignment_attachments', tenantContext(req))
+      .find({ schoolId, assignmentId: assignment.id }).select('key').lean();
     await Promise.all([
+      ...attachments.map(a => storage.deleteObject(a.key)),
       Assignments.deleteOne({ schoolId, id: assignment.id }),
       tenantModel('assignment_submissions', tenantContext(req)).deleteMany({ schoolId, assignmentId: assignment.id }),
       tenantModel('assignment_sync_exceptions', tenantContext(req)).deleteMany({ schoolId, assignmentId: assignment.id }),
+      tenantModel('assignment_attachments', tenantContext(req)).deleteMany({ schoolId, assignmentId: assignment.id }),
     ]);
     return ok(res, { deleted: true });
   } catch (err) {
@@ -492,7 +732,7 @@ router.get('/:id/submissions', authMiddleware, PLAN, MODGATE, rbac('elearning', 
 
     const submissions = await tenantModel('assignment_submissions', tenantContext(req))
       .find({ schoolId, assignmentId: assignment.id })
-      .select('studentId status assignedGrade rawScore submittedAt gradedAt feedback textAnswer markWriteStatus skipReason attemptNo')
+      .select('studentId status assignedGrade rawScore submittedAt gradedAt feedback textAnswer attachmentIds answers autoScore autoMaxScore startedAt markWriteStatus skipReason attemptNo')
       .lean();
     const byStudent = new Map(submissions.map(s => [s.studentId, s]));
 
@@ -504,7 +744,8 @@ router.get('/:id/submissions', authMiddleware, PLAN, MODGATE, rbac('elearning', 
       submission: byStudent.get(s.id) || null,
     }));
 
-    return ok(res, { assignment, rows });
+    const [named] = await _withNames(req, [assignment]);
+    return ok(res, { assignment: named, rows });
   } catch (err) {
     console.error('[assignments/:id/submissions GET]', err);
     return E.serverError(res, 'Could not load submissions.');
@@ -527,10 +768,6 @@ router.post('/:id/submit', authMiddleware, PLAN, MODGATE, async (req, res) => {
         message: i.message,
       })));
     }
-    if (!parsed.data.textAnswer && !(parsed.data.attachmentIds || []).length) {
-      return _bad(res, 'Add an answer or an attachment before submitting.');
-    }
-
     const Assignments = tenantModel('assignments', tenantContext(req));
     const assignment = await Assignments.findOne({ schoolId, id: req.params.id }).lean();
     if (!assignment) return E.notFound(res, 'Assignment not found.');
@@ -555,6 +792,40 @@ router.post('/:id/submit', authMiddleware, PLAN, MODGATE, async (req, res) => {
     if (existing && (existing.status === 'GRADED' || existing.status === 'RETURNED')) {
       return _bad(res, 'This work has already been graded. Ask your teacher to reopen it.', 409);
     }
+    if (assignment.timeLimitMinutes && existing?.startedAt && !assignment.allowLate) {
+      const expiresAt = new Date(existing.startedAt).getTime() + assignment.timeLimitMinutes * 60_000;
+      if (Date.now() > expiresAt) return _bad(res, 'Time is up for this attempt.', 403);
+    }
+
+    const d = parsed.data;
+    const isQuiz = Array.isArray(assignment.questions) && assignment.questions.length > 0;
+    let answers = [];
+    let autoScore = null;
+    let autoMaxScore = null;
+
+    if (isQuiz) {
+      for (const answer of d.answers || []) {
+        const check = await _validateAttachmentIds(req, assignment, studentId, answer.attachmentIds || []);
+        if (check.error) return _bad(res, check.error);
+      }
+      const auto = _autoGrade(assignment.questions, d.answers || []);
+      if (auto.missing) {
+        return _bad(res, `Answer this question before submitting: ${String(auto.missing).slice(0, 90)}`);
+      }
+      answers = auto.answers;
+      autoScore = auto.autoScore;
+      autoMaxScore = auto.autoMax;
+    } else {
+      const check = await _validateAttachmentIds(req, assignment, studentId, d.attachmentIds || []);
+      if (check.error) return _bad(res, check.error);
+      const needsFile = assignment.answerMode === 'file';
+      const needsText = assignment.answerMode === 'written';
+      if (needsFile && !(d.attachmentIds || []).length) return _bad(res, 'Attach a file before submitting.');
+      if (needsText && !(d.textAnswer || '').trim()) return _bad(res, 'Write an answer before submitting.');
+      if (!d.textAnswer && !(d.attachmentIds || []).length) {
+        return _bad(res, 'Add an answer or an attachment before submitting.');
+      }
+    }
 
     const now = new Date().toISOString();
     await Submissions.updateOne(
@@ -562,8 +833,11 @@ router.post('/:id/submit', authMiddleware, PLAN, MODGATE, async (req, res) => {
       {
         $set: {
           status: 'TURNED_IN',
-          textAnswer: parsed.data.textAnswer || '',
-          attachmentIds: parsed.data.attachmentIds || [],
+          textAnswer: d.textAnswer || '',
+          attachmentIds: d.attachmentIds || [],
+          answers,
+          autoScore,
+          autoMaxScore,
           submittedAt: existing?.submittedAt || now,
           updatedAt: now,
         },
@@ -589,6 +863,223 @@ router.post('/:id/submit', authMiddleware, PLAN, MODGATE, async (req, res) => {
   } catch (err) {
     console.error('[assignments/:id/submit POST]', err);
     return E.serverError(res, 'Could not submit the assignment.');
+  }
+});
+
+/* ── Timed attempts ──────────────────────────────────────────── */
+
+router.post('/:id/start', authMiddleware, PLAN, MODGATE, async (req, res) => {
+  // rbac: student self-scoped — starts the caller's own attempt
+  try {
+    const { schoolId, role, studentId } = req.jwtUser;
+    if (!STUDENT_ROLES.has(role) || !studentId) {
+      return E.forbidden(res, 'Only a student may start an attempt.');
+    }
+    const assignment = await tenantModel('assignments', tenantContext(req))
+      .findOne({ schoolId, id: req.params.id }).lean();
+    if (!assignment) return E.notFound(res, 'Assignment not found.');
+    if (assignment.status !== 'PUBLISHED') return E.forbidden(res, 'This assignment is not open yet.');
+    if (!assignment.timeLimitMinutes || !Array.isArray(assignment.questions) || assignment.questions.length === 0) {
+      return ok(res, { attempt: null });
+    }
+
+    const student = await tenantModel('students', tenantContext(req))
+      .findOne({ schoolId, id: studentId }).select('id classId streamId').lean();
+    if (!student || student.classId !== assignment.classId) {
+      return E.forbidden(res, 'This assignment is not for your class.');
+    }
+
+    const Submissions = tenantModel('assignment_submissions', tenantContext(req));
+    let submission = await Submissions.findOne({ schoolId, assignmentId: assignment.id, studentId, attemptNo: 1 }).lean();
+    if (!submission) {
+      const now = new Date().toISOString();
+      await Submissions.updateOne(
+        { schoolId, assignmentId: assignment.id, studentId, attemptNo: 1 },
+        {
+          $setOnInsert: {
+            id: uuidv4(), schoolId, assignmentId: assignment.id, studentId,
+            classId: assignment.classId, subjectId: assignment.subjectId,
+            streamId: student.streamId ?? null, attemptNo: 1, source: 'native',
+            status: 'ASSIGNED', markWriteStatus: 'PENDING',
+            startedAt: now, createdAt: now,
+          },
+        },
+        { upsert: true },
+      );
+      submission = await Submissions.findOne({ schoolId, assignmentId: assignment.id, studentId, attemptNo: 1 }).lean();
+    }
+    const startedAt = submission.startedAt || new Date().toISOString();
+    if (!submission.startedAt) {
+      await Submissions.updateOne(
+        { schoolId, assignmentId: assignment.id, studentId, attemptNo: 1 },
+        { $set: { startedAt } },
+      );
+    }
+    const expiresAt = new Date(new Date(startedAt).getTime() + assignment.timeLimitMinutes * 60_000).toISOString();
+    return ok(res, { attempt: { startedAt, expiresAt } });
+  } catch (err) {
+    console.error('[assignments/:id/start POST]', err);
+    return E.serverError(res, 'Could not start the attempt.');
+  }
+});
+
+/* ── Attachments ─────────────────────────────────────────────── */
+
+async function _attachmentAccess(req, assignment, att) {
+  if (STUDENT_ROLES.has(req.jwtUser.role)) {
+    if (!(await _canRead(req, assignment))) return false;
+    if (att.studentId && att.studentId !== req.jwtUser.studentId) return false;
+    return true;
+  }
+  return _canRead(req, assignment);
+}
+
+router.post('/:id/attachments/presign', authMiddleware, PLAN, MODGATE, readAccess, async (req, res) => {
+  // rbac: staff elearning:read, student self-scoped by _canRead
+  try {
+    const parsed = z.object({
+      fileName: z.string().min(1).max(255),
+      mimeType: z.string().min(1).max(120),
+      size: z.number().positive().max(MAX_FILE_BYTES),
+    }).safeParse(req.body);
+    if (!parsed.success) {
+      return E.validation(res, parsed.error.issues.map(i => ({ path: i.path.join('.'), message: i.message })));
+    }
+    const { schoolId, role, studentId, userId } = req.jwtUser;
+    if (!ALLOWED_MIME.has(parsed.data.mimeType)) {
+      return _bad(res, `That file type is not allowed. Allowed: PDF, image, Word, text.`);
+    }
+    const assignment = await tenantModel('assignments', tenantContext(req))
+      .findOne({ schoolId, id: req.params.id }).lean();
+    if (!assignment) return E.notFound(res, 'Assignment not found.');
+    if (!(await _canRead(req, assignment))) return E.forbidden(res, 'You do not have access to this assignment.');
+
+    const ownerStudentId = STUDENT_ROLES.has(role) ? studentId : null;
+    const attachmentId = uuidv4();
+    const key = storage.buildKey({
+      schoolId,
+      assignmentId: assignment.id,
+      studentId: ownerStudentId,
+      attachmentId,
+      fileName: parsed.data.fileName,
+    });
+    const mode = storage.storageMode();
+
+    const doc = {
+      id: attachmentId,
+      schoolId,
+      assignmentId: assignment.id,
+      studentId: ownerStudentId,
+      fileName: parsed.data.fileName,
+      mimeType: parsed.data.mimeType,
+      size: parsed.data.size,
+      key,
+      mode,
+      uploaded: false,
+      createdBy: userId,
+      createdAt: new Date().toISOString(),
+    };
+    await tenantModel('assignment_attachments', tenantContext(req)).create(doc);
+
+    const uploadUrl = mode === 's3'
+      ? await storage.presignPut(key, parsed.data.mimeType)
+      : `/api/assignments/${assignment.id}/attachments/${attachmentId}/upload`;
+
+    return createdRes(res, {
+      attachmentId,
+      mode,
+      uploadUrl,
+      key,
+      headers: mode === 's3' ? { 'Content-Type': parsed.data.mimeType } : {},
+    });
+  } catch (err) {
+    console.error('[assignments attachments presign]', err);
+    return E.serverError(res, 'Could not prepare the upload.');
+  }
+});
+
+router.put(
+  '/:id/attachments/:attId/upload',
+  // rbac: upload target is owned by the caller (checked inline)
+  authMiddleware, PLAN, MODGATE,
+  express.raw({ type: '*/*', limit: MAX_FILE_BYTES + 1024 }),
+  async (req, res) => {
+    try {
+      const { schoolId, role, studentId } = req.jwtUser;
+      const att = await tenantModel('assignment_attachments', tenantContext(req))
+        .findOne({ schoolId, assignmentId: req.params.id, id: req.params.attId }).lean();
+      if (!att) return E.notFound(res, 'Upload target not found.');
+      if (att.mode !== 'local') return _bad(res, 'This upload must go to object storage.');
+      if (STUDENT_ROLES.has(role) && att.studentId !== studentId) {
+        return E.forbidden(res, 'You can only upload your own work.');
+      }
+      if (!STUDENT_ROLES.has(role) && att.studentId) {
+        return E.forbidden(res, 'Staff cannot upload a student submission.');
+      }
+      const buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || '');
+      if (!buffer.length) return _bad(res, 'The uploaded file is empty.');
+      if (buffer.length > MAX_FILE_BYTES) return _bad(res, 'The file is larger than 10 MB.');
+
+      await storage.saveLocal(att.key, buffer);
+      await tenantModel('assignment_attachments', tenantContext(req)).updateOne(
+        { schoolId, id: att.id },
+        { $set: { uploaded: true, size: buffer.length, uploadedAt: new Date().toISOString() } },
+      );
+      return ok(res, { uploaded: true, attachmentId: att.id, size: buffer.length });
+    } catch (err) {
+      console.error('[assignments attachment upload]', err);
+      return E.serverError(res, 'Could not store the file.');
+    }
+  },
+);
+
+router.post('/:id/attachments/:attId/confirm', authMiddleware, PLAN, MODGATE, async (req, res) => {
+  // rbac: upload target is owned by the caller (checked inline)
+  try {
+    const { schoolId, role, studentId } = req.jwtUser;
+    const att = await tenantModel('assignment_attachments', tenantContext(req))
+      .findOne({ schoolId, assignmentId: req.params.id, id: req.params.attId }).lean();
+    if (!att) return E.notFound(res, 'Upload target not found.');
+    if (STUDENT_ROLES.has(role) && att.studentId !== studentId) {
+      return E.forbidden(res, 'You can only confirm your own upload.');
+    }
+    if (att.mode === 's3') {
+      const head = await storage.headObject(att.key).catch(() => ({ exists: false }));
+      if (!head.exists) return _bad(res, 'The file is not in storage yet.');
+      if (head.size && head.size > MAX_FILE_BYTES) return _bad(res, 'The file is larger than 10 MB.');
+      await tenantModel('assignment_attachments', tenantContext(req)).updateOne(
+        { schoolId, id: att.id },
+        { $set: { uploaded: true, size: head.size ?? att.size, uploadedAt: new Date().toISOString() } },
+      );
+    }
+    return ok(res, { uploaded: true, attachmentId: att.id });
+  } catch (err) {
+    console.error('[assignments attachment confirm]', err);
+    return E.serverError(res, 'Could not confirm the upload.');
+  }
+});
+
+router.get('/:id/attachments/:attId', authMiddleware, PLAN, MODGATE, readAccess, async (req, res) => {
+  // rbac: staff read scope, student self-scoped by _attachmentAccess
+  try {
+    const { schoolId } = req.jwtUser;
+    const assignment = await tenantModel('assignments', tenantContext(req))
+      .findOne({ schoolId, id: req.params.id }).select('id classId subjectId streamId status questions').lean();
+    if (!assignment) return E.notFound(res, 'Assignment not found.');
+    const att = await tenantModel('assignment_attachments', tenantContext(req))
+      .findOne({ schoolId, assignmentId: assignment.id, id: req.params.attId }).lean();
+    if (!att || !att.uploaded) return E.notFound(res, 'Attachment not found.');
+    if (!(await _attachmentAccess(req, assignment, att))) return E.forbidden(res, 'You do not have access to this file.');
+
+    if (att.mode === 's3') {
+      return res.redirect(302, await storage.presignGet(att.key));
+    }
+    res.setHeader('Content-Type', att.mimeType || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(att.fileName)}"`);
+    return res.sendFile(storage.localPath(att.key));
+  } catch (err) {
+    console.error('[assignments attachment download]', err);
+    return E.serverError(res, 'Could not download the file.');
   }
 });
 
@@ -620,12 +1111,37 @@ router.post('/:id/grade', authMiddleware, PLAN, MODGATE, rbac('elearning', 'upda
     if (student.classId !== assignment.classId) {
       return _bad(res, 'That student is not in this assignment’s class.');
     }
-    if (Number(parsed.data.assignedGrade) > Number(assignment.maxPoints)) {
+
+    const Submissions = tenantModel('assignment_submissions', tenantContext(req));
+    const existing = await Submissions.findOne({ schoolId, assignmentId: assignment.id, studentId: student.id, attemptNo: 1 }).lean();
+
+    // Quiz: per-question scores (or the auto-graded total) decide the mark.
+    // Writing the total explicitly still works and overrides both.
+    let gradedAnswers = existing?.answers || [];
+    let assignedGrade = parsed.data.assignedGrade;
+    if (Array.isArray(assignment.questions) && assignment.questions.length > 0) {
+      const byId = new Map(assignment.questions.map(q => [q.id, q]));
+      gradedAnswers = (existing?.answers || []).map(a => ({ ...a }));
+      if (parsed.data.questionScores) {
+        for (const a of gradedAnswers) {
+          const score = parsed.data.questionScores[a.questionId];
+          if (score == null) continue;
+          const q = byId.get(a.questionId);
+          a.awardedPoints = Math.min(Number(q?.points ?? score), Number(score));
+        }
+      }
+      if (assignedGrade == null) {
+        assignedGrade = gradedAnswers.reduce((sum, a) => sum + (Number(a.awardedPoints) || 0), 0);
+      }
+    }
+
+    if (assignedGrade == null) return _bad(res, 'Enter a grade for this submission.');
+    if (Number(assignedGrade) > Number(assignment.maxPoints)) {
       return _bad(res, `Grade cannot exceed ${assignment.maxPoints} points.`);
     }
 
     const rawScore = Math.round(Math.min(100, Math.max(0,
-      (Number(parsed.data.assignedGrade) / Number(assignment.maxPoints)) * 100,
+      (Number(assignedGrade) / Number(assignment.maxPoints)) * 100,
     )) * 100) / 100;
 
     let markWriteStatus = 'NOT_LINKED';
@@ -663,7 +1179,7 @@ router.post('/:id/grade', authMiddleware, PLAN, MODGATE, rbac('elearning', 'upda
           .findOne({ ...period, status: { $in: ['submitted', 'approved'] } }).lean());
 
         const plan = planClassroomMark({
-          assignedGrade: parsed.data.assignedGrade,
+          assignedGrade,
           maxScore: assignment.maxPoints,
           schedule,
           courseLink: { classId: assignment.classId, subjectId: assignment.subjectId },
@@ -710,23 +1226,24 @@ router.post('/:id/grade', authMiddleware, PLAN, MODGATE, rbac('elearning', 'upda
           skipReason = plan.reason;
           await _upsertException(req, _exceptionDoc(
             req, assignment, student.id, plan.reason,
-            `Grade ${parsed.data.assignedGrade}/${assignment.maxPoints} could not reach the Markbook.`,
+            `Grade ${assignedGrade}/${assignment.maxPoints} could not reach the Markbook.`,
           ));
         }
       }
     }
 
     const now = new Date().toISOString();
-    const Submissions = tenantModel('assignment_submissions', tenantContext(req));
-    const existing = await Submissions.findOne({ schoolId, assignmentId: assignment.id, studentId: student.id, attemptNo: 1 }).lean();
 
     await Submissions.updateOne(
       { schoolId, assignmentId: assignment.id, studentId: student.id, attemptNo: 1 },
       {
         $set: {
           status: 'GRADED',
-          assignedGrade: parsed.data.assignedGrade,
+          assignedGrade,
           rawScore,
+          ...(Array.isArray(assignment.questions) && assignment.questions.length
+            ? { answers: gradedAnswers, autoScore: existing?.autoScore ?? null }
+            : {}),
           feedback: parsed.data.feedback || '',
           gradedAt: now,
           gradedBy: userId,

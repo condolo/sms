@@ -74,7 +74,10 @@ const InventoryPage     = lazy(() => import('@/pages/inventory/InventoryPage.jsx
 const LessonsPage          = lazy(() => import('@/pages/lessons/LessonsPage.jsx'));
 const ELearningPage        = lazy(() => import('@/pages/elearning/ELearningPage.jsx'));
 const AssignmentsPage      = lazy(() => import('@/pages/elearning/AssignmentsPage.jsx'));
+const AssignmentEditorPage = lazy(() => import('@/pages/elearning/AssignmentEditorPage.jsx'));
+const AssignmentDetailPage = lazy(() => import('@/pages/elearning/AssignmentDetailPage.jsx'));
 const StudentAssignmentsPage = lazy(() => import('@/pages/student-portal/StudentAssignmentsPage.jsx'));
+const StudentAssignmentPage = lazy(() => import('@/pages/student-portal/StudentAssignmentPage.jsx'));
 const StudentDashboard     = lazy(() => import('@/pages/student-portal/StudentDashboard.jsx'));
 const ParentDashboard      = lazy(() => import('@/pages/parent-portal/ParentDashboard.jsx'));
 const GroupDashboard       = lazy(() => import('@/pages/group-portal/GroupDashboard.jsx'));
@@ -203,6 +206,7 @@ export const router = createBrowserRouter([
   // Student portal — accessible after student login (no AppShell)
   { path: '/student-dashboard', element: <SuspenseWrapper><StudentDashboard /></SuspenseWrapper> },
   { path: '/student-assignments', element: <SuspenseWrapper><StudentAssignmentsPage /></SuspenseWrapper> },
+  { path: '/student-assignments/:id', element: <SuspenseWrapper><StudentAssignmentPage /></SuspenseWrapper> },
 
   // Parent portal — accessible after parent login (no AppShell)
   { path: '/parent-dashboard', element: <SuspenseWrapper><ParentDashboard /></SuspenseWrapper> },
@@ -319,6 +323,8 @@ export const router = createBrowserRouter([
       // eLearning — sub-routes for each tool
       { path: 'elearning',              element: <SuspenseWrapper><ELearningPage /></SuspenseWrapper> },
       { path: 'elearning/assignments',  element: <SuspenseWrapper><AssignmentsPage /></SuspenseWrapper> },
+      { path: 'elearning/assignments/new', element: <SuspenseWrapper><AssignmentEditorPage /></SuspenseWrapper> },
+      { path: 'elearning/assignments/:id', element: <SuspenseWrapper><AssignmentDetailPage /></SuspenseWrapper> },
       { path: 'elearning/sessions',     element: <SuspenseWrapper><ELearningPage /></SuspenseWrapper> },
       { path: 'elearning/classroom',    element: <SuspenseWrapper><ELearningPage /></SuspenseWrapper> },
       { path: 'elearning/meet',         element: <SuspenseWrapper><ELearningPage /></SuspenseWrapper> },

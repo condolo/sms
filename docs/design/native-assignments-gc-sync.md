@@ -1,6 +1,6 @@
 # Design: Native assignments + Google Classroom read-sync (survive on our own)
 
-Status: **partially built (2026-11-06).** The native slice — API, web teacher/student screens, mobile teacher/student screens, Markbook write-through and tests — is implemented on `feat/native-assignments`. The Google Classroom read-sync (PR-1) and quiz engine (PR-4) remain proposals. Points marked **DECIDE** still need answers for those phases. Verified facts were checked against the code on 2026-11-06.
+Status: **native slice built (2026-11-06).** Implemented on `feat/native-assignments`: written/file/both modes, S3-or-local file uploads, structured quizzes (single/multi choice, short/long text, file questions) with server-side auto-marking, question bank, timed attempts, teacher workspace page, student assignment page, and mobile screens. The Google Classroom read-sync (PR-1) remains a proposal. Points marked **DECIDE** still need answers for that phase. Verified facts were checked against the code on 2026-11-06.
 
 ## 1. Problem
 
@@ -405,6 +405,65 @@ The app server never buffers a file, so memory stays flat; the 10 MB JSON limit 
 - One attempt while `TURNED_IN`; after `GRADED` a resubmit is refused until the teacher reopens (reopen endpoint/UI is a follow-up).
 - A late file already in the bucket is harmless: without a submission row pointing at it, the orphan sweep removes it.
 
+## 13. Answer modes and question types (proposal)
+
+**Today:** one free-text answer per student. The `type` field accepts `ASSIGNMENT | SHORT_ANSWER_QUESTION | MULTIPLE_CHOICE_QUESTION | MATERIAL`, but only the free-text path is implemented and exposed (web offers Assignment / Question / Material; mobile offers Assignment). There is no file picker, no option set and no auto-grading. `MULTIPLE_CHOICE_QUESTION` is accepted by the API but would behave like a written answer — so the UI does not offer it.
+
+### Answer modes (one per assignment)
+
+| Mode | Student sees | Grading |
+|---|---|---|
+| `written` (today) | one text box | teacher |
+| `file` | picker, up to N files | teacher |
+| `both` | text box + picker | teacher |
+| `quiz` | questions rendered one by one | MCQ auto, written/file by teacher |
+
+### Data model for structured work
+
+```
+assignment_questions {
+  id, schoolId, assignmentId, order,
+  type: 'MCQ_SINGLE' | 'MCQ_MULTI' | 'SHORT_TEXT' | 'LONG_TEXT' | 'FILE',
+  prompt, options: [{ id, text }],      // MCQ only
+  correctOptionIds: [ ... ],            // server-only, never sent to a student
+  points, required, wordLimit?, maxFiles?
+}
+
+assignment_answers {
+  id, schoolId, assignmentId, studentId, questionId,
+  selectedOptionIds: [], textAnswer, attachmentIds: [],
+  awardedPoints, autoGraded: bool, gradedBy, gradedAt
+}
+```
+
+A submission's total is the sum of its answers' `awardedPoints`; `assignment.maxPoints` must equal the sum of question points (validated at publish). Auto-grading writes `awardedPoints`; written/file answers stay `null` until the teacher marks them. The final total enters the Markbook through the same `planGradeWrite` path.
+
+### Rules that matter
+
+- **Never trust the client with answers.** `correctOptionIds` is stripped from every student-facing payload; grading runs on the server. A student cannot read the key from the assignment detail response.
+- **One attempt by default.** Timed quizzes (startedAt / expiresAt, server clock) are a later flag; the deadline model already uses the school timezone.
+- **Partial credit policy** for `MCQ_MULTI`: all-or-nothing or per-correct-option minus per-wrong-option — DECIDE.
+- **Randomisation**: shuffle question order and/or options per student, then persist the shuffled order with the attempt so review matches what they saw.
+- **Mixed assignments** are allowed (a quiz can end with a long-answer question); release per-question feedback only after the teacher publishes, matching the report-card gate.
+- **Question bank** (reuse across assignments/terms) is a separate collection later; v1 embeds questions in the assignment.
+
+### Workflow sketch
+
+```
+Teacher: choose mode [written | file | both | quiz]
+   quiz → add questions (type, prompt, options, correct answer, points)
+   publish → server validates Σpoints == maxPoints
+
+Student: mode-specific screen
+   written → text box            file → picker (presigned PUT)
+   quiz    → one question at a time, answers saved server-side
+
+Server: MCQ answers auto-scored immediately
+        written/file answers queued for the teacher
+        total → planGradeWrite → assessment_marks (unpublished)
+Teacher: opens the submission, marks remaining answers, returns feedback
+```
+
 ## 11. DECIDEs
 
 1. **Module/plan:** reuse `elearning` + core plan, or new entitlement? (Recommend: reuse.)
@@ -414,3 +473,7 @@ The app server never buffers a file, so memory stays flat; the 10 MB JSON limit 
 5. **Quiz engine scope:** in or out of PR-4? (MCQ auto-grade only, or open-ended with teacher marking?)
 6. **Late submissions:** hard cutoff at dueDate, grace window, or teacher override? (Recommend: teacher can reopen after due date, like schedule unlock.)
 7. **Demo data:** seed a second term's snapshots + a few native/GC assignments into the demo school so trends (PR-18) and this feature are demonstrable end-to-end?
+8. **Answer modes:** which ship first — file upload, MCQ quiz, or both? (Recommend: file first; it is the most-requested classroom need and has no grading engine.)
+9. **Multi-select scoring:** all-or-nothing, or partial credit with a wrong-option penalty?
+10. **Timed quizzes:** server-enforced timer now, or keep to the existing due date until a later phase?
+11. **Per-question feedback:** release after teacher returns the work, or only with the term report?

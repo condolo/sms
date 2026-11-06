@@ -17,7 +17,10 @@ Assignments no longer require Google Classroom. A teacher issues work to a class
 - Teacher role now carries `elearning: read/create/update` (repairPermissions + onboard defaults), so the module is reachable without an admin granting it case by case.
 - Deadlines are enforced in the **school's** timezone (`server/utils/school-deadline.js`), not the server's, with an explicit "accept late submissions" switch on both create forms.
 - 9 route tests + 6 deadline tests + the existing planner suite; RBAC and tenant gates stay at 100% / 35.
-- Files: submissions are text-only in this slice. The upload design (S3 presigned PUT/GET, metadata in Mongo, 100-student concurrency) is written up in `docs/design/native-assignments-gc-sync.md` §12; message attachments' base64-in-Mongo pattern is deliberately not reused.
+- **Answer modes:** written, file upload, text + file, and quizzes. File bytes go to S3-compatible storage with presigned PUT/GET when configured, and to `server/uploads` with an access-checked download route in development; metadata is tenant-scoped in `assignment_attachments`.
+- **Quizzes:** single/multi choice, short/long text and file questions; the answer key never reaches a student payload; MCQ answers are marked on submit and the teacher confirms/adjusts the total. A reusable question bank, per-question points and timed attempts are included.
+- **Pages, not modals:** `/elearning/assignments/new` (builder), `/elearning/assignments/:id` (teacher workspace with KPIs, expandable answers, attachments, grading) and `/student-assignments/:id` (student answer page with timer).
+- Upload design and the 100-student concurrency model are documented in `docs/design/native-assignments-gc-sync.md` §12–13.
 
 ## [v5.262.0] - 2026-11-04 - feat(reminders): Smart Reminders on the web, and a guardian report drafted from real data
 
