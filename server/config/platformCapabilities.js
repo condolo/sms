@@ -183,6 +183,7 @@ const POLICY = [
 
   /* Sensitive reads */
   { method: 'GET',    pattern: '/users/search',                         cap: 'users.search' },
+  { method: 'GET',    pattern: '/email-failures',                      cap: 'schools.view' },
 
   /* Billing */
   { method: 'GET',    pattern: '/billing/all',                          cap: 'billing.view' },

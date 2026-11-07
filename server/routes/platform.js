@@ -595,7 +595,7 @@ router.get('/email-failures', async (req, res) => {
   try {
     const filter = req.query.schoolId ? { scope: String(req.query.schoolId) } : {};
     const limit  = Math.min(parseInt(req.query.limit, 10) || 50, 200);
-    const rows = await _model('email_failures')
+    const rows = await platformModel('email_failures')
       .find(filter)
       .sort({ lastAt: -1 })
       .limit(limit)

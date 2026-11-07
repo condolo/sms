@@ -1932,7 +1932,7 @@ router.post('/school/smtp/retry', authMiddleware, rbac('settings', 'update'), as
 router.get('/school/smtp/failures', authMiddleware, rbac('settings', 'read'), async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
-    const rows = await _model('email_failures')
+    const rows = await tenantModel('email_failures', tenantContext(req))
       .find({ scope: req.jwtUser.schoolId })
       .sort({ lastAt: -1 })
       .limit(limit)
