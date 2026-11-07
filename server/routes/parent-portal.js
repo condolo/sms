@@ -773,6 +773,48 @@ router.get('/attendance/:childId', authMiddleware, PLAN, async (req, res) => {
    turn "my child's own incident record" into "the staff's internal
    case file" if shown verbatim — see behaviour.js's IncidentSchema. */
 /* ══════════════════════════════════════════════════════════════
+   GET /api/parent-portal/calendar?month=YYYY-MM
+   The school calendar for a parent, month-scoped. Events are already
+   school-wide/audience-tagged records; the month filter keeps a phone
+   response small.
+   ══════════════════════════════════════════════════════════════ */
+router.get('/calendar', authMiddleware, PLAN, async (req, res) => {
+  if (!_requireParent(req, res)) return;
+  try {
+    const { schoolId } = req.jwtUser;
+    const month = /^\d{4}-\d{2}$/.test(req.query.month || '')
+      ? req.query.month
+      : new Date().toISOString().slice(0, 7);
+    const [year, mon] = month.split('-').map(Number);
+    const start = `${month}-01`;
+    const end = new Date(Date.UTC(year, mon, 0)).toISOString().slice(0, 10);
+
+    const events = await tenantModel('events', tenantContext(req))
+      .find({
+        schoolId,
+        $and: [
+          {
+            $or: [
+              { startDate: { $gte: start, $lte: end } },
+              { startDate: { $lte: end }, endDate: { $gte: start } },
+            ],
+          },
+          // A staff-only calendar entry must not appear on a parent's phone.
+          audienceClause('parents'),
+        ],
+      })
+      .sort({ startDate: 1, title: 1 })
+      .limit(200)
+      .select('id title description startDate endDate allDay type category location color audience meetingLink meetingPasscode platform')
+      .lean();
+    return ok(res, events);
+  } catch (err) {
+    console.error('[parent-portal calendar]', err);
+    return E.serverError(res, 'Could not load the calendar.');
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
    GET /api/parent-portal/assignments/:childId
    The child's current native assignments with their own submission
    status. The answer key is stripped — a parent must not see a quiz key.
@@ -1024,6 +1066,17 @@ router.get('/report/:childId', authMiddleware, PLAN, async (req, res) => {
     const { year: currentYearDoc, term: currentTermDoc, termNumber: currentTermNumber } = resolveCurrentPeriod(academicYears);
 
     return ok(res, {
+      /* The published card history (newest first) — the mobile report page
+         lets a parent pick a term and download that exact PDF. */
+      reports: cards.map(c => ({
+        id: c.id,
+        academicYear: c.academicYear || null,
+        termName: c.termName || null,
+        termNumber: c.termNumber ?? null,
+        averageScore: c.averageScore ?? null,
+        publishedAt: c.publishedAt || null,
+        reportLabel: c.reportLabel || null,
+      })),
       child: { id: childId, name: `${student?.firstName || ''} ${student?.lastName || ''}`.trim(), className: student?.className || null },
       term: {
         academicYear: currentYearDoc?.name || '',

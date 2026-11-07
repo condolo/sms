@@ -196,6 +196,49 @@ router.get('/books', rbac('library', 'read'), async (req, res) => {
   }
 });
 
+/* GET /api/library/borrowers?q= — the issue-form picker (students + staff).
+   Gated on library read, not the students/staff modules, so a librarian
+   does not need the whole register to lend a book. */
+router.get('/borrowers', rbac('library', 'read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const q = (req.query.q || '').toString().trim();
+    const rx = q ? new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') : null;
+
+    const studentFilter = { schoolId, status: { $ne: 'inactive' } };
+    if (rx) studentFilter.$or = [{ firstName: rx }, { lastName: rx }, { admissionNumber: rx }];
+    const staffFilter = { schoolId, status: { $ne: 'inactive' } };
+    if (rx) staffFilter.$or = [{ firstName: rx }, { lastName: rx }];
+
+    const [students, staff] = await Promise.all([
+      tenantModel('students', tenantContext(req)).find(studentFilter)
+        .select('id firstName lastName admissionNumber classId className').limit(20).lean(),
+      tenantModel('teachers', tenantContext(req)).find(staffFilter)
+        .select('id firstName lastName title').limit(10).lean(),
+    ]);
+
+    return ok(res, [
+      ...students.map(s => ({
+        id: s.id,
+        name: [s.firstName, s.lastName].filter(Boolean).join(' '),
+        type: 'student',
+        className: s.className || null,
+        admissionNumber: s.admissionNumber || null,
+      })),
+      ...staff.map(t => ({
+        id: t.id,
+        name: [t.title, t.firstName, t.lastName].filter(Boolean).join(' '),
+        type: 'staff',
+        className: null,
+        admissionNumber: null,
+      })),
+    ]);
+  } catch (err) {
+    console.error('[library/borrowers GET]', err);
+    return E.serverError(res);
+  }
+});
+
 /* GET /api/library/books/:id */
 router.get('/books/:id', rbac('library', 'read'), async (req, res) => {
   try {

@@ -107,6 +107,40 @@ router.get('/visits', authMiddleware, PLAN, MODGATE, rbac('medical', 'read', 'vi
   } catch (err) { console.error('[medical/visits GET]', err); return E.serverError(res); }
 });
 
+/* GET /api/medical/students?q= — the student picker for a new visit.
+   Gated on medical read (not the students module) so a nurse account does
+   not need the whole student register just to record a visit. */
+router.get('/students', authMiddleware, PLAN, MODGATE, rbac('medical', 'read', 'view'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const q = (req.query.q || '').toString().trim();
+    const filter = { schoolId, status: { $ne: 'inactive' } };
+    if (q) {
+      const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      filter.$or = [
+        { firstName: rx }, { lastName: rx }, { admissionNumber: rx },
+        { name: rx },
+      ];
+    }
+    const docs = await tenantModel('students', tenantContext(req))
+      .find(filter)
+      .select('id firstName lastName name admissionNumber classId className streamId')
+      .sort({ lastName: 1, firstName: 1 })
+      .limit(25)
+      .lean();
+    return ok(res, docs.map(s => ({
+      id: s.id,
+      name: s.name || [s.firstName, s.lastName].filter(Boolean).join(' ') || s.admissionNumber || 'Student',
+      admissionNumber: s.admissionNumber || null,
+      classId: s.classId || null,
+      className: s.className || null,
+    })));
+  } catch (err) {
+    console.error('[medical/students GET]', err);
+    return E.serverError(res);
+  }
+});
+
 /* GET /api/medical/visits/:id */
 router.get('/visits/:id', authMiddleware, PLAN, MODGATE, rbac('medical', 'read', 'view'), async (req, res) => {
   try {
