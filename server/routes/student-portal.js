@@ -809,6 +809,42 @@ router.get('/weekly-snapshot/:weekStart/pdf', authMiddleware, PLAN, async (req, 
   }
 });
 
+/* GET /api/student-portal/calendar?month=YYYY-MM — the school calendar. */
+router.get('/calendar', authMiddleware, PLAN, async (req, res) => {
+  try {
+    if (req.jwtUser.role !== 'student') return E.forbidden(res, 'This endpoint is for student accounts only.');
+    const { schoolId } = req.jwtUser;
+    const month = /^\d{4}-\d{2}$/.test(req.query.month || '')
+      ? req.query.month
+      : new Date().toISOString().slice(0, 7);
+    const [year, mon] = month.split('-').map(Number);
+    const start = `${month}-01`;
+    const end = new Date(Date.UTC(year, mon, 0)).toISOString().slice(0, 10);
+    const events = await tenantModel('events', tenantContext(req))
+      .find({
+        schoolId,
+        $and: [
+          {
+            $or: [
+              { startDate: { $gte: start, $lte: end } },
+              { startDate: { $lte: end }, endDate: { $gte: start } },
+            ],
+          },
+          // Only events the office addressed to students.
+          audienceClause('students'),
+        ],
+      })
+      .sort({ startDate: 1, title: 1 })
+      .limit(200)
+      .select('id title description startDate endDate allDay type category location color audience meetingLink meetingPasscode platform')
+      .lean();
+    return ok(res, events);
+  } catch (err) {
+    console.error('[student-portal calendar]', err);
+    return E.serverError(res, 'Could not load the calendar.');
+  }
+});
+
 /* GET /api/student-portal/exams?from=&to= - the exam week, in full detail.
    Default window is today to +30 days, capped at 120. `from` in the past is
    allowed (last week's paper is still worth reading back to); only the span
