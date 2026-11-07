@@ -744,10 +744,11 @@ export const settings = {
     uploadLoginBg:  (b64) => _put('/settings/school/login-bg', { loginBgBase64: b64 }),
     deleteLoginBg:  ()    => _delete('/settings/school/login-bg'),
     smtp: {
-      save:   (data) => _post('/settings/school/smtp', data),
-      test:   (data) => _post('/settings/school/smtp/test', data),
-      remove: ()     => _delete('/settings/school/smtp'),
-      retry:  ()     => _post('/settings/school/smtp/retry', {}),
+      save:     (data) => _post('/settings/school/smtp', data),
+      test:     (data) => _post('/settings/school/smtp/test', data),
+      remove:   ()     => _delete('/settings/school/smtp'),
+      retry:    ()     => _post('/settings/school/smtp/retry', {}),
+      failures: ()     => _get('/settings/school/smtp/failures'),
     },
   },
   users: {

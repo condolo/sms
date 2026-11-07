@@ -1924,6 +1924,38 @@ router.post('/school/smtp/retry', authMiddleware, rbac('settings', 'update'), as
   }
 });
 
+/* GET /api/settings/school/smtp/failures — this school's recent email
+   failures, newest first. The Settings SMTP panel renders these under the
+   "Falling back to platform" banner so an admin sees WHAT failed and WHEN,
+   not just that something did. `smtpLastError` on GET /school already
+   carries the latest error; this is the history behind it. */
+router.get('/school/smtp/failures', authMiddleware, rbac('settings', 'read'), async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+    const rows = await _model('email_failures')
+      .find({ scope: req.jwtUser.schoolId })
+      .sort({ lastAt: -1 })
+      .limit(limit)
+      .lean();
+    return res.json({
+      success: true,
+      data: rows.map(r => ({
+        id:       r.id,
+        subject:  r.subject,
+        error:    r.error,
+        via:      r.via,
+        count:    r.count || 1,
+        to:       r.to || null,
+        firstAt:  r.firstAt,
+        lastAt:   r.lastAt,
+      })),
+    });
+  } catch (err) {
+    console.error('[settings] GET /school/smtp/failures error:', err);
+    return res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Failed to fetch email failures.' } });
+  }
+});
+
 /* ══════════════════════════════════════════════════════════════
    CUSTOM ROLES
    GET    /api/settings/custom-roles        — list school's custom roles

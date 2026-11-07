@@ -1542,6 +1542,7 @@ async function _checkTrialAndNotify(school) {
     adminEmail:  school.adminEmail,
     schoolName:  school.name,
     schoolEmail: school.systemEmail || '',
+    schoolId:    school.id,
     plan:        school.plan || 'standard',
     daysLeft,
     trialEnds:   ends.toLocaleDateString('en-GB', { day:'numeric', month:'long', year:'numeric' })

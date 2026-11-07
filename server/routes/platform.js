@@ -558,7 +558,7 @@ router.get('/schools', async (req, res) => {
     // Projection: only load fields needed for the dashboard list + stats
     // Avoids pulling large fields (logoUrl, branding, email templates) into RAM for every school
     const schools = await School.find({})
-      .select('id _id slug name shortName plan planExpiresAt isActive status adminName adminEmail currency currencySymbol trialEnds createdAt primaryColor sections curriculum')
+      .select('id _id slug name shortName plan planExpiresAt isActive status adminName adminEmail currency currencySymbol trialEnds createdAt primaryColor sections curriculum smtpEnabled smtpLastError smtpLastErrorAt smtpLastSuccessAt')
       .lean();
 
     const withStats = await Promise.all(schools.map(async s => {
@@ -583,6 +583,34 @@ router.get('/schools', async (req, res) => {
     }));
 
     res.json(withStats);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* GET /api/platform/email-failures — recent email failures across schools,
+   newest first. `schoolId` scopes to one school. This is how platform ops
+   sees that a school's custom SMTP is broken (or that the platform sender
+   itself is failing) without waiting for the school to complain. Pairs
+   with the per-school smtpLastError* fields now on GET /schools above. */
+router.get('/email-failures', async (req, res) => {
+  try {
+    const filter = req.query.schoolId ? { scope: String(req.query.schoolId) } : {};
+    const limit  = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+    const rows = await _model('email_failures')
+      .find(filter)
+      .sort({ lastAt: -1 })
+      .limit(limit)
+      .lean();
+    return res.json(rows.map(r => ({
+      id:       r.id,
+      schoolId: r.schoolId || null,
+      subject:  r.subject,
+      error:    r.error,
+      via:      r.via,
+      count:    r.count || 1,
+      to:       r.to || null,
+      firstAt:  r.firstAt,
+      lastAt:   r.lastAt,
+    })));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -2798,6 +2826,8 @@ router.post('/announcements', async (req, res) => {
           adminName:   school.adminName || school.name,
           adminEmail:  school.adminEmail,
           schoolName:  school.name,
+          schoolEmail: school.systemEmail || school.email || '',
+          schoolId:    school.id || school._id?.toString() || null,
           title,
           description,
           type:        type || 'info',

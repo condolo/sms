@@ -124,8 +124,7 @@ async function _resolveLogoUrl(schoolId) {
 const _smtpOutcomeThrottle = new Map(); // schoolId -> last-recorded Date.now()
 const SMTP_OUTCOME_THROTTLE_MS = 5 * 60 * 1000;
 
-async function _recordSmtpOutcome(schoolId, { ok, error } = {}) {
-  if (!schoolId) return;
+async function _recordSmtpOutcome(schoolId, { ok, error } = {}) {  if (!schoolId) return;
   /* A SUCCESS is never throttled. The throttle exists only to stop one bad
      credential from turning a school-wide send into a DB write storm — but
      throttling the recovery meant a school that fixed its SMTP kept showing
@@ -155,6 +154,57 @@ async function _recordSmtpOutcome(schoolId, { ok, error } = {}) {
   } catch (err) {
     console.error(`[EMAIL] ⚠️ Failed to record SMTP outcome for school ${schoolId}: ${err.message}`);
   }
+}
+
+/* ── Persistent email-failure log ─────────────────────────────
+   `smtpLastError` on the school doc only keeps the LATEST failure —
+   enough for the Settings badge, useless for "how often is this
+   happening / what exactly failed". Every failed send is also upserted
+   here, deduped per (scope, subject, error, hour) so a 500-recipient
+   blast failing on one bad credential becomes ONE row with count=500,
+   not 500 rows. Scope is the schoolId, or '__platform__' for mail that
+   never belonged to a school.
+
+   Readers:
+   - school admin:  GET /api/settings/school/smtp/failures
+   - platform ops:  GET /api/platform/email-failures
+   Retention is 30 days, swept lazily on each write (failures are rare,
+   so a sweep-per-write is cheaper than a cron). Logging never throws —
+   a broken log must never break a send. */
+const EMAIL_FAILURE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+async function _logEmailFailure({ schoolId, subject, to, via, error } = {}) {
+  try {
+    const Log = _model('email_failures');
+    const now = new Date();
+    await Log.updateOne(
+      {
+        scope:   schoolId || '__platform__',
+        subject: String(subject || '').slice(0, 200),
+        error:   String(error?.message || error || 'Unknown error').slice(0, 500),
+        hour:    now.toISOString().slice(0, 13),
+      },
+      {
+        $set: {
+          lastAt:   now.toISOString(),
+          via:      via || 'unknown',
+          schoolId: schoolId || null,
+        },
+        $setOnInsert: {
+          id:      require('crypto').randomUUID(),
+          firstAt: now.toISOString(),
+          to:      String(to || '').slice(0, 200),
+        },
+        $inc: { count: 1 },
+      },
+      { upsert: true },
+    );
+    if (typeof Log.deleteMany === 'function') {
+      Log.deleteMany({
+        lastAt: { $lt: new Date(Date.now() - EMAIL_FAILURE_RETENTION_MS).toISOString() },
+      }).catch(() => {});
+    }
+  } catch { /* logging must never break sending */ }
 }
 
 /**
@@ -265,6 +315,7 @@ async function _resolveTransporter(schoolId, { schoolName, schoolEmail } = {}) {
    opts.replyTo   — Reply-To address
    opts.transporter — explicit transporter override
    opts.from      — explicit From header override
+   opts.schoolId  — owner of this send; the failure log's scope
 */
 async function _send(to, subject, html, opts = {}) {
   const t    = opts.transporter ?? _platformTransporter;
@@ -273,6 +324,7 @@ async function _send(to, subject, html, opts = {}) {
   /* Platform SMTP path: skip entirely if not configured */
   if (!opts.transporter && !SMTP_READY) {
     console.warn(`[EMAIL] SKIPPED (no platform SMTP): "${subject}" → ${to}`);
+    _logEmailFailure({ schoolId: opts.schoolId, subject, to, via: 'platform-unconfigured', error: new Error('Platform SMTP (SMTP_USER/SMTP_PASS) is not configured') }).catch(() => {});
     return false;
   }
 
@@ -284,6 +336,7 @@ async function _send(to, subject, html, opts = {}) {
     return true;
   } catch (err) {
     console.error(`[EMAIL] ❌ Failed "${subject}" → ${to}: ${err.message}`);
+    _logEmailFailure({ schoolId: opts.schoolId, subject, to, via: opts.isCustom ? 'custom' : 'platform', error: err }).catch(() => {});
     if (opts.onFailure) opts.onFailure(err);
     return false;
   }
@@ -318,6 +371,7 @@ async function _sendAsSchool(to, subject, html, { schoolName, schoolEmail, schoo
     from:        resolved.from,
     replyTo:     resolved.replyTo,
     isCustom:    resolved.isCustom,
+    schoolId,
     onFailure:   resolved.isCustom ? (err) => { customError = err; } : undefined,
   });
 
@@ -332,6 +386,7 @@ async function _sendAsSchool(to, subject, html, { schoolName, schoolEmail, schoo
     return _send(to, subject, html, {
       from:    platformFrom,
       replyTo: schoolEmail || PLATFORM_EMAIL,
+      schoolId,
     });
   }
 
@@ -581,8 +636,11 @@ async function sendSecurityAlert({ adminEmail, adminName, schoolName, schoolEmai
   return _sendAsSchool(adminEmail, subject, html, { schoolName, schoolEmail, schoolId });
 }
 
-/* 6. Trial expiry reminder (platform → school admin) */
-async function sendTrialReminder({ adminName, adminEmail, schoolName, schoolEmail, plan, daysLeft, trialEnds }) {
+/* 6. Trial expiry reminder (platform → school admin).
+   Goes through _sendAsSchool like every other school-addressed mail, so a
+   school with working custom SMTP hears about its own trial from its own
+   address; without one it falls back to the platform sender as before. */
+async function sendTrialReminder({ adminName, adminEmail, schoolName, schoolEmail, schoolId = null, plan, daysLeft, trialEnds }) {
   const urgency = daysLeft === 0 ? '🚨 Today is your last day' : daysLeft === 1 ? '⚠️ 1 day left' : `⏰ ${daysLeft} days left`;
   const support = schoolEmail || SUPPORT_EMAIL;
   const html = await _wrap(`
@@ -600,11 +658,14 @@ async function sendTrialReminder({ adminName, adminEmail, schoolName, schoolEmai
     </p>
     <p style="font-size:13px;color:#6b7280">Questions? Contact us at <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>.</p>
   `, schoolName, schoolId);
-  return _send(adminEmail, `${urgency} — Msingi trial for ${schoolName}`, html);
+  return _sendAsSchool(adminEmail, `${urgency} — Msingi trial for ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
 }
 
-/* 12. System-wide update / maintenance notice to school admins */
-async function sendSystemUpdateNotice({ adminName, adminEmail, schoolName, title, description, type, scheduledAt, affectsAt }) {
+/* 12. System-wide update / maintenance notice to school admins.
+   Addressed to a school, so it goes through _sendAsSchool — a school with
+   working custom SMTP gets the notice from its own address, without one
+   from the platform sender as before. */
+async function sendSystemUpdateNotice({ adminName, adminEmail, schoolName, schoolEmail = null, schoolId = null, title, description, type, scheduledAt, affectsAt }) {
   const typeIcons  = { maintenance:'🔧', update:'🚀', security:'🔒', info:'ℹ️' };
   const typeLabels = { maintenance:'Scheduled Maintenance', update:'Platform Update', security:'Security Notice', info:'Platform Notice' };
   const icon   = typeIcons[type]  || 'ℹ️';
@@ -639,8 +700,8 @@ async function sendSystemUpdateNotice({ adminName, adminEmail, schoolName, title
       <a href="${APP_URL}" class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0">Visit Your Dashboard →</a>
     </p>`}
     <p style="font-size:13px;color:#6b7280">Questions about this notice? Contact us at <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>.</p>
-  `);
-  return _send(adminEmail, `${icon} Msingi — ${label}: ${title}`, html);
+  `, schoolName, schoolId);
+  return _sendAsSchool(adminEmail, `${icon} Msingi — ${label}: ${title}`, html, { schoolName, schoolEmail, schoolId });
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -1203,7 +1264,7 @@ async function sendSmartReminder({
 }) {
   const url = appUrl || APP_URL;
   const safeLines = (Array.isArray(lines) ? lines : []).slice(0, 12).map(l => _escapeHtml(String(l)));
-  const html = _wrap(`
+  const html = await _wrap(`
     <h2>${_escapeHtml(title || 'Reminder')}</h2>
     <p>Hi ${_escapeHtml(recipientName || 'there')},</p>
     <div class="info" style="margin:12px 0">
@@ -1212,7 +1273,7 @@ async function sendSmartReminder({
     <p style="text-align:center">
       <a href="${url}" class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0">Open Msingi →</a>
     </p>
-  `, schoolName);
+  `, schoolName, schoolId);
   return _sendAsSchool(recipientEmail, title || 'Reminder', html, { schoolName, schoolEmail, schoolId });
 }
 
@@ -1374,7 +1435,7 @@ async function sendDemoRejected({ to, name, schoolName, reason }) {
   return _send(to, `Update on your Msingi demo request`, html);
 }
 
-async function sendPlanExpiryReminder({ adminName, adminEmail, schoolName, plan, daysLeft, expiresAt }) {
+async function sendPlanExpiryReminder({ adminName, adminEmail, schoolName, schoolEmail = null, schoolId = null, plan, daysLeft, expiresAt }) {
   const isExpired = !daysLeft || daysLeft <= 0;
   const subject = isExpired
     ? `${schoolName}: your Msingi subscription has expired`
@@ -1388,8 +1449,8 @@ async function sendPlanExpiryReminder({ adminName, adminEmail, schoolName, plan,
       : `<p><strong>${_escapeHtml(schoolName)}</strong>'s <strong>${_escapeHtml(plan)}</strong> plan is active until <strong>${_escapeHtml(expiresAt)}</strong> — ${daysLeft} day${daysLeft === 1 ? '' : 's'} left.</p>
          <p>Renew from Settings → Subscription (M-Pesa) to keep every portal open without interruption.</p>`}
     <p>Reply to this email if you need an invoice, a different tier, or more time.</p>
-  `);
-  return _send(adminEmail, subject, html);
+  `, schoolName, schoolId);
+  return _sendAsSchool(adminEmail, subject, html, { schoolName, schoolEmail, schoolId });
 }
 
 async function sendSupportReply({ to, name, ref, subject, body, schoolName }) {
@@ -1453,6 +1514,7 @@ module.exports = {
   invalidateLogoCache,
   _resolveTransporter, // test-only access — see students-bulk-welcome-email-fix.test.js's sibling email-resolve-transporter.test.js
   _wrap, // test-only access — see email-branding.test.js
+  _logEmailFailure, // test-only access — see email-school-routing.test.js
   sendContactEnquiry,
   sendContactConfirmation,
   sendDemoOtp,

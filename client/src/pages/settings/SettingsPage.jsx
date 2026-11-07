@@ -1662,6 +1662,17 @@ function SmtpCard({ school = {}, onSaved }) {
   // that failure has been silently falling back to the platform sender.
   const hasRecentFailure = hasSavedConfig && !!school.smtpLastError;
 
+  // The history behind the badge above: every failed send is logged
+  // server-side (deduped per hour), so a repeat failure shows its count
+  // instead of one row per recipient.
+  const { data: failureRows = [] } = useQuery({
+    queryKey: ['settings', 'smtp', 'failures'],
+    queryFn: async () => {
+      const res = await settingsApi.school.smtp.failures();
+      return res?.data ?? [];
+    },
+  });
+
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
       {/* Header */}
@@ -1694,6 +1705,28 @@ function SmtpCard({ school = {}, onSaved }) {
             </p>
             <p className="mt-1 text-red-600">Use "Send Test Email" below after checking your host/port/credentials — it will clear once a real send succeeds.</p>
           </div>
+        </div>
+      )}
+
+      {/* Recent failures — the history behind the badge above */}
+      {failureRows.length > 0 && (
+        <div className="space-y-1.5">
+          <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Recent email failures · last 30 days</p>
+          {failureRows.slice(0, 5).map(f => (
+            <div key={f.id} className="text-xs bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 space-y-0.5">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="font-medium text-slate-700 truncate">{f.subject || '(no subject)'}</span>
+                {f.count > 1 && (
+                  <span className="flex-shrink-0 text-[10px] font-semibold text-slate-500 bg-slate-200 rounded-full px-1.5 py-0.5">{f.count}×</span>
+                )}
+                <span className={`flex-shrink-0 text-[10px] font-medium rounded-full px-1.5 py-0.5 ${f.via === 'custom' ? 'text-violet-700 bg-violet-100' : 'text-slate-500 bg-slate-200'}`}>
+                  {f.via === 'custom' ? 'school SMTP' : f.via === 'platform' ? 'platform sender' : f.via}
+                </span>
+              </div>
+              <p className="text-red-600 truncate" title={f.error}>{f.error}</p>
+              <p className="text-slate-400">{f.lastAt ? new Date(f.lastAt).toLocaleString() : ''}</p>
+            </div>
+          ))}
         </div>
       )}
 
