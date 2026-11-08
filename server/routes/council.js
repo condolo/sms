@@ -224,10 +224,15 @@ function _caseView(doc, viewer) {
     body: doc.body,
     status: doc.status,
     statusLabel: _statusLabel(doc.status),
+    /** Exposed so the UI can flag the case and use the right copy. */
+    safeguarding: !!doc.safeguarding,
+    sensitive: !!doc.sensitive,
     reporter: _reporterView(doc, { reveal }),
     assignedTo: doc.assignedStudentId
       ? { studentId: doc.assignedStudentId, name: doc.assignedName || 'Council member' }
       : null,
+    /** True when the viewer filed it — the UI hides "upvote your own". */
+    isMine: Boolean(viewer.studentId && viewer.studentId === doc.reporterStudentId),
     upvoteCount: (doc.upvotes || []).length,
     upvotedByMe: viewer.studentId ? (doc.upvotes || []).includes(viewer.studentId) : false,
     replies,
@@ -360,6 +365,32 @@ router.get('/cases', async (req, res) => {
     return ok(res, docs.map(d => _caseView(d, { studentId, isCouncil: false })));
   } catch (err) {
     console.error('[council GET /cases]', err);
+    return E.serverError(res);
+  }
+});
+
+router.get('/suggestions', async (req, res) => {
+  // rbac: student session; suggestions are school-visible by design, anonymous ones stay masked
+  if (!_isStudent(req)) return E.forbidden(res, 'Student accounts only.');
+  try {
+    const ctx = tenantContext(req);
+    const { studentId } = req.jwtUser;
+    const limit = Math.min(parseInt(req.query.limit, 10) || 100, 200);
+    const docs = await tenantModel('council_cases', ctx)
+      .find({
+        kind: 'suggestion',
+        status: { $nin: ['merged', 'withdrawn'] },
+        sensitive: { $ne: true },
+      })
+      .sort({ lastActivityAt: -1 })
+      .limit(limit)
+      .lean();
+    const rows = docs
+      .map(d => _caseView(d, { studentId, isCouncil: false, staff: false }))
+      .sort((a, b) => b.upvoteCount - a.upvoteCount || String(b.updatedAt).localeCompare(String(a.updatedAt)));
+    return ok(res, rows);
+  } catch (err) {
+    console.error('[council GET /suggestions]', err);
     return E.serverError(res);
   }
 });

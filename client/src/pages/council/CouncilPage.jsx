@@ -64,6 +64,24 @@ export default function CouncilPage() {
   const overview = useQuery({ queryKey: ['council', 'overview'], queryFn: () => councilApi.admin.overview() });
   const data = overview.data || {};
 
+  /* Direct navigation to /council is possible even for a role without the
+     grant — the nav hides it, but a bookmark or a pasted URL must not sit
+     on "Loading…" forever. The API's 403 is the authority; show it plainly. */
+  if (overview.isError) {
+    const status = overview.error?.status;
+    return (
+      <div className="max-w-xl mx-auto px-6 py-16 text-center">
+        <ShieldAlert size={26} className="mx-auto text-amber-500 mb-3" />
+        <h1 className="text-lg font-bold text-slate-900">You don’t have access to the Student Council</h1>
+        <p className="text-sm text-slate-500 mt-2">
+          {status === 403
+            ? 'Your role does not carry the council module. The school office can grant it under Settings → Roles & Permissions.'
+            : 'The council could not be loaded. Please refresh, or try again later.'}
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-5">
       <div className="flex items-start justify-between gap-4">
@@ -352,10 +370,16 @@ function ElectionsTab() {
       </div>
 
       {(list.data || []).length === 0 ? (
-        <div className="bg-white border border-slate-200 rounded-xl p-10 text-center">
-          <Vote size={22} className="mx-auto text-slate-300 mb-2" />
-          <p className="text-sm text-slate-500">No elections yet. Create one to let students stand and vote.</p>
-        </div>
+        list.isLoading ? (
+          <div className="bg-white border border-slate-200 rounded-xl p-10 text-center text-sm text-slate-400">
+            <Loader2 size={16} className="animate-spin inline mr-2" />Loading elections…
+          </div>
+        ) : (
+          <div className="bg-white border border-slate-200 rounded-xl p-10 text-center">
+            <Vote size={22} className="mx-auto text-slate-300 mb-2" />
+            <p className="text-sm text-slate-500">No elections yet. Create one to let students stand and vote.</p>
+          </div>
+        )
       ) : (
         <div className="space-y-2">
           {(list.data || []).map(e => (
@@ -605,10 +629,16 @@ function MembersTab() {
       </div>
 
       {(list.data || []).length === 0 ? (
-        <div className="bg-white border border-slate-200 rounded-xl p-10 text-center">
-          <Users size={22} className="mx-auto text-slate-300 mb-2" />
-          <p className="text-sm text-slate-500">No council members yet. Appoint one now, or close an election to seat winners.</p>
-        </div>
+        list.isLoading ? (
+          <div className="bg-white border border-slate-200 rounded-xl p-10 text-center text-sm text-slate-400">
+            <Loader2 size={16} className="animate-spin inline mr-2" />Loading members…
+          </div>
+        ) : (
+          <div className="bg-white border border-slate-200 rounded-xl p-10 text-center">
+            <Users size={22} className="mx-auto text-slate-300 mb-2" />
+            <p className="text-sm text-slate-500">No council members yet. Appoint one now, or close an election to seat winners.</p>
+          </div>
+        )
       ) : (
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
           {(list.data || []).map(m => (
@@ -655,9 +685,14 @@ function AppointModal({ onClose, onDone }) {
 
   const search = useQuery({
     queryKey: ['council', 'student-search', term],
-    queryFn: () => studentsApi.list({ q: term, limit: 8, status: 'active' }),
+    // The raw students resource pages on `search` (not `q`) and returns
+    // firstName/lastName rather than a joined name.
+    queryFn: () => studentsApi.list({ search: term, limit: 8, status: 'active' }),
     enabled: term.trim().length >= 2,
   });
+  // The students resource answers the standard envelope: { data: [...] }.
+  const candidates = search.data?.data ?? search.data?.rows ?? [];
+  const displayName = (s) => s.name || [s.firstName, s.lastName].filter(Boolean).join(' ') || s.admissionNumber;
 
   const appoint = useMutation({
     mutationFn: () => councilApi.admin.appoint({
@@ -689,12 +724,12 @@ function AppointModal({ onClose, onDone }) {
               <div className="mt-1 border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-48 overflow-y-auto">
                 {search.isLoading ? (
                   <p className="text-sm text-slate-400 px-3 py-2">Searching…</p>
-                ) : (search.data?.rows || []).length === 0 ? (
+                ) : candidates.length === 0 ? (
                   <p className="text-sm text-slate-400 px-3 py-2">No student matches.</p>
                 ) : (
-                  (search.data?.rows || []).map(s => (
+                  candidates.map(s => (
                     <button key={s.id} onClick={() => setPicked(s)} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50">
-                      <span className="font-medium text-slate-700">{s.name}</span>
+                      <span className="font-medium text-slate-700">{displayName(s)}</span>
                       <span className="text-[11px] text-slate-400"> · {s.className} · {s.admissionNumber}</span>
                     </button>
                   ))
@@ -703,7 +738,7 @@ function AppointModal({ onClose, onDone }) {
             )}
             {picked && (
               <div className="mt-1 text-sm bg-violet-50 border border-violet-200 rounded-lg px-3 py-2 text-violet-800">
-                {picked.name} · {picked.className}
+                {displayName(picked)} · {picked.className}
               </div>
             )}
           </div>

@@ -1366,38 +1366,43 @@ export const supportApi = {
 
 /* Student Council — grievances/suggestions, the council queue, and
    elections. Student endpoints are self-scoped by the server; the
-   /admin/* ones are gated on the `council` module's grants. */
+   /admin/* ones are gated on the `council` module's grants.
+   Every call unwraps the response envelope, so callers work with the
+   payload directly (an array for lists, an object for one record). */
+const _council = (promise) => promise.then((res) => (res && res.data !== undefined ? res.data : res));
+
 export const council = {
-  me:        ()           => _get('/council/me'),
-  cases:     (params)     => _get('/council/cases', params),
-  case:      (id)         => _get(`/council/cases/${id}`),
-  createCase:(data)       => _post('/council/cases', data),
-  reply:     (id, data)   => _post(`/council/cases/${id}/replies`, data),
-  upvote:    (id)         => _post(`/council/cases/${id}/upvote`, {}),
-  withdraw:  (id)         => _post(`/council/cases/${id}/withdraw`, {}),
-  queue:     ()           => _get('/council/queue'),
-  assign:    (id)         => _post(`/council/cases/${id}/assign`, {}),
-  setStatus: (id, data)   => _post(`/council/cases/${id}/status`, data),
-  escalate:  (id, note)   => _post(`/council/cases/${id}/escalate`, { note }),
-  merge:     (id, intoCaseId) => _post(`/council/cases/${id}/merge`, { intoCaseId }),
-  elections: ()           => _get('/council/elections'),
-  nominate:  (id, data)   => _post(`/council/elections/${id}/nominate`, data),
-  vote:      (id, data)   => _post(`/council/elections/${id}/vote`, data),
+  me:        ()           => _council(_get('/council/me')),
+  cases:     (params)     => _council(_get('/council/cases', params)),
+  suggestions:()          => _council(_get('/council/suggestions')),
+  case:      (id)         => _council(_get(`/council/cases/${id}`)),
+  createCase:(data)       => _council(_post('/council/cases', data)),
+  reply:     (id, data)   => _council(_post(`/council/cases/${id}/replies`, data)),
+  upvote:    (id)         => _council(_post(`/council/cases/${id}/upvote`, {})),
+  withdraw:  (id)         => _council(_post(`/council/cases/${id}/withdraw`, {})),
+  queue:     ()           => _council(_get('/council/queue')),
+  assign:    (id)         => _council(_post(`/council/cases/${id}/assign`, {})),
+  setStatus: (id, data)   => _council(_post(`/council/cases/${id}/status`, data)),
+  escalate:  (id, note)   => _council(_post(`/council/cases/${id}/escalate`, { note })),
+  merge:     (id, intoCaseId) => _council(_post(`/council/cases/${id}/merge`, { intoCaseId })),
+  elections: ()           => _council(_get('/council/elections')),
+  nominate:  (id, data)   => _council(_post(`/council/elections/${id}/nominate`, data)),
+  vote:      (id, data)   => _council(_post(`/council/elections/${id}/vote`, data)),
 
   admin: {
-    overview:   ()          => _get('/council/admin/overview'),
-    cases:      (params)    => _get('/council/admin/cases', params),
-    getCase:    (id)        => _get(`/council/admin/cases/${id}`),
-    updateCase: (id, data)  => _patch(`/council/admin/cases/${id}`, data),
-    memberships:()          => _get('/council/admin/memberships'),
-    appoint:    (data)      => _post('/council/admin/memberships', data),
-    removeMember:(id)       => _delete(`/council/admin/memberships/${id}`),
-    elections:  ()          => _get('/council/admin/elections'),
-    createElection:(data)   => _post('/council/admin/elections', data),
-    updateElection:(id,d)   => _patch(`/council/admin/elections/${id}`, d),
-    candidates: (id)        => _get(`/council/admin/elections/${id}/candidates`),
-    vet:        (id, cid, data) => _post(`/council/admin/elections/${id}/candidates/${cid}/vet`, data),
-    closeElection:(id)      => _post(`/council/admin/elections/${id}/close`, {}),
+    overview:   ()          => _council(_get('/council/admin/overview')),
+    cases:      (params)    => _council(_get('/council/admin/cases', params)),
+    getCase:    (id)        => _council(_get(`/council/admin/cases/${id}`)),
+    updateCase: (id, data)  => _council(_patch(`/council/admin/cases/${id}`, data)),
+    memberships:()          => _council(_get('/council/admin/memberships')),
+    appoint:    (data)      => _council(_post('/council/admin/memberships', data)),
+    removeMember:(id)       => _council(_delete(`/council/admin/memberships/${id}`)),
+    elections:  ()          => _council(_get('/council/admin/elections')),
+    createElection:(data)   => _council(_post('/council/admin/elections', data)),
+    updateElection:(id,d)   => _council(_patch(`/council/admin/elections/${id}`, d)),
+    candidates: (id)        => _council(_get(`/council/admin/elections/${id}/candidates`)),
+    vet:        (id, cid, data) => _council(_post(`/council/admin/elections/${id}/candidates/${cid}/vet`, data)),
+    closeElection:(id)      => _council(_post(`/council/admin/elections/${id}/close`, {})),
   },
 };
 

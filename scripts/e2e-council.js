@@ -28,7 +28,7 @@ const { MongoMemoryServer } = require('mongodb-memory-server');
 const ROOT = path.join(__dirname, '..');
 const MAIL_DIR = path.join(ROOT, '.mail');
 
-const PORT = 3125;
+const PORT = 3135;
 const BASE = `http://127.0.0.1:${PORT}`;
 const SLUG = 'demo';
 
@@ -204,6 +204,14 @@ async function login(identifier, password = 'Demo2025!') {
     const queued = (r.json?.data?.cases || []).find((c) => c.id === suggestion.id);
     check('the suggestion reaches the council queue', Boolean(queued));
     check('the queue masks the reporter', queued?.reporter?.anonymous === true && queued?.reporter?.studentId === null);
+
+    /* The suggestions feed: school-visible, still anonymous, upvotable. */
+    r = await api('/api/council/suggestions', { token: memberToken });
+    const inFeed = (r.json?.data || []).find((c) => c.id === suggestion.id);
+    check('the suggestion appears in the student suggestions feed', Boolean(inFeed));
+    check('the feed keeps the reporter anonymous', inFeed?.reporter?.anonymous === true);
+    r = await api(`/api/council/cases/${suggestion.id}/upvote`, { token: memberToken, method: 'POST', body: {} });
+    check('another student can upvote the suggestion', r.status === 200 && r.json?.data?.upvoteCount === 1);
 
     /* Member replies; pupil reads it. */
     r = await api(`/api/council/cases/${suggestion.id}/replies`, {

@@ -56,6 +56,7 @@ export default function StudentCouncilPage() {
     const base = [
       { key: 'submit', label: 'Have your say' },
       { key: 'mine',   label: 'My cases' },
+      { key: 'ideas',  label: 'Suggestions' },
       { key: 'votes',  label: 'Elections' },
     ];
     if (me.data?.membership) base.push({ key: 'queue', label: 'Council queue' });
@@ -106,6 +107,7 @@ export default function StudentCouncilPage() {
       <main className="max-w-4xl mx-auto px-4 sm:px-6 py-5 pb-16">
         {tab === 'submit' && <SubmitCase onDone={() => setTab('mine')} />}
         {tab === 'mine' && <MyCases onOpenQueue={() => setTab('queue')} hasQueue={!!me.data?.membership} />}
+        {tab === 'ideas' && <Suggestions />}
         {tab === 'votes' && <Elections />}
         {tab === 'queue' && <Queue />}
       </main>
@@ -362,6 +364,73 @@ function CaseDetail({ id, onChanged }) {
           ><X size={13} /> Withdraw</button>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ── Suggestions feed ─────────────────────────────────────── */
+
+function Suggestions() {
+  const qc = useQueryClient();
+  const list = useQuery({ queryKey: ['council', 'suggestions'], queryFn: () => councilApi.suggestions() });
+  const [err, setErr] = useState('');
+
+  const upvote = useMutation({
+    mutationFn: (id) => councilApi.upvote(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['council', 'suggestions'] }),
+    onError: e => setErr(e?.message || 'Could not record your vote.'),
+  });
+
+  if (list.isLoading) {
+    return <div className="py-16 text-center text-sm text-slate-400"><Loader2 size={16} className="animate-spin inline mr-2" />Loading suggestions…</div>;
+  }
+  if (!(list.data || []).length) {
+    return (
+      <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center">
+        <ThumbsUp size={24} className="mx-auto text-slate-300 mb-2" />
+        <p className="text-sm text-slate-500">No suggestions yet.</p>
+        <p className="text-[12px] text-slate-400 mt-1">Be the first to propose something — use “Have your say”.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <p className="text-[12px] text-slate-500 px-1">Ideas other students have shared. Upvote the ones you want the council to push.</p>
+      {(list.data || []).map(c => (
+        <div key={c.id} className="bg-white border border-slate-200 rounded-xl px-4 py-3">
+          <div className="flex items-start gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[11px] font-mono text-slate-400">{c.ref}</span>
+                <span className="text-[11px] text-slate-500">{CATEGORY_LABEL[c.category]}</span>
+                <span className={`text-[10px] font-semibold rounded-full px-2 py-0.5 ring-1 ${STATUS_META[c.status]?.cls || ''}`}>
+                  {STATUS_META[c.status]?.label || c.status}
+                </span>
+              </div>
+              <p className="text-sm font-medium text-slate-800 mt-0.5">{c.title}</p>
+              <p className="text-[12px] text-slate-500 mt-0.5 line-clamp-2">{c.body}</p>
+              <p className="text-[11px] text-slate-400 mt-1">
+                {c.reporter?.anonymous ? 'Anonymous' : c.reporter?.name} · {c.reporter?.className} · {fmt(c.createdAt)}
+              </p>
+            </div>
+            <button
+              onClick={() => { if (!c.isMine) { setErr(''); upvote.mutate(c.id); } }}
+              disabled={upvote.isPending || c.isMine}
+              className={`flex-shrink-0 flex flex-col items-center gap-0.5 rounded-xl border px-3 py-2 transition ${
+                c.isMine
+                  ? 'border-slate-200 bg-slate-50 text-slate-300 cursor-default'
+                  : c.upvotedByMe ? 'border-violet-300 bg-violet-50 text-violet-700' : 'border-slate-200 bg-white text-slate-500 hover:border-violet-300 hover:text-violet-700'
+              }`}
+              title={c.isMine ? 'Your own suggestion' : c.upvotedByMe ? 'Remove your upvote' : 'Upvote this suggestion'}
+            >
+              <ThumbsUp size={14} />
+              <span className="text-[11px] font-semibold">{c.upvoteCount}</span>
+            </button>
+          </div>
+        </div>
+      ))}
+      {err && <p className="text-xs text-red-600 px-1">{err}</p>}
     </div>
   );
 }
