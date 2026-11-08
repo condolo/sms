@@ -1339,6 +1339,31 @@ async function sendContactConfirmation({ name, email, institution, contactPhone 
   return _send(email, `We've received your enquiry — Msingi`, html);
 }
 
+/* 25b. Student Council — one case update to the reporter (or a member).
+   Deliberately small: the case body is NEVER echoed back into email. It
+   carries the ref, the new status and the council's note, so a parent who
+   shares the inbox sees the progress without reopening a private grievance. */
+async function sendCouncilUpdate({
+  recipientName, recipientEmail, caseRef: ref, caseTitle, statusLabel, note,
+  schoolName, schoolEmail, schoolId = null, appUrl,
+}) {
+  const url = appUrl || APP_URL;
+  const html = await _wrap(`
+    <h2>Student Council update</h2>
+    <p>Hi ${_escapeHtml(recipientName || 'there')},</p>
+    <p>There is an update on case <strong>${_escapeHtml(ref)}</strong>${caseTitle ? ` — ${_escapeHtml(caseTitle)}` : ''}.</p>
+    <div class="info">
+      <p><strong>Status:</strong> ${_escapeHtml(statusLabel || 'Updated')}</p>
+      ${note ? `<p><strong>Message:</strong> ${_escapeHtml(note)}</p>` : ''}
+    </div>
+    <p style="text-align:center">
+      <a href="${url}" class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0">Open the Council →</a>
+    </p>
+    <p style="font-size:12px;color:#9ca3af">This update was sent by your school's student council. Reply inside the app to keep the conversation in one place.</p>
+  `, schoolName, schoolId);
+  return _sendAsSchool(recipientEmail, `[${ref}] Student Council update`, html, { schoolName, schoolEmail, schoolId });
+}
+
 /* ══════════════════════════════════════════════════════════════
    DEMO TENANT EMAILS — request OTP, credentials, lifecycle
    ══════════════════════════════════════════════════════════════ */
@@ -1559,5 +1584,6 @@ module.exports = {
   sendSmartReminder,
   sendAbsenteeStaffAlert,
   sendPayrollStatusEmail,
+  sendCouncilUpdate,
   sendPlatformOperatorInvite,
 };

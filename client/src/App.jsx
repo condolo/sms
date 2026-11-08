@@ -79,6 +79,8 @@ const AssignmentDetailPage = lazy(() => import('@/pages/elearning/AssignmentDeta
 const StudentAssignmentsPage = lazy(() => import('@/pages/student-portal/StudentAssignmentsPage.jsx'));
 const StudentAssignmentPage = lazy(() => import('@/pages/student-portal/StudentAssignmentPage.jsx'));
 const StudentDashboard     = lazy(() => import('@/pages/student-portal/StudentDashboard.jsx'));
+const StudentCouncilPage   = lazy(() => import('@/pages/council/StudentCouncilPage.jsx'));
+const CouncilPage          = lazy(() => import('@/pages/council/CouncilPage.jsx'));
 const ParentDashboard      = lazy(() => import('@/pages/parent-portal/ParentDashboard.jsx'));
 const GroupDashboard       = lazy(() => import('@/pages/group-portal/GroupDashboard.jsx'));
 const PlatformConsole      = lazy(() => import('@/pages/ops/PlatformConsole.jsx'));
@@ -205,6 +207,7 @@ export const router = createBrowserRouter([
 
   // Student portal — accessible after student login (no AppShell)
   { path: '/student-dashboard', element: <SuspenseWrapper><StudentDashboard /></SuspenseWrapper> },
+  { path: '/student-council',   element: <SuspenseWrapper><StudentCouncilPage /></SuspenseWrapper> },
   { path: '/student-assignments', element: <SuspenseWrapper><StudentAssignmentsPage /></SuspenseWrapper> },
   { path: '/student-assignments/:id', element: <SuspenseWrapper><StudentAssignmentPage /></SuspenseWrapper> },
 
@@ -249,6 +252,7 @@ export const router = createBrowserRouter([
 
       // Behaviour
       { path: 'behaviour',             element: <SuspenseWrapper><BehaviourPage /></SuspenseWrapper> },
+      { path: 'council',               element: <SuspenseWrapper><CouncilPage /></SuspenseWrapper> },
 
       // Formal Exams (scheduling, results, grade report) — ExamsPage v4.33.0
       { path: 'exams',                 element: <SuspenseWrapper><ExamsPage /></SuspenseWrapper> },

@@ -290,6 +290,7 @@ app.use('/api/streams',         require('./routes/streams'));
 app.use('/api/attendance',      require('./routes/attendance'));
 app.use('/api/finance',         require('./routes/finance'));
 app.use('/api/behaviour',       require('./routes/behaviour'));
+app.use('/api/council',         require('./routes/council'));
 app.use('/api/exams',           require('./routes/exams'));
 app.use('/api/admissions',      require('./routes/admissions'));
 app.use('/api/timetable',       require('./routes/timetable'));

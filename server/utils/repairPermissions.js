@@ -81,6 +81,7 @@ const ROLE_DEFAULTS = {
     medical:      RCUD, inventory:    RCUD,
     weekly_snapshot: R,
     growth_profile: RCU, // matches SettingsPage.jsx's deputy_principal DEFS (principal is aliased to it client-side)
+    council:      RCU,   // patron: sees reporter identities and closes safeguarding cases
   },
 
   deputy_principal: {
@@ -93,6 +94,7 @@ const ROLE_DEFAULTS = {
     medical:      RCUD, inventory:    RCUD,
     weekly_snapshot: R,
     growth_profile: RCU, // matches SettingsPage.jsx's deputy_principal DEFS (blanket E fallback, no growth_profile override)
+    council:      RCU,   // patron: sees reporter identities and closes safeguarding cases
   },
 
   section_head: {
@@ -330,3 +332,4 @@ async function repairPermissions() {
 // server/__tests__/permission-defaults-consistency.test.js, which checks
 // onboard.js's _defaultPerms() never silently drifts from this again.
 module.exports = { repairPermissions, ROLE_DEFAULTS };
+

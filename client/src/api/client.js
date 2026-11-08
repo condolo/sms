@@ -1364,6 +1364,43 @@ export const supportApi = {
   reply:  (id, body) => _post(`/support/tickets/${id}/messages`, { body }),
 };
 
+/* Student Council — grievances/suggestions, the council queue, and
+   elections. Student endpoints are self-scoped by the server; the
+   /admin/* ones are gated on the `council` module's grants. */
+export const council = {
+  me:        ()           => _get('/council/me'),
+  cases:     (params)     => _get('/council/cases', params),
+  case:      (id)         => _get(`/council/cases/${id}`),
+  createCase:(data)       => _post('/council/cases', data),
+  reply:     (id, data)   => _post(`/council/cases/${id}/replies`, data),
+  upvote:    (id)         => _post(`/council/cases/${id}/upvote`, {}),
+  withdraw:  (id)         => _post(`/council/cases/${id}/withdraw`, {}),
+  queue:     ()           => _get('/council/queue'),
+  assign:    (id)         => _post(`/council/cases/${id}/assign`, {}),
+  setStatus: (id, data)   => _post(`/council/cases/${id}/status`, data),
+  escalate:  (id, note)   => _post(`/council/cases/${id}/escalate`, { note }),
+  merge:     (id, intoCaseId) => _post(`/council/cases/${id}/merge`, { intoCaseId }),
+  elections: ()           => _get('/council/elections'),
+  nominate:  (id, data)   => _post(`/council/elections/${id}/nominate`, data),
+  vote:      (id, data)   => _post(`/council/elections/${id}/vote`, data),
+
+  admin: {
+    overview:   ()          => _get('/council/admin/overview'),
+    cases:      (params)    => _get('/council/admin/cases', params),
+    getCase:    (id)        => _get(`/council/admin/cases/${id}`),
+    updateCase: (id, data)  => _patch(`/council/admin/cases/${id}`, data),
+    memberships:()          => _get('/council/admin/memberships'),
+    appoint:    (data)      => _post('/council/admin/memberships', data),
+    removeMember:(id)       => _delete(`/council/admin/memberships/${id}`),
+    elections:  ()          => _get('/council/admin/elections'),
+    createElection:(data)   => _post('/council/admin/elections', data),
+    updateElection:(id,d)   => _patch(`/council/admin/elections/${id}`, d),
+    candidates: (id)        => _get(`/council/admin/elections/${id}/candidates`),
+    vet:        (id, cid, data) => _post(`/council/admin/elections/${id}/candidates/${cid}/vet`, data),
+    closeElection:(id)      => _post(`/council/admin/elections/${id}/close`, {}),
+  },
+};
+
 export const reportCards = {
   generate: (data) => _post('/report-cards/generate', data),
   publish:  (data) => _post('/report-cards/publish', data),
@@ -1498,6 +1535,7 @@ const api = {
   exams,
   assessment,
   admissions,
+  council,
   timetable,
   announcements,
   settings,

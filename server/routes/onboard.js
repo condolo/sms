@@ -655,6 +655,7 @@ function _defaultPerms(role) {
         resources:    RCUD, events:       RCUD,
         weekly_snapshot: R, // system-generated digest, view only
         growth_profile: RCU, // matches repairPermissions.js's ROLE_DEFAULTS.principal/deputy_principal
+        council:      RCU, // patron: sees reporter identities and closes safeguarding cases
       };
 
     case 'discipline_committee':
@@ -744,3 +745,5 @@ function _initials(name) {
 router._defaultPerms = _defaultPerms;
 
 module.exports = router;
+
+

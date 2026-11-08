@@ -250,6 +250,16 @@ const MODULE_REGISTRY = [
     { key: 'edit',   label: 'Edit Records' },
     { key: 'delete', label: 'Delete Records' },
   ]},
+  /* Student Council — grievances and suggestions filed by students, triaged
+     by elected/appointed council members, overseen by a staff patron.
+     Safeguarding cases are staff-only to close (see routes/council.js).
+     navOrder sits beside Behaviour because both are student-services desks. */
+  { key: 'council', label: 'Student Council', section: 'Student Services', icon: 'Megaphone', navRoute: '/council', navLabel: 'Student Council', navOrder: 9, subs: [
+    { key: 'view',      label: 'View Cases & Council Queue' },
+    { key: 'manage',    label: 'Triage, Resolve or Escalate Cases' },
+    { key: 'elections', label: 'Run Elections & Vet Candidates' },
+    { key: 'members',   label: 'Appoint Council Members' },
+  ]},
   { key: 'finance', label: 'Finance', section: 'Operations', icon: 'Wallet', navRoute: '/finance', navOrder: 10, subs: [
     { key: 'invoices',       label: 'View Invoices' },
     { key: 'create_invoice', label: 'Create Invoice' },

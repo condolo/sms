@@ -238,6 +238,29 @@ const EVENT_REGISTRY = {
     implemented: true,
   },
 
+  /* ── Student Council ─────────────────────────────────────── */
+  /* Every update on a filed case (reply, status, staff note). Students
+     receive these through the in-app inbox first; email is optional. */
+  council_case_update: {
+    label:       'Student Council Case Update',
+    desc:        'Sent to a student when their council case is replied to or its status changes',
+    group:       'council',
+    audience:    ['students'],
+    channels:    { email: true, inApp: true },
+    implemented: true,
+  },
+  /* A safeguarding disclosure. Always on �� a school cannot silence the one
+     notification that must reach an adult. */
+  council_safety_alert: {
+    label:       'Safeguarding Case Alert',
+    desc:        'Sent to school leaders when a safety-related council case is filed or escalated',
+    group:       'council',
+    audience:    ['staff'],
+    channels:    { email: true, inApp: true },
+    implemented: true,
+    alwaysOn:    true,
+  },
+
   /* ── Medical Centre ──────────────────────────────────────── */
   medical_visit_logged: {
     label:       'Clinic Visit Logged',
@@ -320,6 +343,7 @@ const GROUPS = [
   { key: 'finance',       label: 'Finance'       },
   { key: 'attendance',    label: 'Attendance'    },
   { key: 'behaviour',     label: 'Behaviour'     },
+  { key: 'council',       label: 'Student Council' },
   { key: 'medical',       label: 'Medical Centre' },
   { key: 'hr',            label: 'HR & Payroll'  },
   { key: 'account',       label: 'Account & Security' },

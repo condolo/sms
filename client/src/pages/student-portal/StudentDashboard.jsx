@@ -14,7 +14,7 @@ import { useSchoolTheme } from '@/hooks/useSchoolTheme.js';
 import {
   LayoutDashboard, Calendar, BookCheck, Bus, CheckCircle, Clock,
   Download, GraduationCap, LogOut, AlertCircle,
-  BookOpen, Lock, Bell, MessageSquare, Activity, Star,
+  BookOpen, Lock, Bell, MessageSquare, Activity, Star, Megaphone,
   MapPin, Play, MonitorPlay, CalendarCheck, Menu, X, LifeBuoy,
   KeyRound, Eye, EyeOff, Loader2, Send,
 } from 'lucide-react';
@@ -763,6 +763,14 @@ export default function StudentDashboard() {
               className="text-emerald-500 hover:text-emerald-300 transition flex-shrink-0"
             >
               <KeyRound size={14} />
+            </button>
+            <button
+              id="sidebar-council-btn"
+              onClick={() => navigate('/student-council')}
+              title="Student Council"
+              className="text-emerald-500 hover:text-emerald-300 transition flex-shrink-0"
+            >
+              <Megaphone size={14} />
             </button>
             <button
               id="sidebar-support-btn"
