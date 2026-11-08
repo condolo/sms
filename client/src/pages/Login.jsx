@@ -107,6 +107,7 @@ function DemoPanel({ onPick }) {
           <button
             key={email}
             type="button"
+            data-testid={`quick-${role.toLowerCase().replace(/\s+/g, '-')}`}
             onClick={() => onPick(email, DEMO_PASSWORD)}
             className="flex flex-col items-start rounded-xl px-3 py-2.5 text-left transition-all hover:scale-[1.02] hover:shadow-md active:scale-100"
             style={{ background: bg, border: `1px solid ${color}30` }}

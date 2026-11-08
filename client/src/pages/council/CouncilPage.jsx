@@ -106,6 +106,7 @@ export default function CouncilPage() {
         {TABS.map(({ key, label, Icon }) => (
           <button
             key={key}
+            data-testid={`council-tab-${key}`}
             onClick={() => setTab(key)}
             className={`flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 -mb-px transition ${
               tab === key ? 'border-violet-600 text-violet-700' : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -254,7 +255,7 @@ function CaseDrawer({ id, onClose }) {
             </div>
             <h2 className="text-base font-semibold text-slate-900 truncate">{c?.title || 'Loading…'}</h2>
           </div>
-          <button onClick={onClose} className="p-2 rounded-lg hover:bg-slate-100 text-slate-400"><X size={16} /></button>
+          <button onClick={onClose} data-testid="close-case" className="p-2 rounded-lg hover:bg-slate-100 text-slate-400"><X size={16} /></button>
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
@@ -315,7 +316,7 @@ function CaseDrawer({ id, onClose }) {
 
               <div className="border-t border-slate-100 pt-4 space-y-2">
                 <div className="flex flex-wrap items-center gap-2">
-                  <select value={status} onChange={e => setStatus(e.target.value)} className={`${inputCls} w-auto`}>
+                  <select value={status} onChange={e => setStatus(e.target.value)} data-testid="staff-status" className={`${inputCls} w-auto`}>
                     <option value="">Change status…</option>
                     {(c.safeguarding ? ['under_review', 'resolved', 'rejected'] : ['under_review', 'resolved', 'rejected', 'open']).map(s => (
                       <option key={s} value={s}>{STATUS_META[s]?.label || s}</option>
@@ -329,6 +330,7 @@ function CaseDrawer({ id, onClose }) {
                 <textarea
                   value={note}
                   onChange={e => setNote(e.target.value)}
+                  data-testid="staff-note"
                   rows={3}
                   placeholder={internal ? 'Internal note for the patron team…' : 'Reply to the student (they receive it in-app and by email if enabled)…'}
                   className={inputCls}
@@ -337,6 +339,7 @@ function CaseDrawer({ id, onClose }) {
                 <div className="flex justify-end">
                   <button
                     onClick={() => update.mutate()}
+                    data-testid="staff-save"
                     disabled={update.isPending || (!note.trim() && !status)}
                     className={btnPrimary}
                   >
@@ -366,7 +369,7 @@ function ElectionsTab() {
   return (
     <div className="space-y-3">
       <div className="flex justify-end">
-        <button onClick={() => setShowNew(true)} className={btnPrimary}><Plus size={14} /> New election</button>
+        <button onClick={() => setShowNew(true)} data-testid="new-election" className={btnPrimary}><Plus size={14} /> New election</button>
       </div>
 
       {(list.data || []).length === 0 ? (
@@ -412,6 +415,20 @@ function ElectionRow({ election, expanded, onToggle, onChanged }) {
     onSuccess: () => { setClosing(false); onChanged(); },
     onError: () => setClosing(false),
   });
+  /* A forgotten date edit must not leave a school unable to vote. Lets the
+     patron pull voting forward to now without hand-editing ISO timestamps. */
+  const startVoting = useMutation({
+    mutationFn: () => {
+      const now = Date.now();
+      const iso = (ms) => new Date(ms).toISOString();
+      return councilApi.admin.updateElection(election.id, {
+        nominationEnd: iso(now - 60_000),
+        votingStart:   iso(now - 30_000),
+        votingEnd:     iso(now + 3_600_000),
+      });
+    },
+    onSuccess: onChanged,
+  });
 
   const phaseMeta = {
     draft: 'bg-slate-100 text-slate-600 ring-slate-200',
@@ -424,7 +441,7 @@ function ElectionRow({ election, expanded, onToggle, onChanged }) {
 
   return (
     <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-      <button onClick={onToggle} className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50">
+      <button onClick={onToggle} data-testid="election-row" className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50">
         <Vote size={16} className="text-violet-500 flex-shrink-0" />
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold text-slate-800 truncate">{election.title}</p>
@@ -481,10 +498,21 @@ function ElectionRow({ election, expanded, onToggle, onChanged }) {
           </div>
 
           {election.phase !== 'closed' && (
-            <div className="flex justify-end">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {['upcoming', 'nominations', 'vetting'].includes(election.phase) && (
+                <button
+                  onClick={() => startVoting.mutate()}
+                  disabled={startVoting.isPending}
+                  data-testid="start-voting"
+                  className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+                >
+                  {startVoting.isPending ? <Loader2 size={13} className="animate-spin" /> : <Vote size={13} />} Start voting now
+                </button>
+              )}
               <button
                 onClick={() => { if (window.confirm('Close this election and seat the winners? Results become visible to students.')) { setClosing(true); close.mutate(); } }}
                 disabled={closing}
+                data-testid="close-election"
                 className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-50"
               >
                 {closing ? <Loader2 size={13} className="animate-spin" /> : <Vote size={13} />} Close & tally
@@ -499,7 +527,14 @@ function ElectionRow({ election, expanded, onToggle, onChanged }) {
                 <div key={r.positionId} className="rounded-lg border border-slate-200 px-3 py-2">
                   <p className="text-sm font-medium text-slate-700">{r.title} <span className="text-[11px] text-slate-400">· {r.seats} seat{r.seats === 1 ? '' : 's'}{r.runoffRequired ? ' · runoff required' : ''}</span></p>
                   <ul className="mt-1 text-[12px] text-slate-600">
-                    {r.candidates.map(c => <li key={c.id}>{c.name} — {c.votes} vote{c.votes === 1 ? '' : 's'}</li>)}
+                    {r.candidates.map(c => {
+                      const won = (r.winners || []).some((w) => w.id === c.id);
+                      return (
+                        <li key={c.id} className={won ? 'font-semibold text-emerald-700' : ''}>
+                          {c.name} — {c.votes} vote{c.votes === 1 ? '' : 's'}{won ? ' · elected' : ''}
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
               ))}
@@ -602,7 +637,7 @@ function ElectionForm({ onClose, onCreated }) {
         </div>
         <div className="px-5 py-3 border-t border-slate-100 flex justify-end gap-2">
           <button onClick={onClose} className={btnGhost}>Cancel</button>
-          <button onClick={() => create.mutate()} disabled={create.isPending} className={btnPrimary}>
+          <button onClick={() => create.mutate()} disabled={create.isPending} data-testid="create-election" className={btnPrimary}>
             {create.isPending ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />} Create election
           </button>
         </div>
@@ -625,7 +660,7 @@ function MembersTab() {
   return (
     <div className="space-y-3">
       <div className="flex justify-end">
-        <button onClick={() => setShowAppoint(true)} className={btnPrimary}><Plus size={14} /> Appoint member</button>
+        <button onClick={() => setShowAppoint(true)} data-testid="appoint-member" className={btnPrimary}><Plus size={14} /> Appoint member</button>
       </div>
 
       {(list.data || []).length === 0 ? (
@@ -718,7 +753,7 @@ function AppointModal({ onClose, onDone }) {
             <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Find the student</label>
             <div className="relative">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input value={term} onChange={e => { setTerm(e.target.value); setPicked(null); }} placeholder="Name or admission number" className={`${inputCls} pl-8`} />
+              <input value={term} onChange={e => { setTerm(e.target.value); setPicked(null); }} data-testid="appoint-search" placeholder="Name or admission number" className={`${inputCls} pl-8`} />
             </div>
             {term.trim().length >= 2 && !picked && (
               <div className="mt-1 border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-48 overflow-y-auto">
@@ -744,13 +779,13 @@ function AppointModal({ onClose, onDone }) {
           </div>
           <div>
             <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Position</label>
-            <input value={positionTitle} onChange={e => setPositionTitle(e.target.value)} placeholder="Secretary" className={inputCls} />
+            <input value={positionTitle} onChange={e => setPositionTitle(e.target.value)} data-testid="appoint-position" placeholder="Secretary" className={inputCls} />
           </div>
           {err && <p className="text-xs text-red-600">{err}</p>}
         </div>
         <div className="px-5 py-3 border-t border-slate-100 flex justify-end gap-2">
           <button onClick={onClose} className={btnGhost}>Cancel</button>
-          <button onClick={() => appoint.mutate()} disabled={appoint.isPending || !picked || positionTitle.trim().length < 2} className={btnPrimary}>
+          <button onClick={() => appoint.mutate()} disabled={appoint.isPending || !picked || positionTitle.trim().length < 2} data-testid="appoint-confirm" className={btnPrimary}>
             {appoint.isPending ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />} Appoint
           </button>
         </div>

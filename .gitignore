@@ -38,3 +38,7 @@ backups/
 
 # Assignment attachment local storage (development fallback)
 server/uploads/
+
+# Web UI e2e failure artefacts
+test-results/
+

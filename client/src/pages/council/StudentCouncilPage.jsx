@@ -95,6 +95,7 @@ export default function StudentCouncilPage() {
           {tabs.map(t => (
             <button
               key={t.key}
+              data-testid={`student-tab-${t.key}`}
               onClick={() => setTab(t.key)}
               className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition ${
                 tab === t.key ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -161,6 +162,7 @@ function SubmitCase({ onDone }) {
           {['grievance', 'suggestion'].map(k => (
             <button
               key={k}
+              data-testid={`kind-${k}`}
               onClick={() => set('kind', k)}
               className={`flex-1 text-left rounded-xl border px-4 py-3 transition ${
                 f.kind === k ? 'border-emerald-400 bg-emerald-50/60 ring-1 ring-emerald-200' : 'border-slate-200 hover:bg-slate-50'
@@ -180,6 +182,7 @@ function SubmitCase({ onDone }) {
             {Object.entries(CATEGORY_LABEL).map(([key, label]) => (
               <button
                 key={key}
+                data-testid={`category-${key}`}
                 onClick={() => set('category', key)}
                 className={`text-xs font-medium rounded-full px-3 py-1.5 border transition ${
                   f.category === key ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
@@ -191,26 +194,26 @@ function SubmitCase({ onDone }) {
 
         <div>
           <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Title</label>
-          <input value={f.title} onChange={e => set('title', e.target.value)} maxLength={160} placeholder="A short line the council will see" className={inputCls} />
+          <input value={f.title} onChange={e => set('title', e.target.value)} data-testid="case-title" maxLength={160} placeholder="A short line the council will see" className={inputCls} />
         </div>
 
         <div>
           <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Details</label>
-          <textarea value={f.body} onChange={e => set('body', e.target.value)} rows={6} maxLength={6000}
+          <textarea value={f.body} onChange={e => set('body', e.target.value)} data-testid="case-body" rows={6} maxLength={6000}
             placeholder="What happened, who it affects, and what you would like the council to do."
             className={inputCls} />
         </div>
 
         <div className="space-y-2 border-t border-slate-100 pt-3">
           <label className="flex items-start gap-2.5 cursor-pointer">
-            <input type="checkbox" checked={f.anonymous} onChange={e => set('anonymous', e.target.checked)} className="mt-0.5 accent-emerald-600" />
+            <input type="checkbox" checked={f.anonymous} onChange={e => set('anonymous', e.target.checked)} data-testid="case-anonymous" className="mt-0.5 accent-emerald-600" />
             <span className="text-[12px] text-slate-600">
               <span className="font-medium text-slate-800 inline-flex items-center gap-1"><EyeOff size={12} /> Hide my name from the council</span>
               <span className="block text-slate-400 mt-0.5">Your class is still shown, and school staff can always see who filed it — that is how safety follow-ups work.</span>
             </span>
           </label>
           <label className="flex items-start gap-2.5 cursor-pointer">
-            <input type="checkbox" checked={f.sensitive} onChange={e => set('sensitive', e.target.checked)} className="mt-0.5 accent-red-600" />
+            <input type="checkbox" checked={f.sensitive} onChange={e => set('sensitive', e.target.checked)} data-testid="case-sensitive" className="mt-0.5 accent-red-600" />
             <span className="text-[12px] text-slate-600">
               <span className="font-medium text-slate-800">This involves a council member or the council patron</span>
               <span className="block text-slate-400 mt-0.5">Only school staff will see it until they decide who handles it.</span>
@@ -230,6 +233,7 @@ function SubmitCase({ onDone }) {
         <div className="flex justify-end">
           <button
             onClick={() => { setErr(''); submit.mutate(); }}
+            data-testid="case-submit"
             disabled={submit.isPending || f.title.trim().length < 3 || f.body.trim().length < 5}
             className={btnPrimary}
           >
@@ -344,8 +348,8 @@ function CaseDetail({ id, onChanged }) {
 
       {!['merged', 'withdrawn'].includes(c.status) && (
         <div className="flex items-start gap-2">
-          <textarea value={reply} onChange={e => setReply(e.target.value)} rows={2} placeholder="Reply to the council…" className={inputCls} />
-          <button onClick={() => send.mutate()} disabled={send.isPending || !reply.trim()} className={`${btnPrimary} mt-0.5`}>
+          <textarea value={reply} onChange={e => setReply(e.target.value)} data-testid="reply-input" rows={2} placeholder="Reply to the council…" className={inputCls} />
+          <button onClick={() => send.mutate()} disabled={send.isPending || !reply.trim()} data-testid="reply-send" className={`${btnPrimary} mt-0.5`}>
             {send.isPending ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
           </button>
         </div>
@@ -505,7 +509,7 @@ function ElectionCard({ election, onChanged }) {
                 ) : election.myCandidacy ? (
                   <p className="mt-2 text-[12px] text-slate-400">You are already standing for another seat.</p>
                 ) : (
-                  <button onClick={() => { setErr(''); nominate.mutate(p.id); }} disabled={nominate.isPending} className={`${btnPrimary} mt-2`}>
+                  <button onClick={() => { setErr(''); nominate.mutate(p.id); }} disabled={nominate.isPending} data-testid="nominate" className={`${btnPrimary} mt-2`}>
                     <Megaphone size={13} /> Stand for this seat
                   </button>
                 )
@@ -518,6 +522,7 @@ function ElectionCard({ election, onChanged }) {
                   ) : p.candidates.map(c => (
                     <button
                       key={c.id}
+                      data-testid={`vote-${c.id}`}
                       onClick={() => { setErr(''); vote.mutate({ positionId: p.id, candidateId: c.id }); }}
                       disabled={vote.isPending || p.voted}
                       className={`w-full flex items-center gap-2 text-left rounded-lg border px-3 py-2 transition ${
@@ -632,14 +637,14 @@ function Queue() {
               )}
 
               {!c.assignedTo && (
-                <button onClick={() => claim.mutate(c.id)} disabled={claim.isPending} className={btnPrimary}>
+                <button onClick={() => claim.mutate(c.id)} disabled={claim.isPending} data-testid="claim-case" className={btnPrimary}>
                   {claim.isPending ? <Loader2 size={13} className="animate-spin" /> : <Users size={13} />} Claim this case
                 </button>
               )}
 
               <div className="flex items-start gap-2">
-                <textarea value={reply} onChange={e => setReply(e.target.value)} rows={2} placeholder="Reply to the student…" className={inputCls} />
-                <button onClick={() => send.mutate({ id: c.id, internal: false })} disabled={send.isPending || !reply.trim()} className={`${btnPrimary} mt-0.5`}>
+                <textarea value={reply} onChange={e => setReply(e.target.value)} data-testid="queue-reply-input" rows={2} placeholder="Reply to the student…" className={inputCls} />
+                <button onClick={() => send.mutate({ id: c.id, internal: false })} disabled={send.isPending || !reply.trim()} data-testid="queue-reply-send" className={`${btnPrimary} mt-0.5`}>
                   <Send size={13} />
                 </button>
               </div>
