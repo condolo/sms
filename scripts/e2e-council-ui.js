@@ -13,7 +13,11 @@
                vet the nomination, open voting
      student   vote
      admin     close & tally, confirm the elected seat
-     teacher   confirm the module is hidden and direct URL is refused
+     teacher   module hidden, direct URL refused
+     principal patron console reachable (default grant)
+     finance   module hidden, console refused
+     parent    kept out of the console
+     student   no queue without a seat; console refused
 
    Run (builds the client first):
      npm run e2e:council:ui
@@ -111,6 +115,16 @@ function assert(cond, message) {
     await page.waitForSelector(`[data-testid="${testid}"]`, { timeout: 20_000 });
     await page.click(`[data-testid="${testid}"]`);
     await waitText(landedText, 25_000);
+  }
+  async function navHasCouncilLink() {
+    const direct = await page.evaluate(() => !!document.querySelector('a[href="/council"]'));
+    if (direct) return true;
+    await page.evaluate(() => {
+      const section = [...document.querySelectorAll('nav button')].find((b) => b.innerText.includes('STUDENT SERVICES'));
+      if (section) section.click();
+    });
+    await sleep(450);
+    return page.evaluate(() => !!document.querySelector('a[href="/council"]'));
   }
   async function loginPassword(username) {
     await page.goto(`${BASE}/login?school=${SLUG}`, { waitUntil: 'networkidle2' });
@@ -422,14 +436,60 @@ function assert(cond, message) {
     step('teacher: no council access');
     await logout();
     await loginQuick('quick-teacher', 'Dashboard');
-    const navHasCouncil = await page.evaluate(() => {
-      const nav = document.querySelector('nav');
-      return nav ? nav.innerText.includes('Student Council') : false;
-    });
-    assert(!navHasCouncil, 'teacher nav does not list the council');
+    const teacherNav = await navHasCouncilLink();
+    assert(!teacherNav, 'teacher nav does not list the council');
     await page.goto(`${BASE}/council`, { waitUntil: 'networkidle2' });
     await waitText('don’t have access');
     assert(true, 'direct URL shows the access-denied state');
+    passed += 1;
+
+    /* 15 ── Patron defaults: principal --------------------------- */
+    step('principal: patron access');
+    await logout();
+    await loginQuick('quick-deputy-principal', 'Dashboard');
+    const principalNav = await navHasCouncilLink();
+    assert(principalNav, 'principal nav lists the council');
+    await page.goto(`${BASE}/council`, { waitUntil: 'networkidle2' });
+    await waitText('OPEN CASES');
+    assert(true, 'principal opens the patron console');
+    passed += 1;
+
+    /* 16 ── No grant: finance ------------------------------------ */
+    step('finance: no council access');
+    await logout();
+    await loginQuick('quick-finance-officer', 'Dashboard');
+    const financeNav = await navHasCouncilLink();
+    assert(!financeNav, 'finance nav does not list the council');
+    await page.goto(`${BASE}/council`, { waitUntil: 'networkidle2' });
+    await waitText('don’t have access');
+    assert(true, 'finance is refused the patron console');
+    passed += 1;
+
+    /* 17 ── Parent: no council ----------------------------------- */
+    step('parent: no council access');
+    await logout();
+    await loginQuick('quick-parent', 'Parent Portal');
+    await page.goto(`${BASE}/council`, { waitUntil: 'networkidle2' });
+    await page.waitForFunction(
+      () => location.pathname !== '/council' || document.body.innerText.includes('don’t have access'),
+      { timeout: 15_000 },
+    );
+    assert(true, 'parent is kept out of the patron console');
+    passed += 1;
+
+    /* 18 ── Student without a seat ------------------------------- */
+    step('student (non-member): no queue');
+    await logout();
+    await loginQuick('quick-student', 'Student Portal');
+    await openStudentCouncil();
+    const studentTabs = await page.evaluate(() => document.body.innerText);
+    assert(!studentTabs.includes('Council queue'), 'non-member sees no council queue tab');
+    await page.goto(`${BASE}/council`, { waitUntil: 'networkidle2' });
+    await page.waitForFunction(
+      () => location.pathname !== '/council' || document.body.innerText.includes('don’t have access'),
+      { timeout: 15_000 },
+    );
+    assert(true, 'student is refused the patron console');
     passed += 1;
 
     console.log(`\n  ${passed} UI checks passed\n`);
