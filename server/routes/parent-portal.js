@@ -180,6 +180,7 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
     const Coverage      = tenantModel('lesson_coverage', tenantContext(req));
     const Topics        = tenantModel('syllabus_topics', tenantContext(req));
     const Subjects      = tenantModel('subjects', tenantContext(req));
+    const ClassSubjects = tenantModel('class_subjects', tenantContext(req));
     const Schools       = _model('schools');
     // behaviour_incidents, not the empty 'behaviour' — see student-portal.js.
     const Behaviour     = tenantModel('behaviour_incidents', tenantContext(req));
@@ -268,7 +269,7 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
        series before the page could render. Nothing here depends on anything
        else in the batch — the coverage subject list is the only derived input,
        and only the block below consumes it. */
-    const [attRecords, invoices, recentPayments, reportCards, coverageSubjectIds] = await Promise.all([
+    const [attRecords, invoices, recentPayments, reportCards, coverageSubjectIdsRaw, offeredSubjectDocs] = await Promise.all([
       Attendance.find({ schoolId, studentId: childId, ...attDateFilter })
         .select('status date').lean(),
       FeeInvoices.find({ schoolId, studentId: childId })
@@ -284,7 +285,19 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
       student.classId
         ? Coverage.distinct('subjectId', { schoolId, classId: student.classId, academicYear, $or: coverageStreamOr })
         : [],
+      // Every subject the class actually studies, not only the ones with a
+      // coverage record. Without this, a subject at 0 lessons taught simply
+      // vanished from the parent's coverage view instead of showing 0%.
+      student.classId
+        ? ClassSubjects.find({ schoolId, classId: student.classId, isActive: { $ne: false } })
+            .select('subjectId').lean().catch(() => [])
+        : [],
     ]);
+
+    const coverageSubjectIds = [...new Set([
+      ...coverageSubjectIdsRaw,
+      ...offeredSubjectDocs.map(s => s.subjectId).filter(Boolean),
+    ])];
 
     const attSummary = { present: 0, absent: 0, late: 0, total: attRecords.length };
     attRecords.forEach(r => {

@@ -73,6 +73,7 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
     // ones in 'timetable_slots'.
     const Timetable     = await publishedReader(schoolId, tenantContext(req));
     const Subjects      = tenantModel('subjects', tenantContext(req));
+    const ClassSubjects = tenantModel('class_subjects', tenantContext(req));
     const Schools       = _model('schools');
     /* 'behaviour_incidents', NOT 'behaviour': behaviour.js:515 stores every
        logged incident in the first; the 'behaviour' collection this line used
@@ -159,7 +160,13 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
       const streamOr = student.streamId
         ? [{ streamId: student.streamId }, { streamId: { $exists: false } }]
         : [{ streamId: { $exists: false } }];
-      const subjectIds = await Coverage.distinct('subjectId', { schoolId, classId: student.classId, academicYear, $or: streamOr });
+      const recordedSubjectIds = await Coverage.distinct('subjectId', { schoolId, classId: student.classId, academicYear, $or: streamOr });
+      // A subject with no coverage record is still part of the class's
+      // syllabus; without this union it disappeared from the checklist and a
+      // student could not tell "not started" from "not offered".
+      const offered = await ClassSubjects.find({ schoolId, classId: student.classId, isActive: { $ne: false } })
+        .select('subjectId').lean().catch(() => []);
+      const subjectIds = [...new Set([...recordedSubjectIds, ...offered.map(s => s.subjectId).filter(Boolean)])];
       const subjectDocs = await Subjects.find({ id: { $in: subjectIds }, schoolId }).select('id name code').lean();
       const subjectMap  = Object.fromEntries(subjectDocs.map(s => [s.id, s]));
 
