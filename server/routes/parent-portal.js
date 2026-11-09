@@ -349,11 +349,11 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
          the identical loop.) */
       const [topicCounts, coverageCounts] = await Promise.all([
         Topics.aggregate([
-          { $match: { academicYear, $or: topicClassOr } },
+          { $match: { schoolId, $or: topicClassOr } },
           { $group: { _id: '$subjectId', n: { $sum: 1 } } },
         ]),
         Coverage.aggregate([
-          { $match: { classId: student.classId, academicYear, $or: coverageStreamOr } },
+          { $match: { schoolId, classId: student.classId, $or: coverageStreamOr } },
           { $group: { _id: '$subjectId', n: { $sum: 1 } } },
         ]),
       ]);

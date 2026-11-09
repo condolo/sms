@@ -176,8 +176,8 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
       // this student's own class total.
       const topicClassOr = [{ classId: student.classId }, { classId: { $exists: false } }];
       for (const subjectId of subjectIds) {
-        const totalTopics   = await Topics.countDocuments({ schoolId, subjectId, academicYear, $or: topicClassOr });
-        const coveredTopics = await Coverage.countDocuments({ schoolId, classId: student.classId, subjectId, academicYear, $or: streamOr });
+        const totalTopics   = await Topics.countDocuments({ schoolId, subjectId, $or: topicClassOr });
+        const coveredTopics = await Coverage.countDocuments({ schoolId, classId: student.classId, subjectId, $or: streamOr });
         if (totalTopics === 0) continue;
         lessonsCoverage.push({
           subjectId,
