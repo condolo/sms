@@ -91,7 +91,16 @@ router.get('/family-summary', authMiddleware, PLAN, async (req, res) => {
         ..._inboxQuery({ schoolId, userId, role }),
         [`isRead.${userId}`]: { $ne: true },
       }).catch(() => 0),
-      Events.countDocuments({ schoolId, date: { $gte: todayISO } }).catch(() => 0),
+      // Calendar entries store startDate/endDate, not `date` - the field
+      // every parent/student dashboard query used to read, so this count was
+      // always zero even when the school calendar had entries.
+      Events.countDocuments({
+        schoolId,
+        $and: [
+          { $or: [{ startDate: { $gte: todayISO } }, { endDate: { $gte: todayISO } }] },
+          audienceClause('parents'),
+        ],
+      }).catch(() => 0),
     ]);
 
     const totalBalance = invoices.reduce((sum, inv) => sum + (inv.balance || 0), 0);
@@ -459,9 +468,20 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
       }).sort({ createdAt: -1 }).limit(3)
         .select('title body createdAt priority').lean()
         .catch(() => []),
-      Events.find({ schoolId, date: { $gte: todayISO } })
-        .sort({ date: 1 }).limit(4)
-        .select('title date category').lean()
+      // Same field mix-up as the family summary above: events carry
+      // startDate/endDate. The response keeps a `date` alias because the
+      // phone's cards read that field.
+      Events.find({
+        schoolId,
+        $and: [
+          { $or: [{ startDate: { $gte: todayISO } }, { endDate: { $gte: todayISO } }] },
+          audienceClause('parents'),
+        ],
+      })
+        .sort({ startDate: 1 }).limit(4)
+        .select('title startDate endDate category location')
+        .lean()
+        .then(rows => rows.map(e => ({ ...e, date: e.startDate })))
         .catch(() => []),
       // Form/assistant teacher lives on the STUDENT'S STREAM, not the class
       // (classes.formTeacherId is a legacy, never-written field — fixed

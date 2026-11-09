@@ -23,8 +23,10 @@ const { resolveCurrentPeriod } = require('./academic-config');
 const { audienceClause }        = require('../utils/announcement-audience');
 const { transportRidesFor }     = require('../utils/transport-ride');
 const { _getMpesaConfig } = require('./mpesa');
-const { createDirectMessage } = require('./messages');
+const { createDirectMessage, _inboxQuery } = require('./messages');
 const { resolveMessageCategories, resolveOneCategory } = require('../utils/parent-message-recipients');
+const { recipientSummary } = require('../utils/message-audience');
+const { messageExtras } = require('../utils/message-extras');
 const { ok, E, created } = require('../utils/response');
 // Weekly Snapshot's read logic is shared with weekly-snapshots.js's own
 // staff-facing routes — see that file's _findAuthorizedStudent header
@@ -348,9 +350,20 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
       }).sort({ createdAt: -1 }).limit(3)
         .select('title body createdAt priority').lean()
         .catch(() => []),
-      Events.find({ schoolId, date: { $gte: todayISO } })
-        .sort({ date: 1 }).limit(4)
-        .select('title date category').lean()
+      // Calendar entries store startDate/endDate, not `date`; the old query
+      // silently returned nothing and the Home "Coming up" card stayed empty.
+      // The `date` alias keeps the phone's row renderer unchanged.
+      Events.find({
+        schoolId,
+        $and: [
+          { $or: [{ startDate: { $gte: todayISO } }, { endDate: { $gte: todayISO } }] },
+          audienceClause('students'),
+        ],
+      })
+        .sort({ startDate: 1 }).limit(4)
+        .select('title startDate endDate category location')
+        .lean()
+        .then(rows => rows.map(e => ({ ...e, date: e.startDate })))
         .catch(() => []),
       // Form/assistant teacher lives on the STUDENT'S STREAM, not the class
       // (classes.formTeacherId is a legacy, never-written field — fixed
@@ -481,11 +494,186 @@ router.get('/me', authMiddleware, PLAN, async (req, res) => {
 });
 
 /* ===============================================================
-   NOTE (merge): the two conflict regions below were resolved by hand —
-   main had added the student messaging routes and this branch adds the
-   published full-week timetable read; both are kept, each closed by the
-   shared `return E.serverError(res); } });` tail.
+   Student messages - the inbox half of the compose route below.
+
+   A student can already SEND (POST /messages), but until now there was
+   no route that listed what came back. That made a two-way conversation
+   impossible: the teacher's reply existed in the database and nowhere
+   on the phone. These routes mirror parent-portal's inbox/thread pair,
+   scoped to the student's own JWT identity and the same `_inboxQuery`
+   the web inbox uses.
    =============================================================== */
+
+function _counterpartOf(msg, userId) {
+  if (msg.senderId === userId) {
+    const other = (msg.recipients || []).find(r => r !== userId && r !== 'all');
+    return other ? { userId: other, name: null, role: null, outboundOnly: true } : null;
+  }
+  return { userId: msg.senderId, name: msg.senderName || null, role: msg.senderRole || null, outboundOnly: false };
+}
+
+/* GET /api/student-portal/inbox - one row per conversation. */
+router.get('/inbox', authMiddleware, PLAN, async (req, res) => {
+  if (!_requireStudent(req, res)) return;
+  try {
+    const { schoolId, userId, role } = req.jwtUser;
+    const Msg = tenantModel('messages', tenantContext(req));
+
+    const docs = await Msg.find({
+      $or: [
+        _inboxQuery({ schoolId, userId, role }),
+        { schoolId, senderId: userId },
+      ],
+    }).sort({ createdAt: -1 }).limit(300)
+      .select('id senderId senderName senderRole recipients subject body isRead createdAt groupId groupName')
+      .lean();
+
+    const byCounterpart = new Map();
+    for (const msg of docs) {
+      const counterpart = _counterpartOf(msg, userId);
+      if (!counterpart?.userId) continue;
+      const key = counterpart.userId;
+      const existing = byCounterpart.get(key);
+      const at = msg.createdAt || '';
+      const unread = msg.senderId !== userId && !msg.isRead?.[userId] ? 1 : 0;
+
+      if (!existing) {
+        byCounterpart.set(key, {
+          counterpartUserId: key,
+          name: counterpart.name,
+          role: counterpart.role,
+          subject: msg.subject || '',
+          preview: String(msg.body || '').slice(0, 120),
+          lastAt: at,
+          unread,
+          ...recipientSummary(msg),
+        });
+      } else {
+        existing.unread += unread;
+        if (at > existing.lastAt) {
+          existing.subject = msg.subject || existing.subject;
+          existing.preview = String(msg.body || '').slice(0, 120);
+          existing.lastAt = at;
+          Object.assign(existing, recipientSummary(msg));
+        }
+        if (!existing.name && counterpart.name) {
+          existing.name = counterpart.name;
+          existing.role = counterpart.role;
+        }
+      }
+    }
+
+    const missing = [...byCounterpart.values()].filter(t => !t.name).map(t => t.counterpartUserId);
+    if (missing.length) {
+      const staff = await tenantModel('users', tenantContext(req))
+        .find({ schoolId, id: { $in: missing } }).select('id name role').lean().catch(() => []);
+      const byId = Object.fromEntries(staff.map(u => [u.id, u]));
+      for (const t of byCounterpart.values()) {
+        if (!t.name && byId[t.counterpartUserId]) {
+          t.name = byId[t.counterpartUserId].name || null;
+          t.role = byId[t.counterpartUserId].role || null;
+        }
+      }
+    }
+
+    return ok(res, {
+      threads: [...byCounterpart.values()]
+        .map(t => ({ ...t, name: t.name || 'School office' }))
+        .sort((a, b) => (a.lastAt < b.lastAt ? 1 : -1)),
+    });
+  } catch (err) {
+    console.error('[student-portal GET /inbox]', err);
+    return E.serverError(res);
+  }
+});
+
+/* GET /api/student-portal/threads/:counterpartUserId - the conversation. */
+router.get('/threads/:counterpartUserId', authMiddleware, PLAN, async (req, res) => {
+  if (!_requireStudent(req, res)) return;
+  try {
+    const { schoolId, userId, role } = req.jwtUser;
+    const counterpartUserId = req.params.counterpartUserId;
+    const Msg = tenantModel('messages', tenantContext(req));
+
+    const docs = await Msg.find({
+      $or: [
+        { schoolId, senderId: userId, recipients: counterpartUserId },
+        { senderId: counterpartUserId, ..._inboxQuery({ schoolId, userId, role }) },
+      ],
+    }).sort({ createdAt: 1 }).limit(300)
+      .select('id senderId senderName senderRole subject body isRead createdAt recipients groupId groupName kind dueAt context attachment poll')
+      .lean();
+
+    const unreadIds = docs.filter(m => m.senderId !== userId && !m.isRead?.[userId]).map(m => m.id);
+    if (unreadIds.length) {
+      await Msg.updateMany({ schoolId, id: { $in: unreadIds } }, { $set: { [`isRead.${userId}`]: true } }).catch(() => {});
+    }
+
+    const counterpart = await tenantModel('users', tenantContext(req))
+      .findOne({ schoolId, id: counterpartUserId }).select('id name role').lean().catch(() => null);
+
+    return ok(res, {
+      counterpartUserId,
+      counterpart: {
+        id: counterpartUserId,
+        name: counterpart?.name || 'School office',
+        role: counterpart?.role || null,
+      },
+      messages: docs.map(m => ({
+        id: m.id,
+        mine: m.senderId === userId,
+        from: m.senderId === userId ? 'You' : (m.senderName || counterpart?.name || 'School office'),
+        subject: m.subject || '',
+        body: m.body,
+        at: m.createdAt,
+        ...recipientSummary(m),
+        ...messageExtras(m, userId),
+        read: m.senderId === userId
+          ? Boolean(m.isRead?.[counterpartUserId])
+          : Boolean(m.isRead?.[userId]),
+      })),
+    });
+  } catch (err) {
+    console.error('[student-portal GET /threads/:id]', err);
+    return E.serverError(res);
+  }
+});
+
+/* POST /api/student-portal/threads/:counterpartUserId/messages - reply. */
+router.post('/threads/:counterpartUserId/messages', authMiddleware, PLAN, async (req, res) => {
+  if (!_requireStudent(req, res)) return;
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const counterpartUserId = req.params.counterpartUserId;
+    const body    = String(req.body?.body || '').trim();
+    const subject = String(req.body?.subject || '').trim() || 'Message from student';
+
+    if (!body) return E.badRequest(res, 'Write a message first.');
+    if (body.length > 4000) return E.badRequest(res, 'That message is too long.');
+
+    const counterpart = await tenantModel('users', tenantContext(req))
+      .findOne({ schoolId, id: counterpartUserId }).select('id name role isActive').lean();
+    if (!counterpart || counterpart.isActive === false) {
+      return E.badRequest(res, 'That recipient is no longer available - please pick another and try again.');
+    }
+
+    const sender = await tenantModel('users', tenantContext(req))
+      .findOne({ id: userId, schoolId }).select('name email').lean();
+
+    const msg = await createDirectMessage(req, {
+      recipientUserIds: [counterpartUserId],
+      subject,
+      body,
+      senderName: sender?.name || sender?.email || 'Student',
+      senderRole: 'student',
+    });
+
+    return created(res, { id: msg.id, at: msg.createdAt });
+  } catch (err) {
+    console.error('[student-portal POST /threads/:id/messages]', err);
+    return E.serverError(res);
+  }
+});
 
 /* ═══════════════════════════════════════════════════════════════
    GET /api/student-portal/message-recipients
