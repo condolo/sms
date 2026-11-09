@@ -175,17 +175,36 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
       // class, but a topic scoped to a DIFFERENT class must not inflate
       // this student's own class total.
       const topicClassOr = [{ classId: student.classId }, { classId: { $exists: false } }];
+      // Topic-level completion, not coverage-row count: a topic with two
+      // subtopics is one topic and only counts when both are covered.
+      const [allTopics, coverageRecords] = await Promise.all([
+        Topics.find({ schoolId, $or: topicClassOr }).select('id subjectId subtopics').lean().catch(() => []),
+        Coverage.find({ schoolId, classId: student.classId, $or: streamOr })
+          .select('topicId subtopicId').lean().catch(() => []),
+      ]);
+      const coveredKeys = new Set(coverageRecords.map(r => `${r.topicId}__${r.subtopicId ?? ''}`));
+      const bySubject = new Map();
+      for (const topic of allTopics) {
+        const row = bySubject.get(topic.subjectId) ?? { total: 0, covered: 0 };
+        row.total += 1;
+        const subs = Array.isArray(topic.subtopics) ? topic.subtopics : [];
+        const done = subs.length
+          ? subs.every(st => coveredKeys.has(`${topic.id}__${st.id}`))
+          : coveredKeys.has(`${topic.id}__`);
+        if (done) row.covered += 1;
+        bySubject.set(topic.subjectId, row);
+      }
+
       for (const subjectId of subjectIds) {
-        const totalTopics   = await Topics.countDocuments({ schoolId, subjectId, $or: topicClassOr });
-        const coveredTopics = await Coverage.countDocuments({ schoolId, classId: student.classId, subjectId, $or: streamOr });
-        if (totalTopics === 0) continue;
+        const row = bySubject.get(subjectId);
+        if (!row || row.total === 0) continue;
         lessonsCoverage.push({
           subjectId,
           subjectName: subjectMap[subjectId]?.name || subjectId,
           subjectCode: subjectMap[subjectId]?.code || '',
-          coveredTopics,
-          totalTopics,
-          percentage: Math.round((coveredTopics / totalTopics) * 100),
+          coveredTopics: row.covered,
+          totalTopics: row.total,
+          percentage: Math.round((row.covered / row.total) * 100),
         });
       }
     }
