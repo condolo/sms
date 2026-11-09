@@ -36,7 +36,7 @@ const router = express.Router();
 // likely cause of intermittent request failures that started right after
 // TIS Group's shared portal got a real (1.3MB) login background image.
 const SCHOOL_INFO_FIELDS =
-  'slug name shortName logoUrl faviconUrl primaryColor accentColor themePreset tagline website loginBgUrl isActive status';
+  'slug name shortName logoUrl faviconUrl primaryColor accentColor themePreset tagline website loginBgUrl isActive status city country address phone type';
 const ORG_PORTAL_FIELDS = 'id slug name logoUrl primaryColor tagline loginBgUrl multiSchoolEnabled';
 
 function _mapPublicSchoolInfo(school) {
@@ -54,6 +54,13 @@ function _mapPublicSchoolInfo(school) {
     loginBgUrl:   school.loginBgUrl    || null,
     isActive:     school.isActive !== false,
     status:       school.status        || 'active',
+    // Disambiguators for same-name schools. Public directory facts only:
+    // city/country/address/phone/type as the office entered them.
+    city:         school.city          || null,
+    country:      school.country       || null,
+    address:      school.address       || null,
+    phone:        school.phone         || null,
+    schoolType:   school.type          || null,
   };
 }
 
@@ -68,6 +75,47 @@ function _resolveSlugFromRequest(req) {
   }
   return slug ? slug.toLowerCase() : null;
 }
+
+/* GET /api/public/resolve-school?address=...
+   One forgiving lookup for the phone's "School address" field. Accepts:
+     - a bare slug/code            demo
+     - a Msingi subdomain          demo.msingi.io
+     - a full custom-domain URL    https://portal.greenwood.ac.ke/login
+   Returns the school's slug so the login call can use the same
+   X-School-Slug contract everywhere. An organisation portal is not a
+   school; it is reported as such rather than silently resolving to one
+   of its schools. */
+router.get('/resolve-school', async (req, res) => {
+  try {
+    const raw = String(req.query.address || req.query.slug || '').trim().toLowerCase();
+    if (!raw) return res.status(400).json({ error: 'address required' });
+
+    const host = raw.replace(/^https?:\/\//, '').split('/')[0].replace(/:\d+$/, '');
+    const slug = host.endsWith('.msingi.io')
+      ? host.slice(0, -'.msingi.io'.length).split('.')[0]
+      : (!host.includes('.') ? host : null);
+
+    const School = _model('schools');
+    let school = null;
+    if (slug) school = await School.findOne({ slug }).select(SCHOOL_INFO_FIELDS).lean();
+    if (!school && host.includes('.')) {
+      school = await School.findOne({ customDomain: host }).select(SCHOOL_INFO_FIELDS).lean();
+    }
+    if (school) return res.json({ type: 'school', ..._mapPublicSchoolInfo(school) });
+
+    const Org = _model('organizations');
+    const org = await Org.findOne({ slug: slug || host })
+      .select('slug name multiSchoolEnabled').lean();
+    if (org?.multiSchoolEnabled) {
+      return res.json({ type: 'organization', orgSlug: org.slug, name: org.name });
+    }
+
+    return res.status(404).json({ error: `School '${raw}' not found` });
+  } catch (err) {
+    console.error('[public/resolve-school]', err.message);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
 
 router.get('/school-info', async (req, res) => {
   try {
@@ -202,7 +250,7 @@ router.get('/schools/search', async (req, res) => {
         ...(matchingOrgIds.length ? [{ organizationId: { $in: matchingOrgIds } }] : []),
       ],
     })
-      .select('slug name shortName logoUrl primaryColor accentColor organizationId')
+      .select('slug name shortName logoUrl primaryColor accentColor organizationId city country address phone type')
       .limit(10)
       .lean();
 
@@ -238,6 +286,11 @@ router.get('/schools/search', async (req, res) => {
         shortName: s.shortName || s.name || 'School',
         logoUrl:   s.logoUrl   || null,
         primaryColor: s.primaryColor || '#4f46e5',
+        city:      s.city    || null,
+        country:   s.country || null,
+        address:   s.address || null,
+        phone:     s.phone   || null,
+        schoolType: s.type   || null,
       };
     }
 
