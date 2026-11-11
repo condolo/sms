@@ -32,6 +32,11 @@ const CLASS_ID  = 'cls_yr2';
 const DIAMOND   = 'strm_diamond';
 const TODAY     = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'][new Date().getDay()];
 const TODAY_ISO = new Date().toISOString().slice(0, 10);
+/* The dashboard filters events on their RANGE (startDate/endDate), not the
+   legacy single `date` field — an all-day event carries both. Tomorrow keeps
+   the fixture unambiguously "upcoming" even when the suite runs late in the
+   evening, when today's date can already be over in school-local time. */
+const UPCOMING_ISO = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
 /* ── mock helpers (same pattern as the lessons-coverage suite) ── */
 function mockChain(result) {
@@ -311,7 +316,7 @@ beforeEach(() => {
     { schoolId: SCHOOL_A, title: 'Parent-Teacher Meeting', body: 'This Saturday', createdAt: new Date().toISOString(), priority: 'normal' },
   ];
   mockEventDocs = [
-    { schoolId: SCHOOL_A, title: 'Sports Day', date: TODAY_ISO, category: 'sports' },
+    { schoolId: SCHOOL_A, title: 'Sports Day', startDate: UPCOMING_ISO, endDate: UPCOMING_ISO, category: 'sports' },
   ];
   mockClassDoc = { id: CLASS_ID, schoolId: SCHOOL_A, name: 'Year 2' };
   // Form/assistant teacher lives on the STREAM, not the class

@@ -17,7 +17,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Megaphone, ShieldAlert, Users, Vote, Plus, X, Loader2, CheckCircle2,
-  Search, CalendarDays, ChevronRight, Send,
+  Search, CalendarDays, ChevronRight, Send, EyeOff, ArrowUp,
 } from 'lucide-react';
 import { council as councilApi, students as studentsApi } from '@/api/client.js';
 
@@ -62,6 +62,11 @@ function Stat({ label, value, tone = 'slate' }) {
 export default function CouncilPage() {
   const [tab, setTab] = useState('cases');
   const overview = useQuery({ queryKey: ['council', 'overview'], queryFn: () => councilApi.admin.overview() });
+  /* /council is the patron console; teachers and other non-patron staff
+     with council:read land on the read-only staff feed instead. me() is
+     the server's authority on which face this viewer gets (students are
+     routed to /student-council and simply fall through to the 403 here). */
+  const me = useQuery({ queryKey: ['council', 'me'], queryFn: () => councilApi.me() });
   const data = overview.data || {};
 
   /* Direct navigation to /council is possible even for a role without the
@@ -80,6 +85,35 @@ export default function CouncilPage() {
         </p>
       </div>
     );
+  }
+
+  /* me() is the server's authority on which face this viewer gets, so wait
+     for it before painting the patron console — otherwise a teacher sees
+     the patron tabs (and their 403/empty case list) flash for a moment. */
+  if (me.isPending) {
+    return (
+      <div className="flex items-center justify-center py-24 text-sm text-slate-400">
+        <Loader2 size={16} className="animate-spin mr-2" /> Loading…
+      </div>
+    );
+  }
+  if (me.isError) {
+    return (
+      <div className="max-w-xl mx-auto px-6 py-16 text-center">
+        <ShieldAlert size={26} className="mx-auto text-amber-500 mb-3" />
+        <h1 className="text-lg font-bold text-slate-900">Couldn’t load your council access</h1>
+        <p className="text-sm text-slate-500 mt-2">Check the connection and try again.</p>
+        <button onClick={() => me.refetch()} className="mt-4 text-sm font-medium text-violet-600 hover:text-violet-700">
+          Try again
+        </button>
+      </div>
+    );
+  }
+
+  /* Teachers and other non-patron staff with council:read land on the
+     read-only staff feed instead of this console. */
+  if (me.data && me.data.student === false && me.data.canManage === false) {
+    return <StaffFeed />;
   }
 
   return (
@@ -788,6 +822,153 @@ function AppointModal({ onClose, onDone }) {
           <button onClick={() => appoint.mutate()} disabled={appoint.isPending || !picked || positionTitle.trim().length < 2} data-testid="appoint-confirm" className={btnPrimary}>
             {appoint.isPending ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />} Appoint
           </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+/* ── Staff read-only feed (teachers & non-patron staff) ──────
+
+   Rendered instead of the patron console when /council/me reports
+   canManage: false. Everything below is read-only: the server masks
+   identities, excludes safeguarding/sensitive cases and exposes no
+   write endpoint to this grant in the first place. */
+
+function StaffFeed() {
+  const [openId, setOpenId] = useState(null);
+  const feed = useQuery({ queryKey: ['council', 'staff-feed'], queryFn: () => councilApi.staffFeed() });
+  const data = feed.data || {};
+  const counts = data.counts || {};
+  const cases = data.cases || [];
+  const open = cases.find(c => c.id === openId) || null;
+
+  return (
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-5">
+      <div>
+        <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+          <Megaphone size={18} className="text-violet-600" /> Student Council
+        </h1>
+        <p className="text-sm text-slate-500 mt-1 flex items-center gap-1.5">
+          <EyeOff size={13} className="text-slate-400 shrink-0" />
+          What students are telling the council, and where each case stands. Names stay with the council patron, safeguarding cases never appear here, and this view is read-only.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <Stat label="Open" value={counts.open ?? '—'} />
+        <Stat label="Resolved" value={cases.filter(c => c.status === 'resolved').length} />
+        <Stat label="Suggestions" value={counts.suggestions ?? '—'} />
+        <Stat label="Grievances" value={counts.grievances ?? '—'} />
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+        {feed.isLoading ? (
+          <div className="p-8 text-center text-sm text-slate-400"><Loader2 size={16} className="animate-spin inline mr-2" />Loading feed…</div>
+        ) : feed.isError ? (
+          <div className="p-10 text-center">
+            <ShieldAlert size={22} className="mx-auto text-amber-500 mb-2" />
+            <p className="text-sm text-slate-500">The staff feed could not be loaded. Please refresh, or ask the office to check the council module for your role.</p>
+          </div>
+        ) : cases.length === 0 ? (
+          <div className="p-10 text-center">
+            <Megaphone size={22} className="mx-auto text-slate-300 mb-2" />
+            <p className="text-sm text-slate-500">No student feedback yet. Cases appear here the moment students file them.</p>
+          </div>
+        ) : (
+          cases.map(c => (
+            <button
+              key={c.id}
+              onClick={() => setOpenId(c.id)}
+              data-testid={`staff-feed-${c.ref}`}
+              className="w-full text-left flex items-center gap-3 px-4 py-3 border-b border-slate-100 last:border-0 hover:bg-slate-50 transition"
+            >
+              <span className={`w-1.5 h-8 rounded-full ${c.kind === 'suggestion' ? 'bg-violet-400' : 'bg-sky-400'}`} />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[11px] font-mono text-slate-400">{c.ref}</span>
+                  <span className={`text-[10px] font-semibold uppercase tracking-wide rounded-full px-2 py-0.5 ring-1 ${c.kind === 'suggestion' ? 'bg-violet-50 text-violet-700 ring-violet-200' : 'bg-sky-50 text-sky-700 ring-sky-200'}`}>
+                    {c.kind}
+                  </span>
+                  <span className="text-[11px] text-slate-500">{CATEGORY_LABEL[c.category] || c.category}</span>
+                </div>
+                <p className="text-sm font-medium text-slate-800 mt-0.5 truncate">{c.title}</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  {c.reporter?.anonymous ? 'Anonymous' : 'Student'}{c.reporter?.className ? ` · ${c.reporter.className}` : ''} · {fmt(c.lastActivityAt)}
+                  {c.upvoteCount > 0 ? ` · ${c.upvoteCount} upvote${c.upvoteCount === 1 ? '' : 's'}` : ''}
+                  {c.replyCount > 0 ? ` · ${c.replyCount} repl${c.replyCount === 1 ? 'y' : 'ies'}` : ''}
+                </p>
+              </div>
+              <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 ring-1 whitespace-nowrap ${STATUS_META[c.status]?.cls || ''}`}>
+                {STATUS_META[c.status]?.label || c.status}
+              </span>
+              <ChevronRight size={14} className="text-slate-300" />
+            </button>
+          ))
+        )}
+      </div>
+
+      <AnimatePresence>
+        {open && <StaffCaseDrawer item={open} onClose={() => setOpenId(null)} />}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function StaffCaseDrawer({ item, onClose }) {
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      className="fixed inset-0 z-40 bg-slate-900/40 flex items-end sm:items-center justify-center p-0 sm:p-6"
+      onClick={onClose}
+    >
+      <motion.div initial={{ y: 24 }} animate={{ y: 0 }} exit={{ y: 24 }}
+        onClick={e => e.stopPropagation()}
+        className="bg-white w-full sm:max-w-2xl max-h-[92vh] rounded-t-2xl sm:rounded-2xl shadow-xl overflow-hidden flex flex-col"
+      >
+        <div className="flex items-center gap-3 px-5 py-3 border-b border-slate-100">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-mono text-slate-400">{item.ref}</span>
+              <span className={`text-[10px] font-semibold uppercase rounded-full px-2 py-0.5 ring-1 ${STATUS_META[item.status]?.cls || ''}`}>{STATUS_META[item.status]?.label || item.status}</span>
+              <span className={`text-[10px] font-semibold uppercase tracking-wide rounded-full px-2 py-0.5 ring-1 ${item.kind === 'suggestion' ? 'bg-violet-50 text-violet-700 ring-violet-200' : 'bg-sky-50 text-sky-700 ring-sky-200'}`}>{item.kind}</span>
+            </div>
+            <h2 className="text-base font-semibold text-slate-900 truncate">{item.title}</h2>
+          </div>
+          <button onClick={onClose} data-testid="close-staff-case" className="p-2 rounded-lg hover:bg-slate-100 text-slate-400"><X size={16} /></button>
+        </div>
+
+        <div className="px-5 py-4 space-y-4 overflow-y-auto">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
+            <span className="flex items-center gap-1"><EyeOff size={12} className="text-slate-400" /> {item.reporter?.anonymous ? 'Filed anonymously' : 'Identity held by the patron'}</span>
+            {item.reporter?.className && <span>Class {item.reporter.className}</span>}
+            <span>{CATEGORY_LABEL[item.category] || item.category}</span>
+            <span>{fmt(item.createdAt)}</span>
+            {item.upvoteCount > 0 && (
+              <span className="inline-flex items-center gap-1 text-violet-700 font-medium"><ArrowUp size={12} /> {item.upvoteCount} upvote{item.upvoteCount === 1 ? '' : 's'}</span>
+            )}
+            {item.assigned && <span>With a council member</span>}
+          </div>
+
+          <p className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{item.body}</p>
+
+          {(item.replies || []).length > 0 && (
+            <div className="space-y-3">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Council replies</div>
+              {(item.replies || []).map(r => (
+                <div key={r.id} className="bg-slate-50 border border-slate-100 rounded-lg px-3 py-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-medium text-slate-700">{r.authorName}</span>
+                    <span className="text-[10px] text-slate-400">{fmt(r.createdAt)}</span>
+                  </div>
+                  <p className="text-sm text-slate-700 mt-1 whitespace-pre-wrap">{r.body}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="px-5 py-3 border-t border-slate-100 flex items-center gap-2 text-xs text-slate-400">
+          <EyeOff size={12} /> Read-only — replies, triage and status changes happen in the council queue, run by the patron.
         </div>
       </motion.div>
     </motion.div>

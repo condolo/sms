@@ -23,11 +23,20 @@
      POST /cases/:id/escalate     hand it to the patron
      POST /cases/:id/merge        fold a duplicate into another case
 
+   STAFF READ-ONLY FEED (council:read, non-patron — teachers etc.)
+     GET  /staff-feed              the pulse: every non-sensitive case
+                                  with identities masked (teachers never
+                                  see who filed it), safeguarding and
+                                  patron-held cases excluded, no write
+                                  actions of any kind.
+
    STAFF PATRON (council:read / update / create)
      GET  /admin/overview
-     GET  /admin/cases            every case, identities included
+     GET  /admin/cases            every case, identities included —
+                                  patron-console only (see _mayUsePatronConsole)
      GET  /admin/cases/:id
-     PATCH /admin/cases/:id       status / assignee, with a note
+     PATCH /admin/cases/:id       status / assignee, with a note —
+                                  patron-console only, like the reads above
      GET  /admin/memberships      POST appoint, DELETE remove
      GET  /admin/elections        POST create, PATCH advance
      GET  /admin/elections/:id/candidates
@@ -47,7 +56,7 @@ const rateLimit = require('express-rate-limit');
 const { z } = require('zod');
 
 const { authMiddleware } = require('../middleware/auth');
-const { rbac } = require('../middleware/rbac');
+const { rbac, hasExplicitSubGrant } = require('../middleware/rbac');
 const { moduleGate } = require('../middleware/module-gate');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { _model } = require('../utils/model');
@@ -179,7 +188,10 @@ function _statusLabel(status) {
 }
 
 /* Reporter identity as a given viewer may see it. Anonymous hides the
-   student from OTHER STUDENTS only — staff routes read the raw doc. */
+   student from OTHER STUDENTS only — staff routes read the raw doc.
+   The class goes with the name: "Anonymous · Form 2B" still narrows a
+   reporter to one class, which defeats the point for other students and
+   council members. Only staff (or the reporter themselves) see it. */
 function _reporterView(doc, { reveal }) {
   if (reveal || !doc.anonymous) {
     return {
@@ -192,7 +204,7 @@ function _reporterView(doc, { reveal }) {
   return {
     studentId: null,
     name:      'Anonymous',
-    className: doc.reporterClass || '',
+    className: '',
     anonymous: true,
   };
 }
@@ -321,7 +333,9 @@ router.get('/me', async (req, res) => {
         student: false,
         membership: null,
         staff: true,
-        canManage: _isPatronRole(req),
+        /* Same rule the identity-bearing /admin/cases routes enforce —
+           keeps the web UI's console-vs-staff-feed branch in step. */
+        canManage: await _mayUsePatronConsole(req),
       });
     }
     const { studentId } = req.jwtUser;
@@ -336,7 +350,6 @@ router.get('/me', async (req, res) => {
       .map(e => ({ id: e.id, title: e.title, phase: effectiveElectionPhase(e, now), votingEnd: e.votingEnd }))
       .filter(e => ['nominations', 'vetting', 'voting'].includes(e.phase));
     return ok(res, {
-      student: true,
       student: student ? { name: _fullName(student), className: student.className || '' } : null,
       membership: membership
         ? { positionTitle: membership.positionTitle, source: membership.source, since: membership.createdAt }
@@ -965,6 +978,103 @@ router.post('/elections/:id/vote', async (req, res) => {
 });
 
 /* ══════════════════════════════════════════════════════════════
+   STAFF READ-ONLY FEED — the pulse, not the people
+
+   Teachers (and any non-patron staff with council:read) see what
+   students are saying and where each case stands. Three hard rules:
+     1. Identities stay masked — anonymous cases don't even reveal
+        the reporter's class; named ones keep the class for context
+        but never the name. Students' replies are masked the same way.
+     2. Safeguarding and patron-held (sensitive) cases never appear
+        here at all — those belong to the patron alone.
+     3. No actions. The patron console (identities, triage, closes)
+        is behind _mayUsePatronConsole, not the coarse council:read
+        this feed rides on.
+   ══════════════════════════════════════════════════════════════ */
+
+function _feedReply(reply) {
+  const isStudent = reply.authorType === 'student';
+  return {
+    id: reply.id,
+    authorType: reply.authorType,
+    /* Student authors are masked for teachers; council/staff names are
+       already public to students in-app, so they stay. */
+    authorName: isStudent
+      ? (reply.anonymous ? 'Anonymous' : 'Student')
+      : (reply.authorName || 'Council'),
+    anonymous: isStudent && !!reply.anonymous,
+    body: reply.body,
+    createdAt: reply.createdAt,
+  };
+}
+
+function _feedCase(doc) {
+  const replies = (doc.replies || []).filter(r => !r.internal).map(_feedReply);
+  return {
+    id: doc.id,
+    ref: doc.ref,
+    kind: doc.kind,
+    category: doc.category,
+    title: doc.title,
+    body: doc.body,
+    status: doc.status,
+    statusLabel: _statusLabel(doc.status),
+    reporter: doc.anonymous
+      ? { name: 'Anonymous', className: '', anonymous: true, masked: true }
+      : { name: 'Student', className: doc.reporterClass || '', anonymous: false, masked: true },
+    assigned: !!doc.assignedStudentId,
+    upvoteCount: (doc.upvotes || []).length,
+    replyCount: replies.length,
+    replies,
+    createdAt: doc.createdAt,
+    lastActivityAt: doc.lastActivityAt,
+  };
+}
+
+router.get('/staff-feed', rbac('council', 'read'), async (req, res) => {
+  if (_isStudent(req)) return E.forbidden(res, 'Staff accounts only.');
+  try {
+    const ctx = tenantContext(req);
+    const limit = Math.min(parseInt(req.query.limit, 10) || 100, 300);
+    const docs = await tenantModel('council_cases', ctx)
+      .find({
+        safeguarding: { $ne: true },
+        sensitive: { $ne: true },
+        status: { $nin: ['merged', 'withdrawn'] },
+      })
+      .sort({ lastActivityAt: -1 })
+      .limit(limit)
+      .lean();
+    return ok(res, {
+      counts: {
+        total: docs.length,
+        open: docs.filter(d => OPEN_STATUSES.includes(d.status)).length,
+        grievances: docs.filter(d => d.kind === 'grievance').length,
+        suggestions: docs.filter(d => d.kind === 'suggestion').length,
+      },
+      cases: docs.map(_feedCase),
+    });
+  } catch (err) {
+    console.error('[council GET /staff-feed]', err);
+    return E.serverError(res);
+  }
+});
+
+/* Patron-console guard for the routes that show WHO filed a case.
+   The coarse council:read grant (which the settings UI unions into
+   perms['council'] whenever any sub is ticked) is no longer enough —
+   that same grant is exactly what teachers hold for the read-only
+   feed above. The patron console needs a patron role, or a deliberate
+   council__manage sub grant for a custom staff role (counselor etc.).
+   /admin/overview, memberships and elections stay on plain rbac(): they
+   carry no reporter identities, only public figures (members, candidates). */
+async function _mayUsePatronConsole(req) {
+  if (_isPatronRole(req)) return true;
+  return (await hasExplicitSubGrant(req, 'council', 'manage', 'read'))
+      || (await hasExplicitSubGrant(req, 'council', 'manage', 'update'));
+}
+
+/* ══════════════════════════════════════════════════════════════
    PATRON / STAFF — oversight, elections, memberships
    ══════════════════════════════════════════════════════════════ */
 
@@ -1001,6 +1111,9 @@ router.get('/admin/overview', rbac('council', 'read'), async (req, res) => {
 });
 
 router.get('/admin/cases', rbac('council', 'read'), async (req, res) => {
+  if (!(await _mayUsePatronConsole(req))) {
+    return E.forbidden(res, 'Case identities are visible to the council patron only — staff have the read-only feed at /council/staff-feed.');
+  }
   try {
     const ctx = tenantContext(req);
     const limit = Math.min(parseInt(req.query.limit, 10) || 100, 300);
@@ -1018,6 +1131,9 @@ router.get('/admin/cases', rbac('council', 'read'), async (req, res) => {
 });
 
 router.get('/admin/cases/:id', rbac('council', 'read'), async (req, res) => {
+  if (!(await _mayUsePatronConsole(req))) {
+    return E.forbidden(res, 'Case identities are visible to the council patron only — staff have the read-only feed at /council/staff-feed.');
+  }
   try {
     const ctx = tenantContext(req);
     const doc = await tenantModel('council_cases', ctx).findOne({ id: req.params.id }).lean();
@@ -1030,6 +1146,13 @@ router.get('/admin/cases/:id', rbac('council', 'read'), async (req, res) => {
 });
 
 router.patch('/admin/cases/:id', rbac('council', 'update'), async (req, res) => {
+  /* Same patron-console boundary as the identity reads above: a role that
+     was only meant to VIEW cases must not decide or reassign them, even if
+     an Edit box was mistakenly ticked on a "View" row (the coarse grant is
+     a union of every sub row — see settings.js _deriveApiPerms). */
+  if (!(await _mayUsePatronConsole(req))) {
+    return E.forbidden(res, 'Case decisions belong to the council patron — staff have the read-only feed at /council/staff-feed.');
+  }
   const body = req.body || {};
   const status = body.status ? String(body.status) : null;
   try {
