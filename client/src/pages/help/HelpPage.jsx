@@ -10,7 +10,7 @@ import {
   Clock, ClipboardList, MonitorPlay, BookCheck,
   ClipboardCheck, Layers, UserCog, Database,
   BookMarked, Bus, BedDouble, TrendingUp, Library,
-  Sprout, CalendarCheck, HeartPulse, Boxes, Link2, LineChart, LifeBuoy,
+  Sprout, CalendarCheck, HeartPulse, Boxes, Link2, LineChart, LifeBuoy, Megaphone,
 } from 'lucide-react';
 import { useSchoolTheme, withOpacity } from '@/hooks/useSchoolTheme.js';
 import useAuthStore from '@/store/auth.js';
@@ -501,6 +501,56 @@ const SECTIONS = [
       {
         q: 'Who can do what here? (Roles & Permissions)',
         a: '• View Incidents & BPS\n• Record Incident / Award Points\n• Edit Records\n• Delete Records\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
+      },
+    ],
+  },
+
+  /* ── Student Council ──────────────────────────────────────── */
+  {
+    id: 'council',
+    moduleKey: 'council',
+    Icon: Megaphone,
+    title: 'Student Council',
+    articles: [
+      {
+        q: 'What is the Student Council module?',
+        a: 'A feedback desk run by students, overseen by a staff patron. Students file suggestions and grievances, upvote each other\'s ideas, follow the council\'s replies, and can stand for a seat and vote in council elections. The council triages what students raise; the patron keeps oversight and handles anything sensitive.',
+      },
+      {
+        q: 'How do we set it up?',
+        a: 'Students do not set the council up — the school does, in three steps. 1) Enable the module in Settings → Modules (it is on by default, but a school can switch it off). 2) Decide who oversees it: admins, principals and deputy principals are patrons automatically; for anyone else, tick the Student Council permissions under Settings → Roles & Permissions. 3) Form the council — appoint members, or run an election so students choose them.',
+      },
+      {
+        q: 'Who are the patrons and what do they see?',
+        a: 'Admin, Principal and Deputy Principal roles act as the council patron. The patron sees every case with the reporter\'s identity (including anonymous cases), internal council notes, safeguarding cases, and can appoint members, run elections, and close or reassign any case. Schools can also give a custom role the patron console by ticking the "Triage, Resolve or Escalate Cases" permission.',
+      },
+      {
+        q: 'How do we appoint council members?',
+        a: 'Open Student Council → Members → Appoint. Search for an active student, enter the position (e.g. "Class Representative" or "Chairperson"), and save. Appointed members can open the council queue on their own Student Council page and triage cases. Remove a member from the same tab when their term ends.',
+      },
+      {
+        q: 'How do council elections work?',
+        a: 'Open Student Council → Elections → New Election. Give it a title and term, set the nomination and voting dates, and add each position with its number of seats. Students nominate themselves during nominations; the patron approves or rejects candidates during vetting. During voting each student casts one secret ballot per seat. When the election is closed, Msingi counts the votes, publishes the results, and seats the winners as council members automatically.',
+      },
+      {
+        q: 'How do students file feedback?',
+        a: 'Students open Student Council from their dashboard (the megaphone icon). In "Have your say" they pick Suggestion or Grievance, a category, a title and details, then file it. They can tick "Post anonymously" to hide their name and class from other students and the council. "My cases" shows the council\'s replies and lets them reply or withdraw, "Suggestions" is the school-wide ideas wall they can upvote, and "Elections" is where they stand and vote.',
+      },
+      {
+        q: 'Who can see my name on an anonymous case?',
+        a: 'Other students see "Anonymous" and no class. Council members also see "Anonymous" — anonymity hides the reporter from them too. School staff (the patron) can always see who filed it; that is how safety follow-ups and safeguarding work. Anonymous cases are never shown to teachers in the read-only staff feed either.',
+      },
+      {
+        q: 'What happens to safeguarding cases?',
+        a: 'Anything filed under the Safety category, or any message that mentions abuse, threats, bullying, self-harm and similar disclosures, is escalated to the staff patron immediately. Council members cannot close or merge it, and it never appears in the student queue or the teacher feed. Only school staff can decide it.',
+      },
+      {
+        q: 'What do teachers see?',
+        a: 'Teachers (or any non-patron staff) granted only "View Cases & Council Queue" get a read-only staff feed: what students are saying and where each case stands. Reporter identities are masked, safeguarding and patron-held cases are excluded, internal notes are hidden, and there are no actions — no replies, no status changes. The full patron console requires a patron role or the "Triage, Resolve or Escalate Cases" permission.',
+      },
+      {
+        q: 'Who can do what here? (Roles & Permissions)',
+        a: '• View Cases & Council Queue (read-only feed; also the read half of the patron console)\n• Triage, Resolve or Escalate Cases (the patron console and case decisions)\n• Run Elections & Vet Candidates\n• Appoint Council Members\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },

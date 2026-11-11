@@ -30,6 +30,14 @@ const FAQS = [
     a: 'Use Messages in your dashboard to contact the teachers and staff your school has made available. For anything private or urgent, call the school office directly.',
   },
   {
+    q: 'How do I give feedback to the student council?',
+    a: 'Students: open Student Council from your dashboard (the megaphone icon) and choose Have your say. Pick Suggestion or Grievance, add a title and details, then file it. Tick Post anonymously to hide your name and class from other students and the council — school staff can always see who filed it, which is how safety follow-ups work. Follow the council’s replies in My cases, and upvote other students’ ideas under Suggestions.',
+  },
+  {
+    q: 'How do council elections work?',
+    a: 'When your school opens an election it appears under Elections on the Student Council page. You can stand for a position while nominations are open, and vote once per seat while voting is open. The results are published when the election closes, and the winners become council members.',
+  },
+  {
     q: 'How do I update my details?',
     a: 'Contact the school office to change your phone number, email, address or your child’s details. Some fields are intentionally locked because they affect official records.',
   },
