@@ -755,6 +755,24 @@ function TemplateFieldsCard({ fields, setFields, toast, setToast, mutation }) {
   );
 }
 
+/* Module-level on purpose — must never move back inside
+   LessonPlanSlideOver. Declared there, it was a new component type on
+   every render, so each keystroke remounted the <textarea> and dropped
+   focus ("you have to click it after every single character"). Same bug
+   class as the parent-portal compose fixes (v5.211.1, v5.240.0). */
+function LessonPlanField({ label: fieldLabel, value, onChange, rows = 2, placeholder, required = false }) {
+  return (
+    <div>
+      <label className="block text-xs font-medium text-slate-700 mb-1.5">{fieldLabel}{required && ' *'}</label>
+      <textarea
+        value={value} onChange={e => onChange(e.target.value)}
+        rows={rows} placeholder={placeholder}
+        className="w-full text-sm px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/10 resize-none"
+      />
+    </div>
+  );
+}
+
 /* ── Lesson Plan slide-over (create / edit) ───────────────────
    Topic/Subtopic are pickers sourced from this subject's existing
    syllabus_topics — never free text. A subject with no topics yet is
@@ -864,19 +882,6 @@ function LessonPlanSlideOver({ classId, className, subjectId, subjectName, strea
     });
   }
 
-  function Field({ label: fieldLabel, value, onChange, rows = 2, placeholder, required = false }) {
-    return (
-      <div>
-        <label className="block text-xs font-medium text-slate-700 mb-1.5">{fieldLabel}{required && ' *'}</label>
-        <textarea
-          value={value} onChange={e => onChange(e.target.value)}
-          rows={rows} placeholder={placeholder}
-          className="w-full text-sm px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/10 resize-none"
-        />
-      </div>
-    );
-  }
-
   return (
     <>
       <div className="fixed inset-0 bg-slate-900/30 backdrop-blur-sm z-40" onClick={onClose} />
@@ -941,36 +946,36 @@ function LessonPlanSlideOver({ classId, className, subjectId, subjectName, strea
             </>
           )}
 
-          {isOn('objectives') && <Field label={label('objectives', 'Lesson Objectives')} required={isRequired('objectives')} value={objectives} onChange={setObjectives} rows={2} placeholder="By the end of the lesson, learners should be able to…" />}
-          {isOn('activities') && <Field label={label('activities', 'Learning Activities')} required={isRequired('activities')} value={activities} onChange={setActivities} rows={3} placeholder="Introduction, main activity, plenary…" />}
-          {isOn('resources')  && <Field label={label('resources', 'Resources / References')} required={isRequired('resources')} value={resources}  onChange={setResources}  rows={2} />}
-          {isOn('remarks')    && <Field label={label('remarks', 'Remarks')} required={isRequired('remarks')} value={remarks}    onChange={setRemarks}    rows={2} />}
+          {isOn('objectives') && <LessonPlanField label={label('objectives', 'Lesson Objectives')} required={isRequired('objectives')} value={objectives} onChange={setObjectives} rows={2} placeholder="By the end of the lesson, learners should be able to…" />}
+          {isOn('activities') && <LessonPlanField label={label('activities', 'Learning Activities')} required={isRequired('activities')} value={activities} onChange={setActivities} rows={3} placeholder="Introduction, main activity, plenary…" />}
+          {isOn('resources')  && <LessonPlanField label={label('resources', 'Resources / References')} required={isRequired('resources')} value={resources}  onChange={setResources}  rows={2} />}
+          {isOn('remarks')    && <LessonPlanField label={label('remarks', 'Remarks')} required={isRequired('remarks')} value={remarks}    onChange={setRemarks}    rows={2} />}
 
           {(isOn('diff_low') || isOn('diff_middle') || isOn('diff_high')) && (
             <div>
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Differentiation</p>
               <div className="grid grid-cols-1 gap-3">
-                {isOn('diff_low')    && <Field label={label('diff_low', 'Low Ability')} required={isRequired('diff_low')} value={diffLow}  onChange={setDiffLow}  rows={2} />}
-                {isOn('diff_middle') && <Field label={label('diff_middle', 'Middle Ability')} required={isRequired('diff_middle')} value={diffMid}  onChange={setDiffMid}  rows={2} />}
-                {isOn('diff_high')   && <Field label={label('diff_high', 'High Ability')} required={isRequired('diff_high')} value={diffHigh} onChange={setDiffHigh} rows={2} />}
+                {isOn('diff_low')    && <LessonPlanField label={label('diff_low', 'Low Ability')} required={isRequired('diff_low')} value={diffLow}  onChange={setDiffLow}  rows={2} />}
+                {isOn('diff_middle') && <LessonPlanField label={label('diff_middle', 'Middle Ability')} required={isRequired('diff_middle')} value={diffMid}  onChange={setDiffMid}  rows={2} />}
+                {isOn('diff_high')   && <LessonPlanField label={label('diff_high', 'High Ability')} required={isRequired('diff_high')} value={diffHigh} onChange={setDiffHigh} rows={2} />}
               </div>
             </div>
           )}
 
-          {isOn('assessment') && <Field label={label('assessment', 'Assessment & Evaluation')} required={isRequired('assessment')} value={assessment} onChange={setAssessment} rows={2} />}
-          {isOn('homework')   && <Field label={label('homework', 'Lesson / Week Assignment')} required={isRequired('homework')} value={homework}  onChange={setHomework}   rows={2} placeholder="Homework or follow-up task" />}
+          {isOn('assessment') && <LessonPlanField label={label('assessment', 'Assessment & Evaluation')} required={isRequired('assessment')} value={assessment} onChange={setAssessment} rows={2} />}
+          {isOn('homework')   && <LessonPlanField label={label('homework', 'Lesson / Week Assignment')} required={isRequired('homework')} value={homework}  onChange={setHomework}   rows={2} placeholder="Homework or follow-up task" />}
 
           {customFieldDefs.map(f => (
-            <Field key={f.key} label={f.label} required={f.required} value={customValues[f.key] ?? ''} onChange={(v) => setCustomValues(prev => ({ ...prev, [f.key]: v }))} rows={2} />
+            <LessonPlanField key={f.key} label={f.label} required={f.required} value={customValues[f.key] ?? ''} onChange={(v) => setCustomValues(prev => ({ ...prev, [f.key]: v }))} rows={2} />
           ))}
 
           {(isOn('reflection_went_well') || isOn('reflection_better_if') || isOn('reflection_improvement')) && (
             <div>
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Reflection <span className="normal-case font-normal text-slate-400">— fill in after teaching this lesson</span></p>
               <div className="grid grid-cols-1 gap-3">
-                {isOn('reflection_went_well')   && <Field label={label('reflection_went_well', 'What went well')} required={isRequired('reflection_went_well')} value={wentWell}    onChange={setWentWell}    rows={2} />}
-                {isOn('reflection_better_if')   && <Field label={label('reflection_better_if', 'Even better if')} required={isRequired('reflection_better_if')} value={betterIf}    onChange={setBetterIf}    rows={2} />}
-                {isOn('reflection_improvement') && <Field label={label('reflection_improvement', 'Areas for improvement')} required={isRequired('reflection_improvement')} value={improvement} onChange={setImprovement} rows={2} />}
+                {isOn('reflection_went_well')   && <LessonPlanField label={label('reflection_went_well', 'What went well')} required={isRequired('reflection_went_well')} value={wentWell}    onChange={setWentWell}    rows={2} />}
+                {isOn('reflection_better_if')   && <LessonPlanField label={label('reflection_better_if', 'Even better if')} required={isRequired('reflection_better_if')} value={betterIf}    onChange={setBetterIf}    rows={2} />}
+                {isOn('reflection_improvement') && <LessonPlanField label={label('reflection_improvement', 'Areas for improvement')} required={isRequired('reflection_improvement')} value={improvement} onChange={setImprovement} rows={2} />}
               </div>
             </div>
           )}

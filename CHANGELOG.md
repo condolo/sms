@@ -6,6 +6,17 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.263.1] - 2026-11-11 - fix(lessons): lesson plan text boxes lost focus after every character typed
+
+Reported by a school: "when creating the lesson plan, the text box is not active all the time while typing, you have to click it after every single character you type." Not a recurrence of the parent-portal fixes (v5.211.1, v5.240.0) — those only covered the parent portal's message boxes. The lesson plan form had its own copy of the same bug since it was built (2026-09-23).
+
+**Root cause:** `Field`, the helper that renders every textarea in the lesson plan form, was declared *inside* `LessonPlanSlideOver`. Each keystroke updates the form's state, the form re-renders, and a brand-new `Field` component type is created — so React unmounts the old `<textarea>` (and its focus) and mounts a fresh one. Affected every text box in the form: Objectives, Learning Activities, Resources, Remarks, Differentiation (3), Assessment, Homework, Reflection (3) and every school custom field.
+
+**Fix:** moved it to module level as `LessonPlanField`, with a comment saying why it must stay there. Markup, props and saving behaviour are unchanged. A codebase-wide scan for components declared inside other components found no other case that renders a text input (the remaining nested ones in ELearningPage, Login, StudentList only render badges/cards/rows; ParentDashboard's were already handled in v5.240.0).
+
+### Fixed
+- `client/src/pages/lessons/LessonsPage.jsx` — nested `Field` → module-level `LessonPlanField`.
+
 ## [v5.263.0] - 2026-11-06 - feat(assignments): native assignments — issue, submit, grade, write to the Markbook
 
 Assignments no longer require Google Classroom. A teacher issues work to a class+subject they hold, a student submits it from the web student portal or the mobile app, and the teacher grades it from a roster that shows every student's status. When the assignment names an assessment window, the score is written to `assessment_marks` through the same `planClassroomMark` planner the Classroom webhook uses — schedule lock, mark lock and under-review checks included — and stays unpublished until the normal report-card flow releases it. A skipped write is never silent: the submission carries `markWriteStatus`/`skipReason`, and the teacher sees an exceptions banner.

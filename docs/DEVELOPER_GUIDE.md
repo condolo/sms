@@ -7522,3 +7522,15 @@ Fix: widened the match to `$or: [{ guardianOf: studentDocId }, { studentIds: stu
 - `server/routes/settings.js` — logo upload/delete routes call `invalidateLogoCache`
 - `server/__tests__/routes/students-guardian-name-sync.test.js` — new case + mock update to match the widened filter
 - `server/__tests__/email-branding.test.js` (new)
+
+## Lesson Plan Text Boxes Lost Focus on Every Keystroke (v5.263.1, 2026-11-11)
+
+`LessonPlanSlideOver` (`client/src/pages/lessons/LessonsPage.jsx`) declared its textarea helper `Field` inside its own body. A component declared inside another component is a new type on every render, so each keystroke (a state update → re-render) unmounted and remounted the `<textarea>`, dropping focus. Fixed by hoisting it to module level as `LessonPlanField`.
+
+**Rule (third time this bug class has shipped — see v5.211.1 and v5.240.0):** never declare a React component (`function Foo(props)` / `const Foo = (props) =>` rendered as `<Foo />`) inside another component's body if it renders anything focusable. Declare it at module level and pass what it needs as props. Quick check for new code:
+
+```bash
+grep -rn -E "^\s{2,}(function [A-Z][A-Za-z0-9]*\s*\(|const [A-Z][A-Za-z0-9]* = \(\{)" client/src --include=*.jsx
+```
+
+Any hit that contains an `<input>`, `<textarea>`, `<select>` or contenteditable must be hoisted.
