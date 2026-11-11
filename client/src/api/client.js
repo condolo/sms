@@ -1389,6 +1389,10 @@ export const council = {
   nominate:  (id, data)   => _council(_post(`/council/elections/${id}/nominate`, data)),
   vote:      (id, data)   => _council(_post(`/council/elections/${id}/vote`, data)),
 
+  /* Read-only feed for non-patron staff (teachers): identities masked
+     server-side, safeguarding/sensitive cases excluded, no actions. */
+  staffFeed: ()           => _council(_get('/council/staff-feed')),
+
   admin: {
     overview:   ()          => _council(_get('/council/admin/overview')),
     cases:      (params)    => _council(_get('/council/admin/cases', params)),

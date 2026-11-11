@@ -2,10 +2,11 @@
    Student Council — the student's side
 
    One page, three lanes:
-     Have your say   file a grievance or a suggestion (named by default,
-                     "hide my name from the council" per submission)
-     My cases        follow the thread, reply, withdraw, upvote
-                     suggestions
+     Have your say   file a grievance or a suggestion (named by default;
+                     anonymous hides the name AND class from students and
+                     the council — the staff patron always sees who filed
+                     it, which is how safety follow-ups work)
+     My cases        follow the thread, reply, withdraw
      Elections       stand for a seat, vote once per position, read the
                      published result
 
@@ -208,8 +209,8 @@ function SubmitCase({ onDone }) {
           <label className="flex items-start gap-2.5 cursor-pointer">
             <input type="checkbox" checked={f.anonymous} onChange={e => set('anonymous', e.target.checked)} data-testid="case-anonymous" className="mt-0.5 accent-emerald-600" />
             <span className="text-[12px] text-slate-600">
-              <span className="font-medium text-slate-800 inline-flex items-center gap-1"><EyeOff size={12} /> Hide my name from the council</span>
-              <span className="block text-slate-400 mt-0.5">Your class is still shown, and school staff can always see who filed it — that is how safety follow-ups work.</span>
+              <span className="font-medium text-slate-800 inline-flex items-center gap-1"><EyeOff size={12} /> Post anonymously</span>
+              <span className="block text-slate-400 mt-0.5">Your name and class stay hidden from other students and the council. School staff (the patron) can always see who filed it — that is how safety follow-ups work.</span>
             </span>
           </label>
           <label className="flex items-start gap-2.5 cursor-pointer">
@@ -243,7 +244,7 @@ function SubmitCase({ onDone }) {
         </div>
       </div>
       <p className="text-[11px] text-slate-400 px-1">
-        This goes to the student council, not to teachers. Anything about immediate danger should also be told to a teacher or the office.
+        This goes to the student council; teachers can follow cases read-only, with identities hidden. Anything about immediate danger should also be told to a teacher or the office.
       </p>
     </div>
   );
@@ -301,22 +302,20 @@ function MyCases({ onOpenQueue, hasQueue }) {
 }
 
 function CaseDetail({ id, onChanged }) {
-  const qc = useQueryClient();
   const q = useQuery({ queryKey: ['council', 'case', 'mine', id], queryFn: () => councilApi.case(id) });
   const [reply, setReply] = useState('');
+  const [err, setErr] = useState('');
   const c = q.data;
 
   const send = useMutation({
     mutationFn: () => councilApi.reply(id, { body: reply }),
-    onSuccess: () => { setReply(''); q.refetch(); onChanged(); },
+    onSuccess: () => { setErr(''); setReply(''); q.refetch(); onChanged(); },
+    onError: e => setErr(e?.message || 'Could not send that reply.'),
   });
   const withdraw = useMutation({
     mutationFn: () => councilApi.withdraw(id),
-    onSuccess: () => { q.refetch(); onChanged(); },
-  });
-  const upvote = useMutation({
-    mutationFn: () => councilApi.upvote(id),
-    onSuccess: () => { q.refetch(); onChanged(); },
+    onSuccess: () => { setErr(''); q.refetch(); onChanged(); },
+    onError: e => setErr(e?.message || 'Could not withdraw this case.'),
   });
 
   if (q.isLoading) return <p className="px-4 py-3 text-sm text-slate-400">Loading…</p>;
@@ -355,17 +354,17 @@ function CaseDetail({ id, onChanged }) {
         </div>
       )}
 
+      {err && <p className="text-xs text-red-600">{err}</p>}
+
       <div className="flex items-center gap-2 flex-wrap">
-        {c.kind === 'suggestion' && !['merged', 'withdrawn'].includes(c.status) && (
-          <button onClick={() => upvote.mutate()} disabled={upvote.isPending} className={`${btnGhost} ${c.upvotedByMe ? 'text-violet-700' : ''}`}>
-            <ThumbsUp size={13} /> {c.upvotedByMe ? 'Upvoted' : 'Upvote'} ({c.upvoteCount})
-          </button>
-        )}
-        {['open', 'under_review'].includes(c.status) && (
+        {/* No upvote here: this is the reporter's own case, and the server
+            refuses self-upvotes. Voting lives on the Suggestions feed. */}
+        {['open', 'under_review', 'escalated'].includes(c.status) && (
           <button
             onClick={() => { if (window.confirm('Withdraw this case? The council will stop working on it.')) withdraw.mutate(); }}
+            disabled={withdraw.isPending}
             className={`${btnGhost} text-red-500 hover:text-red-600`}
-          ><X size={13} /> Withdraw</button>
+          ><X size={13} /> {withdraw.isPending ? 'Withdrawing…' : 'Withdraw'}</button>
         )}
       </div>
     </div>
@@ -415,7 +414,11 @@ function Suggestions() {
               <p className="text-sm font-medium text-slate-800 mt-0.5">{c.title}</p>
               <p className="text-[12px] text-slate-500 mt-0.5 line-clamp-2">{c.body}</p>
               <p className="text-[11px] text-slate-400 mt-1">
-                {c.reporter?.anonymous ? 'Anonymous' : c.reporter?.name} · {c.reporter?.className} · {fmt(c.createdAt)}
+                {[
+                  c.reporter?.anonymous ? 'Anonymous' : c.reporter?.name,
+                  c.reporter?.className,
+                  fmt(c.createdAt),
+                ].filter(Boolean).join(' · ')}
               </p>
             </div>
             <button
@@ -574,22 +577,27 @@ function Queue() {
   const [openId, setOpenId] = useState(null);
   const [reply, setReply] = useState('');
   const [note, setNote] = useState('');
+  const [err, setErr] = useState('');
 
   const claim = useMutation({
     mutationFn: (id) => councilApi.assign(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['council'] }),
+    onSuccess: () => { setErr(''); qc.invalidateQueries({ queryKey: ['council'] }); },
+    onError: e => setErr(e?.message || 'Could not claim this case.'),
   });
   const send = useMutation({
     mutationFn: ({ id, internal }) => councilApi.reply(id, { body: internal ? note : reply, internal }),
-    onSuccess: () => { setReply(''); setNote(''); qc.invalidateQueries({ queryKey: ['council'] }); q.refetch(); },
+    onSuccess: () => { setErr(''); setReply(''); setNote(''); qc.invalidateQueries({ queryKey: ['council'] }); q.refetch(); },
+    onError: e => setErr(e?.message || 'Could not send that reply.'),
   });
   const decide = useMutation({
     mutationFn: ({ id, status, note: n }) => councilApi.setStatus(id, { status, note: n }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['council'] }),
+    onSuccess: () => { setErr(''); qc.invalidateQueries({ queryKey: ['council'] }); },
+    onError: e => setErr(e?.message || 'Could not update the case.'),
   });
   const escalate = useMutation({
     mutationFn: (id) => councilApi.escalate(id, note),
-    onSuccess: () => { setNote(''); qc.invalidateQueries({ queryKey: ['council'] }); },
+    onSuccess: () => { setErr(''); setNote(''); qc.invalidateQueries({ queryKey: ['council'] }); },
+    onError: e => setErr(e?.message || 'Could not escalate this case.'),
   });
 
   if (q.isLoading) return <div className="py-16 text-center text-sm text-slate-400"><Loader2 size={16} className="animate-spin inline mr-2" />Loading the queue…</div>;
@@ -617,7 +625,13 @@ function Queue() {
                 {c.assignedTo && <span className="text-[10px] text-amber-600 font-semibold">Assigned {c.assignedTo.name}</span>}
               </div>
               <p className="text-sm font-medium text-slate-800 truncate">{c.title}</p>
-              <p className="text-[11px] text-slate-400">{c.reporter?.anonymous ? 'Anonymous' : c.reporter?.name} · {c.reporter?.className} · {fmt(c.updatedAt)}</p>
+              <p className="text-[11px] text-slate-400">
+                {[
+                  c.reporter?.anonymous ? 'Anonymous' : c.reporter?.name,
+                  c.reporter?.className,
+                  fmt(c.updatedAt),
+                ].filter(Boolean).join(' · ')}
+              </p>
             </div>
             <ChevronRight size={14} className={`text-slate-300 transition ${openId === c.id ? 'rotate-90' : ''}`} />
           </button>
@@ -657,12 +671,19 @@ function Queue() {
                     <button onClick={() => send.mutate({ id: c.id, internal: true })} disabled={!note.trim()} className={btnGhost}>
                       <Lock size={12} /> Add internal note
                     </button>
-                    <button onClick={() => decide.mutate({ id: c.id, status: 'resolved', note })} className={btnGhost}>
-                      <CheckCircle2 size={13} /> Resolve
-                    </button>
-                    <button onClick={() => escalate.mutate(c.id)} className={`${btnGhost} text-red-500 hover:text-red-600`}>
-                      <AlertTriangle size={13} /> Escalate to staff
-                    </button>
+                    {/* Safeguarding cases are closed by staff only, and an
+                        already-escalated case cannot be escalated again —
+                        hide what the server would refuse. */}
+                    {!c.safeguarding && (
+                      <button onClick={() => decide.mutate({ id: c.id, status: 'resolved', note })} disabled={decide.isPending} className={btnGhost}>
+                        <CheckCircle2 size={13} /> {decide.isPending ? 'Saving…' : 'Resolve'}
+                      </button>
+                    )}
+                    {c.status !== 'escalated' && (
+                      <button onClick={() => escalate.mutate(c.id)} disabled={escalate.isPending} className={`${btnGhost} text-red-500 hover:text-red-600`}>
+                        <AlertTriangle size={13} /> {escalate.isPending ? 'Escalating…' : 'Escalate to staff'}
+                      </button>
+                    )}
                   </div>
                 </div>
               </details>
@@ -670,6 +691,7 @@ function Queue() {
           )}
         </div>
       ))}
+      {err && <p className="text-xs text-red-600 px-1">{err}</p>}
     </div>
   );
 }

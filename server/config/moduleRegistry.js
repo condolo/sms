@@ -253,7 +253,11 @@ const MODULE_REGISTRY = [
   /* Student Council — grievances and suggestions filed by students, triaged
      by elected/appointed council members, overseen by a staff patron.
      Safeguarding cases are staff-only to close (see routes/council.js).
-     navOrder sits beside Behaviour because both are student-services desks. */
+     Granting a non-patron role only "View Cases" gives it the read-only
+     staff feed (identities masked, safeguarding excluded); the identity-
+     revealing patron console additionally needs a patron role or the
+     "Triage" grant. navOrder sits beside Behaviour because both are
+     student-services desks. */
   { key: 'council', label: 'Student Council', section: 'Student Services', icon: 'Megaphone', navRoute: '/council', navLabel: 'Student Council', navOrder: 9, subs: [
     { key: 'view',      label: 'View Cases & Council Queue' },
     { key: 'manage',    label: 'Triage, Resolve or Escalate Cases' },
