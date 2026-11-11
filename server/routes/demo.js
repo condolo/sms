@@ -35,6 +35,7 @@ const RequestSchema = z.object({
   email: z.string().trim().email().max(300),
   phone: z.string().trim().max(40).optional().or(z.literal('')),
   schoolSize: z.string().trim().max(40).optional().or(z.literal('')),
+  referralCode: z.string().trim().max(40).optional().or(z.literal('')),
   turnstileToken: z.string().max(3000).optional().or(z.literal('')),
 });
 

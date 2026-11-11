@@ -55,6 +55,9 @@ const PLATFORM_COLLECTIONS = new Set([
   'queue_jobs',           // C11 Phase 1 / ADR-0006 — job queue; not every job is school-scoped
   'identities',           // C8/MR-001 — org/credential-scoped, not schoolId-shaped (see above)
   'platform_operators',   // named SaaS operator accounts (platform.js login) — no schoolId concept, same shape as platform_settings
+  'referral_partners',    // platform growth program — an outside person, no schoolId concept
+  'referral_conversions', // one per referred school, platform-wide by design
+  'referral_payout_requests', // manual payout queue, platform-wide by design
 ]);
 
 /* ── Tenant context ─────────────────────────────────────────────

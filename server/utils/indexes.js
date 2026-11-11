@@ -705,6 +705,44 @@ const INDEXES = [
     ],
   },
 
+  /* ── referral program ─────────────────────────────────────
+     Code and email are the two public lookup keys and must be unique:
+     the unique index is the final authority behind createPartner()'s
+     retry loop. The hub token is stored only as a SHA-256 hash, and its
+     unique index stops two partners colliding. Conversions are one per
+     school (a school converts once), and the reward-status index serves
+     the console's "what is still payable" query. */
+  {
+    col: 'referral_partners',
+    indexes: [
+      { key: { code: 1 },         name: 'referral_code_unique',  unique: true },
+      { key: { email: 1 },        name: 'referral_email_unique', unique: true },
+      { key: { hubTokenHash: 1 }, name: 'referral_hub_token',    unique: true, sparse: true },
+      { key: { status: 1, createdAt: -1 }, name: 'referral_status_created' },
+    ],
+  },
+  {
+    col: 'referral_conversions',
+    indexes: [
+      { key: { schoolId: 1 },              name: 'referral_school_unique', unique: true },
+      { key: { partnerId: 1, createdAt: -1 }, name: 'referral_partner_created' },
+      { key: { rewardStatus: 1, createdAt: -1 }, name: 'referral_reward_status' },
+      { key: { payoutRequestId: 1 },        name: 'referral_conversion_request', sparse: true },
+      { key: { id: 1 },                    name: 'referral_conv_id', unique: true, sparse: true },
+    ],
+  },
+  {
+    col: 'referral_payout_requests',
+    indexes: [
+      { key: { id: 1 },                    name: 'referral_request_id', unique: true, sparse: true },
+      { key: { partnerId: 1, createdAt: -1 }, name: 'referral_request_partner' },
+      { key: { status: 1, requestedAt: 1 }, name: 'referral_request_status' },
+      // One open request per partner: a second concurrent request gets
+      // E11000 instead of locking the same conversions twice.
+      { key: { partnerId: 1 },             name: 'referral_one_open_request', unique: true, partialFilterExpression: { status: 'requested' } },
+    ],
+  },
+
   {
     col: 'lesson_coverage',
     indexes: [
@@ -1026,6 +1064,7 @@ const INDEXES = [
     indexes: [
       { key: { organizationId: 1 }, name: 'schools_org', sparse: true },
       { key: { slug: 1 },           name: 'schools_slug', unique: true, sparse: true },
+      { key: { referralPartnerId: 1 }, name: 'schools_referral_partner', sparse: true },
     ],
   },
 

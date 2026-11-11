@@ -1559,6 +1559,143 @@ async function sendTicketNotice({ to, ref, subject, priority, source, schoolName
   return _send(to, `New support ticket ${ref} — ${subject}`, html);
 }
 
+/* ──────────────────────────────────────────────────────────────
+   REFERRAL PROGRAM — partner welcome, conversion, payout
+   ────────────────────────────────────────────────────────────── */
+
+async function sendReferralPartnerWelcome({ name, email: toEmail, code, onboardUrl, demoUrl, hubUrl, bountyAmount, currency, payoutMethodLabel, payout }) {
+  const money = `${currency || 'KES'} ${Number(bountyAmount || 0).toLocaleString()}`;
+  const html = await _wrap(`
+    <h2>You're a Msingi referral partner</h2>
+    <p>Hi ${_escapeHtml(name || 'there')},</p>
+    <p>Share your code with a school. When they sign up and become a paying customer, you earn <strong>${money}</strong>.</p>
+    <div class="info" style="text-align:center">
+      <p style="font-size:13px;color:#6b7280;margin:0 0 4px">Your referral code</p>
+      <p style="font-size:28px;letter-spacing:3px;font-weight:700;color:#1e1b4b;margin:0">${_escapeHtml(code)}</p>
+    </div>
+    <p><strong>Two ways to share it:</strong></p>
+    <p>• New school onboarding: <a href="${_escapeHtml(onboardUrl)}" style="color:#4f46e5">${_escapeHtml(onboardUrl)}</a></p>
+    <p>• Book a demo: <a href="${_escapeHtml(demoUrl)}" style="color:#4f46e5">${_escapeHtml(demoUrl)}</a></p>
+    <div class="info">
+      <p><strong>Payout method on file</strong></p>
+      <p>${_escapeHtml(payoutMethodLabel || 'M-Pesa')}</p>
+      ${payout?.method === 'bank' && payout?.bankAccountName ? `<p><strong>Account name:</strong> ${_escapeHtml(payout.bankAccountName)}</p>` : ''}
+      <p style="font-size:12px;color:#6b7280">You can change this from your dashboard before requesting a payout.</p>
+    </div>
+    <div class="info">
+      <p><strong>How it works</strong></p>
+      <p>1. The school enters your code when it signs up.</p>
+      <p>2. We record the referral against that school.</p>
+      <p>3. After their first subscription payment, the reward appears in your dashboard.</p>
+      <p>4. Request a payout; our team reviews it, settles it manually and emails you the reference.</p>
+    </div>
+    ${hubUrl ? `<p style="text-align:center"><a class="btn" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:15px;margin:8px 0" href="${_escapeHtml(hubUrl)}">Open your referral dashboard →</a></p>
+    <p style="font-size:12px;color:#9ca3af">Keep this link private. Anyone with it can view your referral activity and payout settings.</p>` : ''}
+  `);
+  return _send(toEmail, `Your Msingi referral code: ${code}`, html);
+}
+
+async function sendReferralConversion({ name, email: toEmail, schoolName, bountyAmount, currency, hubUrl }) {
+  const money = `${currency || 'KES'} ${Number(bountyAmount || 0).toLocaleString()}`;
+  const html = await _wrap(`
+    <h2>Your referral converted 🎉</h2>
+    <p>Hi ${_escapeHtml(name || 'there')},</p>
+    <p><strong>${_escapeHtml(schoolName || 'A school you referred')}</strong> has made its first subscription payment.</p>
+    <div class="info">
+      <p><strong>Reward:</strong> ${money}</p>
+      <p><strong>Status:</strong> Pending payout</p>
+    </div>
+    <p>Our team will settle this by M-Pesa and send you the reference. No action is needed from you.</p>
+    ${hubUrl ? `<p><a href="${_escapeHtml(hubUrl)}" style="color:#4f46e5">View your referral dashboard →</a></p>` : ''}
+  `);
+  return _send(toEmail, `Referral converted — ${schoolName || 'a school'} joined Msingi`, html);
+}
+
+async function sendReferralPayout({ name, email: toEmail, amount, currency, method, reference, schoolNames = [] }) {
+  const money = `${currency || 'KES'} ${Number(amount || 0).toLocaleString()}`;
+  const html = await _wrap(`
+    <h2>Your referral reward has been paid</h2>
+    <p>Hi ${_escapeHtml(name || 'there')},</p>
+    <p>We have settled <strong>${money}</strong> for the referral${schoolNames.length > 1 ? 's' : ''} below.</p>
+    <div class="info">
+      <p><strong>Amount:</strong> ${money}</p>
+      <p><strong>Method:</strong> ${_escapeHtml(method || 'M-Pesa')}</p>
+      ${reference ? `<p><strong>Reference:</strong> ${_escapeHtml(reference)}</p>` : ''}
+      ${schoolNames.length ? `<p><strong>Referred school${schoolNames.length > 1 ? 's' : ''}:</strong> ${schoolNames.map(_escapeHtml).join(', ')}</p>` : ''}
+    </div>
+    <p>Thank you for helping more schools run on Msingi. Keep sharing your code.</p>
+  `);
+  return _send(toEmail, `Referral reward paid — ${money}`, html);
+}
+
+async function sendReferralPayoutRequested({ name, email: toEmail, amount, currency, methodLabel }) {
+  const money = `${currency || 'KES'} ${Number(amount || 0).toLocaleString()}`;
+  const html = await _wrap(`
+    <h2>Payout request received</h2>
+    <p>Hi ${_escapeHtml(name || 'there')},</p>
+    <p>Your request for <strong>${money}</strong> has been received.</p>
+    <div class="info">
+      <p><strong>Amount:</strong> ${money}</p>
+      <p><strong>Payout to:</strong> ${_escapeHtml(methodLabel || 'your saved payout details')}</p>
+      <p><strong>Status:</strong> Under review</p>
+    </div>
+    <p>Payouts are reviewed and settled manually. We will email you the M-Pesa or bank reference once it is paid.</p>
+    <p>If your payout details are wrong, contact support before the payout is settled.</p>
+  `);
+  return _send(toEmail, `Payout request received — ${money}`, html);
+}
+
+async function sendReferralPayoutRequestAlert({ partnerName, partnerEmail, amount, currency, methodLabel, payout, requestId }) {
+  const money = `${currency || 'KES'} ${Number(amount || 0).toLocaleString()}`;
+  const to = PLATFORM_EMAIL || SUPPORT_EMAIL;
+  const detailLine = payout?.method === 'bank'
+    ? `<p><strong>Bank:</strong> ${_escapeHtml(payout.bankName || '')}</p>
+       <p><strong>Account name:</strong> ${_escapeHtml(payout.bankAccountName || '')}</p>
+       <p><strong>Account number:</strong> ${_escapeHtml(payout.bankAccountNumber || '')}</p>
+       ${payout.bankBranch ? `<p><strong>Branch:</strong> ${_escapeHtml(payout.bankBranch)}</p>` : ''}`
+    : `<p><strong>M-Pesa:</strong> ${_escapeHtml(payout?.phone || '')}</p>`;
+
+  const html = await _wrap(`
+    <h2>Referral payout request</h2>
+    <p>A partner has requested a manual payout.</p>
+    <div class="info">
+      <p><strong>Amount:</strong> ${money}</p>
+      <p><strong>Partner:</strong> ${_escapeHtml(partnerName || '')}</p>
+      <p><strong>Email:</strong> ${_escapeHtml(partnerEmail || '')}</p>
+      <p><strong>Method:</strong> ${_escapeHtml(methodLabel || '')}</p>
+      ${detailLine}
+      <p><strong>Request ID:</strong> ${_escapeHtml(requestId || '')}</p>
+    </div>
+    <p>Open Platform → Referrals, review the request, then mark it paid with the M-Pesa or bank reference.</p>
+  `);
+  return _send(to, `Referral payout request — ${money}`, html);
+}
+
+async function sendReferralPayoutDetailsUpdated({ name, email: toEmail, methodLabel }) {
+  const html = await _wrap(`
+    <h2>Your payout details changed</h2>
+    <p>Hi ${_escapeHtml(name || 'there')},</p>
+    <p>Your payout destination was updated to:</p>
+    <div class="info">
+      <p><strong>${_escapeHtml(methodLabel || 'Saved payout details')}</strong></p>
+    </div>
+    <p>If you did not make this change, reply to this email immediately and do not request a payout.</p>
+  `);
+  return _send(toEmail, 'Your Msingi payout details changed', html);
+}
+
+async function sendReferralPayoutRejected({ name, email: toEmail, amount, currency, reason }) {
+  const money = `${currency || 'KES'} ${Number(amount || 0).toLocaleString()}`;
+  const html = await _wrap(`
+    <h2>Payout request needs attention</h2>
+    <p>Hi ${_escapeHtml(name || 'there')},</p>
+    <p>Your payout request for <strong>${money}</strong> was not settled.</p>
+    ${reason ? `<div class="info"><p><strong>Reason:</strong> ${_escapeHtml(reason)}</p></div>` : ''}
+    <p>Update your payout details in the dashboard or reply to this email, then request the payout again.</p>
+  `);
+  return _send(toEmail, 'Your referral payout request was not settled', html);
+}
+
 module.exports = {
   invalidateSmtpCache,
   invalidateLogoCache,
@@ -1612,4 +1749,11 @@ module.exports = {
   sendPayrollStatusEmail,
   sendCouncilUpdate,
   sendPlatformOperatorInvite,
+  sendReferralPartnerWelcome,
+  sendReferralConversion,
+  sendReferralPayout,
+  sendReferralPayoutRequested,
+  sendReferralPayoutRequestAlert,
+  sendReferralPayoutDetailsUpdated,
+  sendReferralPayoutRejected,
 };

@@ -32,6 +32,7 @@ const NAV = [
     ],
   },
   { label: 'Pricing',   href: '/pricing'  },
+  { label: 'Refer & Earn', href: '/refer' },
   { label: 'Security',  href: '/security' },
   { label: 'About',     href: '/about'    },
 ];

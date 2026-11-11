@@ -201,6 +201,20 @@ const ACTIONS = {
   'platform.backup_restored':   { severity: 'critical' },
   'platform.superadmin_added':  { severity: 'warn' },
   'platform.superadmin_password_reset': { severity: 'warn' }, // same tier as user.password_reset_by_admin
+  // Referral program — money leaves the platform on a payout, so every
+  // state change that affects who is owed what is at least 'warn'.
+  'platform.referral_partner.created':       { severity: 'info' },
+  'platform.referral_partner.status_changed': { severity: 'warn' },
+  'platform.referral_partner.updated':       { severity: 'warn' },
+  'platform.referral_conversion.recorded':   { severity: 'info' },
+  'platform.referral_payout.recorded':       { severity: 'warn' },
+  'platform.referral_payout_request.paid':   { severity: 'warn' },
+  'platform.referral_payout_request.rejected': { severity: 'warn' },
+  'platform.referral_settings.updated':      { severity: 'warn' },
+  'platform.referral.attached':              { severity: 'warn' },
+  'referral.payout_details_updated':         { severity: 'warn' },
+  'referral.payout_requested':               { severity: 'info' },
+  'referral.dashboard_link_resent':          { severity: 'info' },
 };
 
 /**

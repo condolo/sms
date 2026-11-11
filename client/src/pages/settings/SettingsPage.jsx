@@ -4,7 +4,7 @@
    timezone fields, houses config, no old components, no alert()
    ============================================================ */
 import { useState, useRef, useMemo } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useEffect } from 'react';
@@ -4061,6 +4061,10 @@ function SubscriptionTab() {
   async function handlePay() {
     if (!phone.trim())            { setError('Enter the M-Pesa number to charge.'); return; }
     if (!activeStudentCount)      { setError('No active students found — check the Students module before paying.'); return; }
+    if (invoice && invoice.totalAmount < 1) {
+      setError('This invoice is fully covered by referral credit — no payment is due.');
+      return;
+    }
     setLoading(true); setError(''); setResult(null);
     try {
       // studentCount is sent for logging/visibility only — the server
@@ -4184,6 +4188,16 @@ function SubscriptionTab() {
                 <p className="text-[10px] text-indigo-500">{invoice.activeCount} students × KSh {invoice.ratePerStudent}</p>
               </div>
             </div>
+            {invoice.referralDiscount && (
+              <div className="flex items-center justify-between pt-2 border-t border-indigo-200/60 text-[11px] text-emerald-700">
+                <span>
+                  Referral credit
+                  {invoice.referralDiscount.type === 'percent' ? ` (${invoice.referralDiscount.value}%)` : ''}
+                  {invoice.originalAmount ? ` · was KSh ${invoice.originalAmount.toLocaleString()}` : ''}
+                </span>
+                <span className="font-semibold">- KSh {invoice.referralDiscount.amount.toLocaleString()}</span>
+              </div>
+            )}
           </div>
         ) : (
           <div className="space-y-3">
@@ -4249,11 +4263,11 @@ function SubscriptionTab() {
             <button
               type="button"
               onClick={handlePay}
-              disabled={loading || !phone.trim() || countLoading || !activeStudentCount}
+              disabled={loading || !phone.trim() || countLoading || !activeStudentCount || (invoice && invoice.totalAmount < 1)}
               className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
             >
               {loading ? <Loader2 size={14} className="animate-spin" /> : <Smartphone size={14} />}
-              Pay KSh {termAmount.toLocaleString()}
+              {invoice && invoice.totalAmount < 1 ? 'No payment due' : `Pay KSh ${termAmount.toLocaleString()}`}
             </button>
           </div>
         </div>
@@ -4267,6 +4281,20 @@ function SubscriptionTab() {
 
       {/* Billing history */}
       <BillingHistory />
+
+      {/* Referral program — anyone can refer a school; this is the
+          in-app entry point for the school's own admin. */}
+      <div className="rounded-xl border border-indigo-200 bg-gradient-to-r from-indigo-50 to-violet-50 p-5 flex flex-wrap items-center gap-4">
+        <div className="flex-1 min-w-[220px]">
+          <h3 className="text-sm font-semibold text-indigo-900">Know a school that should run on Msingi?</h3>
+          <p className="mt-1 text-xs text-indigo-700/80">
+            Refer them and earn a cash reward after their first subscription payment — no account or limit required.
+          </p>
+        </div>
+        <Link to="/refer" className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-indigo-700">
+          Get your referral code <ArrowRight size={13} />
+        </Link>
+      </div>
     </div>
   );
 }
@@ -4303,6 +4331,11 @@ function BillingHistory() {
             </div>
             <div className="text-right shrink-0">
               <p className="text-sm font-semibold text-slate-800">KSh {inv.totalAmount.toLocaleString()}</p>
+              {inv.referralDiscount && (
+                <p className="text-[10px] text-emerald-600">
+                  Referral -KSh {inv.referralDiscount.amount.toLocaleString()}
+                </p>
+              )}
               {inv.paidAt && <p className="text-[10px] text-slate-400">{new Date(inv.paidAt).toLocaleDateString('en-GB')}</p>}
             </div>
             <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border capitalize ${STATUS_STYLE[inv.status] || 'bg-slate-50 text-slate-600 border-slate-200'}`}>

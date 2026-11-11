@@ -12,6 +12,9 @@ import ResetPassword from '@/pages/ResetPassword.jsx';
 import Landing from '@/pages/Landing.jsx';
 import Contact       from '@/pages/Contact.jsx';
 import DemoRequest   from '@/pages/DemoRequest.jsx';
+import ReferralProgram from '@/pages/ReferralProgram.jsx';
+import ReferralHub     from '@/pages/ReferralHub.jsx';
+import ReferralLogin   from '@/pages/ReferralLogin.jsx';
 import DemoExpired   from '@/pages/DemoExpired.jsx';
 import SupportPage    from '@/pages/support/SupportPage.jsx';
 import Plans         from '@/pages/Plans.jsx';
@@ -163,6 +166,11 @@ export const router = createBrowserRouter([
   // Self-serve demo request + expiry landing (public)
   { path: '/demo', element: <DemoRequest /> },
   { path: '/demo-expired', element: <DemoExpired /> },
+
+  // Public referral program: join, sign-in (email magic link), private dashboard
+  { path: '/refer', element: <ReferralProgram /> },
+  { path: '/refer/login', element: <ReferralLogin /> },
+  { path: '/refer/hub/:token', element: <ReferralHub /> },
 
   // Support tickets — any authenticated school user (guard inside the page)
   { path: '/support', element: <SupportPage /> },

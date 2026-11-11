@@ -17,6 +17,7 @@ const { _model }        = require('../utils/model');
 const AuditService      = require('../services/audit');
 const email             = require('../utils/email');
 const demo              = require('../utils/demo');
+const referralService   = require('./referralService');
 
 const OTP_TTL_MS        = 10 * 60 * 1000;
 const OTP_MAX_ATTEMPTS  = 5;
@@ -31,6 +32,7 @@ const MAX_PER_EMAIL     = 1;
 const CLONE_DENY = new Set([
   'schools', 'organizations', 'platform_operators', 'platform_settings',
   'landing_content', 'system_announcements', 'release_certificates',
+  'referral_partners', 'referral_conversions',
   'app_migrations', 'queue_jobs', 'audit_logs', 'security_events',
   'login_failures', 'sessions', 'identities', 'memberships',
   'backup_logs', 'billing_snapshots', 'notification_digests', 'notifications',
@@ -73,7 +75,7 @@ async function _verifyTurnstile(token, ip) {
 }
 
 /* ── Request ─────────────────────────────────────────────────── */
-async function createRequest({ name, schoolName, role, email: emailAddr, phone, schoolSize, turnstileToken, ip, userAgent }) {
+async function createRequest({ name, schoolName, role, email: emailAddr, phone, schoolSize, referralCode, turnstileToken, ip, userAgent }) {
   const email_ = String(emailAddr || '').trim().toLowerCase();
   const Requests = _model('demo_requests');
   const now = new Date();
@@ -92,6 +94,16 @@ async function createRequest({ name, schoolName, role, email: emailAddr, phone, 
     return { ok: false, code: 'CAPTCHA_FAILED', message: 'Captcha verification failed — please try again.' };
   }
 
+  /* Referral code, if entered, must resolve before anything is stored —
+     same "never silently lose the referrer" rule as onboarding. */
+  let referralAttribution = null;
+  const enteredReferral = referralService.normalizeCode(referralCode);
+  if (enteredReferral) {
+    const resolved = await referralService.resolveAttribution({ code: enteredReferral, email: email_ });
+    if (!resolved.ok) return { ok: false, code: resolved.code, message: resolved.message };
+    referralAttribution = { ...resolved.attribution, referralSource: 'demo' };
+  }
+
   const id = `dr_${crypto.randomUUID()}`;
   const code = _randomOtp();
   const doc = {
@@ -102,6 +114,7 @@ async function createRequest({ name, schoolName, role, email: emailAddr, phone, 
     email: email_,
     phone: String(phone || '').trim().slice(0, 40),
     schoolSize: String(schoolSize || '').trim().slice(0, 40),
+    ...(referralAttribution || {}),
     status: 'pending_otp',
     ip,
     userAgent: String(userAgent || '').slice(0, 300),
@@ -373,6 +386,12 @@ async function _provisionDemo(requestId) {
     status: 'active',
     isDemo: true,
     demoRequestId: req.id,
+    ...(req.referralPartnerId ? {
+      referralCode: req.referralCode || null,
+      referralPartnerId: req.referralPartnerId,
+      referralAttributedAt: req.referralAttributedAt || now.toISOString(),
+      referralSource: req.referralSource || 'demo',
+    } : {}),
     demoExpiresAt: expiresAt.toISOString(),
     expiresAt: expiresAt.toISOString(),
     demoExtensionCount: 0,
