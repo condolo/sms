@@ -138,6 +138,29 @@ For migration of existing students, use **Students → Import** rather than crea
 - Record unresolved follow-ups and handovers in the school's approved tracker.
 - Sign out on shared devices and secure paper files.
 
+## 11a. Public enquiry form (2026-11)
+
+The Admissions module includes a school-branded public enquiry form, separate from the full application. It is **off by default** and must be enabled deliberately:
+
+1. Open **Settings → School → Public Enquiry Form** and switch it on.
+2. Copy the link shown (`https://<your-school>/enquire/<slug>`) and publish it on the school website, WhatsApp, or a reception QR code.
+3. New submissions appear in **Admissions → Enquiry** with a **Web form** badge; staff holding Admissions permissions are notified in-app.
+
+The form captures, all optionally: parent name, phone, email, the learner's age, the class being asked about, whether the family has had a school tour, whether the learner has completed an assessment, and where they heard about the school. At least one contact method (name, phone or email) is required so the school can follow up; the server refuses a completely empty submission. Tour and assessment are tri-state (Yes / No / Not sure) so "not yet" stays distinguishable from "not asked".
+
+Staff can edit the same facts from an applicant's detail panel (**Enquiry Follow-up**), and the source, tour, assessment, learner age and heard-about fields are included in the CSV export. Enquiries stay at the **Enquiry** stage until the family chooses to apply; the full application requirements (DOB, gender, guardian, etc.) apply from then on, not to the enquiry.
+
+Operational rules: the endpoint is unauthenticated but rate-limited and honeypot-protected, classes are school-scoped, and unknown or disabled schools return a plain 404 so slugs cannot be enumerated. Disabling the form (or the Admissions module itself) takes it offline immediately.
+
+### Follow-up routine (suggested)
+
+- **Reply within one working day.** New enquiries notify staff who hold Admissions permissions; someone should own the first call or message the same day.
+- **Check the follow-up filters every morning.** "Tour not had / not sure", "Assessment not done / not sure" and "From the web form" are the shortest list of families who still need something.
+- **Update the flags immediately after each step.** Set the tour and assessment to Yes/No as they happen, and add a one-line note so the next person has context.
+- **Review "where did you hear about us" once a term.** Spend marketing effort where families actually come from; the CSV export gives the raw list.
+- **Keep the board honest.** Move a family to Application only when they decide to apply; withdraw or reject cold leads rather than leaving them at Enquiry forever.
+- **Export weekly** if the admissions team meets weekly — the CSV includes the ref, age, source, heard-about, tour and assessment columns.
+
 ## 12. Privacy, safety, and record quality
 
 Applicant records contain children's and guardians' personal information. Use only your own account, access only records needed for your duties, and share information only with authorized staff or guardians through approved channels. Do not export, photograph, copy to personal storage, or send applicant lists through personal email or messaging apps.
@@ -166,6 +189,6 @@ Run a controlled, non-production or approved test application through creation, 
 
 ## 15. Source notes and change history
 
-This guide was checked against the admissions UI and `server/routes/admissions.js`, plus the existing Admissions module flow and the current changelog through v5.194.0. Relevant documented behavior includes school-specific admission requirements (v5.59.0), setting fee discounts before enrollment and guardian linking (v5.66.0), legacy enrollment validation (v5.57.0), and enrollment lifecycle safeguards and completed-record visibility (v5.82.0–v5.86.0). The front-office reception workflow is described as a school procedure because the current system does not provide a visitor register or enquiry CRM. For implementation detail, see [Admissions module flow](module-flows/admissions.md), [School Administrator Guide](SCHOOL_ADMIN_GUIDE.md), and [CHANGELOG.md](../CHANGELOG.md).
+This guide was checked against the admissions UI and `server/routes/admissions.js`, plus the existing Admissions module flow and the current changelog through v5.194.0. Relevant documented behavior includes school-specific admission requirements (v5.59.0), setting fee discounts before enrollment and guardian linking (v5.66.0), legacy enrollment validation (v5.57.0), and enrollment lifecycle safeguards and completed-record visibility (v5.82.0–v5.86.0). The front-office reception workflow is described as a school procedure because the current system does not provide a visitor register; initial enquiries are captured by the public enquiry form (see §11a). For implementation detail, see [Admissions module flow](module-flows/admissions.md), [School Administrator Guide](SCHOOL_ADMIN_GUIDE.md), and [CHANGELOG.md](../CHANGELOG.md).
 
 **Maintenance note:** Keep this guide aligned with the admissions screens, server validation, role permissions, and `CHANGELOG.md`. If behavior changes, update this manual and its module-flow link in the same documentation change. Confirm any version/date-specific statements against the changelog before publishing a revised edition.
