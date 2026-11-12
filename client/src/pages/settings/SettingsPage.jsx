@@ -20,7 +20,7 @@ import {
   Upload, ImageIcon, KeyRound, RefreshCw,
   PlusCircle, ChevronRight, AlertCircle, Archive,
   MonitorPlay, WifiOff, ClipboardList,
-  Megaphone, Copy,
+  Megaphone, Copy, ExternalLink, GraduationCap,
 } from 'lucide-react';
 import { sections as sectionsApi, teachers as teachersApi } from '@/api/client.js';
 import { settings as settingsApi } from '@/api/client.js';
@@ -799,13 +799,14 @@ function AdmissionRequirementsSection({ form: f, set }) {
    never appear for a school that did not ask for it. The link is
    derived from the school's own slug, so there is nothing to type.
    ══════════════════════════════════════════════════════════════ */
-function PublicEnquirySection({ form: f, set }) {
+function PublicEnquirySection({ form: f, set, saved }) {
   /* The session does not carry the slug; the portal URL does. Same detector
      the login/API client use, so the link always points at this school. */
   const detected = detectSchool();
   const schoolSlug = f.slug || detected.slug || '';
   const ac = f.admissionConfig ?? {};
   const enabled = ac.publicEnquiry?.enabled === true;
+  const savedEnabled = saved?.admissionConfig?.publicEnquiry?.enabled === true;
   const [copied, setCopied] = useState(false);
   const link = schoolSlug ? `${window.location.origin}/enquire/${schoolSlug}` : '';
 
@@ -867,7 +868,25 @@ function PublicEnquirySection({ form: f, set }) {
             >
               <Copy size={12} /> {copied ? 'Copied' : 'Copy'}
             </button>
+            <a
+              href={link}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 border border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-600 text-xs font-medium px-3 rounded-lg transition-colors"
+            >
+              <ExternalLink size={12} /> Open
+            </a>
           </div>
+          {enabled && !savedEnabled && (
+            <p className="text-[11px] font-medium text-amber-600 mt-1.5">
+              Not live yet — click Save settings below to publish.
+            </p>
+          )}
+          {!enabled && savedEnabled && (
+            <p className="text-[11px] font-medium text-amber-600 mt-1.5">
+              Still live until you save this change.
+            </p>
+          )}
           <p className="text-[11px] text-slate-400 mt-1.5">
             Enquiries appear in Admissions → Enquiry. Reporter details are visible only to your staff.
           </p>
@@ -1045,10 +1064,22 @@ function StaffResponsibilitiesPanel() {
 /* ══════════════════════════════════════════════════════════════
    SCHOOL SETTINGS TAB
    ══════════════════════════════════════════════════════════════ */
+const SCHOOL_TABS = [
+  { id: 'profile',    label: 'Profile & Branding',    Icon: Building2 },
+  { id: 'regional',   label: 'Regional & Houses',     Icon: Globe },
+  { id: 'academics',  label: 'Academics & Staff',     Icon: ClipboardList },
+  { id: 'portals',    label: 'Portals & Learning',    Icon: MonitorPlay },
+  { id: 'admissions', label: 'Admissions & Payments', Icon: GraduationCap },
+];
+
 function SchoolTab() {
   const qc         = useQueryClient();
   const patchSchool = useAuthStore(s => s.patchSchool);
   const [toast, setToast] = useState(null);
+  /* The School tab used to be one very long scroll. Sub-tabs expose the
+     groups directly; the form state is shared, so switching tabs never
+     loses an unsaved edit and the one Save bar still applies to all. */
+  const [schoolTab, setSchoolTab] = useState('profile');
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['settings', 'school'],
@@ -1119,7 +1150,28 @@ function SchoolTab() {
         </AnimatePresence>
       </div>
 
+      {/* School sub-tabs — every group is one click away instead of a long scroll. */}
+      <div className="flex items-center gap-1 border-b border-slate-200 overflow-x-auto -mx-1 px-1">
+        {SCHOOL_TABS.map(({ id, label, Icon }) => {
+          const active = schoolTab === id;
+          return (
+            <button
+              key={id}
+              type="button"
+              data-testid={`school-tab-${id}`}
+              onClick={() => setSchoolTab(id)}
+              className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition-colors ${
+                active ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              <Icon size={14} /> {label}
+            </button>
+          );
+        })}
+      </div>
+
       {/* ── Row 1: School Information + Branding ── */}
+      {schoolTab === 'profile' && (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
         {/* School information */}
         <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
@@ -1162,8 +1214,10 @@ function SchoolTab() {
         {/* Branding */}
         <BrandingCard schoolId={school.id} logoUrl={school.logoUrl} faviconUrl={school.faviconUrl} loginBgUrl={school.loginBgUrl} onSaved={() => qc.invalidateQueries({ queryKey: ['settings', 'school'] })} />
       </div>
+      )}
 
       {/* ── Row 2: Regional + House System ── */}
+      {schoolTab === 'regional' && (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
         {/* Regional */}
         <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
@@ -1283,8 +1337,11 @@ function SchoolTab() {
           </div>
         </div>
       </div>
+      )}
 
       {/* ── Login Page Appearance (full-width) ── */}
+      {schoolTab === 'profile' && (
+      <>
       <style>{`
         @keyframes msingiGradientShift {
           0%   { background-position: 0% 50%; }
@@ -1407,14 +1464,19 @@ function SchoolTab() {
           </div>
         </div>
       </div>
+      </>
+      )}
 
       {/* ── Row 3: Curriculum Sections + Staff Responsibilities ── */}
+      {schoolTab === 'academics' && (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
         <SectionsPanel />
         <StaffResponsibilitiesPanel />
       </div>
+      )}
 
       {/* ── Row 4: Emergency Online Learning + Portal Settings ── */}
+      {schoolTab === 'portals' && (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
         {/* Emergency Online Learning */}
         <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
@@ -1539,8 +1601,11 @@ function SchoolTab() {
           );
         })()}
       </div>
+      )}
 
       {/* ── Row 5: Admission Numbers + M-Pesa ── */}
+      {schoolTab === 'admissions' && (
+      <>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
         <AdmissionNumbersSection form={f} set={set} />
 
@@ -1625,8 +1690,10 @@ function SchoolTab() {
       {/* ── Row 6: Admission Requirements + Public Enquiry Form ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
         <AdmissionRequirementsSection form={f} set={set} />
-        <PublicEnquirySection form={f} set={set} />
+        <PublicEnquirySection form={f} set={set} saved={school} />
       </div>
+      </>
+      )}
 
       {/* ── Sticky Save Bar ── */}
       <div className="sticky bottom-0 z-10 -mx-1 px-1 pt-3 pb-4 bg-gradient-to-t from-slate-50 via-slate-50/90 to-transparent">
@@ -4641,13 +4708,13 @@ function Toggle({ checked, onChange, disabled = false }) {
       aria-checked={checked}
       disabled={disabled}
       onClick={() => !disabled && onChange(!checked)}
-      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-slate-400
+      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-emerald-500
         ${disabled ? 'opacity-40 cursor-not-allowed' :  'cursor-pointer'}
-        ${checked ? 'bg-slate-800' : 'bg-slate-200'}`}
+        ${checked ? 'bg-emerald-600' : 'bg-slate-300'}`}
     >
       <span
-        className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform
-          ${checked ? 'translate-x-4.5' : 'translate-x-0.5'}`}
+        className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform duration-200
+          ${checked ? 'translate-x-[18px]' : 'translate-x-0.5'}`}
       />
     </button>
   );
