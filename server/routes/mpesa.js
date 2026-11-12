@@ -17,6 +17,7 @@ const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { nextReceiptNumber } = require('../utils/counters');
 const mpesa              = require('../utils/mpesa');
+const referralService    = require('../services/referralService');
 
 const router = express.Router();
 
@@ -638,7 +639,25 @@ router.post('/subscription', authMiddleware, async (req, res) => {
     // Matches createBillingSnapshot()'s own count (billing.js) exactly, so
     // this route and the "Generate invoice" path always agree.
     const count  = Math.max(1, await tenantModel('students', tenantContext(req)).countDocuments({ schoolId, status: 'active' }));
-    const amount = rate * count;
+
+    /* If the first invoice carries a referral discount, collect exactly what
+       that invoice says — not the gross rate × count, which would quietly
+       claw the promised incentive back at the M-Pesa prompt. */
+    const Snapshots   = tenantModel('billing_snapshots', tenantContext(req));
+    const pendingSnap = await Snapshots.findOne({ schoolId, status: 'pending' }).sort({ generatedAt: -1 }).lean();
+    const amount = pendingSnap?.referralDiscount
+      ? Math.max(0, Number(pendingSnap.totalAmount) || 0)
+      : rate * count;
+
+    if (amount < 1) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'NOTHING_DUE',
+          message: 'Your referral credit covers this invoice in full, so there is no payment to collect. Contact support if you believe this is wrong.',
+        },
+      });
+    }
 
     // Platform M-Pesa credentials (separate from school's own credentials)
     const consumerKey    = process.env.MSINGI_MPESA_CONSUMER_KEY;
@@ -681,7 +700,6 @@ router.post('/subscription', authMiddleware, async (req, res) => {
     const txnId = _uid();
     // Fetch current academic year + pending invoice term for callback reconciliation
     const schoolDoc    = await _model('schools').findOne({ id: schoolId }).select('academicYear').lean();
-    const pendingSnap  = await tenantModel('billing_snapshots', tenantContext(req)).findOne({ schoolId, status: 'pending' }).sort({ generatedAt: -1 }).lean();
     await Transactions.create({
       id:                txnId,
       schoolId,
@@ -799,6 +817,21 @@ router.post('/subscription/callback', async (req, res) => {
       { schoolId: txn.schoolId, status: 'pending', academicYear: txn.academicYear },
       { $set: { status: 'paid', paidAt: now, mpesaCode, paidAmount, updatedAt: now } }
     );
+
+    /* Referral conversion: only the FIRST subscription payment earns the
+       referrer's bounty. recordConversion re-checks that (a renewal must
+       not pay twice) and is idempotent per school. Non-fatal — the
+       payment itself has already succeeded. */
+    try {
+      await referralService.recordConversion({
+        schoolId: txn.schoolId,
+        trigger: 'subscription_payment',
+        amountPaid: paidAmount,
+        reference: mpesaCode,
+      });
+    } catch (refErr) {
+      console.error('[mpesa/subscription] referral conversion failed:', refErr.message);
+    }
 
     console.log(`[mpesa/subscription] ✓ Plan activated — school ${txn.schoolId} → ${txn.plan} until ${planExpiry} · ${mpesaCode} · KSh ${paidAmount}`);
   } catch (err) {

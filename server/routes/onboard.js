@@ -15,6 +15,7 @@ const { tenantModel } = require('../utils/tenant-model');
 const { withFinanceSubGrants } = require('../middleware/explicit-sub');
 const { provisionOrganizationForSchool } = require('../utils/provision-organizations');
 const { provisionIdentityForUser } = require('../utils/provision-identities');
+const referralService = require('../services/referralService');
 
 const router = express.Router();
 
@@ -107,6 +108,7 @@ router.post('/', onboardLimiter, async (req, res) => {
       adminName, adminEmail,
       plan, slug: rawSlug,
       curriculum, sections,
+      referralCode,
       _trap, _elapsed
     } = req.body;
 
@@ -171,7 +173,8 @@ router.post('/', onboardLimiter, async (req, res) => {
       adminName, adminEmail, tempPassword,
       plan: validPlan, slug,
       curriculum: validCurriculum,
-      sections: validSections.length ? validSections : ['primary']
+      sections: validSections.length ? validSections : ['primary'],
+      referralCode: referralCode ? String(referralCode).trim().slice(0, 40) : ''
     };
 
     /* ── If MongoDB is connected, provision in DB ── */
@@ -192,7 +195,7 @@ router.post('/', onboardLimiter, async (req, res) => {
 async function _provisionInDB(data, res) {
   const { schoolName, shortName, schoolType, country, city, website,
           adminName, adminEmail, tempPassword, plan, slug,
-          curriculum, sections } = data;
+          curriculum, sections, referralCode } = data;
 
   const School = _model('schools');
   // Bootstrap-only handle: this lookup checks email uniqueness ACROSS ALL
@@ -222,6 +225,17 @@ async function _provisionInDB(data, res) {
     // User exists but their school is inactive/rejected — allow re-registration
   }
 
+  /* Referral attribution is resolved BEFORE the school is created: an
+     entered-but-invalid code must fail the signup loudly, otherwise the
+     referrer silently loses credit for a school they brought in. */
+  let referralAttribution = null;
+  const enteredReferral = referralService.normalizeCode(referralCode);
+  if (enteredReferral) {
+    const resolved = await referralService.resolveAttribution({ code: enteredReferral, email: adminEmail });
+    if (!resolved.ok) return res.status(400).json({ error: resolved.message });
+    referralAttribution = { ...resolved.attribution, referralSource: 'onboard' };
+  }
+
   const schoolId = `sch_${slug}_${Date.now().toString(36)}`;
   const userId   = `u_${slug}_superadmin`;
   const now      = new Date().toISOString();
@@ -249,6 +263,7 @@ async function _provisionInDB(data, res) {
     timezone: _timezoneForCountry(country),
     adminName: adminName || adminEmail.split('@')[0],
     adminEmail: adminEmail.toLowerCase(),
+    ...(referralAttribution || {}),
     createdAt: now
   });
 
@@ -290,6 +305,9 @@ async function _provisionInDB(data, res) {
   }
 
   const schoolObj = school.toObject();
+  // The partner's internal id is not needed by the public signup response;
+  // the school keeps only its own code visible.
+  delete schoolObj.referralPartnerId;
   const userObj   = { ...user.toObject(), password: undefined };
 
   /* Send emails (fire-and-forget — don't block response) */

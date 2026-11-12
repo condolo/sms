@@ -273,6 +273,7 @@ console.log('[Security] rate limiting active — general: 10000/15min per user (
 /* ── API Routes ─────────────────────────────────────────────── */
 app.use('/api/public',      require('./routes/public'));   // no auth - school branding
 app.use('/api/demo',        require('./routes/demo'));     // no auth - self-serve demo requests
+app.use('/api/referrals',   require('./routes/referrals')); // no auth - public referral program
 app.use('/api/auth/pin',    require('./routes/pin'));      // the app-lock PIN, on the account
 app.use('/api/auth',        require('./routes/auth'));
 app.use('/api/onboard',     require('./routes/onboard'));
@@ -534,6 +535,25 @@ app.get('*', (req, res) => {
   }
   // Legacy HTML pages with their own entry points
   if (req.path === '/onboard' || req.path === '/onboard/') {
+    // onboard.html is a legacy standalone page: inline <script>, inline
+    // onclick/oninput handlers, and Font Awesome from cdnjs. The global
+    // Helmet policy blocks all three, which left the public signup page
+    // completely inert (no step navigation, no ?ref= prefill). Same
+    // narrowly-scoped override as /platform below; the React SPA keeps the
+    // strict policy. 'unsafe-inline' is acceptable here because the file is
+    // static, server-controlled HTML with no user-generated content.
+    res.setHeader('Content-Security-Policy', [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline'",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com",
+      "font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com",
+      "img-src 'self' data: blob:",
+      "connect-src 'self'",
+      "frame-src 'none'",
+      "frame-ancestors 'none'",
+      "object-src 'none'",
+      "base-uri 'self'",
+    ].join('; '));
     return res.sendFile(path.join(ROOT_DIR, 'onboard.html'));
   }
   if (req.path === '/platform' || req.path === '/platform/') {

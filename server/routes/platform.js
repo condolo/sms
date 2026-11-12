@@ -43,6 +43,7 @@ const {
   parseOperatorInput,
 } = require('../services/platformOperators');
 const { SYSTEM_ROLES } = require('../utils/role-validation');
+const referralService = require('../services/referralService');
 
 const router = express.Router();
 
@@ -624,7 +625,7 @@ router.get('/email-failures', async (req, res) => {
    so schools sharing an organization are recognizable by URL. */
 router.post('/schools', async (req, res) => {
   try {
-    const { name, shortName, slug, plan, adminName, adminEmail, adminPassword, currency, timezone, organizationId } = req.body;
+    const { name, shortName, slug, plan, adminName, adminEmail, adminPassword, currency, timezone, organizationId, referralCode } = req.body;
     if (!name || !slug || !adminEmail || !adminPassword) {
       return res.status(400).json({ error: 'name, slug, adminEmail, adminPassword required' });
     }
@@ -663,6 +664,15 @@ router.post('/schools', async (req, res) => {
     const schoolId = `sch_${finalSlug}_${Date.now().toString(36)}`;
     const userId   = `u_${finalSlug}_admin`;
 
+    /* An operator may provision a school that came in through a referral;
+       the same invalid-code/self-referral rules apply as public signup. */
+    let referralAttribution = null;
+    if (referralCode) {
+      const resolved = await referralService.resolveAttribution({ code: referralCode, email: adminEmail });
+      if (!resolved.ok) return res.status(400).json({ error: resolved.message });
+      referralAttribution = { ...resolved.attribution, referralSource: 'platform' };
+    }
+
     // Use raw collection API to bypass Mongoose's `id` virtual, which would
     // silently strip any field named "id" passed to Model.create().
     const db = mongoose.connection.db;
@@ -673,6 +683,7 @@ router.post('/schools', async (req, res) => {
       plan: plan || process.env.BOOTSTRAP_PLAN || 'base', addOns: [], isActive: true,
       currency: currency || 'KES', timezone: timezone || 'Africa/Nairobi',
       organizationId: org ? org.id : null,
+      ...(referralAttribution || {}),
       createdAt: new Date().toISOString()
     };
     const insertResult = await db.collection('schools').insertOne(schoolDoc);
@@ -3961,6 +3972,216 @@ router.delete('/operators/:id', async (req, res) => {
     return res.json({ success: true });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* ═══════════════════════════════════════════════════════════════
+   REFERRAL PROGRAM — platform growth, NOT the school fee discount
+   ═══════════════════════════════════════════════════════════════
+   Partners are outside people ("anyone can refer a school"), so they
+   have no platform login. The console manages the program, attribution
+   corrections and payouts here; partners use their emailed hub link. */
+
+/* GET /api/platform/referrals — partners, program terms and totals. */
+router.get('/referrals', async (req, res) => {
+  try {
+    const [partners, program] = await Promise.all([
+      referralService.listPartners({ limit: req.query.limit }),
+      referralService.getProgramSettings(),
+    ]);
+    const totals = partners.reduce((acc, p) => {
+      acc.signups += p.signups;
+      acc.conversions += p.conversions;
+      acc.pendingAmount += p.pendingAmount;
+      acc.paidAmount += p.paidAmount;
+      return acc;
+    }, { signups: 0, conversions: 0, pendingAmount: 0, paidAmount: 0 });
+    return res.json({ success: true, data: { partners, program, totals } });
+  } catch (err) {
+    console.error('[platform GET /referrals]', err);
+    return res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Failed to load referral partners.' } });
+  }
+});
+
+/* GET /api/platform/referrals/settings */
+router.get('/referrals/settings', async (req, res) => {
+  try {
+    const program = await referralService.getProgramSettings();
+    return res.json({ success: true, data: program });
+  } catch (err) {
+    console.error('[platform GET /referrals/settings]', err);
+    return res.status(500).json({ success: false, error: { message: err.message } });
+  }
+});
+
+/* PUT /api/platform/referrals/settings */
+router.put('/referrals/settings', async (req, res) => {
+  try {
+    const program = await referralService.saveProgramSettings(req.body || {});
+    AuditService.log({
+      action: 'platform.referral_settings.updated',
+      actor: _platformActor(req),
+      schoolId: null,
+      target: { type: 'platform_settings', id: 'referral_program', label: 'Referral program' },
+      details: program,
+      req,
+    });
+    return res.json({ success: true, data: program });
+  } catch (err) {
+    console.error('[platform PUT /referrals/settings]', err);
+    return res.status(500).json({ success: false, error: { message: err.message } });
+  }
+});
+
+/* POST /api/platform/referrals/schools/:id/convert — record an offline
+   first payment for a referred school (bank transfer, cash, etc.). The
+   M-Pesa subscription callback records its own conversions automatically. */
+router.post('/referrals/schools/:id/convert', async (req, res) => {
+  try {
+    const result = await referralService.recordConversion({
+      schoolId: req.params.id,
+      trigger: 'manual',
+      amountPaid: req.body?.amountPaid ?? null,
+      reference: req.body?.reference || null,
+      note: req.body?.note || '',
+      actor: _platformActor(req),
+    });
+    if (!result.ok) return res.status(400).json({ success: false, error: { code: result.code, message: result.message } });
+    return res.json({ success: true, data: result });
+  } catch (err) {
+    console.error('[platform POST /referrals/schools/:id/convert]', err);
+    return res.status(500).json({ success: false, error: { message: err.message } });
+  }
+});
+
+/* GET /api/platform/referrals/schools — lightweight picker for attaching a
+   code. Deliberately NOT GET /schools: that route computes students/staff
+   stats per school (two extra queries each), which a dropdown does not
+   need, and it is gated on schools.view — an operator may legitimately hold
+   referrals.manage without it. Declared before /referrals/:id. */
+router.get('/referrals/schools', async (req, res) => {
+  try {
+    const schools = await platformModel('schools').find({
+      isDemo: { $ne: true },
+      slug: { $nin: ['demo', 'msingi'] }, // template tenants have no isDemo flag
+    })
+      .select('id name slug status isActive')
+      .sort({ name: 1 })
+      .limit(2000)
+      .lean();
+    return res.json({ success: true, data: schools });
+  } catch (err) {
+    console.error('[platform GET /referrals/schools]', err);
+    return res.status(500).json({ success: false, error: { message: err.message } });
+  }
+});
+
+/* GET /api/platform/referrals/:id — partner detail with every referral. */
+router.get('/referrals/:id', async (req, res) => {
+  try {
+    const result = await referralService.getPartner(req.params.id);
+    if (!result.ok) return res.status(404).json({ success: false, error: { code: result.code, message: result.message } });
+    return res.json({ success: true, data: result });
+  } catch (err) {
+    console.error('[platform GET /referrals/:id]', err);
+    return res.status(500).json({ success: false, error: { message: err.message } });
+  }
+});
+
+/* PATCH /api/platform/referrals/:id — block/reactivate, or correct the
+   payout/contact details before a payout. */
+router.patch('/referrals/:id', async (req, res) => {
+  try {
+    const result = await referralService.updatePartner(req.params.id, req.body || {});
+    if (!result.ok) return res.status(400).json({ success: false, error: { code: result.code, message: result.message } });
+    AuditService.log({
+      action: 'platform.referral_partner.updated',
+      actor: _platformActor(req),
+      schoolId: null,
+      target: { type: 'referral_partner', id: result.partner.id, label: result.partner.code },
+      details: {
+        status: req.body?.status,
+        phone: req.body?.phone,
+        payoutPhone: req.body?.payoutPhone,
+        note: req.body?.note,
+      },
+      req,
+    });
+    return res.json({ success: true, data: result.partner });
+  } catch (err) {
+    console.error('[platform PATCH /referrals/:id]', err);
+    return res.status(500).json({ success: false, error: { message: err.message } });
+  }
+});
+
+/* POST /api/platform/referrals/:id/payouts — settle pending conversions. */
+router.post('/referrals/:id/payouts', async (req, res) => {
+  try {
+    const result = await referralService.markPayout({
+      partnerId: req.params.id,
+      conversionIds: Array.isArray(req.body?.conversionIds) ? req.body.conversionIds : [],
+      method: req.body?.method || 'mpesa',
+      reference: req.body?.reference,
+      actor: _platformActor(req),
+    });
+    if (!result.ok) return res.status(400).json({ success: false, error: { code: result.code, message: result.message } });
+    return res.json({ success: true, data: result });
+  } catch (err) {
+    console.error('[platform POST /referrals/:id/payouts]', err);
+    return res.status(500).json({ success: false, error: { message: err.message } });
+  }
+});
+
+/* POST /api/platform/referrals/payout-requests/:id/pay — settle an
+   affiliate-requested payout manually. */
+router.post('/referrals/payout-requests/:id/pay', async (req, res) => {
+  try {
+    const result = await referralService.payPayoutRequest({
+      requestId: req.params.id,
+      reference: req.body?.reference,
+      method: req.body?.method,
+      actor: _platformActor(req),
+    });
+    if (!result.ok) return res.status(400).json({ success: false, error: { code: result.code, message: result.message } });
+    return res.json({ success: true, data: result });
+  } catch (err) {
+    console.error('[platform POST /referrals/payout-requests/:id/pay]', err);
+    return res.status(500).json({ success: false, error: { message: err.message } });
+  }
+});
+
+/* POST /api/platform/referrals/payout-requests/:id/reject — return the
+   locked conversions to the partner's available balance. */
+router.post('/referrals/payout-requests/:id/reject', async (req, res) => {
+  try {
+    const result = await referralService.rejectPayoutRequest({
+      requestId: req.params.id,
+      reason: req.body?.reason || '',
+      actor: _platformActor(req),
+    });
+    if (!result.ok) return res.status(400).json({ success: false, error: { code: result.code, message: result.message } });
+    return res.json({ success: true, data: result });
+  } catch (err) {
+    console.error('[platform POST /referrals/payout-requests/:id/reject]', err);
+    return res.status(500).json({ success: false, error: { message: err.message } });
+  }
+});
+
+/* POST /api/platform/schools/:id/referral — attach or correct a school's
+   referral code. `force: true` replaces an existing attribution. */
+router.post('/schools/:id/referral', async (req, res) => {
+  try {
+    const result = await referralService.attachToSchool({
+      schoolId: req.params.id,
+      code: req.body?.code || '',
+      force: req.body?.force === true,
+      actor: _platformActor(req),
+    });
+    if (!result.ok) return res.status(400).json({ success: false, error: { code: result.code, message: result.message } });
+    return res.json({ success: true, data: result });
+  } catch (err) {
+    console.error('[platform POST /schools/:id/referral]', err);
+    return res.status(500).json({ success: false, error: { message: err.message } });
   }
 });
 
