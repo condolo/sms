@@ -61,7 +61,7 @@
     "setupFiles": [
       "<rootDir>/server/__tests__/jest.setup.js"
     ],
-    "testTimeout": 15000,
+    "testTimeout": 30000,
     "testMatch": [
       "**/server/__tests__/**/*.test.js"
     ],

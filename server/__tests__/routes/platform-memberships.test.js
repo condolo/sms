@@ -155,10 +155,15 @@ jest.mock('mongoose', () => {
 const express   = require('express');
 const supertest = require('supertest');
 
+// Loaded once up front, not inside the first test: the first load of a route's module graph
+// takes ~1s alone and much longer when the whole suite runs in parallel, and inside a test
+// it counts against that test's timeout.
+const platformRouter = require('../../routes/platform');
+
 function app() {
   const a = express();
   a.use(express.json());
-  a.use('/api/platform', require('../../routes/platform'));
+  a.use('/api/platform', platformRouter);
   return a;
 }
 

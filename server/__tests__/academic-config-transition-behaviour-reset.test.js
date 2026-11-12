@@ -63,6 +63,9 @@ jest.mock('../utils/model', () => ({
 const express   = require('express');
 const supertest = require('supertest');
 const academicConfigRouter = require('../routes/academic-config');
+// transition-year loads routes/behaviour lazily on its first call; load it here so that
+// one-off cost (large module graph) doesn't count against the first test's timeout.
+require('../routes/behaviour');
 
 function buildApp() {
   const app = express();
