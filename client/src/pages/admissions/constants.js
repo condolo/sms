@@ -146,6 +146,15 @@ export function avatarColor(name = '') {
   return AVATAR_COLORS[(name.charCodeAt(0) || 0) % AVATAR_COLORS.length];
 }
 
+/* A CSV cell built from applicant input. Text beginning with = + - @ (or a
+   tab/CR) is treated by Excel/Sheets as a formula; prefix an apostrophe so
+   it stays text. Public-form input is untrusted, so this matters. */
+function csvCell(value) {
+  let s = String(value ?? '');
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return `"${s.replace(/"/g, '""')}"`;
+}
+
 export function exportAdmissionsCSV(cols) {
   const header = [
     'Application Ref',
@@ -173,7 +182,7 @@ export function exportAdmissionsCSV(cols) {
     ])
   );
   const csv = [header, ...rows]
-    .map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))
+    .map(r => r.map(csvCell).join(','))
     .join('\n');
   const blob = new Blob([csv], { type: 'text/csv' });
   const url  = URL.createObjectURL(blob);
