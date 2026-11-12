@@ -619,6 +619,10 @@ export const timetable = {
   publish:     (data)       => _post('/timetable/publish', data),
   unpublish:   ()           => _post('/timetable/unpublish'),
   versions:    ()           => _get('/timetable/versions'),
+  // Working days + lessons to place (v5.265.0)
+  settings:     ()          => _get('/timetable/settings'),
+  saveSettings: (data)      => _put('/timetable/settings', data),
+  placement:    ()          => _get('/timetable/placement'),
   // Substitution system
   substitutions: {
     list:        (params)   => _get('/timetable/substitutions', params),

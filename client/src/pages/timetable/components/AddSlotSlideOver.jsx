@@ -15,7 +15,7 @@
    ============================================================ */
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Loader2, Save, AlertTriangle, X, Edit2, Zap } from 'lucide-react';
+import { Loader2, Save, AlertTriangle, X, Edit2, Zap, Lock } from 'lucide-react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import {
   timetable as ttApi,
@@ -32,7 +32,7 @@ const EMPTY_FORM = {
   day: 'monday', period: '1', subject: '',
   teacherId: '', teacherName: '',
   assistantTeacherId: '', assistantTeacherName: '',
-  room: '', roomId: '', type: 'lesson',
+  room: '', roomId: '', type: 'lesson', locked: false,
 };
 
 export default function AddSlotSlideOver({
@@ -42,6 +42,7 @@ export default function AddSlotSlideOver({
   onClose,
   onCreated,
   lessonPeriods = DEFAULT_BELL.filter(b => !b.isBreak),
+  days = DAYS,           // the school's working days (Timetable → Days)
 }) {
   const isEdit = !!editSlot;
 
@@ -58,6 +59,7 @@ export default function AddSlotSlideOver({
         room:        editSlot.room        ?? '',
         roomId:      editSlot.roomId      ?? '',
         type:        editSlot.type        ?? 'lesson',
+        locked:      !!editSlot.locked,
       };
     }
     return { ...EMPTY_FORM, ...defaults };
@@ -194,6 +196,7 @@ export default function AddSlotSlideOver({
         room:        form.room.trim() || '',
         roomId:      form.roomId      || '',
         type:        form.type,
+        locked:      !!form.locked,
       };
       if (isEdit) return ttApi.update(editSlot.id ?? editSlot._id, payload);
       return ttApi.create({ ...payload, classId });
@@ -264,6 +267,12 @@ export default function AddSlotSlideOver({
 
         {/* Form */}
         <form onSubmit={submit} className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+          {isEdit && editSlot.locked && form.locked && (
+            <div className="flex items-start gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              <Lock size={12} className="shrink-0 mt-0.5" />
+              <span>This lesson is locked, so it can't be changed or removed. Untick <b>Lock this lesson</b> below to change it.</span>
+            </div>
+          )}
           {errors._server && (
             <div className="flex items-start gap-2 bg-red-50 text-red-700 text-xs px-3 py-2.5 rounded-lg border border-red-200">
               <AlertTriangle size={13} className="mt-0.5 shrink-0" />
@@ -362,7 +371,8 @@ export default function AddSlotSlideOver({
           <div className="grid grid-cols-2 gap-3">
             <FField label="Day">
               <select value={form.day} onChange={e => set('day', e.target.value)} className={iCls()}>
-                {DAYS.map(d => <option key={d} value={d}>{DAY_FULL[d]}</option>)}
+                {/* Working days, plus this lesson's own day if the school has since removed it. */}
+                {[...days, ...(days.includes(form.day) ? [] : [form.day])].map(d => <option key={d} value={d}>{DAY_FULL[d] ?? d}</option>)}
               </select>
             </FField>
             <FField label="Period">
@@ -484,6 +494,20 @@ export default function AddSlotSlideOver({
               <option value="free">Free period</option>
             </select>
           </FField>
+
+          {/* ── Lock (v5.265.0) ──────────────────────────────── */}
+          <label className="flex items-start gap-2.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={!!form.locked}
+              onChange={e => set('locked', e.target.checked)}
+              className="mt-0.5 rounded border-slate-300"
+            />
+            <span>
+              <span className="flex items-center gap-1 text-sm font-medium text-slate-700"><Lock size={12} /> Lock this lesson</span>
+              <span className="block text-[11px] text-slate-400">Keeps it in place: it can't be edited, moved or removed until unlocked, and replacing a class's timetable leaves it alone.</span>
+            </span>
+          </label>
         </form>
 
         {/* Footer */}

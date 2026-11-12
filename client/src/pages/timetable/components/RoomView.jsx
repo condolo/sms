@@ -27,7 +27,7 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { DoorOpen, AlertTriangle } from 'lucide-react';
-import { DAYS, DAY_FULL, DAY_SHORT, UNTIMED_BAND, slotColor, bandKeyOf, timeBandsFromSlots } from '../constants.js';
+import { DAYS, DAY_FULL, DAY_SHORT, UNTIMED_BAND, slotColor, bandKeyOf, timeBandsFromSlots, daysToShow } from '../constants.js';
 
 /* ── Build room-slot map: { [room]: { [day]: { [period]: slot[] } } } ── */
 function buildRoomMap(slots) {
@@ -102,7 +102,7 @@ function RoomCell({ entries, conflictSlotIds }) {
 }
 
 /* ── Room grid for one room ──────────────────────────────────── */
-function RoomGrid({ roomName, slotMap, bands, conflictSlotIds }) {
+function RoomGrid({ roomName, slotMap, bands, conflictSlotIds, days }) {
   // Count grid cells that actually contain a server-confirmed conflict —
   // matches exactly what the grid below highlights in red, so the badge
   // and the grid can never tell a different story from each other.
@@ -132,10 +132,10 @@ function RoomGrid({ roomName, slotMap, bands, conflictSlotIds }) {
       {/* Day header row */}
       <div className="flex bg-slate-50 border-b border-slate-200">
         <div className="shrink-0 border-r border-slate-200" style={{ width: '80px', minWidth: '80px' }} />
-        {DAYS.map((day, i) => (
+        {days.map((day, i) => (
           <div
             key={day}
-            className={`flex-1 py-2 text-center text-xs font-semibold text-slate-600 ${i < DAYS.length - 1 ? 'border-r border-slate-200' : ''}`}
+            className={`flex-1 py-2 text-center text-xs font-semibold text-slate-600 ${i < days.length - 1 ? 'border-r border-slate-200' : ''}`}
           >
             <span className="hidden sm:inline">{DAY_FULL[day]}</span>
             <span className="sm:hidden">{DAY_SHORT[day]}</span>
@@ -156,12 +156,12 @@ function RoomGrid({ roomName, slotMap, bands, conflictSlotIds }) {
                       <span className="text-[9px] text-slate-400">–{b.end}</span>
                     </>}
               </div>
-              {DAYS.map((day, i) => {
+              {days.map((day, i) => {
                 const entries = slotMap[roomName]?.[day]?.[b.key];
                 return (
                   <div
                     key={day}
-                    className={`flex-1 p-1.5 ${i < DAYS.length - 1 ? 'border-r border-slate-100' : ''}`}
+                    className={`flex-1 p-1.5 ${i < days.length - 1 ? 'border-r border-slate-100' : ''}`}
                     style={{ minWidth: 0 }}
                   >
                     <RoomCell entries={entries} conflictSlotIds={conflictSlotIds} />
@@ -177,7 +177,8 @@ function RoomGrid({ roomName, slotMap, bands, conflictSlotIds }) {
 }
 
 /* ── Main export ─────────────────────────────────────────────── */
-export default function RoomView({ slots = [], rooms = [], conflicts = [] }) {
+export default function RoomView({ slots = [], rooms = [], conflicts = [], days: workingDays = DAYS }) {
+  const days = daysToShow(workingDays, slots);
   const [selectedRoom, setSelectedRoom] = useState('');
 
   // Slot ids GET /timetable/conflicts already confirmed are a genuine
@@ -254,6 +255,7 @@ export default function RoomView({ slots = [], rooms = [], conflicts = [] }) {
             slotMap={slotMap}
             bands={bands}
             conflictSlotIds={conflictSlotIds}
+            days={days}
           />
         </motion.div>
       )}

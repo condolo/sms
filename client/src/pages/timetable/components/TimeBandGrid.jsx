@@ -5,10 +5,12 @@
    Props:
      slots       []        — the lessons to show
      renderEntry fn(slot)  — what one lesson looks like in its cell
+     days        []        — working days (default Mon–Fri); a day with lessons is always shown
    ============================================================ */
-import { DAYS, DAY_FULL, DAY_SHORT, UNTIMED_BAND, timeBandsFromSlots, buildBandMap } from '../constants.js';
+import { DAYS, DAY_FULL, DAY_SHORT, UNTIMED_BAND, timeBandsFromSlots, buildBandMap, daysToShow } from '../constants.js';
 
-export default function TimeBandGrid({ slots = [], renderEntry }) {
+export default function TimeBandGrid({ slots = [], renderEntry, days: workingDays = DAYS }) {
+  const days  = daysToShow(workingDays, slots);
   const bands = timeBandsFromSlots(slots);
   const map   = buildBandMap(slots);
 
@@ -16,8 +18,8 @@ export default function TimeBandGrid({ slots = [], renderEntry }) {
     <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
       <div className="flex bg-slate-50 border-b border-slate-200">
         <div className="shrink-0 border-r border-slate-200" style={{ width: '88px', minWidth: '88px' }} />
-        {DAYS.map((day, i) => (
-          <div key={day} className={`flex-1 py-2.5 text-center text-xs font-semibold text-slate-700 ${i < DAYS.length - 1 ? 'border-r border-slate-200' : ''}`}>
+        {days.map((day, i) => (
+          <div key={day} className={`flex-1 py-2.5 text-center text-xs font-semibold text-slate-700 ${i < days.length - 1 ? 'border-r border-slate-200' : ''}`}>
             <span className="hidden sm:inline">{DAY_FULL[day]}</span>
             <span className="sm:hidden">{DAY_SHORT[day]}</span>
           </div>
@@ -39,10 +41,10 @@ export default function TimeBandGrid({ slots = [], renderEntry }) {
                         <span className="text-[9px] text-slate-400">–{b.end}</span>
                       </>}
                 </div>
-                {DAYS.map((day, i) => {
+                {days.map((day, i) => {
                   const entries = map[day]?.[b.key] ?? [];
                   return (
-                    <div key={day} className={`flex-1 p-1.5 space-y-1 ${i < DAYS.length - 1 ? 'border-r border-slate-100' : ''}`} style={{ minWidth: 0 }}>
+                    <div key={day} className={`flex-1 p-1.5 space-y-1 ${i < days.length - 1 ? 'border-r border-slate-100' : ''}`} style={{ minWidth: 0 }}>
                       {entries.length === 0
                         ? <div className="h-full min-h-[64px]" />
                         : entries.map(s => <div key={s.id ?? s._id}>{renderEntry(s)}</div>)}

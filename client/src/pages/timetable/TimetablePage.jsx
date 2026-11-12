@@ -9,7 +9,7 @@ import { AnimatePresence } from 'framer-motion';
 import {
   CalendarDays, Plus, AlertCircle, CheckCircle2, BarChart3,
   Clock, User, LayoutGrid, Globe, UserX, Zap, Download, Printer,
-  DoorOpen, Upload, MonitorPlay,
+  DoorOpen, Upload, MonitorPlay, ListChecks, CalendarCheck,
 } from 'lucide-react';
 import {
   timetable    as ttApi,
@@ -23,7 +23,7 @@ import BulkImportSlideOver from '@/components/import/BulkImportSlideOver.jsx';
 import useAuthStore from '@/store/auth.js';
 
 import TimetablePortal       from './TimetablePortal.jsx';
-import { DAYS, DAY_SHORT, DEFAULT_BELL, inferSection } from './constants.js';
+import { DAYS, DAY_SHORT, DAY_FULL, DEFAULT_BELL, inferSection, daysToShow } from './constants.js';
 import { useSections } from '@/hooks/useSections.js';
 import TimetableGrid          from './components/TimetableGrid.jsx';
 import TimeBandGrid           from './components/TimeBandGrid.jsx';
@@ -36,10 +36,13 @@ import CoverTab               from './components/CoverTab.jsx';
 import PublishModal           from './components/PublishModal.jsx';
 import RoomsTab               from './components/RoomsTab.jsx';
 import RoomView               from './components/RoomView.jsx';
+import PlacementView          from './components/PlacementView.jsx';
+import WorkingDaysModal       from './components/WorkingDaysModal.jsx';
 import { Toast }              from './components/TimetablePrimitives.jsx';
 
 const VIEWS = [
   { id: 'class',    label: 'Class Grid',   Icon: LayoutGrid                    },
+  { id: 'placement', label: 'Lessons to place', Icon: ListChecks              },
   { id: 'teacher',  label: 'Teacher View', Icon: User                          },
   { id: 'overview', label: 'Institution',  Icon: Globe                         },
   { id: 'rooms',    label: 'Rooms',        Icon: DoorOpen, adminOnly: true      },
@@ -92,6 +95,7 @@ export default function TimetablePage() {
   const [showBell,        setShowBell]        = useState(false);
   const [showPublishModal,setShowPublishModal] = useState(false);
   const [showImport,      setShowImport]      = useState(false);
+  const [showDays,        setShowDays]        = useState(false);
   const [toast,           setToast]           = useState(null);
 
   function showToast(msg, type = 'success') {
@@ -100,6 +104,14 @@ export default function TimetablePage() {
   }
 
   /* ── Shared data queries ─────────────────────────────────── */
+  // Working days (Timetable → Days, v5.265.0): the day columns and the days a lesson can go on.
+  const { data: settingsData } = useQuery({
+    queryKey: ['timetable', 'settings'],
+    queryFn:  () => ttApi.settings(),
+    staleTime: 5 * 60_000,
+  });
+  const workingDays = settingsData?.data?.workingDays ?? DAYS;
+
   const { data: classesData } = useQuery({
     queryKey: ['classes', 'list'],
     queryFn:  () => classesApi.list({ limit: 200, status: 'active' }),
@@ -221,7 +233,7 @@ export default function TimetablePage() {
     : (teacherData?.data?.slots ?? []);
 
   const teacherLessonCount = teacherSlots.filter(s => !s.type || s.type === 'lesson').length;
-  const teacherByDay = DAYS.map(d => ({
+  const teacherByDay = daysToShow(workingDays, teacherSlots).map(d => ({
     day: d, count: teacherSlots.filter(s => (s.day || '').toLowerCase() === d).length,
   }));
 
@@ -247,6 +259,7 @@ export default function TimetablePage() {
     qc.invalidateQueries({ queryKey: ['timetable', 'conflicts'] });
     qc.invalidateQueries({ queryKey: ['timetable', 'overview'] });
     qc.invalidateQueries({ queryKey: ['timetable', 'workload'] });
+    qc.invalidateQueries({ queryKey: ['timetable', 'placement'] });
   };
 
   const { mutate: removeSlot } = useMutation({
@@ -294,7 +307,7 @@ export default function TimetablePage() {
   /* ── Export helpers ─────────────────────────────────────────── */
   function exportClassCSV() {
     if (!classSlots.length || !selectedClass) return;
-    const DAY_LIST = ['monday','tuesday','wednesday','thursday','friday'];
+    const DAY_LIST = daysToShow(workingDays, classSlots);
     const header = ['Period','Time',...DAY_LIST.map(d => d.charAt(0).toUpperCase() + d.slice(1))];
     const rows = bell.filter(b => !b.isBreak).map(b => {
       const row = [`P${b.p}`, `${b.start}–${b.end}`];
@@ -326,7 +339,7 @@ export default function TimetablePage() {
 
   function printClassTimetable() {
     if (!selectedClass) return;
-    const DAY_LIST = ['monday','tuesday','wednesday','thursday','friday'];
+    const DAY_LIST = daysToShow(workingDays, classSlots);
     const schoolName = school?.name ?? 'Msingi School';
     const periods = bell.filter(b => !b.isBreak);
 
@@ -453,6 +466,17 @@ export default function TimetablePage() {
                   className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-white/40 bg-white/15 text-white hover:bg-white/25 transition"
                 >
                   <Clock size={12} /> Bell
+                </button>
+              )}
+
+              {/* Working days */}
+              {canEdit && (
+                <button
+                  onClick={() => setShowDays(true)}
+                  className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-white/40 bg-white/15 text-white hover:bg-white/25 transition"
+                  title={`Working days: ${workingDays.map(d => DAY_SHORT[d]).join(', ')}`}
+                >
+                  <CalendarCheck size={12} /> Days
                 </button>
               )}
 
@@ -677,6 +701,12 @@ export default function TimetablePage() {
           {activeView === 'cover' && (
             <span className="text-xs text-slate-500">Daily cover arrangements · substitution management</span>
           )}
+
+          {activeView === 'placement' && (
+            <span className="text-xs text-slate-500">
+              Lessons per week each class needs (from teaching assignments) against what's on the draft timetable · click a row to open that class
+            </span>
+          )}
         </div>
       </div>
 
@@ -740,7 +770,7 @@ export default function TimetablePage() {
               </div>
             </div>
           ) : (
-            <TimetableGrid slots={classSlots} onDelete={removeSlot} onEdit={openEdit} onAdd={openAdd} canEdit={canEdit} bell={bell}
+            <TimetableGrid slots={classSlots} onDelete={removeSlot} onEdit={openEdit} onAdd={openAdd} canEdit={canEdit} bell={bell} days={workingDays}
               emergencyMode={emergencyMode} teacherMap={teacherMap} />
           )
         )}
@@ -768,6 +798,7 @@ export default function TimetablePage() {
           ) : (
             <TimeBandGrid
               slots={teacherSlots}
+              days={workingDays}
               renderEntry={s => {
                 const t = emergencyMode && s.teacherId ? teacherMap?.[s.teacherId] : null;
                 const link = t ? (t.zoomPMILink || t.meetLink || null) : null;
@@ -794,7 +825,12 @@ export default function TimetablePage() {
           )
         )}
 
-        {activeView === 'overview' && <OverviewView classList={classList} />}
+        {activeView === 'overview' && <OverviewView classList={classList} days={workingDays} />}
+        {activeView === 'placement' && (
+          <PlacementView
+            onOpenClass={(cid, sid) => { setSection('all'); setClassId(cid); setStreamId(sid || ''); setActiveView('class'); }}
+          />
+        )}
         {activeView === 'cover'    && <CoverTab teachers={teacherList} />}
 
         {activeView === 'rooms' && (
@@ -805,7 +841,7 @@ export default function TimetablePage() {
             </div>
             {/* Right: room occupancy view */}
             <div className="xl:col-span-2">
-              <RoomView slots={allSlots} rooms={roomList} conflicts={conflicts} />
+              <RoomView slots={allSlots} rooms={roomList} conflicts={conflicts} days={workingDays} />
             </div>
           </div>
         )}
@@ -831,12 +867,30 @@ export default function TimetablePage() {
             onClose={() => { setShowAdd(false); setEditSlot(null); }}
             onCreated={onSlotCreated}
             lessonPeriods={lessonPeriods}
+            days={workingDays}
           />
         )}
       </AnimatePresence>
 
       <AnimatePresence>
         {showBell && <BellScheduleSlideOver onClose={() => setShowBell(false)} />}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showDays && (
+          <WorkingDaysModal
+            workingDays={workingDays}
+            onClose={() => setShowDays(false)}
+            onSaved={(r) => {
+              setShowDays(false);
+              qc.invalidateQueries({ queryKey: ['timetable', 'settings'] });
+              const days = (r.workingDays ?? []).map(d => DAY_FULL[d]).join(', ');
+              showToast(r.lessonsOnRemovedDays
+                ? `Working days: ${days}. ${r.lessonsOnRemovedDays} lesson${r.lessonsOnRemovedDays === 1 ? ' is' : 's are'} on a removed day — move or remove ${r.lessonsOnRemovedDays === 1 ? 'it' : 'them'}.`
+                : `Working days: ${days}.`);
+            }}
+          />
+        )}
       </AnimatePresence>
 
       <AnimatePresence>

@@ -306,7 +306,7 @@ export default function RoomsTab({ canEdit }) {
 
       {/* Double-booking note */}
       <p className="text-[11px] text-slate-400 leading-relaxed">
-        Rooms can be double-booked — the timetable will warn but not block. Use the Room View tab to spot conflicts visually.
+        A room can't be booked for two lessons at the same time: adding, editing, bulk saving and importing lessons all refuse a room that is already in use. Clashes left over from before show in red in the room's schedule.
       </p>
     </div>
   );

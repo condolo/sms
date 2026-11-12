@@ -4,9 +4,20 @@
    ============================================================ */
 
 /* ── Days ──────────────────────────────────────────────────── */
+// DAYS is the default working week. A school can add Saturday (or Sunday) under Timetable → Days
+// (v5.265.0); grids then take that list as their `days` prop.
 export const DAYS      = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'];
-export const DAY_SHORT = { monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', friday: 'Fri' };
-export const DAY_FULL  = { monday: 'Monday', tuesday: 'Tuesday', wednesday: 'Wednesday', thursday: 'Thursday', friday: 'Friday' };
+export const ALL_DAYS  = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+export const DAY_SHORT = { monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', friday: 'Fri', saturday: 'Sat', sunday: 'Sun' };
+export const DAY_FULL  = { monday: 'Monday', tuesday: 'Tuesday', wednesday: 'Wednesday', thursday: 'Thursday', friday: 'Friday', saturday: 'Saturday', sunday: 'Sunday' };
+
+/** The day columns to show: the working days, plus any other day that has lessons on it
+    (so a lesson on a day the school has since removed is still visible). Week order. */
+export function daysToShow(workingDays = DAYS, slots = []) {
+  const set = new Set(workingDays.map(d => String(d).toLowerCase()));
+  for (const s of slots) if (s?.day) set.add(String(s.day).toLowerCase());
+  return ALL_DAYS.filter(d => set.has(d));
+}
 
 /* ── Default bell schedule (fallback when no custom schedule) ── */
 export const DEFAULT_BELL = [

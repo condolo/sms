@@ -6,6 +6,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.265.0] - 2026-11-12 - feat(timetable): clash checks on every save and import, locked lessons, working days, "Lessons to place"
+
+Phase 0–1 of the plan towards an aSc-style automatic timetable generator (from the 2026-11-12 timetable audit). No generator yet; this fixes the gaps the audit found and gives timetablers a checklist.
+
+### Fixed (Phase 0)
+- **Bulk save and spreadsheet import skipped clash checks.** Only adding or editing one lesson checked them, so an import could put a teacher or room in two places at once. Both now use the same checks (`server/utils/timetable-conflicts.js`). Bulk save is all-or-nothing (`409` with the clashing lessons listed); import skips the clashing row with the reason.
+- **"Replace this class" deleted the class's lessons in every academic year**, archived ones included. It now replaces only the year being written, and never a locked lesson.
+- **The Rooms tab said rooms "can be double-booked — the timetable will warn but not block".** Adding a lesson already blocked it, and now every path does; the text says so.
+- **Saturday/Sunday couldn't be used in the editor** (the server accepted them, the editor showed Monday–Friday only). Now driven by the new working-days setting.
+- **Saving a lesson that already sat in an old clash was refused**, even with nothing about when/who/where changed (the editor re-sends every field). Clashes are now re-checked only when the class, stream, day, period, teacher or room actually change. Found while testing locks on the demo school.
+
+### Added (Phase 1)
+- **Lessons to place** tab: for each class (or stream) and subject, lessons per week needed (from teaching assignments' Periods/wk), placed on the draft, and left; per-teacher totals; lessons on the timetable no assignment asks for; subjects with no Periods/wk set are flagged. `GET /api/timetable/placement`, `server/utils/timetable-placement.js`, `PlacementView.jsx`.
+- **Lock a lesson**: a padlocked lesson can't be edited, moved or removed until unlocked; bulk replace and import leave it alone. `timetable.locked`.
+- **Working days** (Timetable → **Days**): default Monday–Friday, add Saturday/Sunday. Grids, the add-lesson day picker, saves and import follow it; removing a day keeps its lessons and says how many. `GET/PUT /api/timetable/settings`, `schools.timetableSettings.workingDays`.
+
+### Tests / verified
+- New `server/__tests__/routes/timetable-clash-lock-days.test.js` (21) and `server/__tests__/timetable-placement.test.js` (9). All timetable and import suites pass. RBAC and tenant coverage scanners unchanged (100%, ceiling held). Client production build compiles.
+- In the browser on the local demo school: Lessons to place showed To place / Too many / Done / No target correctly after setting Periods/wk on three Form 1A assignments; clicking a row opened that class's grid; Days → Saturday added the Saturday column; locking a lesson showed the padlock, hid delete, and the server refused edit and delete with "Unlock it first".
+
 ## [v5.264.2] - 2026-11-12 - fix(notifications): "View Snapshot" in the weekly snapshot email now opens the snapshot, through login if needed
 
 Reported by a school: "a parent … on receiving the notification on a weekly snapshot, when going to the site there's nothing." Asked for: clicking the link and logging in should land on the snapshot itself.

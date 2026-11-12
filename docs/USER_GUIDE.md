@@ -306,10 +306,14 @@ Admins can **edit** or **delete** subjects directly from the catalogue. A subjec
 Navigate to **Timetable** to build the weekly schedule.
 - Select a class to view or edit its timetable.
 - Click an empty slot to assign a subject and teacher.
-- Clash warnings appear if a teacher is double-booked.
+- A lesson that would put a class, teacher or room in two places at once is refused, with the reason. Imports skip such rows and say why.
+- **Lessons to place** shows, for each class and subject, how many lessons a week are needed (from teaching assignments), how many are placed, and how many are left.
+- **Days** sets the working days (add Saturday if your school teaches then).
+- Tick **Lock this lesson** to pin a lesson so it can't be changed or removed until unlocked.
 - Print or export the timetable from the action bar.
 
 ---
+- Full details: [Timetabler Guide](TIMETABLER_GUIDE.md).
 
 ## 7. Attendance
 

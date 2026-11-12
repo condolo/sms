@@ -19,11 +19,9 @@ import {
 import { timetable as ttApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 import RoleGuide from '@/components/RoleGuide.jsx';
+import { DAYS, DAY_SHORT, DAY_FULL, daysToShow } from './constants.js';
 
-/* ── Days ────────────────────────────────────────────────────── */
-const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'];
-const DAY_SHORT = { monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', friday: 'Fri' };
-const DAY_FULL  = { monday: 'Monday', tuesday: 'Tuesday', wednesday: 'Wednesday', thursday: 'Thursday', friday: 'Friday' };
+/* ── Days: Monday–Friday, plus Saturday/Sunday when there are lessons on them (v5.265.0) ── */
 
 /* ── Colour palette (deterministic by subject) ───────────────── */
 const PALETTE = [
@@ -73,7 +71,8 @@ function buildSlotMap(slots) {
 }
 
 /* ── Shared read-only timetable grid ─────────────────────────── */
-function ReadGrid({ slots, days = DAYS }) {
+function ReadGrid({ slots, days: baseDays = DAYS }) {
+  const days    = daysToShow(baseDays, slots);
   const rows    = buildRows(slots);
   const slotMap = buildSlotMap(slots);
 
@@ -200,7 +199,7 @@ function TeacherPortalView() {
 
   // Summary stats
   const totalLessons = slots.filter(s => !s.type || s.type === 'lesson').length;
-  const byDay = DAYS.map(d => ({ day: d, count: slots.filter(s => (s.day || '').toLowerCase() === d).length }));
+  const byDay = daysToShow(DAYS, slots).map(d => ({ day: d, count: slots.filter(s => (s.day || '').toLowerCase() === d).length }));
 
   if (isPending) return (
     <div className="bg-white border border-slate-200 rounded-xl p-10 animate-pulse">

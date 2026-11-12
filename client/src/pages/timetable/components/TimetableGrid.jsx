@@ -8,10 +8,11 @@
      bell          []          — bell schedule periods (from constants or custom)
      emergencyMode bool        — when true, show teacher's meeting join button
      teacherMap    {}          — map of teacherId → { zoomPMILink, meetLink, ... }
+     days          []          — the school's working days (default Mon–Fri); a day with lessons is always shown
    ============================================================ */
 import { motion } from 'framer-motion';
-import { Plus, Trash2, Play } from 'lucide-react';
-import { DAYS, DAY_FULL, DAY_SHORT, DEFAULT_BELL, buildSlotMap, slotColor } from '../constants.js';
+import { Plus, Trash2, Play, Lock } from 'lucide-react';
+import { DAYS, DAY_FULL, DAY_SHORT, DEFAULT_BELL, buildSlotMap, slotColor, daysToShow } from '../constants.js';
 import TimeBandGrid from './TimeBandGrid.jsx';
 
 /* ── Slot card ───────────────────────────────────────────────── */
@@ -33,7 +34,12 @@ function SlotCard({ slot, onDelete, onEdit, canEdit, emergencyMode, teacherMap }
       onClick={() => canEdit && onEdit && onEdit(slot)}
       className={`h-full rounded-lg border px-2 py-1.5 group relative ${col.bg} ${col.border} ${canEdit ? 'cursor-pointer hover:shadow-sm hover:brightness-95 transition' : ''}`}
     >
-      {canEdit && (
+      {slot.locked && (
+        <span className="absolute top-1 right-1 p-0.5 text-slate-500" title="Locked — unlock it to change or remove it">
+          <Lock size={10} />
+        </span>
+      )}
+      {canEdit && !slot.locked && (
         <button
           onClick={e => { e.stopPropagation(); onDelete(slot.id ?? slot._id); }}
           className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-white/80 text-slate-400 hover:text-red-500 transition"
@@ -104,7 +110,7 @@ function BreakRow({ bell }) {
 }
 
 /* ── Period row ──────────────────────────────────────────────── */
-function PeriodRow({ bell, slotMap, onDelete, onEdit, onAdd, canEdit, emergencyMode, teacherMap }) {
+function PeriodRow({ bell, days, slotMap, onDelete, onEdit, onAdd, canEdit, emergencyMode, teacherMap }) {
   return (
     <div className="flex border-b border-slate-100" style={{ minHeight: '72px' }}>
       <div
@@ -115,9 +121,9 @@ function PeriodRow({ bell, slotMap, onDelete, onEdit, onAdd, canEdit, emergencyM
         <span className="text-[9px] text-slate-400">{bell.start}</span>
         <span className="text-[9px] text-slate-400">–{bell.end}</span>
       </div>
-      {DAYS.map((day, i) => {
+      {days.map((day, i) => {
         const slot   = slotMap[day]?.[bell.p];
-        const isLast = i === DAYS.length - 1;
+        const isLast = i === days.length - 1;
         return (
           <div
             key={day}
@@ -137,8 +143,9 @@ function PeriodRow({ bell, slotMap, onDelete, onEdit, onAdd, canEdit, emergencyM
 }
 
 /* ── Timetable grid (public export) ─────────────────────────── */
-export default function TimetableGrid({ slots, onDelete, onEdit, onAdd, canEdit, bell = DEFAULT_BELL, emergencyMode = false, teacherMap = {} }) {
+export default function TimetableGrid({ slots, onDelete, onEdit, onAdd, canEdit, bell = DEFAULT_BELL, emergencyMode = false, teacherMap = {}, days: workingDays = DAYS }) {
   const slotMap = buildSlotMap(slots);
+  const days    = daysToShow(workingDays, slots);
   // Lessons whose period is not a row of this class's schedule (its period was removed, or it
   // was moved to another schedule). They are shown for review, not dropped.
   const lessonKeys = new Set(bell.filter(b => !b.isBreak).map(b => String(b.p)));
@@ -149,11 +156,11 @@ export default function TimetableGrid({ slots, onDelete, onEdit, onAdd, canEdit,
       {/* Day header */}
       <div className="flex bg-slate-50 border-b border-slate-200">
         <div className="shrink-0 border-r border-slate-200" style={{ width: '88px', minWidth: '88px' }} />
-        {DAYS.map((day, i) => (
+        {days.map((day, i) => (
           <div
             key={day}
             className={`flex-1 py-2.5 text-center text-xs font-semibold text-slate-700 ${
-              i < DAYS.length - 1 ? 'border-r border-slate-200' : ''
+              i < days.length - 1 ? 'border-r border-slate-200' : ''
             }`}
           >
             <span className="hidden sm:inline">{DAY_FULL[day]}</span>
@@ -172,6 +179,7 @@ export default function TimetableGrid({ slots, onDelete, onEdit, onAdd, canEdit,
                 <PeriodRow
                   key={b.p}
                   bell={b}
+                  days={days}
                   slotMap={slotMap}
                   onDelete={onDelete}
                   onEdit={onEdit}
@@ -191,6 +199,7 @@ export default function TimetableGrid({ slots, onDelete, onEdit, onAdd, canEdit,
           </p>
           <TimeBandGrid
             slots={outside}
+            days={workingDays}
             renderEntry={slot => (
               <SlotCard slot={slot} onDelete={onDelete} onEdit={onEdit} canEdit={canEdit}
                 emergencyMode={emergencyMode} teacherMap={teacherMap} />

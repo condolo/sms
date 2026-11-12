@@ -1,12 +1,13 @@
 /* ============================================================
    OverviewView — institution-wide slot count table
    Props: classList []  — all class documents
+          days      []  — working days (default Mon–Fri); a day with lessons is always shown
    ============================================================ */
 import { useQuery } from '@tanstack/react-query';
 import { timetable as ttApi } from '@/api/client.js';
-import { DAYS, DAY_SHORT } from '../constants.js';
+import { DAYS, ALL_DAYS, DAY_SHORT } from '../constants.js';
 
-export default function OverviewView({ classList }) {
+export default function OverviewView({ classList, days: workingDays = DAYS }) {
   const { data, isLoading } = useQuery({
     queryKey: ['timetable', 'overview'],
     queryFn:  () => ttApi.overview(),
@@ -31,6 +32,7 @@ export default function OverviewView({ classList }) {
       byDay:   oc.byDay,
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
+  const days = ALL_DAYS.filter(d => workingDays.includes(d) || overviewClasses.some(oc => (oc.byDay?.[d] ?? 0) > 0));
 
   if (isLoading) {
     return (
@@ -51,7 +53,7 @@ export default function OverviewView({ classList }) {
           <thead>
             <tr className="bg-slate-50 border-b border-slate-100">
               <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-600">Class</th>
-              {DAYS.map(d => (
+              {days.map(d => (
                 <th key={d} className="text-center px-3 py-2.5 text-xs font-semibold text-slate-600">
                   {DAY_SHORT[d]}
                 </th>
@@ -62,14 +64,14 @@ export default function OverviewView({ classList }) {
           <tbody className="divide-y divide-slate-100">
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={7} className="text-center py-10 text-sm text-slate-400">
+                <td colSpan={days.length + 2} className="text-center py-10 text-sm text-slate-400">
                   No timetable data yet.
                 </td>
               </tr>
             ) : rows.map(row => (
               <tr key={row.classId} className="hover:bg-slate-50/50 transition">
                 <td className="px-4 py-2.5 text-xs font-medium text-slate-800">{row.name}</td>
-                {DAYS.map(d => (
+                {days.map(d => (
                   <td key={d} className="px-3 py-2.5 text-center">
                     <span className={`text-xs font-medium ${
                       (row.byDay[d] ?? 0) === 0 ? 'text-slate-300' : 'text-slate-700'

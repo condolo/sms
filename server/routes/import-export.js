@@ -27,6 +27,8 @@ const { planGate }            = require('../middleware/plan');
 const { _model }              = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { markTimetableChanged } = require('../utils/timetable-publish');
+const { checkConflicts: checkTimetableConflicts } = require('../utils/timetable-conflicts');
+const { getTimetableSettings } = require('../utils/timetable-settings');
 const { resolveBellSchedule } = require('./bell-schedule');
 const { resolvePrimaryContact, validateGuardianRequirement } = require('../utils/guardian-contact');
 const { BUILTIN_EXTRA_ROLE_VALUES } = require('../config/staffResponsibilities');
@@ -1589,7 +1591,9 @@ async function _importTimetable(rows, schoolId, userId) {
   }
 
   const Timetable  = tenantModel('timetable', { schoolId });
-  const VALID_DAYS = new Set(['monday', 'tuesday', 'wednesday', 'thursday', 'friday']);
+  // Lessons go only on the school's working days (Timetable → Days; default Monday–Friday).
+  const { workingDays } = await getTimetableSettings(schoolId);
+  const VALID_DAYS = new Set(workingDays);
   const VALID_TYPE = new Set(['lesson', 'assembly', 'registration', 'free']);
 
   const results = { created: 0, skipped: 0, errors: [] };
@@ -1609,7 +1613,7 @@ async function _importTimetable(rows, schoolId, userId) {
 
     const day = r.day.trim().toLowerCase();
     if (!VALID_DAYS.has(day)) {
-      results.errors.push({ row, field: 'day', message: `day must be monday–friday. Got: '${r.day}'` });
+      results.errors.push({ row, field: 'day', message: `day must be one of the school's working days (${workingDays.join(', ')}). Got: '${r.day}'` });
       results.skipped++; continue;
     }
 
@@ -1685,6 +1689,25 @@ async function _importTimetable(rows, schoolId, userId) {
         streamId:       streamId || null,
         academicYearId: currentPeriod.academicYearId || null,
       };
+
+      // A row updates the lesson already in this cell, if any. A locked lesson is never
+      // overwritten, and the row must pass the same clash checks as adding a lesson by hand
+      // (v5.265.0 — before, an import could put a teacher or room in two places at once).
+      const existing = await Timetable.findOne(filter).select('id locked').lean();
+      if (existing?.locked) {
+        results.errors.push({ row, message: `${classEntry.name} ${day} period ${period} is locked. Unlock it in the Timetable first.` });
+        results.skipped++; continue;
+      }
+      const clash = await checkTimetableConflicts(schoolId, {
+        classId, streamId: streamId || undefined, day, period,
+        teacherId, room: r.room?.trim() || undefined,
+        startTime: slotTime.start, endTime: slotTime.end,
+        academicYearId: currentPeriod.academicYearId || null,
+      }, existing ? (existing.id || String(existing._id)) : null);
+      if (clash) {
+        results.errors.push({ row, message: clash });
+        results.skipped++; continue;
+      }
       const update = {
         $set: {
           subject:        r.subject?.trim() || undefined,
@@ -2385,3 +2408,6 @@ function _dateStamp() {
 }
 
 module.exports = router;
+
+// Exposed for tests only (server/__tests__/routes/timetable-clash-lock-days.test.js).
+module.exports._importTimetable = _importTimetable;

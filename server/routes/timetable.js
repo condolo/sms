@@ -20,9 +20,11 @@
      GET    /class/:classId          Full class timetable (array)
      GET    /student/:studentId      One student's own weekly schedule
      GET    /teacher/:teacherId      Teacher weekly schedule (array)
+     GET    /settings                Working days (PUT to change)
+     GET    /placement               Lessons to place: needed per week vs on the draft
      GET    /:id                     Single slot
      POST   /                        Create slot (with conflict checks)
-     POST   /bulk                    Bulk create / replace
+     POST   /bulk                    Bulk create / replace (clash-checked, all or nothing)
      PUT    /:id                     Update slot (with conflict checks)
      DELETE /:id                     Delete slot
    ============================================================ */
@@ -38,19 +40,22 @@ const { _model }         = require('../utils/model');
 const { getPublishState, markTimetableChanged, publishedReader, timetableReaderFor } = require('../utils/timetable-publish');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { notifyTimetableChange } = require('../utils/change-alerts');
-const { ok, created, paginate, parsePagination, E } = require('../utils/response');
+const { ok, created, fail, paginate, parsePagination, E } = require('../utils/response');
 const { resolveBellSchedule } = require('./bell-schedule');
 const { sanitisePdfStr }      = require('../utils/sanitisePdf');
 const { resolveAcademicPeriod } = require('../utils/academic-period');
 const { isYearArchived } = require('../utils/archival');
 const ScopeEngine = require('../utils/scopeEngine');
+const { timesOverlap, checkConflicts, batchConflicts } = require('../utils/timetable-conflicts');
+const { getTimetableSettings, setWorkingDays, notWorkingDayMsg, ALL_DAYS } = require('../utils/timetable-settings');
+const { computePlacement } = require('../utils/timetable-placement');
 
 const router = express.Router();
 
 // Every successful change to the draft marks it as changed, so Publish becomes available.
-// Publishing and substitution cover are not timetable changes.
+// Publishing, substitution cover and the working-days setting are not timetable changes.
 router.use((req, res, next) => {
-  if (['POST', 'PUT', 'DELETE'].includes(req.method) && !/^\/(publish|unpublish|substitutions)/.test(req.path)) {
+  if (['POST', 'PUT', 'DELETE'].includes(req.method) && !/^\/(publish|unpublish|substitutions|settings)/.test(req.path)) {
     res.on('finish', () => {
       if (res.statusCode < 300 && req.jwtUser?.schoolId) {
         markTimetableChanged(req.jwtUser.schoolId).catch(err => console.error('[timetable] change mark failed:', err.message));
@@ -201,6 +206,9 @@ const SlotSchema = z.object({
   type:           z.enum(['lesson', 'break', 'lunch', 'assembly', 'registration', 'free']).default('lesson'),
   notes:          z.string().max(500).optional(),
   isActive:       z.boolean().default(true),
+  // Pinned by the timetabler (v5.265.0): can't be edited, moved or removed until unlocked, and a
+  // bulk "replace this class" keeps it. The future timetable generator will plan around it.
+  locked:         z.boolean().optional(),
 });
 
 const BulkSlotSchema = z.object({
@@ -217,14 +225,8 @@ function _validate(schema, data) {
 
 /* ── Time helpers ────────────────────────────────────────────── */
 
-/**
- * Returns true if two time ranges overlap (exclusive boundaries).
- * Requires HH:MM strings — comparable lexicographically.
- */
-function _timesOverlap(start1, end1, start2, end2) {
-  if (!start1 || !end1 || !start2 || !end2) return false;
-  return start1 < end2 && end1 > start2;
-}
+// Clash checks live in utils/timetable-conflicts.js, shared with spreadsheet import (v5.265.0).
+const _timesOverlap = timesOverlap;
 
 /**
  * Resolve the actual start/end times for a period key in a given section.
@@ -263,98 +265,8 @@ async function _sectionForClass(schoolId, classId) {
   }
 }
 
-/* ── Conflict checks ─────────────────────────────────────────── */
-/**
- * Check for scheduling conflicts.
- * Uses time-overlap when startTime/endTime are available — this is what
- * makes cross-section teacher double-booking detectable:
- *   Primary P3 (09:30–10:30) overlaps with Secondary P2 (09:30–11:00)
- *   even though they have different period keys.
- *
- * Falls back to exact period-key match for old slots without stored times.
- */
-async function _checkConflicts(schoolId, data, excludeId = null) {
-  const Timetable = tenantModel('timetable', { schoolId });
-  // academicYearId scoped — Academic Year & Term Dependency Map, finding
-  // #6. Every slot is now stamped with a real academicYearId at create
-  // time (see POST / and POST /bulk below) and the one-time backfill
-  // (scripts/backfill-timetable-academic-year.js) has tagged pre-existing
-  // active slots with the school's then-current year, so an exact match
-  // here is safe: a slot from a genuinely different year — including one
-  // still isActive: true because year-transition never touches this
-  // collection — no longer registers as a live conflict against a new
-  // year's timetable.
-  const base = { schoolId, day: data.day, isActive: true, academicYearId: data.academicYearId ?? null };
-  if (excludeId) base.id = { $ne: excludeId };
-
-  // 1. Class slot collision — same class, same day, same period key.
-  // Stream-aware: two DIFFERENT streams of the same class (e.g. 7i and 7ii,
-  // each with their own Maths teacher) are independent groups of students
-  // and may legitimately have different simultaneous lessons — only a
-  // genuine same-audience collision should block. Either slot being
-  // whole-class (no streamId) still conflicts with anything, since a
-  // whole-class slot by definition covers every stream too.
-  const classSlots = await Timetable.find({ ...base, classId: data.classId, period: data.period }).lean();
-  const classConflict = classSlots.find(s => !data.streamId || !s.streamId || s.streamId === data.streamId);
-  if (classConflict) {
-    return `Slot already exists for this ${data.streamId && classConflict.streamId ? 'stream' : 'class'} on ${data.day} period ${data.period}.`;
-  }
-
-  // 2. Teacher double-booking — time-overlap aware across all sections
-  if (data.teacherId) {
-    const teacherSlots = await Timetable.find({ ...base, teacherId: data.teacherId }).lean();
-    for (const s of teacherSlots) {
-      const overlap = (data.startTime && s.startTime)
-        ? _timesOverlap(data.startTime, data.endTime, s.startTime, s.endTime)
-        : data.period === s.period;
-      if (overlap) {
-        const when = (data.startTime && s.startTime)
-          ? `${data.startTime}–${data.endTime} overlaps with ${s.startTime}–${s.endTime}`
-          : `${data.day} period ${data.period}`;
-        return `Teacher is already scheduled in another class at ${when}.`;
-      }
-    }
-  }
-
-  // 3. Room double-booking — time-overlap aware across all sections.
-  // Matches on EITHER a shared roomId OR a shared room display name, not
-  // just one or the other: a linked room's id is the stable, rename-proof
-  // identity (this is what actually closes the "two different spellings of
-  // the same room never register as a conflict" gap), but an incoming
-  // free-text room name (no roomId — an unregistered/ad-hoc space) can still
-  // collide with an existing linked slot whose denormalised `room` text
-  // happens to read the same, and vice-versa, so both existing slots must
-  // stay reachable regardless of which side is linked.
-  const roomFilters = [];
-  if (data.roomId) roomFilters.push({ roomId: data.roomId });
-  if (data.room && data.room.trim()) {
-    const roomRe = new RegExp(
-      `^${data.room.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`,
-      'i',
-    );
-    roomFilters.push({ room: roomRe });
-  }
-  if (roomFilters.length) {
-    const roomSlots = await Timetable.find({ ...base, $or: roomFilters }).lean();
-    const seen = new Set();
-    for (const s of roomSlots) {
-      const sid = s.id || String(s._id);
-      if (seen.has(sid)) continue;
-      seen.add(sid);
-      const overlap = (data.startTime && s.startTime)
-        ? _timesOverlap(data.startTime, data.endTime, s.startTime, s.endTime)
-        : data.period === s.period;
-      if (overlap) {
-        const when = (data.startTime && s.startTime)
-          ? `${data.startTime}–${data.endTime}`
-          : `${data.day} period ${data.period}`;
-        return `Room "${data.room || s.room}" is already occupied at ${when}.`;
-      }
-    }
-  }
-
-  return null;
-}
+/* ── Conflict checks: see utils/timetable-conflicts.js ────────── */
+const _checkConflicts = checkConflicts;
 
 /* ══════════════════════════════════════════════════════════════
    LIST ROUTES (before /:id wildcard)
@@ -414,7 +326,7 @@ router.get('/workload', authMiddleware, PLAN, MODGATE, timetableManageAccess('re
           teacherId:   s.teacherId,
           teacherName: s.teacherName || '',
           total:       0,
-          byDay:       { monday: 0, tuesday: 0, wednesday: 0, thursday: 0, friday: 0 },
+          byDay:       { monday: 0, tuesday: 0, wednesday: 0, thursday: 0, friday: 0, saturday: 0, sunday: 0 },
           sections:    new Set(),
           classes:     new Set(),
         };
@@ -631,7 +543,7 @@ router.get('/overview', authMiddleware, PLAN, MODGATE, timetableManageAccess('re
           classId: s.classId,
           section: s.section || 'all',
           total:   0,
-          byDay:   { monday: 0, tuesday: 0, wednesday: 0, thursday: 0, friday: 0 },
+          byDay:   { monday: 0, tuesday: 0, wednesday: 0, thursday: 0, friday: 0, saturday: 0, sunday: 0 },
         };
       }
       byClass[s.classId].total++;
@@ -784,6 +696,53 @@ async function _draftProblems(req) {
     warnings: warnings.slice(0, 20),
   };
 }
+
+/* ── GET/PUT /api/timetable/settings ─ Working days (utils/timetable-settings.js) ── */
+router.get('/settings', authMiddleware, PLAN, MODGATE, timetableManageAccess('read'), async (req, res) => {
+  try {
+    return ok(res, await getTimetableSettings(req.jwtUser.schoolId));
+  } catch (err) { console.error('[timetable GET /settings]', err); return E.serverError(res); }
+});
+
+const SettingsSchema = z.object({ workingDays: z.array(z.enum(ALL_DAYS)).min(1).max(7) });
+
+router.put('/settings', authMiddleware, PLAN, MODGATE, timetableManageAccess('update'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const { data, error } = _validate(SettingsSchema, req.body);
+    if (error) return E.validation(res, error);
+    // Removing a day leaves its lessons in place (they still show, and can be moved or removed);
+    // it only stops new lessons going on that day. Say how many are affected.
+    const saved = await setWorkingDays(schoolId, data.workingDays);
+    const dropped = ALL_DAYS.filter(d => !saved.workingDays.includes(d));
+    const stranded = dropped.length
+      ? await tenantModel('timetable', tenantContext(req)).countDocuments({ schoolId, isActive: true, day: { $in: dropped } })
+      : 0;
+    return ok(res, { ...saved, lessonsOnRemovedDays: stranded });
+  } catch (err) { console.error('[timetable PUT /settings]', err); return E.serverError(res); }
+});
+
+/* ── GET /api/timetable/placement ─ Lessons to place (utils/timetable-placement.js) ──
+   Lessons per week each class needs (teaching assignments) against what the draft has,
+   for the current academic year. */
+router.get('/placement', authMiddleware, PLAN, MODGATE, timetableManageAccess('read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const ctx = tenantContext(req);
+    const period = await resolveAcademicPeriod(schoolId, ctx, {});
+    const yearId = period.error ? null : (period.academicYearId ?? null);
+    const [assignments, slots, classes, subjects, teachers] = await Promise.all([
+      tenantModel('teaching_assignments', ctx).find({ schoolId })
+        .select('classId className streamId streamName subjectId subjectName teacherId teacherName periodsPerWeek').limit(20000).lean(),
+      tenantModel('timetable', ctx).find({ schoolId, isActive: true, academicYearId: yearId })
+        .select('classId streamId subject subjectId teacherId teacherName type isActive').limit(20000).lean(),
+      tenantModel('classes', ctx).find({ schoolId }).select('id name').lean(),
+      tenantModel('subjects', ctx).find({ schoolId }).select('id name').lean(),
+      tenantModel('teachers', ctx).find({ schoolId }).select('id userId title firstName lastName').lean(),
+    ]);
+    return ok(res, computePlacement({ assignments, slots, classes, subjects, teachers }));
+  } catch (err) { console.error('[timetable GET /placement]', err); return E.serverError(res); }
+});
 
 /* ── GET /api/timetable/status ─ Publish state (utils/timetable-publish.js) ── */
 router.get('/status', authMiddleware, PLAN, MODGATE, timetableManageAccess('read'), async (req, res) => {
@@ -1617,6 +1576,9 @@ router.post('/', authMiddleware, PLAN, MODGATE, timetableManageAccess('create'),
     const { data, error } = _validate(SlotSchema, req.body);
     if (error) return E.validation(res, error);
 
+    const { workingDays } = await getTimetableSettings(schoolId);
+    if (!workingDays.includes(data.day)) return E.badRequest(res, notWorkingDayMsg(data.day));
+
     const roomErr = await _applyRoomLink(schoolId, tenantContext(req), data);
     if (roomErr) return E.notFound(res, roomErr);
 
@@ -1663,11 +1625,9 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, timetableManageAccess('creat
 
     const Timetable = tenantModel('timetable', tenantContext(req));
 
-    if (data.replaceClass) {
-      const delFilter = { schoolId, classId: data.replaceClass };
-      if (data.replaceDay) delFilter.day = data.replaceDay;
-      await Timetable.deleteMany(delFilter);
-    }
+    const { workingDays } = await getTimetableSettings(schoolId);
+    const offDay = data.slots.find(s => !workingDays.includes(s.day));
+    if (offDay) return E.badRequest(res, notWorkingDayMsg(offDay.day));
 
     // Resolve + stamp the real academic year/term on every slot in the
     // batch — Academic Year & Term Dependency Map, finding #6. Resolved
@@ -1719,8 +1679,35 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, timetableManageAccess('creat
     if (missingPeriods.length) {
       return E.badRequest(res, `${[...new Set(missingPeriods)].join(', ')} ${missingPeriods.length > 1 ? 'are' : 'is'} not in the bell schedule of the class being timetabled. Add ${missingPeriods.length > 1 ? 'them' : 'it'} to the schedule, or choose other periods.`);
     }
+
+    // "Replace this class" only ever replaces the class's lessons in the academic year(s) being
+    // written — never another year's — and never a locked lesson (v5.265.0). Before, it deleted
+    // the class's lessons in every year, including archived ones.
+    let replacedIds = [];
+    let delFilter = null;
+    if (data.replaceClass) {
+      const years = [...new Set(toInsert.map(s => s.academicYearId ?? null))];
+      delFilter = { schoolId, classId: data.replaceClass, academicYearId: years.length === 1 ? years[0] : { $in: years } };
+      if (data.replaceDay) delFilter.day = data.replaceDay;
+      const toReplace = await Timetable.find(delFilter).select('id locked').lean();
+      replacedIds = toReplace.filter(s => !s.locked).map(s => s.id || String(s._id));
+    }
+
+    // Clash checks — the same rules as adding a single lesson (v5.265.0; before, a bulk save
+    // skipped them). Inside the batch first, then against what is saved, ignoring the lessons
+    // this batch replaces. Nothing is written if any lesson clashes.
+    const clashes = batchConflicts(toInsert).map(c => ({ index: c.index, message: c.message }));
+    for (let i = 0; i < toInsert.length && clashes.length < 20; i++) {
+      const msg = await checkConflicts(schoolId, toInsert[i], replacedIds);
+      if (msg) clashes.push({ index: i, message: msg });
+    }
+    if (clashes.length) {
+      return fail(res, 'CONFLICT', `${clashes.length} lesson${clashes.length === 1 ? '' : 's'} clash. Nothing was saved.`, 409, { details: clashes.slice(0, 20) });
+    }
+
+    if (replacedIds.length) await Timetable.deleteMany({ ...delFilter, id: { $in: replacedIds } });
     await Timetable.insertMany(toInsert, { ordered: false });
-    return ok(res, { created: toInsert.length, replaced: !!data.replaceClass }, null, 201);
+    return ok(res, { created: toInsert.length, replaced: !!data.replaceClass, replacedCount: replacedIds.length }, null, 201);
   } catch (err) { console.error('[timetable POST /bulk]', err); return E.serverError(res); }
 });
 
@@ -1745,6 +1732,15 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, timetableManageAccess('update'
     // already belongs to an archived year.
     if (await isYearArchived(schoolId, current.academicYearId)) {
       return E.badRequest(res, `Academic year is locked — this timetable slot cannot be edited.`);
+    }
+    // A locked lesson stays where it is until someone unlocks it (v5.265.0). The request that
+    // unlocks it may carry other changes too, so the editor can unlock and move in one save.
+    if (current.locked && data.locked !== false) {
+      return E.badRequest(res, 'This lesson is locked. Unlock it first to change it.');
+    }
+    if (data.day !== undefined && data.day !== current.day) {
+      const { workingDays } = await getTimetableSettings(schoolId);
+      if (!workingDays.includes(data.day)) return E.badRequest(res, notWorkingDayMsg(data.day));
     }
     if (data.academicYearId !== undefined || data.termId !== undefined) {
       const period = await resolveAcademicPeriod(schoolId, tenantContext(req), {
@@ -1774,7 +1770,12 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, timetableManageAccess('update'
       if (merged.bellScheduleId !== undefined) data.bellScheduleId = merged.bellScheduleId;
     }
 
-    const schedulingChanged = ['classId', 'streamId', 'day', 'period', 'teacherId', 'room', 'roomId'].some(f => data[f] !== undefined);
+    // Re-check clashes only when something that decides a clash actually changes. The editor
+    // re-sends every field on save, so "sent" isn't "changed": before v5.265.0, locking a lesson
+    // (or editing its notes) that already sat in an old clash was refused with that clash.
+    const _norm = v => (v === undefined || v === null ? '' : String(v));
+    const schedulingChanged = ['classId', 'streamId', 'day', 'period', 'teacherId', 'room', 'roomId']
+      .some(f => data[f] !== undefined && _norm(data[f]) !== _norm(current[f]));
     if (schedulingChanged) {
       const conflictMsg = await _checkConflicts(schoolId, merged, req.params.id);
       if (conflictMsg) return E.conflict(res, conflictMsg);
@@ -1810,6 +1811,7 @@ router.delete('/:id', authMiddleware, PLAN, MODGATE, timetableManageAccess('dele
     if (await isYearArchived(schoolId, existing.academicYearId)) {
       return E.badRequest(res, `Academic year is locked — this timetable slot cannot be deleted.`);
     }
+    if (existing.locked) return E.badRequest(res, 'This lesson is locked. Unlock it first to remove it.');
 
     const doc = await Timetable.findOneAndDelete({ id: req.params.id, schoolId });
     if (!doc) return E.notFound(res, 'Timetable slot not found');
