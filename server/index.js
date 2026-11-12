@@ -271,6 +271,7 @@ app.use('/api/platform', platformLimiter);
 console.log('[Security] rate limiting active — general: 10000/15min per user (IP for anonymous), auth: 20/15min per IP (login+force-change+change-password+revoke-all), platform: 300/15min per IP');
 
 /* ── API Routes ─────────────────────────────────────────────── */
+app.use('/api/public/enquiry', require('./routes/public-enquiry')); // no auth - school enquiry form
 app.use('/api/public',      require('./routes/public'));   // no auth - school branding
 app.use('/api/demo',        require('./routes/demo'));     // no auth - self-serve demo requests
 app.use('/api/referrals',   require('./routes/referrals')); // no auth - public referral program

@@ -11,6 +11,7 @@ import {
   ClipboardCheck, Layers, UserCog, Database,
   BookMarked, Bus, BedDouble, TrendingUp, Library,
   Sprout, CalendarCheck, HeartPulse, Boxes, Link2, LineChart, LifeBuoy, Megaphone,
+  Lightbulb,
 } from 'lucide-react';
 import { useSchoolTheme, withOpacity } from '@/hooks/useSchoolTheme.js';
 import useAuthStore from '@/store/auth.js';
@@ -61,6 +62,44 @@ const SECTIONS = [
       {
         q: 'What is the academic year context?',
         a: 'Everything in Msingi — attendance, grades, fees, timetables — is tied to an academic year. Make sure your administrator has created and activated the current academic year in Settings before entering data.',
+      },
+    ],
+  },
+
+  /* ── Tips & Best Practices ────────────────────────────────── */
+  {
+    id: 'tips',
+    moduleKey: null,
+    Icon: Lightbulb,
+    title: 'Tips & Best Practices',
+    articles: [
+      {
+        q: 'Reply to a new enquiry within one working day',
+        a: 'Speed is the single biggest advantage a school has over a parent’s other options. New enquiries land at Admissions → Enquiry and notify staff who hold Admissions permissions, so someone should own the first call or message the same day. If nobody can call today, send a short WhatsApp or email acknowledging the enquiry and say when you will call.',
+      },
+      {
+        q: 'Put the enquiry link everywhere parents already look',
+        a: 'Add the school’s enquiry link (Settings → School → Public Enquiry Form) to the website header and footer, the school’s WhatsApp business profile, the reception desk QR code, Facebook/Instagram bios, email signatures and printed flyers. The simpler the path, the more enquiries you keep — a parent should never have to call the office just to find the form.',
+      },
+      {
+        q: 'Work the follow-up filters every morning',
+        a: 'On Admissions, use the follow-up filter: "Tour not had / not sure", "Assessment not done / not sure", and "From the web form". That is the shortest list of people who still need something from you. Clear it daily or weekly, and update the flags as each step happens so the list stays honest.',
+      },
+      {
+        q: 'Update tour and assessment flags right after the call',
+        a: 'A flag updated a week later is usually wrong. When a family books or attends a tour, or a learner sits the assessment, open the applicant → Edit → Enquiry Follow-up and set Yes/No. Add a one-line note ("Tour booked Tue 10am", "Assessment done, awaiting results") so the next person has context without calling the family again.',
+      },
+      {
+        q: 'Ask where families heard about you — and use the answer',
+        a: 'The "where did you hear about us" field is only useful if it stays accurate. Let parents pick the closest option (word of mouth, social media, Google, event, referral, walk-in, other). Review the mix once a term: if most families come from word of mouth or a particular event, that is where the next marketing effort belongs — and the CSV export gives you the list to count.',
+      },
+      {
+        q: 'Keep the admissions board honest',
+        a: 'An enquiry is not an application. Move a family to Application only when they have actually decided to apply; withdraw or reject leads that have gone cold rather than leaving them in Enquiry forever. A board that reflects reality is the only one the leadership team can trust during intake.',
+      },
+      {
+        q: 'General habits that keep the school running smoothly',
+        a: 'Reply to messages in the same place the parent wrote to you. Keep attendance registers filed daily. Review Roles & Permissions when someone changes role, and remove access when they leave. Use the Help Centre search before raising a support ticket — most questions are answered there. Small, consistent habits beat a big cleanup at the end of term.',
       },
     ],
   },
@@ -267,6 +306,14 @@ const SECTIONS = [
       {
         q: 'Where do I see the admissions funnel overview?',
         a: 'The Dashboard → Admissions Pipeline bar chart shows counts by stage. For full detail, go to Admissions — the board view shows all active applications grouped by stage.',
+      },
+      {
+        q: 'How do I share the public enquiry form?',
+        a: 'Open Settings → School → Public Enquiry Form and switch it on, then copy the link it shows (https://your-school…/enquire/your-school). Parents fill in a short form — their name, phone and optional email, the child’s age and the class they are asking about, whether they have had a tour or an assessment, and where they heard about the school. Every field is optional, but at least one contact method is required so the school can follow up. Submissions appear in Admissions at the Enquiry stage with a "Web form" badge; the source and tour/assessment flags are on the applicant panel and can be updated as follow-up happens. The form is off until a school turns it on, and unknown or disabled schools get a plain 404.',
+      },
+      {
+        q: 'What happens after a parent sends an enquiry?',
+        a: 'The enquiry lands in Admissions at the Enquiry stage, marked "Web form", with the parent’s name, phone and email, the learner’s age and class, the tour and assessment answers, and where they heard about the school. Staff who hold Admissions permissions get an in-app notification. Open the card to call the family; after the call use Edit → Enquiry Follow-up to set the tour and assessment to Yes or No (or leave Not sure) and add a note. The board badges and the follow-up filter ("Tour not had / not sure", "Assessment not done / not sure", "From the web form") show who still needs action, and every field is included in the CSV export. The form can be switched off again at any time in Settings → School.',
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',

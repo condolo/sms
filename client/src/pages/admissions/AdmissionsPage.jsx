@@ -23,6 +23,7 @@ export default function AdmissionsPage() {
 
   /* UI state */
   const [search, setSearch]               = useState('');
+  const [followUp, setFollowUp]           = useState('');         // '' | tour_unknown | assessment_unknown | web
   const [viewMode, setViewMode]           = useState('kanban');   // 'kanban' | 'list'
   const [showAdd, setShowAdd]             = useState(false);
   const [showEnroll, setShowEnroll]       = useState(false);
@@ -48,12 +49,20 @@ export default function AdmissionsPage() {
   const byStageArr   = statsRes?.data?.byStage ?? [];
   const statsByStage = Object.fromEntries(byStageArr.map(s => [s.stage, s]));
 
+  /* Follow-up filters (2026-11) — the server already supports tour/
+     assessment/source filters; these chips are how the admissions team
+     actually finds "who still needs a tour" without reading every card. */
+  const followUpParams = followUp === 'tour_unknown' ? { tour: 'unknown' }
+    : followUp === 'assessment_unknown' ? { assessment: 'unknown' }
+    : followUp === 'web' ? { source: 'public_form' }
+    : {};
+
   /* One query per active pipeline stage (hooks in loop — intentional) */
   const stageQueries = PIPELINE.map(col =>
     // eslint-disable-next-line react-hooks/rules-of-hooks
     useQuery({
-      queryKey: ['admissions', 'stage', col.id, search],
-      queryFn:  () => admissionsApi.list({ stage: col.id, search: search || undefined, limit: 200, page: 1 }),
+      queryKey: ['admissions', 'stage', col.id, search, followUp],
+      queryFn:  () => admissionsApi.list({ stage: col.id, search: search || undefined, ...followUpParams, limit: 200, page: 1 }),
       staleTime: 30_000,
       select: r => r?.data ?? [],
     })
@@ -156,6 +165,17 @@ export default function AdmissionsPage() {
               </button>
             )}
           </div>
+          <select
+            value={followUp}
+            onChange={e => setFollowUp(e.target.value)}
+            title="Follow-up filter"
+            className="text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-600 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400"
+          >
+            <option value="">All follow-ups</option>
+            <option value="tour_unknown">Tour not had / not sure</option>
+            <option value="assessment_unknown">Assessment not done / not sure</option>
+            <option value="web">From the web form</option>
+          </select>
         </div>
       </div>
 

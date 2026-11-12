@@ -26,6 +26,55 @@ export const PRIORITY_CONFIG = {
   low:    { label: 'Low',    cls: 'bg-slate-50 text-slate-400'                 },
 };
 
+/* ── Enquiry tracking (2026-11) ────────────────────────────────
+   The public/staff enquiry form captures a deliberately small set of
+   follow-up facts. Tri-state flags are kept distinct from false:
+   "not sure / not asked" is exactly the group the admissions team
+   needs to chase, so collapsing it into "no" would lose the lead. */
+export const HEARD_ABOUT_OPTIONS = [
+  { value: 'word_of_mouth', label: 'Word of mouth' },
+  { value: 'social_media',  label: 'Facebook / Instagram / WhatsApp' },
+  { value: 'google',        label: 'Google search' },
+  { value: 'event',         label: 'School event / open day' },
+  { value: 'referral',      label: 'Referred by a parent' },
+  { value: 'walk_in',       label: 'Walked past / signboard' },
+  { value: 'other',         label: 'Other' },
+];
+
+export const ENQUIRY_SOURCE_LABEL = {
+  public_form: 'Web form',
+  staff:       'Staff',
+};
+
+export function heardAboutLabel(value) {
+  if (!value) return '';
+  return HEARD_ABOUT_OPTIONS.find(o => o.value === value)?.label ?? value;
+}
+
+export function triStateLabel(value) {
+  if (value === true)  return 'Yes';
+  if (value === false) return 'No';
+  return 'Not sure';
+}
+
+/** Applicant name with a fallback for the light enquiry form, where the
+ *  learner's names are intentionally not collected. */
+export function applicantDisplayName(a) {
+  const name = [a?.firstName, a?.lastName].filter(Boolean).join(' ').trim();
+  if (name) return name;
+  return a?.parentName || a?.parentPhone || a?.parentEmail || 'Unnamed enquiry';
+}
+
+export function applicantInitials(a) {
+  if (a?.firstName || a?.lastName) return initials(a.firstName, a.lastName);
+  const name = applicantDisplayName(a);
+  const parts = name.split(/\s+/).filter(Boolean);
+  // A phone number has no useful initials — use the first digit instead.
+  if (!parts.length) return '?';
+  if (/^\+?\d/.test(name)) return name.replace(/\D/g, '').slice(0, 2) || '#';
+  return parts.slice(0, 2).map(p => p[0]).join('').toUpperCase();
+}
+
 export const EMPTY_FORM = {
   firstName: '', lastName: '', middleName: '', dateOfBirth: '',
   gender: '',
@@ -48,6 +97,15 @@ export const EMPTY_FORM = {
   // here so it's known BEFORE the admission invoice is generated at
   // enroll time (see server/routes/admissions.js's billing-sequence fix).
   isDirectorFamily: false, isReferralFamily: false,
+  // 2026-11 — enquiry tracking. Staff-captured leads are marked as such;
+  // the public form sets 'public_form' server-side. Tri-state selects use
+  // 'unknown' | 'yes' | 'no' and are converted to null | true | false on save.
+  learnerAge: '',
+  tourCompleted: 'unknown',
+  assessmentCompleted: 'unknown',
+  heardAbout: '',
+  heardAboutOther: '',
+  enquirySource: 'staff',
 };
 
 /** Display label for an applicant's class — prefers the denormalized name
@@ -88,14 +146,26 @@ export function avatarColor(name = '') {
   return AVATAR_COLORS[(name.charCodeAt(0) || 0) % AVATAR_COLORS.length];
 }
 
+/* A CSV cell built from applicant input. Text beginning with = + - @ (or a
+   tab/CR) is treated by Excel/Sheets as a formula; prefix an apostrophe so
+   it stays text. Public-form input is untrusted, so this matters. */
+function csvCell(value) {
+  let s = String(value ?? '');
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return `"${s.replace(/"/g, '""')}"`;
+}
+
 export function exportAdmissionsCSV(cols) {
   const header = [
+    'Application Ref',
     'First Name','Last Name','Stage','Priority',
     'Applying For Class','Applying For Stream','Academic Year','Date of Birth','Gender',
     'Parent Name','Parent Phone','Parent Email','Applied Date',
+    'Learner Age','Enquiry Source','Heard About','School Tour','Assessment',
   ];
   const rows = cols.flatMap(col =>
     col.items.map(a => [
+      a.applicationRef ?? '',
       a.firstName ?? '', a.lastName ?? '',
       stageMeta(a.stage).label,
       a.priority ?? 'normal',
@@ -104,10 +174,15 @@ export function exportAdmissionsCSV(cols) {
       a.gender ?? '',
       a.parentName ?? '', a.parentPhone ?? '', a.parentEmail ?? '',
       a.createdAt ? new Date(a.createdAt).toLocaleDateString('en-GB') : '',
+      a.learnerAge ?? '',
+      ENQUIRY_SOURCE_LABEL[a.enquirySource] ?? '',
+      heardAboutLabel(a.heardAbout) ?? '',
+      a.tourCompleted === true ? 'Yes' : a.tourCompleted === false ? 'No' : 'Not sure',
+      a.assessmentCompleted === true ? 'Yes' : a.assessmentCompleted === false ? 'No' : 'Not sure',
     ])
   );
   const csv = [header, ...rows]
-    .map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))
+    .map(r => r.map(csvCell).join(','))
     .join('\n');
   const blob = new Blob([csv], { type: 'text/csv' });
   const url  = URL.createObjectURL(blob);
