@@ -1064,13 +1064,23 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
         }).select('classId streamId').lean().catch(() => [])
       : [];
     const submittedKeys = new Set(todayAttCombos.map(a => _slotKey(a.classId, a.streamId)));
+    /* A whole-class lesson has no streamId, while every attendance record
+       is stamped with the STUDENT'S stream. Keying that slot by
+       `classId::''` therefore never matched a real register — the teacher
+       marked the class, saw every name green, and Home still said "1
+       register still open". A register is filed once a day for a class, so
+       any attendance row for that class/date means the whole-class lesson
+       is submitted. Stream-specific slots keep the exact per-stream check. */
+    const submittedClassIds = new Set(todayAttCombos.map(a => a.classId));
 
     const attendanceStatus = timetableToday.map(slot => ({
       classId:   slot.classId,
       className: slot.className,
       streamId:  slot.streamId ?? null,
       streamName: slot.streamName ?? null,
-      submitted: submittedKeys.has(_slotKey(slot.classId, slot.streamId)),
+      submitted: slot.streamId
+        ? submittedKeys.has(_slotKey(slot.classId, slot.streamId))
+        : submittedClassIds.has(slot.classId),
     }));
     // Deduplicate by (classId, streamId) — NOT classId alone, which used
     // to silently merge two different streams' lessons into one entry.

@@ -203,6 +203,24 @@ describe('GET /api/teacher-portal/dashboard — attendance submitted-status is p
     expect(res.body.data.attendanceWidget[0].submitted).toBe(true);
     expect(res.body.data.attendanceWidget[0].streamId).toBeNull();
   });
+
+  test('a whole-class lesson counts a register whose rows carry the students’ own streams', async () => {
+    // The mobile app files a class register without a slot streamId; the
+    // server stamps each row with the student's stream. Before this fix the
+    // slot looked for `classId::''` and stayed "open" forever.
+    mockAssignments = [{ schoolId: SCHOOL_A, teacherId: TEACHER_ID, classId: CLASS_ID, subjectId: 'subj_math' }];
+    mockTimetableDocs = [
+      { schoolId: SCHOOL_A, teacherId: TEACHER_ID, day: TODAY_DAY, classId: CLASS_ID, isActive: true, subject: 'Math', startTime: '08:00', endTime: '08:40' },
+    ];
+    mockAttendanceDocs = [
+      { schoolId: SCHOOL_A, classId: CLASS_ID, streamId: STREAM_A, date: TODAY_ISO, studentId: 'stu_1', status: 'present' },
+      { schoolId: SCHOOL_A, classId: CLASS_ID, streamId: STREAM_B, date: TODAY_ISO, studentId: 'stu_2', status: 'present' },
+    ];
+    const res = await supertest(buildApp()).get('/api/teacher-portal/dashboard');
+    expect(res.body.data.attendanceWidget).toHaveLength(1);
+    expect(res.body.data.attendanceWidget[0].submitted).toBe(true);
+    expect(res.body.data.pendingAttendanceCount).toBe(0);
+  });
 });
 
 describe('Today\'s Timetable day-name casing (2026-09 — the root cause found while investigating this whole feature)', () => {
