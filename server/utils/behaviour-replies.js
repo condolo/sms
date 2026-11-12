@@ -30,6 +30,7 @@
    ============================================================ */
 'use strict';
 
+const mongoose = require('mongoose');
 const { tenantModel } = require('./tenant-model');
 
 const PORTAL_ROLES = new Set(['parent', 'guardian', 'student']);
@@ -42,6 +43,22 @@ function displayName(name) {
   if (s.includes('@')) return 'School staff';
   if (/^\+?[\d\s()-]{6,}$/.test(s)) return 'School staff';
   return s;
+}
+
+/* A user's id as the JWT carries it: `id`, or String(_id) for an account
+   saved without an `id` field (some schools' records — see
+   scopeMiddleware._teacherIdForms). reportedBy, recipients and the parent's
+   userId all use this form, so every lookup by user id must match both. */
+function userKey(u) { return u.id || String(u._id); }
+function byUserIds(ids) {
+  const list = [...new Set((ids || []).filter(Boolean).map(String))];
+  const oids = list.filter(v => /^[a-fd]{24}$/i.test(v)).map(v => new mongoose.Types.ObjectId(v));
+  return oids.length ? { $or: [{ id: { $in: list } }, { _id: { $in: oids } }] } : { id: { $in: list } };
+}
+async function findUser(ctx, schoolId, userId, fields) {
+  if (!userId) return null;
+  const [u] = await tenantModel('users', ctx).find({ schoolId, ...byUserIds([userId]) }).select(fields).limit(1).lean();
+  return u || null;
 }
 
 function threadKey(incidentId, parentUserId) {
@@ -64,8 +81,8 @@ async function recorderNames(ctx, schoolId, incidents) {
   const ids = [...new Set(incidents.map(loggerOf).filter(Boolean))];
   if (!ids.length) return {};
   const users = await tenantModel('users', ctx)
-    .find({ schoolId, id: { $in: ids } }).select('id name').lean();
-  return Object.fromEntries(users.map(u => [u.id, displayName(u.name)]));
+    .find({ schoolId, ...byUserIds(ids) }).select('id name').lean();
+  return Object.fromEntries(users.map(u => [userKey(u), displayName(u.name)]));
 }
 
 /**
@@ -141,9 +158,9 @@ async function incidentStaff(ctx, schoolId, incident) {
     const teacherIds = [stream?.formTeacherId, stream?.assistantFormTeacherId].filter(Boolean);
     if (teacherIds.length) {
       const teachers = await tenantModel('teachers', ctx)
-        .find({ schoolId, id: { $in: teacherIds } }).select('id userId').lean();
+        .find({ schoolId, ...byUserIds(teacherIds) }).select('id userId').lean();
       for (const tid of teacherIds) {
-        const t = teachers.find(x => x.id === tid);
+        const t = teachers.find(x => x.id === tid || String(x._id) === tid);
         if (t?.userId) wanted.push({ userId: t.userId, reason: 'form_teacher' });
       }
     }
@@ -152,8 +169,8 @@ async function incidentStaff(ctx, schoolId, incident) {
   const ids = [...new Set(wanted.map(w => w.userId))];
   if (!ids.length) return [];
   const users = await tenantModel('users', ctx)
-    .find({ schoolId, id: { $in: ids }, isActive: { $ne: false } }).select('id name role').lean();
-  const byId = Object.fromEntries(users.filter(u => !PORTAL_ROLES.has(u.role)).map(u => [u.id, u]));
+    .find({ schoolId, ...byUserIds(ids), isActive: { $ne: false } }).select('id name role').lean();
+  const byId = Object.fromEntries(users.filter(u => !PORTAL_ROLES.has(u.role)).map(u => [userKey(u), u]));
   const seen = new Set();
   const out = [];
   for (const w of wanted) {
@@ -227,6 +244,9 @@ module.exports = {
   PORTAL_ROLES,
   BODY_MAX,
   displayName,
+  userKey,
+  byUserIds,
+  findUser,
   threadKey,
   loggerOf,
   cleanBody,

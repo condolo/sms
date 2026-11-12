@@ -17,7 +17,8 @@ function matchValue(actual, cond) {
   if (cond && typeof cond === 'object' && !Array.isArray(cond) && !(cond instanceof Date)) {
     return Object.entries(cond).every(([op, v]) => {
       switch (op) {
-        case '$in': return Array.isArray(actual) ? actual.some(a => v.includes(a)) : v.includes(actual);
+        // ObjectId-like values (e.g. _id: { $in: [new ObjectId(hex)] }) compare by their string form.
+        case '$in': { const vs = v.map(x => (x && typeof x === 'object' ? String(x) : x)); return Array.isArray(actual) ? actual.some(a => vs.includes(a)) : vs.includes(actual); }
         case '$ne': return Array.isArray(actual) ? !actual.includes(v) : actual !== v;
         case '$exists': return v ? actual !== undefined : actual === undefined;
         case '$gte': return actual >= v;
@@ -49,6 +50,8 @@ function project(row, spec) {
     return out;
   }
   const out = {};
+  // Like MongoDB, _id comes back unless explicitly excluded ('-_id').
+  if (row._id !== undefined && !fields.includes('-_id')) out._id = row._id;
   for (const f of fields) if (row[f] !== undefined) out[f] = row[f];
   return out;
 }

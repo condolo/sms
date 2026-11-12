@@ -974,7 +974,7 @@ router.post('/incidents/:id/replies', authMiddleware, PLAN, MODGATE, async (req,
     if (!allowed) return E.forbidden(res, 'You are not on this conversation.');
 
     // The parent must still be a parent of this child, in this school.
-    const parent = await tenantModel('users', ctx).findOne({ schoolId, id: parentUserId }).select('id role studentIds guardianOf isActive').lean();
+    const parent = await behaviourReplies.findUser(ctx, schoolId, parentUserId, 'id role studentIds guardianOf isActive');
     const linked = parent && ['parent', 'guardian'].includes(parent.role) && parent.isActive !== false
       && [...(parent.studentIds || []), ...(parent.guardianOf || [])].includes(incident.studentId);
     if (!linked) return E.conflict(res, 'That parent is no longer linked to this student.');
@@ -982,7 +982,7 @@ router.post('/incidents/:id/replies', authMiddleware, PLAN, MODGATE, async (req,
     const priorStaff = msgs.filter(m => !behaviourReplies.PORTAL_ROLES.has(m.senderRole)).map(m => m.senderId);
     const recipientUserIds = [...new Set([parentUserId, ...staff.map(s => s.userId), ...priorStaff])].filter(id => id && id !== userId);
 
-    const me = await tenantModel('users', ctx).findOne({ schoolId, id: userId }).select('name').lean();
+    const me = await behaviourReplies.findUser(ctx, schoolId, userId, 'name');
     const senderName = behaviourReplies.displayName(me?.name);
     const msg = await createDirectMessage(req, {
       recipientUserIds,

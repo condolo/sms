@@ -1684,13 +1684,15 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, timetableManageAccess('creat
     // written — never another year's — and never a locked lesson (v5.265.0). Before, it deleted
     // the class's lessons in every year, including archived ones.
     let replacedIds = [];
+    let replaceTargets = [];
     let delFilter = null;
     if (data.replaceClass) {
       const years = [...new Set(toInsert.map(s => s.academicYearId ?? null))];
       delFilter = { schoolId, classId: data.replaceClass, academicYearId: years.length === 1 ? years[0] : { $in: years } };
       if (data.replaceDay) delFilter.day = data.replaceDay;
       const toReplace = await Timetable.find(delFilter).select('id locked').lean();
-      replacedIds = toReplace.filter(s => !s.locked).map(s => s.id || String(s._id));
+      replaceTargets = toReplace.filter(s => !s.locked);
+      replacedIds = replaceTargets.map(s => s.id || String(s._id));
     }
 
     // Clash checks — the same rules as adding a single lesson (v5.265.0; before, a bulk save
@@ -1705,7 +1707,13 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, timetableManageAccess('creat
       return fail(res, 'CONFLICT', `${clashes.length} lesson${clashes.length === 1 ? '' : 's'} clash. Nothing was saved.`, 409, { details: clashes.slice(0, 20) });
     }
 
-    if (replacedIds.length) await Timetable.deleteMany({ ...delFilter, id: { $in: replacedIds } });
+    // Delete exactly the lessons excluded from the clash check above: by id, or by _id for an
+    // old lesson saved without one (otherwise it would stay and sit beside its replacement).
+    if (replaceTargets.length) {
+      const withId = replaceTargets.filter(s => s.id).map(s => s.id);
+      const noId   = replaceTargets.filter(s => !s.id).map(s => s._id);
+      await Timetable.deleteMany({ ...delFilter, $or: [{ id: { $in: withId } }, { _id: { $in: noId } }] });
+    }
     await Timetable.insertMany(toInsert, { ordered: false });
     return ok(res, { created: toInsert.length, replaced: !!data.replaceClass, replacedCount: replacedIds.length }, null, 201);
   } catch (err) { console.error('[timetable POST /bulk]', err); return E.serverError(res); }

@@ -157,6 +157,26 @@ describe('parent sees who logged each entry and where', () => {
   });
 });
 
+describe('accounts saved without an `id` field (user id = String(_id))', () => {
+  const HEX = 'aaaaaaaaaaaaaaaaaaaaaaaa';
+  beforeEach(() => {
+    mockDb.data.users.push({ _id: HEX, schoolId: S, role: 'teacher', name: 'Mrs Idless', email: 'idless@school.test' });
+    mockDb.data.behaviour_incidents.push({ id: 'inc_idless', schoolId: S, studentId: 'stu_1', classId: 'cls_6', reportedBy: HEX, title: 'Late homework', points: -1, date: '2026-11-11' });
+  });
+
+  test('the parent still sees who logged it', async () => {
+    const res = await as(PARENT).get('/api/parent-portal/behaviour/stu_1');
+    expect(res.body.data.find(d => d.id === 'inc_idless').recordedBy).toBe('Mrs Idless');
+  });
+
+  test('a reply still reaches that teacher', async () => {
+    const res = await as(PARENT).post('/api/parent-portal/behaviour/stu_1/inc_idless/replies').send({ body: 'Which homework?' });
+    expect(res.status).toBe(201);
+    expect(res.body.data.recipients[0]).toEqual({ name: 'Mrs Idless', reason: 'logged' });
+    expect(mockDb.data.messages[0].recipients).toContain(HEX);
+  });
+});
+
 describe('parent replies', () => {
   test('a reply goes to the logger and the form teacher, and they are notified by email when the school allows it', async () => {
     const res = await as(PARENT).post('/api/parent-portal/behaviour/stu_1/inc_1/replies')

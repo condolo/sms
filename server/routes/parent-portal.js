@@ -1015,7 +1015,7 @@ router.post('/behaviour/:childId/:incidentId/replies', authMiddleware, PLAN, asy
       return E.conflict(res, 'No teacher is linked to this entry any more. Please use Messages to contact the school.');
     }
 
-    const me = await tenantModel('users', ctx).findOne({ schoolId, id: userId }).select('name').lean();
+    const me = await behaviourReplies.findUser(ctx, schoolId, userId, 'name');
     const senderName = (me?.name && !me.name.includes('@')) ? me.name : 'Parent';
     const msg = await createDirectMessage(req, {
       recipientUserIds: staff.map(s => s.userId),
