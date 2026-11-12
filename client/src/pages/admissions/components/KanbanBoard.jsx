@@ -3,14 +3,15 @@
    ============================================================ */
 import { motion } from 'framer-motion';
 import { Calendar, ArrowRight } from 'lucide-react';
-import { avatarColor, initials, formatDate, PRIORITY_CONFIG, applicantClassLabel } from '../constants.js';
+import { avatarColor, formatDate, PRIORITY_CONFIG, applicantClassLabel, applicantDisplayName, applicantInitials } from '../constants.js';
 import { CardSkeleton, EmptyCol } from './AdmissionsPrimitives.jsx';
 
 /* ── Applicant card ───────────────────────────────────────── */
 function ApplicantCard({ applicant, col, onClick, onStageClick }) {
   const a   = applicant;
   const pri = PRIORITY_CONFIG[a.priority] ?? PRIORITY_CONFIG.normal;
-  const av  = avatarColor(`${a.firstName}${a.lastName}`);
+  const av  = avatarColor(applicantDisplayName(a));
+  const hasFollowUp = a.enquirySource || a.tourCompleted != null || a.assessmentCompleted != null;
 
   return (
     <motion.div
@@ -26,15 +27,16 @@ function ApplicantCard({ applicant, col, onClick, onStageClick }) {
         {/* Top row: avatar + name + priority */}
         <div className="flex items-start gap-3">
           <div className={`w-9 h-9 rounded-full bg-gradient-to-br ${av} flex items-center justify-center text-white text-xs font-bold shrink-0`}>
-            {initials(a.firstName, a.lastName)}
+            {applicantInitials(a)}
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-slate-900 truncate">
-              {a.firstName} {a.lastName}
+              {applicantDisplayName(a)}
             </p>
             <p className="text-xs text-slate-400 truncate mt-0.5">
               {applicantClassLabel(a) || 'No class specified'}
               {a.applyingForStreamName && ` · ${a.applyingForStreamName}`}
+              {a.learnerAge ? ` · age ${a.learnerAge}` : ''}
             </p>
           </div>
           {a.priority === 'high' && (
@@ -43,6 +45,25 @@ function ApplicantCard({ applicant, col, onClick, onStageClick }) {
             </span>
           )}
         </div>
+
+        {/* Enquiry follow-up badges — only what was actually captured. */}
+        {hasFollowUp && (
+          <div className="mt-2 flex flex-wrap items-center gap-1">
+            {a.enquirySource === 'public_form' && (
+              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600">Web form</span>
+            )}
+            {a.tourCompleted != null && (
+              <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${a.tourCompleted ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                Tour {a.tourCompleted ? '✓' : '✗'}
+              </span>
+            )}
+            {a.assessmentCompleted != null && (
+              <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${a.assessmentCompleted ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                Assessment {a.assessmentCompleted ? '✓' : '✗'}
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Meta */}
         <div className="mt-3 flex items-center justify-between">

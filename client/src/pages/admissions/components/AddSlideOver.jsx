@@ -9,7 +9,7 @@ import {
   admissions as admissionsApi, academicConfig as academicConfigApi,
   classes as classesApi, streams as streamsApi, settings as settingsApi,
 } from '@/api/client.js';
-import { EMPTY_FORM, PIPELINE } from '../constants.js';
+import { EMPTY_FORM, PIPELINE, HEARD_ABOUT_OPTIONS } from '../constants.js';
 import { Section, Field, inputCls } from './AdmissionsPrimitives.jsx';
 import { useCurrentAcademicPeriod } from '@/hooks/useCurrentAcademicPeriod.js';
 
@@ -138,7 +138,16 @@ export default function AddSlideOver({ onClose, onCreated }) {
     ev.preventDefault();
     const e = validate();
     if (Object.keys(e).length) { setErrors(e); return; }
-    mutation.mutate(form);
+    /* The form keeps tri-state selects as strings for plain HTML; the API
+       stores null | true | false so "not sure" stays distinct from "no". */
+    mutation.mutate({
+      ...form,
+      learnerAge: form.learnerAge === '' ? undefined : Number(form.learnerAge),
+      tourCompleted:       form.tourCompleted === 'yes' ? true : form.tourCompleted === 'no' ? false : null,
+      assessmentCompleted: form.assessmentCompleted === 'yes' ? true : form.assessmentCompleted === 'no' ? false : null,
+      heardAbout: form.heardAbout || null,
+      heardAboutOther: form.heardAbout === 'other' ? form.heardAboutOther : '',
+    });
   }
 
   return (
@@ -311,6 +320,56 @@ export default function AddSlideOver({ onClose, onCreated }) {
             <Field label="Notes">
               <textarea value={form.notes} onChange={e => set('notes', e.target.value)} rows={3} placeholder="Any additional notes…" className={`${inputCls()} resize-none`} />
             </Field>
+          </Section>
+
+          {/* Enquiry tracking — the same follow-up facts the public form
+              captures, so a phone/walk-in enquiry can be compared with a
+              web lead on the same board. All optional. */}
+          <Section label="Enquiry Tracking">
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Learner Age">
+                <input
+                  type="number" min={2} max={25} inputMode="numeric"
+                  value={form.learnerAge}
+                  onChange={e => set('learnerAge', e.target.value)}
+                  placeholder="e.g. 7"
+                  className={inputCls()}
+                />
+              </Field>
+              <Field label="How they heard about us">
+                <select value={form.heardAbout} onChange={e => set('heardAbout', e.target.value)} className={inputCls()}>
+                  <option value="">Not captured</option>
+                  {HEARD_ABOUT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </Field>
+            </div>
+            {form.heardAbout === 'other' && (
+              <Field label="Where?">
+                <input
+                  value={form.heardAboutOther}
+                  onChange={e => set('heardAboutOther', e.target.value)}
+                  maxLength={160}
+                  placeholder="e.g. Church notice board"
+                  className={inputCls()}
+                />
+              </Field>
+            )}
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="School tour">
+                <select value={form.tourCompleted} onChange={e => set('tourCompleted', e.target.value)} className={inputCls()}>
+                  <option value="unknown">Not sure / not yet</option>
+                  <option value="yes">Yes — had a tour</option>
+                  <option value="no">No — not yet</option>
+                </select>
+              </Field>
+              <Field label="Assessment">
+                <select value={form.assessmentCompleted} onChange={e => set('assessmentCompleted', e.target.value)} className={inputCls()}>
+                  <option value="unknown">Not sure / not yet</option>
+                  <option value="yes">Yes — completed</option>
+                  <option value="no">No — not yet</option>
+                </select>
+              </Field>
+            </div>
           </Section>
 
           {/* Fee Discounts — 2026-09: established here so it's known

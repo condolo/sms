@@ -2,7 +2,7 @@
    ListView — flat table fallback for the admissions pipeline
    ============================================================ */
 import { ChevronRight } from 'lucide-react';
-import { avatarColor, initials, formatDate, PRIORITY_CONFIG, applicantClassLabel } from '../constants.js';
+import { avatarColor, formatDate, PRIORITY_CONFIG, applicantClassLabel, applicantDisplayName, applicantInitials, ENQUIRY_SOURCE_LABEL } from '../constants.js';
 
 export default function ListView({ cols, onCardClick, onStageClick }) {
   const allItems = cols.flatMap(col => col.items.map(i => ({ ...i, _stageMeta: col })));
@@ -31,7 +31,7 @@ export default function ListView({ cols, onCardClick, onStageClick }) {
             allItems.map(a => {
               const sm  = a._stageMeta;
               const pri = PRIORITY_CONFIG[a.priority] ?? PRIORITY_CONFIG.normal;
-              const av  = avatarColor(`${a.firstName}${a.lastName}`);
+              const av  = avatarColor(applicantDisplayName(a));
               return (
                 <tr
                   key={a.id ?? a._id}
@@ -41,10 +41,17 @@ export default function ListView({ cols, onCardClick, onStageClick }) {
                   <td className="py-3.5 px-4">
                     <div className="flex items-center gap-3">
                       <div className={`w-8 h-8 rounded-full bg-gradient-to-br ${av} flex items-center justify-center text-white text-xs font-bold shrink-0`}>
-                        {initials(a.firstName, a.lastName)}
+                        {applicantInitials(a)}
                       </div>
                       <div>
-                        <p className="font-medium text-slate-800">{a.firstName} {a.lastName}</p>
+                        <p className="font-medium text-slate-800 flex items-center gap-1.5">
+                          {applicantDisplayName(a)}
+                          {a.enquirySource === 'public_form' && (
+                            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600">
+                              {ENQUIRY_SOURCE_LABEL.public_form}
+                            </span>
+                          )}
+                        </p>
                         <p className="text-xs text-slate-400">{a.parentEmail || a.parentPhone || ''}</p>
                       </div>
                     </div>

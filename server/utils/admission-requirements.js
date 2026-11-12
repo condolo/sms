@@ -81,4 +81,23 @@ function validateRequiredAdmissionFields(row, requiredFields) {
   return errors.length ? errors : null;
 }
 
-module.exports = { DEFAULT_REQUIRED_FIELDS, resolveRequiredFields, validateRequiredAdmissionFields };
+/**
+ * resolvePublicEnquiryConfig(admissionConfig)
+ * The public enquiry form is OPT-IN per school (2026-11). Absent config —
+ * every school that has never opened the new Settings card — means OFF:
+ * an unauthenticated form that writes into a school's admissions pipeline
+ * must never appear for a school that did not ask for it. Only an explicit
+ * `admissionConfig.publicEnquiry.enabled === true` exposes it. Same "one
+ * place decides the default" rule as resolveRequiredFields.
+ */
+function resolvePublicEnquiryConfig(admissionConfig) {
+  const configured = admissionConfig?.publicEnquiry || {};
+  return { enabled: configured.enabled === true };
+}
+
+module.exports = {
+  DEFAULT_REQUIRED_FIELDS,
+  resolveRequiredFields,
+  validateRequiredAdmissionFields,
+  resolvePublicEnquiryConfig,
+};
