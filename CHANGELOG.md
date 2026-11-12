@@ -6,6 +6,37 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.269.2] - 2026-11-12 - fix(timetable): home rooms for generated lessons, safer undo, consistent Generate permission, exact teacher precheck, run cleanup, measured on a full school
+
+The remaining gaps from the post-Phase-3 review.
+
+### Added
+- **Home room for** (Timetable → Rooms → edit a room): the classes or streams normally taught in that room. Generated ordinary lessons go there; a stream without its own uses its class's; option subjects use the class's when it's free. Rooms are never double-booked: if the home room is taken, the lesson is placed without a room, and the result shows how many ("N lessons without a room"). Each class or stream has one home room; a class from another school, a stream of a different class, or a second home room are refused. Check warns about classes with no home room. Before this, most generated lessons had no room at all.
+
+### Fixed
+- **Undo silently removed hand-edited generated lessons.** It now lists them first and asks: "Undo anyway" or "Keep my changes".
+- **Undo could put lessons back on top of something added since.** It now refuses and lists the clash. Clashes the timetable already had before applying don't block it; found on the demo school, which already has 158 clashes.
+- **"Generate Timetable" alone was a permission the screen couldn't use** (the tab is inside the admin console). The server and screen now both require it together with "Manage Whole-School Timetable"; the Settings label says so.
+- **Precheck could report a teacher overload that wasn't there.** It subtracted every lesson the teacher had elsewhere, even ones at times that didn't matter. It now counts exactly the periods that teacher has free.
+- **Lessons saved with only a typed room name didn't block that room for the generator.** They do now.
+- **Generation runs were kept forever.** Each run stores its lessons and backup. A school now keeps its newest 30, and always the one Undo works on and any run being applied.
+
+### Measured
+- On a realistic full secondary school (24 or 36 classes × 36 lessons a week, doubles, a lab subject, 4–6 labs, teachers at up to 36 of 40 periods, 10 unavailable on Friday afternoons), the generator placed every lesson. One pass took about 60 ms for 24 classes. It bent the soft "most lessons a day" rule only where the numbers force it. This is now a test (`fixtures/big-school.js`), capped by passes rather than time so it doesn't depend on machine speed.
+
+### Not covered (documented)
+- Two teachers on one lesson, two streams taught together as one group, and per-subject time rules ("no PE in period 1"). These need changes to how assignments are stored. Place them by hand and lock them before generating.
+
+### Tests / verified
+- New `server/__tests__/routes/rooms-home-room.test.js` (4).
+- Route tests (+9): home rooms used and not double-booked; a typed-name room blocks; precheck names classes without one; undo asks about edits, goes straight through without, refuses new clashes and ignores old ones; pruning keeps 30 plus the undo run and leaves other schools alone; Generate needs both grants; exact teacher message.
+- Solver (+3): full-school 24 and 36 classes; a home room shared by two parallel options goes to one of them, so exactly 8 lessons are roomless.
+- Fixture `fake-tenant-db.js` gains `findOneAndUpdate`.
+- On the local demo school:
+  - created "Form 1A room" with Home room for Form 1A through the Rooms tab;
+  - generating Form 1A put all 16 lessons in a room (0 without, none double-booked; 8 without before options could use the home room);
+  - applied, edited one generated lesson, and Undo showed "1 generated lesson was changed by hand since applying"; "Undo anyway" then worked even though Form 1A's teachers already had clashes before applying.
+
 ## [v5.269.1] - 2026-11-12 - fix(timetable): option blocks (electives) on the timetable and in the generator; applying a generated timetable can no longer lose lessons
 
 The two gaps found in the post-Phase-3 review.

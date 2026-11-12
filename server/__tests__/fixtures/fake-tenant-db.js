@@ -130,6 +130,22 @@ function createFakeDb(seed = {}) {
         }
         return { modifiedCount: 1 };
       },
+      // Plain-object updates (Mongoose's implicit $set) or { $set }; returns the doc ({ new: true }).
+      findOneAndUpdate: (filter, update) => {
+        const run = () => {
+          const r = rows().find(x => matches(x, filter));
+          if (!r) return null;
+          const set = update.$set || Object.fromEntries(Object.entries(update).filter(([k]) => !k.startsWith('$')));
+          for (const [path, v] of Object.entries(set)) {
+            const keys = path.split('.');
+            let o = r;
+            for (const k of keys.slice(0, -1)) o = (o[k] = o[k] || {});
+            o[keys[keys.length - 1]] = v;
+          }
+          return JSON.parse(JSON.stringify(r));
+        };
+        return { lean: () => Promise.resolve(run()), then: (res, rej) => Promise.resolve(run()).then(res, rej) };
+      },
       insertMany: async (docs) => {
         for (const d of docs) rows().push({ createdAt: new Date(Date.now() + (seq++)).toISOString(), ...JSON.parse(JSON.stringify(d)) });
         return docs;

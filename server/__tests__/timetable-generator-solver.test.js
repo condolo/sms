@@ -310,3 +310,46 @@ test('audienceClash: unknown or missing group info always clashes', () => {
   expect(audienceClash(p, { groupId: 'G1' }, { streamId: 's1' })).toBe(true);
   expect(audienceClash({ groups: {} }, { groupId: 'GX' }, { streamId: 's2' })).toBe(true);
 });
+
+/* ── A full school, v5.269.2 ────────────────────────────────────────
+   24 and 36 classes × 36 lessons a week (864 / 1,296), doubles, a lab
+   subject, teachers at up to 30 of 40 periods, some unavailable on
+   Friday afternoons (fixtures/big-school.js). Measured on a dev machine:
+   one pass places everything in well under a second, so these use a
+   capped number of passes rather than a time budget — they don't depend
+   on how fast the CI machine is. */
+describe('a full school', () => {
+  const { buildBigSchool } = require('./fixtures/big-school');
+  // minOver: the soft 6-a-day teacher limit MUST be bent this many times. With 5 classes,
+  // T_eng_0 teaches 30 lessons and can't teach Friday afternoon (Friday holds at most 5),
+  // so the other four days carry 25: at least one day of 7. The solver should hit exactly that.
+  test.each([[24, 5, 1], [36, 3, 0]])('%i classes (each teacher with %i classes): every lesson placed, no hard rule broken, daily-limit bent only where forced (%i)', (classes, classesPerTeacher, minOver) => {
+    const p = buildBigSchool({ classes, normaliseRules, classesPerTeacher });
+    const r = solve(p, { budgetMs: 60000, maxRuns: 5 });
+    expect(r.unplaced).toEqual([]);
+    expect(r.placements.reduce((s, x) => s + x.segments.length, 0)).toBe(classes * 36);
+    expect(r.violations.teacherOverDay).toBe(minOver);
+    assertValid(p, r);
+  });
+});
+
+test('home room: used when free, never double-booked — two options side by side, one gets it (v5.269.2)', () => {
+  const room = { id: 'home', name: 'Room A', type: 'classroom', capacity: null };
+  const p = electiveProblem({
+    rooms: [room],
+    units: [
+      ...many(12, { audKey: 'A|', classId: 'A', subjectId: 'core', teacherKey: 'TC', homeRoomId: 'home' }),
+      ...optionUnits('A|g:phy|TP', 'phy', 'TP', 8).map(u => ({ ...u, homeRoomId: 'home' })),
+      ...optionUnits('A|g:his|TH', 'his', 'TH', 8).map(u => ({ ...u, homeRoomId: 'home' })),
+    ],
+  });
+  const r = solve(p, { budgetMs: 1500 });
+  expect(r.unplaced).toEqual([]);
+  assertValid(p, r);                                   // includes: no room twice at once
+  const core = r.placements.filter(pl => p.units.find(u => u.id === pl.unitId).subjectId === 'core');
+  expect(core.every(pl => pl.roomId === 'home')).toBe(true);
+  const roomless = r.placements.filter(pl => !pl.roomId).length;
+  // 12 core lessons fill 12 of 20 periods, so the 16 option lessons pair up in the other 8:
+  // each pair has one room, so exactly 8 option lessons go roomless and 8 get the room.
+  expect(roomless).toBe(8);
+});

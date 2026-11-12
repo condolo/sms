@@ -10,7 +10,30 @@ import {
   DoorOpen, Plus, Pencil, Trash2, Save, X,
   Loader2, AlertTriangle, Building2,
 } from 'lucide-react';
-import { rooms as roomsApi } from '@/api/client.js';
+import { rooms as roomsApi, classes as classesApi, streams as streamsApi } from '@/api/client.js';
+
+/* Home room (v5.269.2): which classes / streams are normally taught in this
+   room. The timetable generator puts their ordinary lessons here. Options
+   are keyed `${classId}|${streamId || ''}`. */
+const homeKey = h => `${h.classId}|${h.streamId || ''}`;
+function useHomeOptions() {
+  const { data: cls } = useQuery({ queryKey: ['classes', 'list', 'home-room'], queryFn: () => classesApi.list({ limit: 200 }), staleTime: 5 * 60_000 });
+  const { data: str } = useQuery({ queryKey: ['streams', 'list', 'home-room'], queryFn: () => streamsApi.list({ limit: 200 }), staleTime: 5 * 60_000 });
+  const classes = cls?.data ?? [];
+  const streams = str?.data ?? [];
+  const nameOf = new Map();
+  const options = [];
+  for (const c of [...classes].sort((a, b) => String(a.name).localeCompare(String(b.name)))) {
+    const cid = c.id ?? c._id;
+    options.push({ value: `${cid}|`, label: c.name });
+    nameOf.set(`${cid}|`, c.name);
+    for (const s of streams.filter(x => String(x.classId) === String(cid) || String(x.classId) === String(c._id))) {
+      options.push({ value: `${cid}|${s.id}`, label: `${c.name} – ${s.name}` });
+      nameOf.set(`${cid}|${s.id}`, `${c.name} – ${s.name}`);
+    }
+  }
+  return { options, nameOf };
+}
 
 const ROOM_TYPES = [
   { value: 'classroom', label: 'Classroom'  },
@@ -30,11 +53,12 @@ const TYPE_COLORS = {
   other:     'bg-slate-100 text-slate-600',
 };
 
-const EMPTY_FORM = { name: '', code: '', type: 'classroom', capacity: '', notes: '' };
+const EMPTY_FORM = { name: '', code: '', type: 'classroom', capacity: '', notes: '', homeFor: [] };
 
 /* ── Small form component ───────────────────────────────────── */
-function RoomForm({ initial = EMPTY_FORM, onSave, onCancel, isPending, serverErr }) {
-  const [f, setF] = useState(initial);
+function RoomForm({ initial = EMPTY_FORM, onSave, onCancel, isPending, serverErr, homeOptions = [] }) {
+  const [f, setF] = useState({ homeFor: [], ...initial });
+  const [homePick, setHomePick] = useState('');
   const [errs, setErrs] = useState({});
 
   function set(k, v) {
@@ -52,8 +76,10 @@ function RoomForm({ initial = EMPTY_FORM, onSave, onCancel, isPending, serverErr
       type:     f.type,
       capacity: f.capacity ? Number(f.capacity) : undefined,
       notes:    f.notes.trim() || undefined,
+      homeFor:  f.homeFor.map(k => { const [classId, streamId] = k.split('|'); return { classId, streamId: streamId || null }; }),
     });
   }
+  const labelOf = k => homeOptions.find(o => o.value === k)?.label ?? k;
 
   const iCls = (err) =>
     `w-full text-sm px-3 py-2 rounded-lg border ${err ? 'border-red-300 bg-red-50' : 'border-slate-200 bg-white'} focus:outline-none focus:ring-2 focus:ring-slate-900/10`;
@@ -119,6 +145,29 @@ function RoomForm({ initial = EMPTY_FORM, onSave, onCancel, isPending, serverErr
         />
       </div>
 
+      <div>
+        <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Home room for</label>
+        <p className="text-[10px] text-slate-400">Classes or streams normally taught here. The timetable generator puts their ordinary lessons in this room.</p>
+        {f.homeFor.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1.5">
+            {f.homeFor.map(k => (
+              <span key={k} className="inline-flex items-center gap-1 text-[11px] bg-white border border-slate-200 rounded-full pl-2 pr-1 py-0.5">
+                {labelOf(k)}
+                <button type="button" onClick={() => set('homeFor', f.homeFor.filter(x => x !== k))} className="p-0.5 rounded-full hover:bg-slate-100" aria-label={`Remove ${labelOf(k)}`}><X size={10} /></button>
+              </span>
+            ))}
+          </div>
+        )}
+        <select
+          value={homePick}
+          onChange={e => { const v = e.target.value; setHomePick(''); if (v && !f.homeFor.includes(v)) set('homeFor', [...f.homeFor, v]); }}
+          className={`mt-1.5 ${iCls()}`}
+        >
+          <option value="">Add a class or stream…</option>
+          {homeOptions.filter(o => !f.homeFor.includes(o.value)).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+      </div>
+
       <div className="flex items-center justify-end gap-2 pt-1">
         <button onClick={onCancel} className="px-3 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-800 transition">
           Cancel
@@ -142,6 +191,7 @@ export default function RoomsTab({ canEdit }) {
   const [showAdd,   setShowAdd]   = useState(false);
   const [editId,    setEditId]    = useState(null);
   const [serverErr, setServerErr] = useState('');
+  const { options: homeOptions, nameOf: homeName } = useHomeOptions();
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['rooms'],
@@ -207,6 +257,7 @@ export default function RoomsTab({ canEdit }) {
               onCancel={() => { setShowAdd(false); setServerErr(''); }}
               isPending={createMut.isPending}
               serverErr={createMut.isPending ? '' : serverErr}
+              homeOptions={homeOptions}
             />
           </motion.div>
         )}
@@ -249,11 +300,13 @@ export default function RoomsTab({ canEdit }) {
                       type:     room.type     ?? 'classroom',
                       capacity: room.capacity ?? '',
                       notes:    room.notes    ?? '',
+                      homeFor:  (room.homeFor ?? []).map(homeKey),
                     }}
                     onSave={data => updateMut.mutate({ id: room.id, data })}
                     onCancel={() => { setEditId(null); setServerErr(''); }}
                     isPending={updateMut.isPending}
                     serverErr={updateMut.isPending ? '' : serverErr}
+                    homeOptions={homeOptions}
                   />
                 </div>
               ) : (
@@ -272,6 +325,9 @@ export default function RoomsTab({ canEdit }) {
                       </span>
                       {room.capacity && (
                         <span className="text-[10px] text-slate-400">Cap: {room.capacity}</span>
+                      )}
+                      {(room.homeFor ?? []).length > 0 && (
+                        <span className="text-[10px] text-slate-500">Home: {room.homeFor.map(h => homeName.get(homeKey(h)) ?? 'a class').join(', ')}</span>
                       )}
                       {room.notes && (
                         <span className="text-[10px] text-slate-400 truncate hidden sm:block">{room.notes}</span>

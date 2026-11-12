@@ -13,7 +13,7 @@
                   doubleStarts: [slot i …] } }   i = index into slots; a double
                                                     starts at i and uses i+1
      units      [{ id, audKey, classId, streamId, subjectId, subjectName,
-                  teacherKey, length: 1|2, requiredRoomType, preferredRoomId,
+                  teacherKey, length: 1|2, requiredRoomType, preferredRoomId, homeRoomId,
                   classSize, isCore }]
      fixed      [{ day, start, end, classId, streamId, teacherKey, roomId,
                   audKey, subjectId }]           lessons that stay put: locked
@@ -51,6 +51,7 @@ const PENALTY = {
   adjacentDay:    4,    // same subject on the day before/after
   coreAfternoon:  4,    // a core subject in the second half of the day
   preferredRoom:  1,    // preferred room wanted but taken
+  noHomeRoom:     2,    // the class's home room is taken at that time (lesson goes roomless)
 };
 
 /* Small seeded RNG (mulberry32) so a seed reproduces a run exactly. */
@@ -201,9 +202,17 @@ function check(problem, st, unit, startIdx) {
         }
       }
     }
-  } else if (unit.preferredRoomId && problem.rules.usePreferredRooms?.on) {
-    const pref = problem.rooms.find(r => r.id === unit.preferredRoomId);
-    if (pref && !st.roomBusy.clashes(pref.id, day, start, end).length) room = pref;
+  } else {
+    if (unit.preferredRoomId && problem.rules.usePreferredRooms?.on) {
+      const pref = problem.rooms.find(r => r.id === unit.preferredRoomId);
+      if (pref && !st.roomBusy.clashes(pref.id, day, start, end).length) room = pref;
+    }
+    // Home room (v5.269.2): the class's/stream's own room when it's free.
+    // Taken → the lesson is still placed, without a room (cost() prefers times it's free).
+    if (!room && unit.homeRoomId) {
+      const home = problem.rooms.find(r => r.id === unit.homeRoomId);
+      if (home && !st.roomBusy.clashes(home.id, day, start, end).length) room = home;
+    }
   }
 
   if (hardFixed) return { ok: false, reason: hardFixed, blockers: [] };
@@ -239,6 +248,7 @@ function cost(problem, st, unit, at) {
   if (!unit.requiredRoomType && unit.preferredRoomId && r.usePreferredRooms?.on && (!at.room || at.room.id !== unit.preferredRoomId)) {
     c += PENALTY.preferredRoom;
   }
+  if (!unit.requiredRoomType && unit.homeRoomId && !at.room) c += PENALTY.noHomeRoom;
   return c;
 }
 

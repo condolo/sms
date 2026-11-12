@@ -18,10 +18,10 @@ let mockJwtUser;
 jest.mock('../../middleware/auth', () => ({
   authMiddleware: (req, _res, next) => { req.jwtUser = mockJwtUser; next(); },
 }));
-const mockGrant = { value: false };
+const mockGrant = { value: new Set() };   // e.g. new Set(['generate', 'manage'])
 jest.mock('../../middleware/rbac', () => ({
   rbac: () => (req, _res, next) => next(),
-  hasExplicitSubGrant: jest.fn(async (_req, mod, sub) => mod === 'timetable' && sub === 'generate' && mockGrant.value),
+  hasExplicitSubGrant: jest.fn(async (_req, mod, sub) => mod === 'timetable' && mockGrant.value.has(sub)),
 }));
 
 const { createFakeDb } = require('../fixtures/fake-tenant-db');
@@ -109,7 +109,7 @@ const as = (user) => { mockJwtUser = user; return supertest(app()); };
 beforeEach(() => {
   jest.clearAllMocks();
   mockDb = seed();
-  mockGrant.value = false;
+  mockGrant.value = new Set();
   mockClash.value = null;
 });
 
@@ -122,7 +122,9 @@ async function generate() {
 describe('access', () => {
   test('a teacher without "Generate Timetable" is refused; with it, allowed', async () => {
     expect((await as(TEACHER).post('/api/timetable/generate/precheck').send(SCOPE)).status).toBe(403);
-    mockGrant.value = true;
+    mockGrant.value = new Set(['generate']);   // Generate alone is not enough (v5.269.2)
+    expect((await as(TEACHER).post('/api/timetable/generate/precheck').send(SCOPE)).status).toBe(403);
+    mockGrant.value = new Set(['generate', 'manage']);
     expect((await as(TEACHER).post('/api/timetable/generate/precheck').send(SCOPE)).status).toBe(200);
   });
 
@@ -157,7 +159,7 @@ describe('precheck', () => {
     mockDb.data.teaching_assignments[0].periodsPerWeek = 8; // Amos: 8 + 3 + 1 elsewhere > 8 periods
     mockDb.data.teaching_assignments[0].doubleLessons = 0;
     const res = await as(ADMIN).post('/api/timetable/generate/precheck').send(SCOPE);
-    expect(res.body.data.precheck.find(p => p.code === 'teacher_overfull').message).toMatch(/Amos Kip needs 12 lessons/);
+    expect(res.body.data.precheck.find(p => p.code === 'teacher_overfull').message).toMatch(/Amos Kip needs 11 lessons a week here but is free for only 7 of these classes' periods \(1 is taken by lessons that stay\)/);
   });
 });
 
@@ -393,5 +395,122 @@ describe('apply is safe if writing fails part-way', () => {
     mockDb.data.timetable_generation_runs.find(r => r.id === run.id).status = 'applying';
     expect((await as(ADMIN).post(`/api/timetable/generate/runs/${run.id}/apply`)).status).toBe(409);
     expect(mockDb.data.timetable.map(l => l.id).sort()).toEqual(['L_art', 'L_locked', 'L_old', 'L_primary']);
+  });
+});
+
+describe('home rooms, v5.269.2', () => {
+  beforeEach(() => {
+    mockDb.data.rooms = [
+      { id: 'r1A', schoolId: S, name: 'Room 1A', type: 'classroom', homeFor: [{ classId: 'c1', streamId: null }] },
+      { id: 'r1B', schoolId: S, name: 'Room 1B', type: 'classroom', homeFor: [{ classId: 'c2', streamId: null }] },
+    ];
+  });
+
+  test('ordinary lessons go in the class\'s home room, never double-booked', async () => {
+    const run = await generate();
+    expect(run.stats.lessonsWithoutRoom).toBe(0);
+    const lessons = (await as(ADMIN).get(`/api/timetable/generate/runs/${run.id}`)).body.data.lessons;
+    expect(lessons.filter(l => l.classId === 'c1').every(l => l.roomId === 'r1A' && l.room === 'Room 1A')).toBe(true);
+    expect(lessons.filter(l => l.classId === 'c2').every(l => l.roomId === 'r1B')).toBe(true);
+  });
+
+  test('a home room taken by a lesson that stays (typed room name only) is not double-booked; the lesson goes roomless and is counted', async () => {
+    // Grade 3 (out of scope) uses "room 1a" by NAME at every Form 1A period on Monday.
+    for (const [p, s, e] of [['1', '08:00', '08:40'], ['2', '08:40', '09:20'], ['3', '09:40', '10:20'], ['4', '10:20', '11:00']]) {
+      mockDb.data.timetable.push({ id: `L_g3_${p}`, schoolId: S, academicYearId: 'ay1', isActive: true, classId: 'c3', day: 'monday', period: p, startTime: s, endTime: e, subject: 'Reading', teacherId: 'u_t9', room: 'room 1a', type: 'lesson' });
+    }
+    const run = await generate();
+    const lessons = (await as(ADMIN).get(`/api/timetable/generate/runs/${run.id}`)).body.data.lessons;
+    const mondayC1 = lessons.filter(l => l.classId === 'c1' && l.day === 'monday');
+    expect(mondayC1.every(l => l.roomId !== 'r1A')).toBe(true);
+    expect(run.stats.lessonsWithoutRoom).toBe(mondayC1.length);
+  });
+
+  test('precheck names classes with no home room', async () => {
+    mockDb.data.rooms = [];
+    const pre = (await as(ADMIN).post('/api/timetable/generate/precheck').send(SCOPE)).body.data;
+    expect(pre.precheck.find(p => p.code === 'no_home_room').message).toMatch(/Form 1A, Form 1B have no home room/);
+  });
+});
+
+describe('undo checks before changing anything, v5.269.2', () => {
+  async function applied() {
+    const run = await generate();
+    expect((await as(ADMIN).post(`/api/timetable/generate/runs/${run.id}/apply`)).status).toBe(200);
+    return run;
+  }
+
+  test('a generated lesson edited by hand: undo asks first, then removes it when confirmed', async () => {
+    const run = await applied();
+    const g = mockDb.data.timetable.find(l => l.generationRunId === run.id);
+    g.room = 'Library';   // a hand edit
+    const first = await as(ADMIN).post(`/api/timetable/generate/runs/${run.id}/undo`);
+    expect(first.status).toBe(409);
+    expect(first.body.error.code).toBe('EDITED_SINCE');
+    expect(first.body.error.details).toHaveLength(1);
+    expect(mockDb.data.timetable.filter(l => l.generationRunId === run.id)).toHaveLength(9);   // nothing changed
+    const ok2 = await as(ADMIN).post(`/api/timetable/generate/runs/${run.id}/undo`).send({ confirmEdited: true });
+    expect(ok2.status).toBe(200);
+    expect(mockDb.data.timetable.map(l => l.id).sort()).toEqual(['L_art', 'L_locked', 'L_old', 'L_primary']);
+  });
+
+  test('no edits: undo goes straight through', async () => {
+    const run = await applied();
+    expect((await as(ADMIN).post(`/api/timetable/generate/runs/${run.id}/undo`)).status).toBe(200);
+  });
+
+  test('a lesson added since would clash with one undo puts back: refused, listed, nothing changed', async () => {
+    const run = await applied();
+    const { checkConflicts } = require('../../utils/timetable-conflicts');
+    checkConflicts.mockImplementation(async (_s, lesson) => (lesson.id === 'L_old' ? 'Slot already exists for this class on tuesday period 4.' : null));
+    const res = await as(ADMIN).post(`/api/timetable/generate/runs/${run.id}/undo`).send({ confirmEdited: true });
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('UNDO_CLASH');
+    expect(res.body.error.details[0]).toMatch(/tuesday period 4/);
+    expect(mockDb.data.timetable.filter(l => l.generationRunId === run.id)).toHaveLength(9);
+    checkConflicts.mockImplementation(async () => mockClash.value);
+  });
+});
+
+describe('old runs are pruned, v5.269.2', () => {
+  test('a school keeps its newest 30 runs, plus the applied one Undo needs', async () => {
+    const first = await generate();
+    await as(ADMIN).post(`/api/timetable/generate/runs/${first.id}/apply`);
+    for (let i = 0; i < 31; i++) {
+      mockDb.data.timetable_generation_runs.push({ id: `old_${i}`, schoolId: S, status: 'generated', createdAt: `2026-01-01T00:00:${String(i).padStart(2, '0')}Z` });
+    }
+    mockDb.data.timetable_generation_runs.find(r => r.id === first.id).createdAt = '2025-01-01T00:00:00Z'; // oldest
+    await generate();   // triggers pruning
+    const mine = mockDb.data.timetable_generation_runs.filter(r => r.schoolId === S);
+    expect(mine.length).toBe(31);                                   // 30 newest + the applied one
+    expect(mine.some(r => r.id === first.id)).toBe(true);
+    expect(mockDb.data.timetable_generation_runs.some(r => r.id === 'run_B')).toBe(true);   // another school untouched
+  });
+});
+
+describe('undo ignores clashes the school already had, v5.269.2', () => {
+  test('only lessons added or changed since applying can block undo', async () => {
+    const run = await generate();
+    await as(ADMIN).post(`/api/timetable/generate/runs/${run.id}/apply`);
+    const appliedAt = Date.parse(mockDb.data.timetable_generation_runs.find(r => r.id === run.id).appliedAt);
+    // Pretend L_old clashes with L_primary (an old clash, there before applying)
+    // and with L_new (added after applying). checkConflicts reports a clash only
+    // with lessons NOT in its exclude list — like the real one.
+    mockDb.data.timetable.push({ id: 'L_new', schoolId: S, academicYearId: 'ay1', isActive: true, classId: 'c3', day: 'tuesday', period: '4', subject: 'New', teacherId: 'u_t9', type: 'lesson', createdAt: new Date(appliedAt + 60000).toISOString() });
+    const { checkConflicts } = require('../../utils/timetable-conflicts');
+    const clashWith = new Set(['L_primary', 'L_new']);
+    checkConflicts.mockImplementation(async (_s, lesson, exclude) => {
+      if (lesson.id !== 'L_old') return null;
+      const left = [...clashWith].filter(id => mockDb.data.timetable.some(l => l.id === id) && !exclude.includes(id));
+      return left.length ? `clashes with ${left.join(', ')}` : null;
+    });
+    const blocked = await as(ADMIN).post(`/api/timetable/generate/runs/${run.id}/undo`);
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.error.details[0]).toMatch(/clashes with L_new$/);   // not L_primary
+    mockDb.data.timetable = mockDb.data.timetable.filter(l => l.id !== 'L_new');
+    const done = await as(ADMIN).post(`/api/timetable/generate/runs/${run.id}/undo`);
+    expect(done.body.error ?? null).toBeNull();
+    expect(done.status).toBe(200);
+    checkConflicts.mockImplementation(async () => mockClash.value);
   });
 });

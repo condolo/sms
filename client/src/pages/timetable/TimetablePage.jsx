@@ -79,7 +79,7 @@ export default function TimetablePage() {
   const isAdminRole = isFloorRole || can('timetable__manage', 'read');
   const canEdit      = isFloorRole || can('timetable__manage', 'update');
   // Same gate as routes/timetable-generate.js: floor roles, or the strict "Generate Timetable" grant.
-  const canGenerate  = isFloorRole || can('timetable__generate', 'update');
+  const canGenerate  = isFloorRole || (can('timetable__generate', 'update') && can('timetable__manage', 'read'));
 
   // Non-admin roles see the read-only portal
   if (!isAdminRole) return <TimetablePortal />;

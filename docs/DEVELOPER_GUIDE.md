@@ -7692,3 +7692,25 @@ Tests: `server/__tests__/timetable-generator-solver.test.js` (pure solver, with 
 4. If the rollback itself fails, the run stays `'applying'` with `backup` saved and the response says so.
 
 Tests: `server/__tests__/timetable-elective-clashes.test.js`; option and apply-failure cases in `timetable-generate.test.js`. The solver tests use a roster checker that works out actual student membership, independently of `audienceClash`.
+
+### Home rooms, safer undo, consistent permission, run pruning (v5.269.2)
+
+**Home rooms: `rooms.homeFor: [{ classId, streamId|null }]`** (`routes/rooms.js`, strict zod, max 20). `_checkHomeFor` rejects (409) a class not in this school (any id form), a stream not of that class, a duplicate entry, or a class/stream that is already another room's home.
+- `prepare.js` builds `homeRoom` (`<classKey>|<streamId>` → roomId). A unit's `homeRoomId` is its stream's home room, else its class's; option groups get the class's.
+- In `solver.js check()`, the room is: the required type if any; else the preferred room (if the rule is on and it's free); else the home room if free; else none. A taken home room never blocks a lesson; it goes roomless, and `cost()` adds `PENALTY.noHomeRoom` so free times are preferred.
+- Fixed lessons with only a typed `room` name now block that room (`roomIdByName`).
+- Run `stats.lessonsWithoutRoom`, and a `no_home_room` precheck warning.
+
+**Precheck `teacher_overfull` is exact:** distinct periods of the classes in scope, minus unavailable blocks, minus periods overlapping a fixed lesson of that teacher. It errors when `need > free`.
+
+**Undo:**
+- Apply stores `appliedSnapshot` (id + `SNAP_FIELDS` of every inserted lesson).
+- Undo returns 409 `EDITED_SINCE` (details) if a generated lesson differs from its snapshot, unless the body has `{ confirmEdited: true }`.
+- It returns 409 `UNDO_CLASH` (cannot be overridden) if a lesson it would restore clashes with a lesson created or updated after `appliedAt`. Lessons untouched since applying, and the generated ones, are excluded from the check, so clashes that pre-date the apply don't block it.
+- Restored ids that already exist are skipped (this happens on the demo school, which re-seeds its lessons on every server start).
+
+**Permission:** `generateAccess` = `TIMETABLE_FLOOR_ROLES` or (`timetable__generate` update **and** `timetable__manage` read). The client's `canGenerate` mirrors it.
+
+**Pruning:** after each new run, keep the newest `KEEP_RUNS` (30) per school, plus any run with status `applying` and the latest applied-not-undone run.
+
+**Scale:** `server/__tests__/fixtures/big-school.js` builds 24 or 36 classes × 36 lessons (doubles, labs, teachers at ≤30 or 36 of 40 periods, Friday-afternoon unavailability). The solver test asserts every lesson placed with `maxRuns: 5` (not a time budget, so it doesn't depend on CI speed), every hard rule held (independent checker), and the daily-limit rule bent exactly as often as the numbers force. Measured locally: one pass places all 864 lessons in about 60 ms; 36 classes in under a second.

@@ -647,7 +647,7 @@ export const timetable = {
     runs:     ()       => _get('/timetable/generate/runs'),
     run:      (id)     => _get(`/timetable/generate/runs/${id}`),
     apply:    (id)     => _post(`/timetable/generate/runs/${id}/apply`),
-    undo:     (id)     => _post(`/timetable/generate/runs/${id}/undo`),
+    undo:     (id, confirmEdited) => _post(`/timetable/generate/runs/${id}/undo`, confirmEdited ? { confirmEdited: true } : {}),
   },
   // Substitution system
   substitutions: {

@@ -65,6 +65,13 @@ Click **Bell** to define the actual period times each day maps to (start/end tim
 
 Go to **Rooms** to maintain your school's room registry (name, capacity, type) — this is the same list that populates the room dropdown when adding a slot, and it's also viewable per-room via **Room View**, which shows what's scheduled in each room across the week so you can spot idle or over-booked spaces. A room can't be booked for two lessons at once: adding, editing, bulk saving and importing all refuse it. Clashes left over from before this check show in red.
 
+**Home room for** (edit a room). This lists the classes, or individual streams, that are normally taught in that room. The automatic timetable puts their ordinary lessons there.
+- Each class or stream can have only one home room.
+- A stream without its own home room uses its class's.
+- Option subjects use the class's home room when it's free.
+- Lessons needing a special room type (a lab, say) go to a room of that type instead.
+- If the home room is taken at a time, the lesson is still placed, without a room, and the result counts these.
+
 ---
 
 ## 7. Cover / Substitution
@@ -171,7 +178,10 @@ These are set outside the Timetable module, and both the **Lessons to place** li
    - Lessons of subjects with no periods per week stay.
    - Other sections stay.
    - Nothing reaches teachers, students or parents until you **Publish** (section 8).
-5. Changed your mind? Under **Recent runs**, **Undo** removes the generated lessons and puts the replaced ones back. Only the most recently applied run can be undone, and undo also removes any generated lesson you edited by hand after applying.
+5. Changed your mind? Under **Recent runs**, **Undo** removes the generated lessons and puts the replaced ones back. Only the most recently applied run can be undone.
+   - If you've changed any generated lesson by hand since applying, Undo lists them first and asks: **Undo anyway** (removes them too) or **Keep my changes**.
+   - If a lesson Undo would put back now clashes with something added since, Undo refuses and lists it, so you can move it first. Clashes your timetable already had before applying don't block Undo.
+   - The newest 30 runs are kept (and always the one Undo works on); older ones are removed automatically.
 
 If applying fails part-way (for example a connection drop), the draft is put back as it was and you see "Applying failed, so nothing was changed". Just try again.
 
@@ -193,8 +203,17 @@ If one of these can't be met, the lesson is left unplaced and listed with the re
 
 **If the timetable changed after you generated** (for example someone added a lesson in another section that now clashes), **Apply** is refused with the reason. Generate again.
 
-**Who can use it:** the scheduling roles (Admin, Principal, Deputy, Timetabler), or a role that has both **Manage Whole-School Timetable (Admin Console)** and **Generate Timetable (automatic)** ticked under Settings → Roles & Permissions → Timetable.
+**Who can use it:** the scheduling roles (Admin, Principal, Deputy, Timetabler), or a role that has both **Manage Whole-School Timetable (Admin Console)** and **Generate Timetable (automatic)** ticked under Settings → Roles & Permissions → Timetable. Both are required: the Generate screen is part of the admin console.
+
+**How well it fills a timetable.** Measured on a realistic full secondary school (24 or 36 classes, 36 lessons a week each, doubles, a lab subject, teachers at up to 36 of 40 periods, some unavailable on Friday afternoons), it placed every lesson, in under a second per pass. It bent the "most lessons a day" rule only where the numbers made it unavoidable. Your school's result depends on its own data, and the result screen always shows exactly what was placed and what wasn't.
+
+**Not yet supported:**
+- two teachers sharing one lesson;
+- two streams (but not the whole class) taught together as one group;
+- per-subject time rules such as "no PE in period 1".
+
+For now, place those by hand and lock them before generating.
 
 ---
 
-*Last reviewed: 2026-11-12 (v5.269.1) — checked directly against `client/src/pages/timetable/`, `server/routes/timetable.js`, `server/routes/timetable-generate.js` and `server/utils/elective-groups.js`.*
+*Last reviewed: 2026-11-12 (v5.269.2) — checked directly against `client/src/pages/timetable/`, `server/routes/timetable.js`, `server/routes/timetable-generate.js`, `server/routes/rooms.js` and `server/utils/elective-groups.js`.*

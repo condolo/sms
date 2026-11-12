@@ -49,8 +49,13 @@ function generateAccess() {
   return async (req, res, next) => {
     const { role } = req.jwtUser || {};
     if (ScopeEngine.TIMETABLE_FLOOR_ROLES.has(role)) return next();
-    if (await hasExplicitSubGrant(req, 'timetable', 'generate', 'update')) return next();
-    return E.forbidden(res, 'Only scheduling administrators, or a role given "Generate Timetable", can use the timetable generator.');
+    // Both grants (v5.269.2): the Generate screen lives in the admin console,
+    // which needs "Manage Whole-School Timetable". Requiring both here keeps
+    // the server and the screen in agreement — no grant that works on one
+    // and not the other.
+    if (await hasExplicitSubGrant(req, 'timetable', 'generate', 'update')
+      && await hasExplicitSubGrant(req, 'timetable', 'manage', 'read')) return next();
+    return E.forbidden(res, 'Only scheduling administrators, or a role given both "Manage Whole-School Timetable" and "Generate Timetable", can use the timetable generator.');
   };
 }
 
@@ -69,6 +74,29 @@ function parseScope(req, res) {
 }
 
 const Runs = req => tenantModel('timetable_generation_runs', tenantContext(req));
+
+/* Each run stores its lessons (and, once applied, a backup), so runs are
+   pruned: a school keeps its newest KEEP_RUNS. Never removed: a run being
+   applied right now, or the latest applied run that hasn't been undone
+   (the one Undo works on). v5.269.2. */
+const KEEP_RUNS = 30;
+async function pruneRuns(req, schoolId) {
+  try {
+    const all = await Runs(req).find({ schoolId }).sort({ createdAt: -1 })
+      .select('id status appliedAt undoneAt createdAt').lean();
+    if (all.length <= KEEP_RUNS) return;
+    const latestApplied = all.filter(r => r.appliedAt && !r.undoneAt)
+      .sort((a, b) => String(b.appliedAt).localeCompare(String(a.appliedAt)))[0]?.id;
+    const drop = all.slice(KEEP_RUNS).filter(r => r.status !== 'applying' && r.id !== latestApplied).map(r => r.id);
+    if (drop.length) await Runs(req).deleteMany({ schoolId, id: { $in: drop } });
+  } catch (err) {
+    console.error('[timetable-generate] pruning old runs failed (ignored):', err.message);
+  }
+}
+
+/* The fields that say where/what a lesson is — compared at undo to spot hand edits. */
+const SNAP_FIELDS = ['classId', 'streamId', 'day', 'period', 'startTime', 'endTime', 'subjectId', 'subject', 'teacherId', 'roomId', 'room', 'locked'];
+const snap = l => Object.fromEntries(SNAP_FIELDS.map(f => [f, l[f] ?? null]));
 
 /* Turn solver placements into draft lesson documents (one per period). */
 function lessonsFrom(result, meta, problem) {
@@ -139,11 +167,14 @@ router.post('/', authMiddleware, planGate('timetable_generator'), MODGATE, gener
         unitsUnplaced: unplaced.length, lessonsUnplaced: result.unplaced.reduce((s, x) => s + (problem.units.find(u => u.id === x.unitId)?.length || 1), 0),
         violations: result.violations, score: result.score, runs: result.runs, durationMs: result.durationMs,
         replaces: meta.replaceableCount,
+        // Ordinary lessons that got no room (no home room set, or it was taken).
+        lessonsWithoutRoom: lessons.filter(l => !l.roomId && !l.room).length,
       },
       precheck, lessons, unplaced,
       createdBy: userId, createdAt: new Date().toISOString(),
     };
     await Runs(req).create(run);
+    await pruneRuns(req, schoolId);
     const { lessons: _l, ...summary } = run;
     return created(res, summary);
   } catch (err) { console.error('[timetable-generate POST /]', err); return E.serverError(res); }
@@ -162,7 +193,7 @@ router.get('/runs', authMiddleware, planGate('timetable_generator'), MODGATE, ge
 /* ── GET /runs/:id ──────────────────────────────────────────── */
 router.get('/runs/:id', authMiddleware, planGate('timetable_generator'), MODGATE, generateAccess(), async (req, res) => {
   try {
-    const run = await Runs(req).findOne({ schoolId: req.jwtUser.schoolId, id: req.params.id }).select('-backup -replaceIds').lean();
+    const run = await Runs(req).findOne({ schoolId: req.jwtUser.schoolId, id: req.params.id }).select('-backup -replaceIds -appliedSnapshot').lean();
     if (!run) return E.notFound(res, 'Run not found');
     const { _id, ...out } = run;
     return ok(res, out);
@@ -242,16 +273,27 @@ router.post('/runs/:id/apply', authMiddleware, planGate('timetable_generator'), 
       return fail(res, 'APPLY_FAILED', 'Applying failed, so nothing was changed. Try again.', 500);
     }
 
-    // 3. Done.
-    await Runs(req).updateOne({ schoolId, id: run.id }, { $set: { status: 'applied', appliedAt: now, appliedBy: userId } });
+    // 3. Done. The snapshot lets Undo tell which generated lessons were edited since.
+    await Runs(req).updateOne({ schoolId, id: run.id }, {
+      $set: { status: 'applied', appliedAt: now, appliedBy: userId, appliedSnapshot: docs.map(d => ({ id: d.id, ...snap(d) })) },
+    });
     await markTimetableChanged(schoolId);
     return ok(res, { applied: docs.length, replaced: toReplace.length });
   } catch (err) { console.error('[timetable-generate POST /runs/:id/apply]', err); return E.serverError(res); }
 });
 
 /* ── POST /runs/:id/undo ────────────────────────────────────────
-   Removes the lessons this run added (only those still unchanged-by-id) and
-   restores the lessons it replaced. Only the most recently applied run. */
+   Removes the lessons this run added and restores the lessons it replaced.
+   Only the most recently applied run. Body: { confirmEdited?: true }.
+   Before changing anything (v5.269.2):
+     - generated lessons changed by hand since applying (compared with the
+       snapshot taken at apply) → 409 EDITED_SINCE listing them, unless the
+       request confirms with confirmEdited: true;
+     - a lesson it would put back now clashes with something added or
+       changed since applying (createdAt/updatedAt after appliedAt) → 409
+       UNDO_CLASH listing them; move those first (can't be overridden, it
+       would create a new double booking). Clashes the school already had
+       before applying don't block undo. */
 router.post('/runs/:id/undo', authMiddleware, planGate('timetable_generator'), MODGATE, generateAccess(), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
@@ -263,19 +305,53 @@ router.post('/runs/:id/undo', authMiddleware, planGate('timetable_generator'), M
     if (latest[0]?.id !== run.id) return E.conflict(res, 'Only the most recently applied run can be undone.');
 
     const Timetable = tenantModel('timetable', tenantContext(req));
-    const removed = await Timetable.deleteMany({ schoolId, generationRunId: run.id });
-    const backup = run.backup || [];
-    if (backup.length) {
-      // Restore under their original ids — but not on top of anything with the same id.
-      const existing = await Timetable.find({ schoolId, id: { $in: backup.map(b => b.id).filter(Boolean) } }).select('id').lean();
-      const taken = new Set(existing.map(e => e.id));
-      const restore = backup.filter(b => !b.id || !taken.has(b.id));
-      if (restore.length) await Timetable.insertMany(restore, { ordered: false });
+    const generated = await Timetable.find({ schoolId, generationRunId: run.id }).lean();
+    const genIds = generated.map(l => l.id || String(l._id));
+
+    // Hand edits since applying.
+    const before = new Map((run.appliedSnapshot || []).map(s => [s.id, s]));
+    const describe = l => `${l.subject || 'Lesson'} ${l.day} ${l.startTime || `period ${l.period}`}`;
+    const edited = run.appliedSnapshot
+      ? generated.filter(l => { const s = before.get(l.id); return s && JSON.stringify(snap(l)) !== JSON.stringify((({ id, ...r }) => r)(s)); })
+      : [];
+    if (edited.length && req.body?.confirmEdited !== true) {
+      return fail(res, 'EDITED_SINCE', `${edited.length} generated lesson${edited.length === 1 ? ' was' : 's were'} changed by hand since applying. Undo removes ${edited.length === 1 ? 'it' : 'them'} too.`, 409,
+        { details: edited.slice(0, 20).map(describe) });
     }
+
+    // Lessons it would put back: not on top of anything with the same id, and no clash with what's there now.
+    const backup = run.backup || [];
+    const existing = backup.length
+      ? await Timetable.find({ schoolId, id: { $in: backup.map(b => b.id).filter(Boolean) } }).select('id').lean()
+      : [];
+    const taken = new Set(existing.map(e => e.id));
+    const restore = backup.filter(b => !b.id || !taken.has(b.id));
+    // Only clashes with lessons added or changed SINCE applying count: the
+    // lessons being put back were already there together with everything
+    // older (including any clash the school already had), so those are not
+    // undo's doing. Lessons untouched since applying are excluded from the check.
+    const appliedAtMs = Date.parse(run.appliedAt);
+    const others = await Timetable.find({ schoolId, isActive: true, academicYearId: run.academicYearId ?? null })
+      .select('id generationRunId createdAt updatedAt').lean();
+    const touchedMs = l => Date.parse(l.updatedAt || l.createdAt || 0) || 0;
+    const unchangedIds = others.filter(l => l.generationRunId !== run.id && touchedMs(l) <= appliedAtMs).map(l => l.id || String(l._id));
+    const exclude = [...genIds, ...unchangedIds];
+    const clashes = [];
+    for (const b of restore) {
+      const msg = await checkConflicts(schoolId, b, exclude);
+      if (msg) clashes.push(`${describe(b)}: ${msg}`);
+      if (clashes.length >= 20) break;
+    }
+    if (clashes.length) {
+      return fail(res, 'UNDO_CLASH', `Undo would put back ${clashes.length === 1 ? 'a lesson that now clashes' : 'lessons that now clash'} with lessons added since. Move ${clashes.length === 1 ? 'that lesson' : 'those'} first.`, 409, { details: clashes });
+    }
+
+    const removed = await Timetable.deleteMany({ schoolId, generationRunId: run.id });
+    if (restore.length) await Timetable.insertMany(restore, { ordered: false });
     const now = new Date().toISOString();
     await Runs(req).updateOne({ schoolId, id: run.id }, { $set: { status: 'undone', undoneAt: now, undoneBy: userId } });
     await markTimetableChanged(schoolId);
-    return ok(res, { removed: removed?.deletedCount ?? null, restored: backup.length });
+    return ok(res, { removed: removed?.deletedCount ?? null, restored: restore.length });
   } catch (err) { console.error('[timetable-generate POST /runs/:id/undo]', err); return E.serverError(res); }
 });
 

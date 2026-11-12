@@ -38,7 +38,56 @@ const RoomSchema = z.object({
   type:     z.enum(['classroom', 'lab', 'hall', 'sports', 'library', 'other']).default('classroom'),
   capacity: z.number().int().min(1).max(2000).optional(),
   notes:    z.string().max(500).optional(),
+  // Classes (or one stream of a class) normally taught here, v5.269.2.
+  // The timetable generator puts their ordinary lessons in this room.
+  // One home room per class/stream (checked below).
+  homeFor:  z.array(z.object({
+    classId:  z.string().min(1).max(100),
+    streamId: z.string().min(1).max(100).nullable().optional(),
+  }).strict()).max(20).optional(),
 });
+
+/* Every homeFor entry must be a class (and stream) of this school, and no
+   other room may already be the home room of the same class/stream.
+   Returns an error message or null; normalises streamId to null. */
+async function _checkHomeFor(req, homeFor, roomId = null) {
+  if (!homeFor || !homeFor.length) return null;
+  const { schoolId } = req.jwtUser;
+  const ctx = tenantContext(req);
+  const classIds = [...new Set(homeFor.map(h => h.classId))];
+  const classes = await tenantModel('classes', ctx).find({ schoolId }).select('id name').lean();
+  const byForm = new Map();
+  for (const c of classes) for (const f of [c.id, c._id && String(c._id)].filter(Boolean)) byForm.set(String(f), c);
+  const missing = classIds.filter(id => !byForm.has(String(id)));
+  if (missing.length) return 'A home-room class is not a class of this school.';
+  const streamIds = [...new Set(homeFor.map(h => h.streamId).filter(Boolean))];
+  if (streamIds.length) {
+    const streams = await tenantModel('streams', ctx).find({ schoolId, id: { $in: streamIds } }).select('id classId').lean();
+    for (const h of homeFor.filter(x => x.streamId)) {
+      const s = streams.find(x => x.id === h.streamId);
+      const cls = byForm.get(String(h.classId));
+      if (!s || ![cls.id, cls._id && String(cls._id)].filter(Boolean).map(String).includes(String(s.classId))) {
+        return 'A home-room stream is not a stream of that class.';
+      }
+    }
+  }
+  const keyOf = h => { const c = byForm.get(String(h.classId)); return `${c.id || String(c._id)}|${h.streamId || ''}`; };
+  const wanted = new Set(homeFor.map(keyOf));
+  if (wanted.size !== homeFor.length) return 'The same class or stream is listed twice.';
+  const others = await tenantModel('rooms', ctx).find({ schoolId, isActive: { $ne: false }, 'homeFor.0': { $exists: true } }).select('id name homeFor').lean();
+  for (const r of others) {
+    if (roomId && r.id === roomId) continue;
+    for (const h of r.homeFor || []) {
+      if (!byForm.has(String(h.classId))) continue;
+      if (wanted.has(keyOf(h))) {
+        const c = byForm.get(String(h.classId));
+        return `${c.name}${h.streamId ? ' (that stream)' : ''} already has a home room: ${r.name}.`;
+      }
+    }
+  }
+  for (const h of homeFor) h.streamId = h.streamId || null;
+  return null;
+}
 
 /* ── GET /api/rooms ─────────────────────────────────────────── */
 router.get('/', authMiddleware, async (req, res) => { // rbac: intentionally open to every authenticated user — see header comment
@@ -80,6 +129,8 @@ router.post('/', authMiddleware, rbac('timetable', 'create', 'rooms'), async (re
     if (!result.success) return E.validation(res, result.error.issues);
 
     const { data } = result;
+    const homeErr = await _checkHomeFor(req, data.homeFor);
+    if (homeErr) return E.conflict(res, homeErr);
 
     // Duplicate name guard within school
     const existing = await tenantModel('rooms', tenantContext(req)).findOne({
@@ -109,6 +160,10 @@ router.put('/:id', authMiddleware, rbac('timetable', 'update', 'rooms'), async (
     const { schoolId, userId } = req.jwtUser;
     const result = RoomSchema.partial().safeParse(req.body);
     if (!result.success) return E.validation(res, result.error.issues);
+    if (result.data.homeFor) {
+      const homeErr = await _checkHomeFor(req, result.data.homeFor, req.params.id);
+      if (homeErr) return E.conflict(res, homeErr);
+    }
 
     // Name uniqueness check on rename
     if (result.data.name) {

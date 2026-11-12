@@ -94,7 +94,7 @@ async function buildProblem(schoolId, ctx, scope = {}) {
     tenantModel('teaching_assignments', ctx).find({ schoolId, classId: { $in: scopeIdForms } })
       .select('id teacherId teacherName subjectId subjectName classId className streamId streamName preferredRoomId periodsPerWeek doubleLessons').lean(),
     tenantModel('subjects', ctx).find({ schoolId }).select('id name requiredRoomType').lean(),
-    tenantModel('rooms', ctx).find({ schoolId, isActive: { $ne: false } }).select('id name type capacity').lean(),
+    tenantModel('rooms', ctx).find({ schoolId, isActive: { $ne: false } }).select('id name type capacity homeFor').lean(),
     tenantModel('teachers', ctx).find({ schoolId }).select('id userId title firstName lastName').lean(),
     tenantModel('teacher_availability', ctx).find({ schoolId }).select('teacherId blocks').lean(),
     tenantModel('timetable', ctx).find({ schoolId, isActive: true, academicYearId })
@@ -144,6 +144,11 @@ async function buildProblem(schoolId, ctx, scope = {}) {
   const subjectById = new Map(subjects.map(s => [s.id, s]));
   const subjectByName = new Map(subjects.filter(s => s.name).map(s => [s.name.trim().toLowerCase(), s]));
   const roomList = rooms.map(r => ({ id: r.id || String(r._id), name: r.name, type: r.type || 'classroom', capacity: r.capacity || null }));
+  // Lessons saved with only a typed room name still occupy that room.
+  const roomIdByName = new Map(rooms.filter(r => r.name).map(r => [r.name.trim().toLowerCase(), r.id || String(r._id)]));
+  // Home rooms (rooms.homeFor, v5.269.2): `${classKey}|${streamId||''}` → roomId.
+  const homeRoom = new Map();
+  for (const r of rooms) for (const h of r.homeFor || []) homeRoom.set(`${ck(h.classId)}|${h.streamId || ''}`, r.id || String(r._id));
   const coreIds = new Set(rules.coreSubjectsMorning?.on ? rules.coreSubjectsMorning.subjectIds : []);
 
   // ── Bell schedules: one per class (scope classes + classes of lessons that need times) ──
@@ -232,7 +237,7 @@ async function buildProblem(schoolId, ctx, scope = {}) {
     const audKey = gid || (inScope ? `${k}|${l.streamId || ''}` : null);
     fixed.push({
       day: l.day, start: startTime, end: endTime, classId: k, streamId: gid ? null : (l.streamId || null), groupId: gid,
-      teacherKey: tk(l.teacherId), roomId: l.roomId || null,
+      teacherKey: tk(l.teacherId), roomId: l.roomId || roomIdByName.get(String(l.room || '').trim().toLowerCase()) || null,
       audKey, subjectId: subj?.id || null,
     });
     if (inScope && l.locked && isLesson(l) && subj) {
@@ -301,6 +306,9 @@ async function buildProblem(schoolId, ctx, scope = {}) {
       subjectId: a.subjectId, subjectName: a.subjectName || subj?.name || '',
       teacherKey: tk(a.teacherId), requiredRoomType: subj?.requiredRoomType || null,
       preferredRoomId: a.preferredRoomId || null,
+      // An option group uses the class home room when it is free (rooms are never double-booked,
+      // so of two options side by side one gets it and the other goes roomless, counted).
+      homeRoomId: elective ? (homeRoom.get(`${k}|`) || null) : (homeRoom.get(audKey) || homeRoom.get(`${k}|`) || null),
       classSize: elective ? (enrolledCount || null) : (size.get(audKey) || null),
       isCore: coreIds.has(a.subjectId),
     };
@@ -368,15 +376,32 @@ async function buildProblem(schoolId, ctx, scope = {}) {
   const teacherNeed = new Map();
   for (const u of units) if (u.teacherKey) teacherNeed.set(u.teacherKey, (teacherNeed.get(u.teacherKey) || 0) + u.length);
   for (const [t, need] of teacherNeed) {
-    const busyElsewhere = fixed.filter(f => f.teacherKey === t).length;
-    // Periods available: the distinct times of the classes they'd teach here, minus unavailable ones.
-    const times = new Set();
-    for (const u of units.filter(x => x.teacherKey === t)) for (const s of audiences[u.audKey].slots) times.add(`${s.day}|${s.start}|${s.end}`);
+    // Exact count (v5.269.2): the distinct periods of the classes they'd
+    // teach here, minus times they marked unavailable and minus times they
+    // already teach a lesson that stays (elsewhere, or locked). Before, every
+    // lesson elsewhere was subtracted even if it fell outside these times,
+    // which could report an overload that wasn't there.
+    const busy = fixed.filter(f => f.teacherKey === t);
     const blocks = unavailable[t] || [];
-    const free = [...times].filter(k => { const [day, s, e] = k.split('|'); return !blocks.some(b => b.day === day && s < b.end && e > b.start); }).length;
-    if (need + busyElsewhere > free) {
-      add('error', 'teacher_overfull', `${teacherName.get(t) || 'A teacher'} needs ${need + busyElsewhere} lessons a week (${need} here${busyElsewhere ? `, ${busyElsewhere} already elsewhere` : ''}) but is free for only ${free} periods.`);
+    const times = new Map();
+    for (const u of units.filter(x => x.teacherKey === t)) for (const s of audiences[u.audKey].slots) times.set(`${s.day}|${s.start}|${s.end}`, s);
+    let blockedByLessons = 0;
+    let free = 0;
+    for (const s of times.values()) {
+      if (blocks.some(b => b.day === s.day && s.start < b.end && s.end > b.start)) continue;
+      if (busy.some(f => f.day === s.day && s.start < f.end && s.end > f.start)) { blockedByLessons += 1; continue; }
+      free += 1;
     }
+    if (need > free) {
+      add('error', 'teacher_overfull', `${teacherName.get(t) || 'A teacher'} needs ${need} lessons a week here but is free for only ${free} of these classes' periods${blockedByLessons ? ` (${blockedByLessons} ${blockedByLessons === 1 ? 'is' : 'are'} taken by lessons that stay)` : ''}${blocks.length ? ', after unavailable times' : ''}.`);
+    }
+  }
+  // Classes whose ordinary lessons will have no room (no home room, no preferred room).
+  const roomless = [...new Set(units
+    .filter(u => !u.requiredRoomType && !u.homeRoomId && !(u.preferredRoomId && rules.usePreferredRooms?.on))
+    .map(u => audiences[u.audKey]?.label || u.classId))];
+  if (roomless.length) {
+    add('warning', 'no_home_room', `${roomless.slice(0, 6).join(', ')}${roomless.length > 6 ? '…' : ''} ha${roomless.length === 1 ? 's' : 've'} no home room, so ${roomless.length === 1 ? 'its' : 'their'} ordinary lessons will be placed without a room. Set one under Timetable → Rooms → edit a room → Home room for.`);
   }
   // Room types nobody registered.
   const neededTypes = [...new Set(units.map(u => u.requiredRoomType).filter(Boolean))];

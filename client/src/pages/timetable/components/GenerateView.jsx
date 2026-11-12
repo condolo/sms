@@ -108,10 +108,18 @@ export default function GenerateView({ classList = [], sections = [], days = [],
     onSuccess: (r) => { setConfirmApply(false); setMessage({ ok: true, text: `Applied to the draft: ${r.applied} lessons placed, ${r.replaced} replaced. Publish when you're ready.` }); refreshAfterChange(); },
     onError: (e) => setMessage({ ok: false, text: e.message }),
   });
+  // Undo first asks the server; if generated lessons were edited by hand
+  // since applying, it says which and we ask before removing them too.
+  const [undoConfirm, setUndoConfirm] = useState(null);   // { id, text, details }
   const undo = useMutation({
-    mutationFn: (id) => ttApi.generator.undo(id).then(r => r.data),
-    onSuccess: (r) => { setMessage({ ok: true, text: `Undone: generated lessons removed, ${r.restored} earlier lessons put back.` }); refreshAfterChange(); },
-    onError: (e) => setMessage({ ok: false, text: e.message }),
+    mutationFn: ({ id, confirmEdited }) => ttApi.generator.undo(id, confirmEdited).then(r => r.data),
+    onSuccess: (r) => { setUndoConfirm(null); setMessage({ ok: true, text: `Undone: generated lessons removed, ${r.restored} earlier lessons put back.` }); refreshAfterChange(); },
+    onError: (e, vars) => {
+      const details = e.extra?.error?.details ?? [];
+      if (e.code === 'EDITED_SINCE') { setMessage(null); setUndoConfirm({ id: vars.id, text: e.message, details }); return; }
+      setUndoConfirm(null);
+      setMessage({ ok: false, text: e.message, details });
+    },
   });
 
   const pre = precheck.data && precheck.data.scopeKey === scopeKey ? precheck.data : null;
@@ -221,7 +229,27 @@ export default function GenerateView({ classList = [], sections = [], days = [],
       </div>
 
       {message && (
-        <div className={`text-sm rounded-lg px-4 py-2.5 border ${message.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-red-50 border-red-200 text-red-800'}`}>{message.text}</div>
+        <div className={`text-sm rounded-lg px-4 py-2.5 border ${message.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
+          {message.text}
+          {message.details?.length > 0 && (
+            <ul className="mt-1.5 list-disc pl-5 text-xs space-y-0.5">{message.details.map((d, i) => <li key={i}>{d}</li>)}</ul>
+          )}
+        </div>
+      )}
+      {undoConfirm && (
+        <div className="text-sm rounded-lg px-4 py-3 border bg-amber-50 border-amber-200 text-amber-900 space-y-2">
+          <p className="font-medium">{undoConfirm.text}</p>
+          {undoConfirm.details.length > 0 && (
+            <ul className="list-disc pl-5 text-xs space-y-0.5">{undoConfirm.details.map((d, i) => <li key={i}>{d}</li>)}</ul>
+          )}
+          <div className="flex gap-2">
+            <button type="button" onClick={() => undo.mutate({ id: undoConfirm.id, confirmEdited: true })} disabled={undo.isPending}
+              className="text-sm font-semibold px-3 py-1.5 rounded-lg bg-amber-600 text-white disabled:opacity-50">
+              {undo.isPending ? 'Undoing…' : 'Undo anyway'}
+            </button>
+            <button type="button" onClick={() => setUndoConfirm(null)} className="text-sm px-3 py-1.5 rounded-lg border border-amber-300 text-amber-900">Keep my changes</button>
+          </div>
+        </div>
       )}
 
       {/* ── 2. Result ── */}
@@ -240,6 +268,7 @@ export default function GenerateView({ classList = [], sections = [], days = [],
                   <p className="text-xs text-slate-500 mt-0.5">
                     {run.scopeLabel} · rule breaks: {v.teacherOverDay ?? 0} over a teacher's daily limit, {v.subjectOverDay ?? 0} extra same-subject in a day,
                     {' '}{v.teacherGaps ?? 0} teacher gaps{v.coreAfternoon ? `, ${v.coreAfternoon} core lessons in the afternoon` : ''} · {(run.stats.durationMs / 1000).toFixed(1)} s
+                    {run.stats.lessonsWithoutRoom ? <span className="text-amber-700"> · {run.stats.lessonsWithoutRoom} lesson{run.stats.lessonsWithoutRoom === 1 ? '' : 's'} without a room</span> : null}
                   </p>
                 </div>
                 {!run.appliedAt ? (
@@ -301,7 +330,7 @@ export default function GenerateView({ classList = [], sections = [], days = [],
                     {r.undoneAt ? 'Undone' : r.appliedAt ? 'Applied' : 'Not applied'}
                   </span>
                   {latestApplied?.id === r.id && (
-                    <button type="button" onClick={() => undo.mutate(r.id)} disabled={undo.isPending}
+                    <button type="button" onClick={() => undo.mutate({ id: r.id })} disabled={undo.isPending}
                       className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50">
                       <Undo2 size={12} /> Undo
                     </button>
