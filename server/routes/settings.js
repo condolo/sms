@@ -37,6 +37,10 @@ const { generateLinkCode, hashLinkCode, linkCodeExpiry } = require('../utils/lin
 const SessionService         = require('../services/sessionService');
 const { peekAdmissionCounter, setAdmissionCounter } = require('../utils/counters');
 const { MODULE_REGISTRY, MODULE_KEYS } = require('../config/moduleRegistry');
+const {
+  BUILTIN_RESPONSIBILITY_LABELS,
+  LEGACY_RESPONSIBILITY_RENAMES,
+} = require('../config/staffResponsibilities');
 const { provisionIdentityForUser } = require('../utils/provision-identities');
 const { isIdentityCutoverEnabled } = require('../utils/identity-cutover');
 const { validateAssignableRole, SYSTEM_ROLES } = require('../utils/role-validation');
@@ -475,7 +479,23 @@ router.put('/school', authMiddleware, rbac('settings', 'update'), async (req, re
       if (!Array.isArray(list)) {
         return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'staffResponsibilities must be an array.' } });
       }
-      const reserved = list.filter(r => r && typeof r.value === 'string' && SYSTEM_ROLES.has(r.value));
+      /* Self-heal persisted LEGACY BUILT-INS before the security guard.
+         A school that saved "Timetabler" back when its value was the real
+         'timetabler' role key could otherwise never save ANY settings
+         change: the whole PUT was rejected on sight, with the offending
+         record invisible in the UI. Rename only when the label still
+         matches that built-in — a hand-typed custom entry with a colliding
+         value and a different label stays rejected below, which is the
+         guard's actual job. */
+      const normalized = list.map(r => {
+        if (!r || typeof r.value !== 'string') return r;
+        const canonical = LEGACY_RESPONSIBILITY_RENAMES[r.value];
+        if (!canonical) return r;
+        const builtinLabel = BUILTIN_RESPONSIBILITY_LABELS[canonical];
+        if (r.label && builtinLabel && r.label.trim().toLowerCase() !== builtinLabel.toLowerCase()) return r;
+        return { ...r, value: canonical };
+      });
+      const reserved = normalized.filter(r => r && typeof r.value === 'string' && SYSTEM_ROLES.has(r.value));
       if (reserved.length) {
         return res.status(400).json({
           success: false,
@@ -485,6 +505,7 @@ router.put('/school', authMiddleware, rbac('settings', 'update'), async (req, re
           },
         });
       }
+      req.body.staffResponsibilities = normalized;
     }
 
     if (req.body.roleLabels !== undefined) {
