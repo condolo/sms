@@ -107,7 +107,9 @@ Available demo roles: **Super Admin · Teacher · Parent · Finance · Student �
 If your account was created by an administrator (individually or via bulk import), you will be asked to **set your own password** the very first time you sign in. Your temporary password (sent to your email) is valid for one login only.
 
 ### Forgot Password
-Contact your school administrator to reset your password. They can generate a new temporary password for you immediately from **Settings → Users** — no email required. See [Your Profile & Password](#your-profile--password) below for how to then change it yourself.
+On the sign-in page, click **Forgot your password?**, enter the email on your account and click **Send reset link**. The link arrives by email and works for one hour. This works on your school's own sign-in page and on a group portal shared by several schools (for example a "Group of Schools" address); on a group portal the new password works for every school you have access to. If no email arrives, check spam, or ask the school office.
+
+You can also contact your school administrator to reset your password. They can generate a new temporary password for you immediately from **Settings → Users** — no email required. See [Your Profile & Password](#your-profile--password) below for how to then change it yourself.
 
 ### Auto-Logout (Security)
 For your security, Msingi automatically signs you out after **10 minutes of inactivity**. At 9 minutes, an amber warning toast appears — click **Stay signed in** to reset the timer. This protects shared or unattended devices.

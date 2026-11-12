@@ -1290,13 +1290,92 @@ const forgotPasswordLimiter = rateLimit({
   message: { success: false, error: { code: 'RATE_LIMITED', message: 'Too many requests. Please try again shortly.' } },
 });
 
-router.post('/forgot-password', forgotPasswordLimiter, tenantMiddleware, async (req, res) => {
-  // Property 2: one answer, every branch below.
-  const ok = {
-    success: true,
-    data: { sent: true, message: 'If that address is on this school\u2019s records, a reset link is on its way.' },
-  };
+// Property 2: one answer, every branch below (school and group portal alike).
+const FORGOT_OK = {
+  success: true,
+  data: { sent: true, message: 'If that address is on this school’s records, a reset link is on its way.' },
+};
 
+/* Issue a single-use reset ticket on this user and email the link to that
+   user's school sign-in page. `school` is { id, slug, name, systemEmail }. */
+async function _sendResetLink(req, user, school) {
+  const sid  = school.id;
+  const User = tenantModel('users', { schoolId: sid });
+  const { token, set } = passwordTicket.issueTicket('reset');
+  await User.updateOne({ _id: user._id }, { $set: set });
+
+  /* Built from the school's OWN sign-in host, never PUBLIC_URL — PUBLIC_URL
+     is not provisioned in production, which is exactly what made every
+     Google redirect_uri relative. See utils/school-url.js. The slug is
+     carried too, so the link still resolves if a school has no subdomain. */
+  const base = await schoolLoginUrl(sid);
+  const resetUrl = `${base}/reset-password?ticket=${encodeURIComponent(token)}`
+    + (school.slug ? `&school=${encodeURIComponent(school.slug)}` : '');
+
+  email.sendPasswordReset({
+    name:        user.name,
+    email:       user.email,
+    resetUrl,
+    schoolName:  school.name || school.slug || 'your school',
+    schoolEmail: school.systemEmail || '',
+    schoolId:    sid,
+    ttlMinutes:  passwordTicket.PURPOSES.reset.ttlMs / 60000,
+  }).then(sent => {
+    // The RESPONSE stays generic, but a delivery failure must be visible
+    // somewhere or unconfigured SMTP looks exactly like "no such user".
+    if (!sent) console.error(`[auth/forgot-password] reset link for ${user.email} was NOT delivered (SMTP failure or unconfigured).`);
+  }).catch(err => console.error('[auth/forgot-password] send failed:', err.message));
+
+  AuditService.log({ action: 'auth.forgot_password_requested', actor: { userId: user.id, role: user.primaryRole || user.role, email: user.email }, schoolId: sid, req });
+}
+
+/* Group (organisation) portals — e.g. "TIS Group of Schools" at tis.msingi.io.
+   Reported 2026-11-12 (v5.265.1): a parent on a group portal asking for a reset
+   link got "School 'tis' not found". The portal's slug belongs to the
+   organisation, not to any school, so tenantMiddleware (schools only) refused it.
+
+   Same rule the sign-in page uses (public.js /resolve-portal): a slug is a school
+   if any school has it; only otherwise is it a group portal, and only for an
+   organisation with multiSchoolEnabled. On a group portal the account is the
+   shared identity (identities: orgId + email) that /org-login checks. We send the
+   ordinary reset link for one of that identity's school accounts; /reset-password
+   already writes the new hash to the identity too, so the new password works on
+   the group portal and (identity cutover) at each of its schools.
+   Answers exactly like the school path whatever happens — no enumeration. */
+async function _forgotPasswordGroupPortal(req, res, next) {
+  try {
+    const parts = (req.hostname || '').split('.');
+    const subdomain = parts.length >= 3 && !['www', 'app'].includes(parts[0]) ? parts[0] : '';
+    const slug = String(req.body?.orgSlug || req.headers['x-school-slug'] || subdomain).trim().toLowerCase();
+    if (!slug) return next();
+    if (await _model('schools').findOne({ slug }).select('id').lean()) return next(); // a school: normal path
+    const org = await _model('organizations').findOne({ slug }).select('id slug multiSchoolEnabled').lean();
+    if (!org?.multiSchoolEnabled) return next();                                      // not a group portal either
+
+    const email_ = String(req.body?.email || '').trim().toLowerCase();
+    if (!email_) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Email required' } });
+    }
+
+    const identity = await _model('identities').findOne({ orgId: org.id, email: email_, status: 'active' }).lean();
+    const target   = identity ? (await _resolveIdentitySchools(identity.id, org.id))[0] : null;
+    const user = target
+      ? await tenantModel('users', { schoolId: target.schoolId }).findOne({ id: target.userId, schoolId: target.schoolId }).lean()
+      : null;
+    if (!user || user.isActive === false) {
+      AuditService.log({ action: 'auth.forgot_password_unknown', actor: { userId: 'public', role: 'public', email: email_ }, schoolId: org.id, req });
+      return res.json(FORGOT_OK);
+    }
+    const school = await _model('schools').findOne({ id: target.schoolId }).select('id slug name systemEmail').lean();
+    await _sendResetLink(req, user, school || { id: target.schoolId, slug: target.slug, name: target.name });
+    return res.json(FORGOT_OK);
+  } catch (err) {
+    console.error('[auth/forgot-password group portal]', err);
+    return res.json(FORGOT_OK);
+  }
+}
+
+router.post('/forgot-password', forgotPasswordLimiter, _forgotPasswordGroupPortal, tenantMiddleware, async (req, res) => {
   const email_ = String(req.body?.email || '').trim().toLowerCase();
   if (!email_) {
     return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Email required' } });
@@ -1309,41 +1388,16 @@ router.post('/forgot-password', forgotPasswordLimiter, tenantMiddleware, async (
 
     if (!user || !user.isActive) {
       AuditService.log({ action: 'auth.forgot_password_unknown', actor: { userId: 'public', role: 'public', email: email_ }, schoolId: sid, req });
-      return res.json(ok);
+      return res.json(FORGOT_OK);
     }
 
-    const { token, set } = passwordTicket.issueTicket('reset');
-    await User.updateOne({ _id: user._id }, { $set: set });
-
-    /* Built from the school's OWN sign-in host, never PUBLIC_URL — PUBLIC_URL
-       is not provisioned in production, which is exactly what made every
-       Google redirect_uri relative. See utils/school-url.js. The slug is
-       carried too, so the link still resolves if a school has no subdomain. */
-    const base = await schoolLoginUrl(sid);
-    const resetUrl = `${base}/reset-password?ticket=${encodeURIComponent(token)}`
-      + (req.school?.slug ? `&school=${encodeURIComponent(req.school.slug)}` : '');
-
-    email.sendPasswordReset({
-      name:        user.name,
-      email:       user.email,
-      resetUrl,
-      schoolName:  req.school?.name || req.school?.slug || 'your school',
-      schoolEmail: req.school?.systemEmail || '',
-      schoolId:    sid,
-      ttlMinutes:  passwordTicket.PURPOSES.reset.ttlMs / 60000,
-    }).then(sent => {
-      // The RESPONSE stays generic, but a delivery failure must be visible
-      // somewhere or unconfigured SMTP looks exactly like "no such user".
-      if (!sent) console.error(`[auth/forgot-password] reset link for ${email_} was NOT delivered (SMTP failure or unconfigured).`);
-    }).catch(err => console.error('[auth/forgot-password] send failed:', err.message));
-
-    AuditService.log({ action: 'auth.forgot_password_requested', actor: { userId: user.id, role: user.primaryRole || user.role, email: email_ }, schoolId: sid, req });
-    return res.json(ok);
+    await _sendResetLink(req, user, req.school);
+    return res.json(FORGOT_OK);
   } catch (err) {
     console.error('[auth/forgot-password]', err);
     // Answer identically even here: an error only on the enrolled-address path
     // would itself be an existence oracle.
-    return res.json(ok);
+    return res.json(FORGOT_OK);
   }
 });
 

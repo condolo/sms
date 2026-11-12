@@ -6,6 +6,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.265.1] - 2026-11-12 - fix(auth): password reset on a group portal said "School 'tis' not found"
+
+Reported by a parent on the TIS Group of Schools portal: **Forgot password → Send reset link** showed "School 'tis' not found".
+
+**Root cause:** `tis` is a **group (organisation) portal** slug, not a school's. The sign-in page knows this (`/api/public/resolve-portal` falls back to organisations with `multiSchoolEnabled`, and sign-in goes to `/auth/org-login`), but `POST /auth/forgot-password` ran `tenantMiddleware`, which only looks up schools, so it 404'd before doing anything.
+
+**Fix:** `server/routes/auth.js` — new `_forgotPasswordGroupPortal` step before `tenantMiddleware`. It uses the slug from `orgSlug` in the body, the `X-School-Slug` header or the subdomain, and the same rule as the sign-in page: if any school has that slug, use the normal school path; otherwise, for an organisation with `multiSchoolEnabled`, find the parent's shared identity (`identities`: orgId + email, active) and one of its active school accounts (`_resolveIdentitySchools`), and send the ordinary reset link for that account (that school's sign-in host, `&school=<its slug>`). `/reset-password` already writes the new hash to the identity, so the new password works on the group portal and at each of its schools. Every outcome gives the same answer (no enumeration). Ticket issue and email sending moved into a shared `_sendResetLink()`.
+
+### Tests
+- New `server/__tests__/routes/auth-forgot-password-group-portal.test.js` (7): known parent gets the link for their school account; unknown and inactive accounts get the same answer and no email; `orgSlug` in the body works; a school slug still takes the school path; a slug that's both a school and an organisation is the school; an organisation without `multiSchoolEnabled` still 404s as before.
+- Not checked against the live TIS data (no production database access from this machine).
+
 ## [v5.265.0] - 2026-11-12 - feat(timetable): clash checks on every save and import, locked lessons, working days, "Lessons to place"
 
 Phase 0–1 of the plan towards an aSc-style automatic timetable generator (from the 2026-11-12 timetable audit). No generator yet; this fixes the gaps the audit found and gives timetablers a checklist.
