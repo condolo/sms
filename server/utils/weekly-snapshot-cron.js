@@ -150,6 +150,9 @@ async function _notifyGuardians(ctx, school, createdDocs) {
             recipientName: recipient.name, recipientEmail: recipient.email,
             studentName, weekStart: d.weekStart, weekEnd: d.weekEnd,
             schoolName, schoolEmail, schoolId: school.id,
+            // So "View Snapshot" opens THIS child's snapshot on the school's
+            // own address (through login if needed), not the msingi.io homepage.
+            schoolSlug: school.slug, studentId: d.studentId,
           }),
         };
       }),
@@ -175,7 +178,7 @@ async function runWeeklySnapshots() {
   const Schools = _model('schools');
   let schools;
   try {
-    schools = await Schools.find({ isActive: { $ne: false } }).select('id name timezone systemEmail').lean();
+    schools = await Schools.find({ isActive: { $ne: false } }).select('id name slug timezone systemEmail').lean();
   } catch (err) {
     console.error('[weekly-snapshot-cron] Failed to query schools:', err.message);
     return;

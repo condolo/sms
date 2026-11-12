@@ -633,6 +633,9 @@ Open a message and scroll to the **Reply** box at the bottom. Type your reply an
 - **Notifications** (bell icon, top-right): automatic system alerts (attendance, behaviour, finance).
 - **Messages** (Communication module): manually composed messages — permanently stored and accessible from any device.
 
+### Parent Portal — Weekly Snapshot email link *(2026-11)*
+The **Weekly Snapshot Ready** email's **View Snapshot** button opens your school's own Msingi address. If you are not signed in you will see your school's login page; after signing in you go straight to that child's Overview with **This Week's Snapshot** in view (tap **PDF** there to download it). If you are already signed in, the snapshot opens directly.
+
 ### Parent Portal — Messaging the School
 Parents and guardians can now send a message directly from the **Messages** page of their Parent Portal (also reachable via the **Message School** button on Overview):
 1. Click **New Message**.

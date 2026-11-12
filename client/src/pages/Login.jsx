@@ -4,6 +4,7 @@ import { Spinner } from '@/components/ui/Spinner.jsx';
 import useAuthStore from '@/store/auth.js';
 import { auth as authApi, publicApi, APIError } from '@/api/client.js';
 import { detectSchool, storeSchoolSlug } from '@/utils/schoolDetect.js';
+import { safeDest, locationToDest, rememberDest, peekDest, clearDest } from '@/utils/postLoginRedirect.js';
 import { setFavicon, DEFAULT_FAVICON, DEFAULT_TITLE } from '@/utils/favicon.js';
 import { Loader2 as Loader2Icon, Search, Mail, KeyRound, Eye, EyeOff, AlertTriangle, Users, ChevronDown } from 'lucide-react';
 
@@ -454,7 +455,20 @@ export default function Login() {
     return '/dashboard';
   }
 
-  const from = location.state?.from?.pathname ?? null; // null = use role-based default
+  // Where to go after sign-in: the page that sent us here (path AND query,
+  // e.g. /parent-dashboard?child=…&focus=snapshot from a notification
+  // email), else an explicit ?next=, else what this tab remembered before a
+  // school-picker / Google / Microsoft round-trip lost the router state.
+  // null = role-based default. See utils/postLoginRedirect.js.
+  const stateDest = locationToDest(location.state?.from);
+  const nextDest  = safeDest(new URLSearchParams(location.search).get('next'));
+  if (stateDest || nextDest) rememberDest(stateDest || nextDest);
+  const from = stateDest || nextDest || peekDest();
+
+  function _goAfterLogin(role) {
+    clearDest();
+    navigate(from || _defaultDest(role), { replace: true });
+  }
 
   // Detect school from subdomain / query param
   const { slug, isSchool } = detectSchool();
@@ -478,7 +492,7 @@ export default function Login() {
   useEffect(() => {
     if (isAuthenticated) {
       const role = useAuthStore.getState().session?.user?.role;
-      navigate(from || _defaultDest(role), { replace: true });
+      _goAfterLogin(role);
     }
   }, [isAuthenticated, from, navigate]);
 
@@ -521,7 +535,7 @@ export default function Login() {
         .then(res => {
           if (!res.user) throw new Error('Invalid exchange response');
           setSession({ user: res.user, school: res.school, moduleRegistry: res.moduleRegistry });
-          navigate(from || _defaultDest(res.user?.role), { replace: true });
+          _goAfterLogin(res.user?.role);
         })
         .catch(() => {
           setError('Sign-in session expired. Please try signing in again.');
@@ -597,7 +611,7 @@ export default function Login() {
       if (res?.mfaRequired) { setPendingMfa({ userId: res.userId, schoolId: res.schoolId }); setMode(MODES.OTP); setLoading(false); return; }
       if (res?.passwordExpired) { setPendingPw({ ticket: res.ticket, schoolId: res.schoolId, reason: res.reason }); setMode(MODES.CHANGE_PASSWORD); setLoading(false); return; }
       setSession({ user: res.user, school: res.school, absoluteExpiry: res.absoluteExpiry, moduleRegistry: res.moduleRegistry });
-      navigate(from || _defaultDest(res.user?.role), { replace: true });
+      _goAfterLogin(res.user?.role);
     } catch (err) {
       setError(err instanceof APIError ? err.message : 'Demo login failed — please try again.');
     } finally {
@@ -648,7 +662,7 @@ export default function Login() {
       }
 
       setSession({ user: res.user, school: res.school, absoluteExpiry: res.absoluteExpiry, moduleRegistry: res.moduleRegistry });
-      navigate(from || _defaultDest(res.user?.role), { replace: true });
+      _goAfterLogin(res.user?.role);
     } catch (err) {
       if (err instanceof APIError && err.code === 'DEMO_EXPIRED') {
         navigate(`/demo-expired${slug ? `?school=${encodeURIComponent(slug)}` : ''}`, { replace: true });
@@ -677,7 +691,7 @@ export default function Login() {
       }
 
       setSession({ user: res.user, school: res.school, absoluteExpiry: res.absoluteExpiry, moduleRegistry: res.moduleRegistry });
-      navigate(from || _defaultDest(res.user?.role), { replace: true });
+      _goAfterLogin(res.user?.role);
     } catch (err) {
       setError(err instanceof APIError ? err.message : 'Could not complete sign-in. Please try again.');
       setMode(MODES.LOGIN);
@@ -709,7 +723,7 @@ export default function Login() {
         otp:      otp.trim(),
       }, pendingMfa.schoolSlug ? { schoolSlug: pendingMfa.schoolSlug } : undefined);
       setSession({ user: res.user, school: res.school, absoluteExpiry: res.absoluteExpiry, moduleRegistry: res.moduleRegistry });
-      navigate(from || _defaultDest(res.user?.role), { replace: true });
+      _goAfterLogin(res.user?.role);
     } catch (err) {
       setError(err instanceof APIError ? err.message : 'Invalid code. Please try again.');
     } finally {
@@ -750,7 +764,7 @@ export default function Login() {
         newPassword,
       });
       setSession({ user: res.user, school: res.school, absoluteExpiry: res.absoluteExpiry, moduleRegistry: res.moduleRegistry });
-      navigate(from || _defaultDest(res.user?.role), { replace: true });
+      _goAfterLogin(res.user?.role);
     } catch (err) {
       setError(err instanceof APIError ? err.message : 'Password change failed.');
     } finally {

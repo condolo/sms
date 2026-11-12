@@ -11,6 +11,7 @@
  */
 'use strict';
 
+const mongoose = require('mongoose');
 const { tenantModel, tenantContext } = require('./tenant-model');
 const { resolveTeacher } = require('./resolveTeacher');
 const { _loadAssigned } = require('../middleware/scopeMiddleware');
@@ -133,6 +134,36 @@ const MODULE_SCOPE = {
  * @returns {object}        — the same filter object, mutated
  */
 function applyToFilter(req, module, filter) {
+  _applyToFilterRaw(req, module, filter);
+  if (module === 'classes') _widenClassIdForms(filter);
+  return filter;
+}
+
+/* A class can be referenced by its `id` field OR by String(_id). A school
+   whose class documents have no `id` at all (Mascit Lab Academy — see
+   DEVELOPER_GUIDE v5.227.0) stores String(_id) in
+   teaching_assignments.classId / streams.classId, so that is what scope
+   classIds hold. The 'classes' mapping filters on `id`, so
+   { id: { $in: [String(_id)] } } matched NOTHING for those classes: every
+   scoped class picker (Attendance, Lessons, Markbook, assignedOnly) came
+   back with only "Select class...", while Exams — which lists the
+   teacher's assignments directly — showed the class fine (reported
+   2026-11-12). Widen an { id: { $in } } restriction to also match _id for
+   values that are valid ObjectIds. Still only matches the allowed
+   classes; an empty $in stays empty (no widening at all). */
+function _widenClassIdForms(filter) {
+  const cond = filter.id;
+  if (!cond || typeof cond !== 'object' || !Array.isArray(cond.$in) || !cond.$in.length) return;
+  const oids = cond.$in
+    .filter(v => typeof v === 'string' && /^[a-f\d]{24}$/i.test(v))
+    .map(v => new mongoose.Types.ObjectId(v));
+  if (!oids.length) return;
+  delete filter.id;
+  const clause = { $or: [{ id: { $in: cond.$in } }, { _id: { $in: oids } }] };
+  filter.$and = [...(Array.isArray(filter.$and) ? filter.$and : []), clause];
+}
+
+function _applyToFilterRaw(req, module, filter) {
   const scope = req.scope;
   if (!scope) return filter;                                   // school-level: unrestricted
   if (scope.unrestrictedModules?.includes(module)) return filter; // module exempt

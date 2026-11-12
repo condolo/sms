@@ -220,6 +220,18 @@ describe('parent notification dispatch (M4)', () => {
     expect(typeof call.items[0].sendEmail).toBe('function');
   });
 
+  test('the email is given the school slug and the child, so "View Snapshot" can deep-link (not the msingi.io homepage)', async () => {
+    jest.setSystemTime(new Date('2026-08-08T10:05:00.000Z'));
+    const email = require('../utils/email');
+    email.sendWeeklySnapshotReady.mockClear();
+    await maybeGenerateForSchool({ id: SCHOOL_A, slug: 'testschool', timezone: 'Africa/Nairobi', name: 'Test School' });
+    const item = mockNotifyGuardiansForStudents.mock.calls[0][0].items.find(i => i.studentId === 'stu_1');
+    item.sendEmail({ name: 'Pat', email: 'pat@example.test' });
+    expect(email.sendWeeklySnapshotReady).toHaveBeenCalledWith(expect.objectContaining({
+      schoolSlug: 'testschool', studentId: 'stu_1',
+    }));
+  });
+
   test('a notification dispatch failure does not change the already-committed generation result', async () => {
     jest.setSystemTime(new Date('2026-08-08T10:05:00.000Z'));
     mockNotifyGuardiansForStudents.mockRejectedValueOnce(new Error('smtp down'));

@@ -551,6 +551,26 @@ function _buildSchoolLoginUrl(slug) {
   return loginUrl;
 }
 
+/* Absolute link to a specific page on a school's own address, e.g.
+   _buildSchoolPageUrl('greenwood', '/parent-dashboard', { child: 'stu_1' })
+   → https://greenwood.msingi.io/parent-dashboard?child=stu_1&school=greenwood
+   Same host rule as _buildSchoolLoginUrl. `school` is always added so the
+   page can send a signed-out reader to the right school's login even on a
+   host without subdomains (localhost / raw IP), and the web app remembers
+   the page across login (client/src/utils/postLoginRedirect.js) — so a
+   notification link lands on the item itself, never on the msingi.io
+   homepage (reported 2026-11-12: "on receiving the notification on a
+   weekly snapshot, when going to the site there's nothing"). */
+function _buildSchoolPageUrl(slug, pathname, params = {}) {
+  const loginUrl = _buildSchoolLoginUrl(slug);
+  const origin   = loginUrl.replace(/\/login$/, '');
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (v != null && v !== '') qs.set(k, String(v));
+  if (slug) qs.set('school', slug);
+  const q = qs.toString();
+  return `${origin}${pathname.startsWith('/') ? pathname : `/${pathname}`}${q ? `?${q}` : ''}`;
+}
+
 /* 3. School approved — welcome email with credentials */
 async function sendApprovalWelcome({ adminName, adminEmail, schoolName, slug, plan, tempPassword }) {
   const loginUrl = _buildSchoolLoginUrl(slug);
@@ -1072,9 +1092,14 @@ async function sendReportCardPublishedAlert({
 /* 18b. Weekly Student Snapshot ready — parent/guardian */
 async function sendWeeklySnapshotReady({
   recipientName, recipientEmail, studentName, weekStart, weekEnd,
-  schoolName, schoolEmail, schoolId = null, appUrl,
+  schoolName, schoolEmail, schoolId = null, appUrl, schoolSlug = null, studentId = null,
 }) {
-  const url = appUrl || APP_URL;
+  // Was `appUrl || APP_URL` — the bare msingi.io homepage, so parents who
+  // tapped "View Snapshot" saw the marketing site and no snapshot. Now opens
+  // the parent portal on this child with the snapshot card in view.
+  const url = appUrl || _buildSchoolPageUrl(schoolSlug, '/parent-dashboard', {
+    child: studentId, focus: 'snapshot', week: weekStart,
+  });
   const { subject, bodyHtml } = await resolveMessageTemplate(schoolId, 'weekly_snapshot_ready', {
     recipientName: recipientName || 'Parent/Guardian', studentName, schoolName, weekStart, weekEnd,
   });
@@ -1540,6 +1565,7 @@ module.exports = {
   _resolveTransporter, // test-only access — see students-bulk-welcome-email-fix.test.js's sibling email-resolve-transporter.test.js
   _wrap, // test-only access — see email-branding.test.js
   _logEmailFailure, // test-only access — see email-school-routing.test.js
+  _buildSchoolPageUrl, // test-only access — see notification-deep-link.test.js
   sendContactEnquiry,
   sendContactConfirmation,
   sendDemoOtp,

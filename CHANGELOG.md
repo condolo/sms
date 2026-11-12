@@ -6,6 +6,42 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.264.2] - 2026-11-12 - fix(notifications): "View Snapshot" in the weekly snapshot email now opens the snapshot, through login if needed
+
+Reported by a school: "a parent … on receiving the notification on a weekly snapshot, when going to the site there's nothing." Asked for: clicking the link and logging in should land on the snapshot itself.
+
+**Root causes:**
+1. The email's button linked to the bare `APP_URL` — `https://msingi.io`, the marketing homepage. No school, no login, no snapshot.
+2. The login page only ever kept the *path* of the page that sent someone there (never `?…`), and lost it entirely at the school picker (`navigate('/login?school=…')` drops router state) and across Google/Microsoft sign-in.
+3. The parent portal had no way to open a given child or section from a link, and its own "signed out" redirect didn't remember the page at all.
+
+**Fix (snapshot email only, as asked — other notification emails still link to the homepage; same helper ready for them):**
+- `server/utils/email.js` — new `_buildSchoolPageUrl(slug, path, params)`: the school's own address (`https://<slug>.msingi.io`, same rule as the welcome emails; path-based on localhost) + page + query, always carrying `school=<slug>`. `sendWeeklySnapshotReady` links to `/parent-dashboard?child=<studentId>&focus=snapshot&week=<weekStart>&school=<slug>`.
+- `server/utils/weekly-snapshot-cron.js` — loads the school `slug` and passes it and the `studentId` to the email.
+- `client/src/utils/postLoginRedirect.js` (new) — remembers the destination for the browser tab (sessionStorage) so it survives the school picker, OAuth and MFA; accepts only same-site paths (rejects other hosts, `//…`, backslash tricks, `/login`).
+- `client/src/pages/Login.jsx` — destination = the sending page's path **and query**, else `?next=`, else what the tab remembered; every post-login navigation goes through one `_goAfterLogin()` that uses it once and clears it.
+- `client/src/pages/parent-portal/ParentDashboard.jsx` — signed-out / expired sessions go to that school's login remembering the exact page; `?child=` opens that child (only if it's one of this parent's), `?focus=snapshot` scrolls to and briefly outlines the snapshot card, then the query is cleared.
+
+### Tests / verified
+- New `server/__tests__/notification-deep-link.test.js` (5): subdomain link, APP_URL already on a subdomain, localhost, no slug never falls back to the homepage, encoding. `weekly-snapshot-cron.test.js`: the email receives `schoolSlug` + `studentId`. Email and snapshot suites: 47/47.
+- End-to-end on a local demo DB in the browser: signed out → the email link → that school's login (no picker) → sign in as the demo parent → parent portal on that child with "This Week's Snapshot" scrolled into view. Also: already signed in → straight to the snapshot; no school on the link → school picker → sign in → still lands on the snapshot; plain teacher login with no link → `/dashboard` as before.
+
+## [v5.264.1] - 2026-11-12 - fix(scope): class pickers were empty for classes with no `id` field (Mascit Lab Academy)
+
+Reported directly, with a screenshot: a Mascit Lab Academy teacher assigned English in Year 2 saw Year 2 in the Exams module, but Attendance showed only "Select class...".
+
+**Root cause:** Mascit's class documents have no `id` field (the only school in that state — see v5.220.0 / v5.227.0), so every reference to them (`teaching_assignments.classId`, `streams.classId`) is `String(_id)`, and that is what a teacher's scope `classIds` hold. `ScopeEngine.applyToFilter(req, 'classes', …)` restricts on the `id` field — `{ id: { $in: ['<_id hex>'] } }` — which matches **no** document lacking `id`. Every scoped class picker (`GET /api/classes?attendanceScope|assessmentScope|lessonsScope|assignedOnly=true`, plus assessment analytics and class-subjects) came back without that school's classes. Exams wasn't affected because its teacher picker lists the teacher's own assignments directly. Not related to the v5.264.0 teacher-ID fix, which was correct but couldn't help here.
+
+**Fix:** `applyToFilter` now widens a `classes` restriction `{ id: { $in: [...] } }` to `$or: [{ id: { $in } }, { _id: { $in: <the ObjectId-shaped values> } }]`, appended under `$and` so an existing search `$or`/`$and` is kept. It still matches only the allowed classes; an empty list is never widened; schools whose classes all have `id` get the same filter as before.
+
+### Changed
+- `server/utils/scopeEngine.js` — `applyToFilter` → `_applyToFilterRaw` + `_widenClassIdForms` for the `classes` module.
+
+### Tests / verified
+- 5 new cases in `server/__tests__/attendance-teacher-id-forms.test.js` (ObjectId ids widened, UUID ids unchanged, empty stays empty, existing `$and` kept, unrestricted untouched). 434 related scope/attendance/classes/streams/assessment tests pass.
+- End-to-end against a local demo DB with a class inserted without an `id` field and the demo teacher assigned to it: `GET /api/classes?attendanceScope=true` and `?assessmentScope=true` listed it with this fix and **omitted** it on the previous code.
+- Not verified on Mascit's live data (no database access from this machine).
+
 ## [v5.264.0] - 2026-11-12 - fix(attendance): teachers with assigned classes couldn't mark attendance; new "All Classes" permission
 
 Reported directly about Mascit Lab Academy: "teachers assigned classes cannot mark attendance … if a user is assigned full access of attendance role and permission in the setting, how can they still not take attendance?" Two independent causes, both fixed. Not yet confirmed against Mascit's live data (no database access from the machine this was built on) — see Verified below.

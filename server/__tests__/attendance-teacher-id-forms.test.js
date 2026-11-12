@@ -152,3 +152,43 @@ describe('resolveAttendanceScope — "All Classes (not just assigned)"', () => {
     expect(await ScopeEngine.resolveAttendanceScope(req('principal'))).toBeNull();
   });
 });
+
+/* Mascit's classes have no `id` field — scope classIds hold String(_id).
+   (2026-11-12: teacher saw the class in Exams but Attendance showed only
+   "Select class...".) */
+describe("applyToFilter('classes') — classes referenced by String(_id)", () => {
+  const hex = '65a1b2c3d4e5f60718293a4b';
+  const reqWith = (classIds) => ({ scope: { level: 'assigned', classIds, subjectIds: [], streamIds: [] } });
+
+  test('an ObjectId-shaped class id also matches on _id', () => {
+    const f = ScopeEngine.applyToFilter(reqWith([hex, 'cls_uuid']), 'classes', { schoolId: SCHOOL });
+    expect(f.id).toBeUndefined();
+    expect(f.schoolId).toBe(SCHOOL);
+    const or = f.$and[0].$or;
+    expect(or[0]).toEqual({ id: { $in: [hex, 'cls_uuid'] } });
+    expect(or[1]._id.$in.map(String)).toEqual([hex]);
+  });
+
+  test('UUID-only class ids keep the plain id filter', () => {
+    const f = ScopeEngine.applyToFilter(reqWith(['cls_uuid']), 'classes', { schoolId: SCHOOL });
+    expect(f.id).toEqual({ $in: ['cls_uuid'] });
+    expect(f.$and).toBeUndefined();
+  });
+
+  test('no assignments stays an empty match — never widened', () => {
+    const f = ScopeEngine.applyToFilter(reqWith([]), 'classes', { schoolId: SCHOOL });
+    expect(f.id).toEqual({ $in: [] });
+    expect(f.$and).toBeUndefined();
+  });
+
+  test('an existing $and (e.g. a search) is kept alongside', () => {
+    const f = ScopeEngine.applyToFilter(reqWith([hex]), 'classes', { schoolId: SCHOOL, $and: [{ status: 'active' }] });
+    expect(f.$and).toHaveLength(2);
+    expect(f.$and[0]).toEqual({ status: 'active' });
+  });
+
+  test('unrestricted scope is untouched', () => {
+    const f = ScopeEngine.applyToFilter({ scope: null }, 'classes', { schoolId: SCHOOL });
+    expect(f).toEqual({ schoolId: SCHOOL });
+  });
+});

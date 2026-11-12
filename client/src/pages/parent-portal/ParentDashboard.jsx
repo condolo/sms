@@ -26,7 +26,8 @@
  */
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { rememberDest, locationToDest } from '@/utils/postLoginRedirect.js';
 import useAuthStore from '@/store/auth.js';
 import { useSchoolTheme } from '@/hooks/useSchoolTheme.js';
 import { buildModuleConfigMap } from '@/config/moduleNav.js';
@@ -349,9 +350,29 @@ function ComposeMessageModal({ open, mode, sent, recipientOptions, form, onFormC
    ══════════════════════════════════════════════════════════════════ */
 export default function ParentDashboard() {
   const navigate = useNavigate();
+  const location = useLocation();
   const logout   = useAuthStore(s => s.logout);
   const session  = useAuthStore(s => s.session);
   const mainRef  = useRef(null);
+
+  /* Deep link from a notification email, e.g. the weekly snapshot:
+     /parent-dashboard?child=<studentId>&focus=snapshot&school=<slug>
+     (server/utils/email.js _buildSchoolPageUrl). Read once on mount. */
+  const deepLinkRef = useRef(null);
+  if (deepLinkRef.current === null) {
+    const q = new URLSearchParams(location.search);
+    deepLinkRef.current = { child: q.get('child'), focus: q.get('focus'), school: q.get('school'), applied: false };
+  }
+
+  /* Signed out (or session expired): go to login, remembering this exact
+     page — including ?child=… — so sign-in comes straight back here. */
+  function _toLogin() {
+    const dest = locationToDest(location);
+    rememberDest(dest);
+    const school = deepLinkRef.current?.school;
+    const target = school && /^[a-z0-9-]{1,63}$/i.test(school) ? `/login?school=${encodeURIComponent(school)}` : '/login';
+    navigate(target, { replace: true, state: { from: location } });
+  }
 
   const [children,      setChildren]      = useState([]);
   const [activeChildId, setActiveChildId] = useState(null);
@@ -463,7 +484,7 @@ export default function ParentDashboard() {
 
   /* ── Auth guard ── */
   useEffect(() => {
-    if (!session?.user) { navigate('/login', { replace: true }); return; }
+    if (!session?.user) { _toLogin(); return; }
     const role = session.user?.role;
     if (role !== 'parent' && role !== 'guardian') { navigate('/dashboard', { replace: true }); return; }
   }, []);
@@ -482,10 +503,15 @@ export default function ParentDashboard() {
       setChildren(list);
       setFamilySummary(summary);
       setLiveProfile(profile);
-      if (list.length > 0) setActiveChildId(list[0].id);
+      // A notification link names the child it is about — open that child
+      // when it is one of this parent's own; otherwise the usual first child.
+      const linked = deepLinkRef.current?.child;
+      const linkedChild = linked ? list.find(c => c.id === linked || c.studentId === linked) : null;
+      if (linkedChild) setActiveChildId(linkedChild.id);
+      else if (list.length > 0) setActiveChildId(list[0].id);
       setLoadingList(false);
     }).catch(e => {
-      if (e.code === 'auth_expired') { logout(); navigate('/login', { replace: true }); return; }
+      if (e.code === 'auth_expired') { logout(); _toLogin(); return; }
       setInitError(e.message);
       setLoadingList(false);
     });
@@ -499,7 +525,7 @@ export default function ParentDashboard() {
     _fetch(`/api/parent-portal/dashboard/${activeChildId}`)
       .then(d  => { setChildData(d); setLoadingChild(false); })
       .catch(e => {
-        if (e.code === 'auth_expired') { logout(); navigate('/login', { replace: true }); return; }
+        if (e.code === 'auth_expired') { logout(); _toLogin(); return; }
         setLoadingChild(false);
       });
   }, [activeChildId]);
@@ -514,6 +540,29 @@ export default function ParentDashboard() {
       .then(({ weeks }) => setLatestWeek(weeks?.[0] ?? undefined))
       .catch(() => setLatestWeek(undefined)); // no snapshot yet, or transient error - card simply hides
   }, [activeChildId]);
+
+  /* Deep link ?focus=snapshot: once the snapshot card has rendered on the
+     Overview, scroll it into view and outline it briefly, then drop the
+     query so a refresh doesn't jump again. Runs at most once. */
+  useEffect(() => {
+    const dl = deepLinkRef.current;
+    if (!dl || dl.applied || dl.focus !== 'snapshot') return;
+    if (loadingChild || latestWeek === null) return; // still loading
+    dl.applied = true;
+    if (activePage !== 'overview') setActivePage('overview');
+    // No cleanup on purpose: `applied` is already set, so a re-render inside
+    // these 150ms must not cancel the one-time scroll.
+    setTimeout(() => {
+      const el = document.getElementById('section-weekly-snapshot');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.style.transition = 'box-shadow 0.4s';
+        el.style.boxShadow = '0 0 0 3px #38bdf8';
+        setTimeout(() => { el.style.boxShadow = ''; }, 2500);
+      }
+      navigate(location.pathname, { replace: true });
+    }, 150);
+  }, [loadingChild, latestWeek, activePage]);
 
   /* ── This child's own full histories — Behaviour, Medical (nurse
      visits), full weekly Timetable. Same "own endpoint, own effect"
