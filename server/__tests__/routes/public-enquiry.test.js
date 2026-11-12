@@ -40,19 +40,6 @@ jest.mock('../../utils/model', () => ({
     if (collection === 'schools') {
       return { findOne: () => mockChain(mockSchool) };
     }
-    if (collection === 'classes') {
-      return {
-        find: () => mockChain(mockClasses),
-        findOne: (q) => ({
-          select: () => ({
-            lean: () => Promise.resolve(mockClasses.find((c) => c.id === q.id && (!q.schoolId || q.schoolId === SCHOOL_A)) || null),
-          }),
-        }),
-      };
-    }
-    if (collection === 'role_permissions') {
-      return { find: () => mockChain(mockRoleDocs) };
-    }
     return { findOne: () => mockChain(null), find: () => mockChain([]) };
   }),
 }));
@@ -61,6 +48,19 @@ jest.mock('../../utils/tenant-model', () => ({
   tenantModel: jest.fn((collection) => {
     if (collection === 'admissions') {
       return { create: (doc) => { mockCreated.push(doc); return Promise.resolve(doc); } };
+    }
+    if (collection === 'classes') {
+      return {
+        find: () => mockChain(mockClasses),
+        findOne: (q) => ({
+          select: () => ({
+            lean: () => Promise.resolve(mockClasses.find((c) => c.id === q.id) || null),
+          }),
+        }),
+      };
+    }
+    if (collection === 'role_permissions') {
+      return { find: () => mockChain(mockRoleDocs) };
     }
     if (collection === 'users') {
       return {

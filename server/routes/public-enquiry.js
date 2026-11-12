@@ -110,8 +110,8 @@ router.get('/:slug', async (req, res) => {
       return E.notFound(res, 'Enquiry form not available.');
     }
 
-    const classes = await _model('classes')
-      .find({ schoolId: school.id, status: { $ne: 'inactive' } })
+    const classes = await tenantModel('classes', { schoolId: school.id })
+      .find({ status: { $ne: 'inactive' } })
       .sort({ order: 1, name: 1 })
       .select('id name')
       .limit(100)
@@ -186,8 +186,8 @@ router.post('/:slug', submitLimiter, async (req, res) => {
     let classId = null;
     let className = '';
     if (data.applyingForClass) {
-      const cls = await _model('classes')
-        .findOne({ id: data.applyingForClass, schoolId: school.id })
+      const cls = await tenantModel('classes', { schoolId: school.id })
+        .findOne({ id: data.applyingForClass })
         .select('id name')
         .lean();
       if (!cls) return E.badRequest(res, 'Pick a class from the list.');
@@ -248,8 +248,8 @@ router.post('/:slug', submitLimiter, async (req, res) => {
 
 async function _notifyAdmissions(school, doc) {
   const ctx = { schoolId: school.id };
-  const roleDocs = await _model('role_permissions')
-    .find({ schoolId: school.id })
+  const roleDocs = await tenantModel('role_permissions', { schoolId: school.id })
+    .find({})
     .select('roleKey permissions')
     .lean();
   const roles = [...new Set(
