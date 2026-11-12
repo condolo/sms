@@ -1,5 +1,5 @@
 /* ============================================================
-   AvailabilityModal — when a teacher can't teach (v5.267.0)
+   AvailabilityModal — when a teacher can't teach (v5.268.0)
    A grid of working days × the school's default bell periods. Tick a
    cell to mark the teacher unavailable then, or a whole day. Saved as
    clock-time blocks (PUT /api/timetable/availability/:teacherId), so

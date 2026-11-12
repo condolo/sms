@@ -157,7 +157,7 @@ const AssignmentSchema = z.object({
   preferredRoomId: z.string().optional(),
   periodsPerWeek:  z.number().int().min(1).max(40).optional(),
   // How many of those lessons are double periods (two back-to-back periods each), for the
-  // timetable generator (v5.267.0). 2 × doubleLessons must fit in periodsPerWeek.
+  // timetable generator (v5.268.0). 2 × doubleLessons must fit in periodsPerWeek.
   doubleLessons:   z.number().int().min(0).max(20).optional(),
 });
 

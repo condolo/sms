@@ -4,7 +4,7 @@
    timezone fields, houses config, no old components, no alert()
    ============================================================ */
 import { useState, useRef, useMemo } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useEffect } from 'react';
@@ -20,6 +20,7 @@ import {
   Upload, ImageIcon, KeyRound, RefreshCw,
   PlusCircle, ChevronRight, AlertCircle, Archive,
   MonitorPlay, WifiOff, ClipboardList,
+  Megaphone, Copy,
 } from 'lucide-react';
 import { sections as sectionsApi, teachers as teachersApi } from '@/api/client.js';
 import { settings as settingsApi } from '@/api/client.js';
@@ -32,6 +33,7 @@ import { SYSTEM_ROLE_LABELS, roleLabel } from '@/utils/roleLabels.js';
 import { useCurrentAcademicPeriod } from '@/hooks/useCurrentAcademicPeriod.js';
 import { BUILTIN_STAFF_RESPONSIBILITIES } from '@/config/staffResponsibilities.js';
 import { resizeImageToDataUrl } from '@/utils/imageResize.js';
+import { detectSchool } from '@/utils/schoolDetect.js';
 
 /* ── Extracted tab components + shared primitives ────────────────
    The Users and Audit Log tabs were split into ./components/ (2026-10)
@@ -791,6 +793,99 @@ function AdmissionRequirementsSection({ form: f, set }) {
 }
 
 /* ══════════════════════════════════════════════════════════════
+   PUBLIC ENQUIRY FORM (2026-11)
+   Opt-in switch for the school-branded /enquire/:slug page. Off by
+   default: an unauthenticated form that writes into Admissions must
+   never appear for a school that did not ask for it. The link is
+   derived from the school's own slug, so there is nothing to type.
+   ══════════════════════════════════════════════════════════════ */
+function PublicEnquirySection({ form: f, set }) {
+  /* The session does not carry the slug; the portal URL does. Same detector
+     the login/API client use, so the link always points at this school. */
+  const detected = detectSchool();
+  const schoolSlug = f.slug || detected.slug || '';
+  const ac = f.admissionConfig ?? {};
+  const enabled = ac.publicEnquiry?.enabled === true;
+  const [copied, setCopied] = useState(false);
+  const link = schoolSlug ? `${window.location.origin}/enquire/${schoolSlug}` : '';
+
+  function toggle(value) {
+    set('admissionConfig', {
+      ...ac,
+      publicEnquiry: { ...(ac.publicEnquiry || {}), enabled: value },
+    });
+  }
+
+  async function copyLink() {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard access can be blocked; the input stays selectable.
+    }
+  }
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+      <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
+        <Megaphone size={14} className="text-indigo-500" />
+        <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Public Enquiry Form</h3>
+      </div>
+      <p className="text-[11px] text-slate-400 leading-relaxed">
+        A short, school-branded form parents can open from your website, WhatsApp or a QR code. Every field is optional;
+        submissions land in Admissions at the Enquiry stage with their source and follow-up flags. Nothing is public until
+        you switch it on.
+      </p>
+
+      <div className="flex items-start justify-between gap-4 py-1">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-slate-700">Enquiry form is {enabled ? 'on' : 'off'}</p>
+          <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
+            {enabled
+              ? 'Anyone with the link can send an enquiry. Unknown or disabled schools get a plain 404.'
+              : 'Turn this on to publish the form at the link below.'}
+          </p>
+        </div>
+        <Toggle checked={enabled} onChange={toggle} />
+      </div>
+
+      {enabled && link && (
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1.5">Share this link</p>
+          <div className="flex items-stretch gap-2">
+            <input
+              readOnly
+              value={link}
+              onFocus={(e) => e.target.select()}
+              className="flex-1 min-w-0 text-xs border border-slate-200 rounded-lg px-3 py-2 bg-slate-50 text-slate-600 font-mono"
+            />
+            <button
+              type="button"
+              onClick={copyLink}
+              className="inline-flex items-center gap-1.5 border border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-600 text-xs font-medium px-3 rounded-lg transition-colors"
+            >
+              <Copy size={12} /> {copied ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+          <p className="text-[11px] text-slate-400 mt-1.5">
+            Enquiries appear in Admissions → Enquiry. Reporter details are visible only to your staff.
+          </p>
+        </div>
+      )}
+
+      <div className="flex items-start gap-2 bg-slate-50 rounded-lg p-3 border border-slate-100">
+        <Info size={13} className="text-slate-400 mt-0.5 shrink-0" />
+        <p className="text-[11px] text-slate-400 leading-relaxed">
+          New enquiries notify staff who hold Admissions permissions. The form refuses a submission with no name, phone or
+          email — there must be someone to call back.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
    STAFF RESPONSIBILITIES PANEL — standalone component
    Placed inside SchoolTab (HR section). Manages the per-school
    list of responsibility options shown in the Add/Edit Staff form.
@@ -1527,9 +1622,10 @@ function SchoolTab() {
         </div>
       </div>
 
-      {/* ── Row 6: Admission Requirements ── */}
+      {/* ── Row 6: Admission Requirements + Public Enquiry Form ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
         <AdmissionRequirementsSection form={f} set={set} />
+        <PublicEnquirySection form={f} set={set} />
       </div>
 
       {/* ── Sticky Save Bar ── */}
@@ -4061,6 +4157,10 @@ function SubscriptionTab() {
   async function handlePay() {
     if (!phone.trim())            { setError('Enter the M-Pesa number to charge.'); return; }
     if (!activeStudentCount)      { setError('No active students found — check the Students module before paying.'); return; }
+    if (invoice && invoice.totalAmount < 1) {
+      setError('This invoice is fully covered by referral credit — no payment is due.');
+      return;
+    }
     setLoading(true); setError(''); setResult(null);
     try {
       // studentCount is sent for logging/visibility only — the server
@@ -4184,6 +4284,16 @@ function SubscriptionTab() {
                 <p className="text-[10px] text-indigo-500">{invoice.activeCount} students × KSh {invoice.ratePerStudent}</p>
               </div>
             </div>
+            {invoice.referralDiscount && (
+              <div className="flex items-center justify-between pt-2 border-t border-indigo-200/60 text-[11px] text-emerald-700">
+                <span>
+                  Referral credit
+                  {invoice.referralDiscount.type === 'percent' ? ` (${invoice.referralDiscount.value}%)` : ''}
+                  {invoice.originalAmount ? ` · was KSh ${invoice.originalAmount.toLocaleString()}` : ''}
+                </span>
+                <span className="font-semibold">- KSh {invoice.referralDiscount.amount.toLocaleString()}</span>
+              </div>
+            )}
           </div>
         ) : (
           <div className="space-y-3">
@@ -4249,11 +4359,11 @@ function SubscriptionTab() {
             <button
               type="button"
               onClick={handlePay}
-              disabled={loading || !phone.trim() || countLoading || !activeStudentCount}
+              disabled={loading || !phone.trim() || countLoading || !activeStudentCount || (invoice && invoice.totalAmount < 1)}
               className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
             >
               {loading ? <Loader2 size={14} className="animate-spin" /> : <Smartphone size={14} />}
-              Pay KSh {termAmount.toLocaleString()}
+              {invoice && invoice.totalAmount < 1 ? 'No payment due' : `Pay KSh ${termAmount.toLocaleString()}`}
             </button>
           </div>
         </div>
@@ -4267,6 +4377,20 @@ function SubscriptionTab() {
 
       {/* Billing history */}
       <BillingHistory />
+
+      {/* Referral program — anyone can refer a school; this is the
+          in-app entry point for the school's own admin. */}
+      <div className="rounded-xl border border-indigo-200 bg-gradient-to-r from-indigo-50 to-violet-50 p-5 flex flex-wrap items-center gap-4">
+        <div className="flex-1 min-w-[220px]">
+          <h3 className="text-sm font-semibold text-indigo-900">Know a school that should run on Msingi?</h3>
+          <p className="mt-1 text-xs text-indigo-700/80">
+            Refer them and earn a cash reward after their first subscription payment — no account or limit required.
+          </p>
+        </div>
+        <Link to="/refer" className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-indigo-700">
+          Get your referral code <ArrowRight size={13} />
+        </Link>
+      </div>
     </div>
   );
 }
@@ -4303,6 +4427,11 @@ function BillingHistory() {
             </div>
             <div className="text-right shrink-0">
               <p className="text-sm font-semibold text-slate-800">KSh {inv.totalAmount.toLocaleString()}</p>
+              {inv.referralDiscount && (
+                <p className="text-[10px] text-emerald-600">
+                  Referral -KSh {inv.referralDiscount.amount.toLocaleString()}
+                </p>
+              )}
               {inv.paidAt && <p className="text-[10px] text-slate-400">{new Date(inv.paidAt).toLocaleDateString('en-GB')}</p>}
             </div>
             <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border capitalize ${STATUS_STYLE[inv.status] || 'bg-slate-50 text-slate-600 border-slate-200'}`}>

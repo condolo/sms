@@ -1,5 +1,5 @@
 /* ============================================================
-   v5.268.0 — timetable generator solver (server/utils/timetable-generator/solver.js)
+   v5.269.0 — timetable generator solver (server/utils/timetable-generator/solver.js)
    Hard rules are never broken; soft rules are followed where possible.
    ============================================================ */
 'use strict';

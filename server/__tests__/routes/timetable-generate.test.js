@@ -1,5 +1,5 @@
 /* ============================================================
-   /api/timetable/generate — automatic timetable (v5.268.0)
+   /api/timetable/generate — automatic timetable (v5.269.0)
 
    Through the real route and the real prepare.js + solver (in-memory DB,
    inline solver under Jest). Pins: who may use it; the precheck; a

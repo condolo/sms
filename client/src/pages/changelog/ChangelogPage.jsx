@@ -6,6 +6,17 @@ import { Tag, Zap, Bug, Shield, Sparkles } from 'lucide-react';
 
 const RELEASES = [
   {
+    version: '4.66.0',
+    date: '2026-11-12',
+    label: 'Admissions — a public enquiry form, and the Student Council reaches teachers',
+    changes: [
+      { type: 'new', text: 'Admissions → a school-branded public enquiry form: Settings → School → Public Enquiry Form turns on a short page (/enquire/<school>) parents can open from the website, WhatsApp or a QR code. It captures a parent’s name, phone and optional email, the learner’s age, the class they are asking about, whether the family has had a tour or the child an assessment, and where they heard about the school. Every field is optional, but at least one way to reach the family is required; submissions land in Admissions at the Enquiry stage with a "Web form" badge and notify staff who hold Admissions permissions.' },
+      { type: 'new', text: 'Admissions → follow-up tracking on every applicant: the source, learner age, "how did you hear about us", and tri-state school-tour and assessment flags (Yes / No / Not sure) show on the board, in the applicant panel and the CSV export, and can be edited as follow-up happens. The form is off until a school switches it on; unknown or disabled schools get a plain 404, and the endpoint is rate-limited and honeypot-protected.' },
+      { type: 'new', text: 'Student Council → a read-only staff feed for teachers granted "View Cases & Council Queue": every non-sensitive case with its status, category, upvotes and public replies, reporter identities masked and internal notes excluded. The identity-bearing patron console and case decisions now need a patron role or the "Triage, Resolve or Escalate Cases" grant, and anonymous cases no longer reveal the reporter’s class to students or council members.' },
+      { type: 'improvement', text: 'Help Centre → a Student Council section and a public-enquiry article in Admissions, so both features are documented where staff look first. The portal Help & FAQs gained the student-facing council answers, and docs/STUDENT_COUNCIL_GUIDE.md and docs/ADMISSIONS_GUIDE.md were updated.' },
+    ],
+  },
+  {
     version: '4.65.0',
     date: '2026-11-04',
     label: 'Smart Reminders — and a guardian report drafted from real data',

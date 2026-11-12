@@ -128,6 +128,22 @@ const ApplicationSchema = z.object({
   specialNeedsDetails: z.string().max(1000).optional(),
   documents:      z.array(z.object({ name: z.string(), url: z.string().optional() })).optional(),
 
+  // ── Enquiry tracking (2026-11) ───────────────────────────────
+  // The simplified public/staff enquiry form captures far less than a full
+  // application, so every field here is optional and old applications
+  // simply read as "not captured". tourCompleted/assessmentCompleted are
+  // deliberately TRI-STATE: null means "not sure / not asked", which is
+  // different from a deliberate "no" when the admissions team is
+  // following up. heardAbout is the marketing source ("where did you
+  // hear about us?"); enquirySource tells a public-form lead apart from
+  // one captured by the front office.
+  learnerAge:          z.number().int().min(2).max(25).nullish(),
+  tourCompleted:       z.boolean().nullable().optional(),
+  assessmentCompleted: z.boolean().nullable().optional(),
+  heardAbout:          z.enum(['word_of_mouth', 'social_media', 'google', 'event', 'referral', 'walk_in', 'other']).nullish(),
+  heardAboutOther:     z.string().trim().max(160).optional(),
+  enquirySource:       z.enum(['public_form', 'staff']).optional(),
+
   // System-managed — set only by POST /:id/enroll below, never accepted
   // as client input (stripped in PUT/POST just like id/schoolId/
   // applicationRef). Links this application to the real Student record
@@ -177,12 +193,30 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('admissions', 'read'), async
     const _ks    = strParam(req.query.keyStageId);
     const _ay    = strParam(req.query.academicYearId);
     const _at    = strParam(req.query.assignedTo);
+    const _src   = strParam(req.query.source);
+    const _tour  = strParam(req.query.tour);
+    const _ass   = strParam(req.query.assessment);
     if (_stage) filter.stage          = _stage;
     if (_pri)   filter.priority       = _pri;
     if (_ks)    filter.keyStageId     = _ks;
     if (_ay)    filter.academicYearId = _ay;
     if (_at)    filter.assignedTo     = _at;
+    if (_src)   filter.enquirySource  = _src;
     if (req.query.sibling === 'true') filter.sibling = true;
+
+    /* Tri-state follow-up filters (2026-11). "unknown" means the flag was
+       never captured or explicitly left as not-sure — the state the
+       admissions team actually needs to chase. */
+    const triFilter = (field, value) => {
+      if (value === 'yes') filter[field] = true;
+      else if (value === 'no') filter[field] = false;
+      else if (value === 'unknown') {
+        filter.$and = filter.$and || [];
+        filter.$and.push({ $or: [{ [field]: null }, { [field]: { $exists: false } }] });
+      }
+    };
+    triFilter('tourCompleted', _tour);
+    triFilter('assessmentCompleted', _ass);
 
     // A fully-enrolled application (stage 'enrolled' AND a linked
     // studentId) is now a real Student record — the Admissions board is
@@ -209,13 +243,19 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('admissions', 'read'), async
     if (req.query.search?.trim()) {
       const terms = req.query.search.trim().split(/\s+/)
         .map(t => new RegExp(t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
-      filter.$and = terms.map(rx => ({
-        $or: [
-          { firstName: rx }, { lastName: rx },
-          { parentName: rx }, { parentEmail: rx },
-          { applicationRef: rx },
-        ],
-      }));
+      /* Append — never replace — any $and already built by the tri-state
+         follow-up filters above; a search inside "tour = unknown" must keep
+         the unknown clause. */
+      filter.$and = [
+        ...(filter.$and || []),
+        ...terms.map(rx => ({
+          $or: [
+            { firstName: rx }, { lastName: rx },
+            { parentName: rx }, { parentEmail: rx }, { parentPhone: rx },
+            { applicationRef: rx },
+          ],
+        })),
+      ];
     }
 
     const Apps = tenantModel('admissions', tenantContext(req));

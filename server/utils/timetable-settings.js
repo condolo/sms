@@ -1,11 +1,11 @@
 /* ============================================================
-   Msingi — school-wide timetable settings (v5.265.0, rules v5.267.0).
+   Msingi — school-wide timetable settings (v5.265.0, rules v5.268.0).
 
    Stored on the school document as schools.timetableSettings:
      workingDays   the days lessons can be placed on, in week order.
                    Default Monday–Friday. A school with Saturday
                    classes adds 'saturday'.
-     rules         how a good timetable looks (v5.267.0). Used by the
+     rules         how a good timetable looks (v5.268.0). Used by the
                    automatic timetable generator, and two of them
                    (max lessons a day, teacher availability) are also
                    reported as warnings on the draft. They never block

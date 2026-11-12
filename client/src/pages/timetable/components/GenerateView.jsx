@@ -1,5 +1,5 @@
 /* ============================================================
-   GenerateView — automatic timetable (v5.268.0)
+   GenerateView — automatic timetable (v5.269.0)
    1. Pick a scope (a section, or chosen classes) and Check: what will be
       placed, what will be replaced, and anything that can't fit.
    2. Generate: the server places the lessons from the teaching

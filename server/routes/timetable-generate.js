@@ -1,5 +1,5 @@
 /* ============================================================
-   Msingi — /api/timetable/generate  (automatic timetable, v5.268.0)
+   Msingi — /api/timetable/generate  (automatic timetable, v5.269.0)
 
    The generator fills one section (or chosen classes) from the
    teaching assignments, following the hard rules (no clashes, teacher

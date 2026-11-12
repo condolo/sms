@@ -15,7 +15,9 @@ import {
 } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 import { useToast } from '@/hooks/useToast.jsx';
-import { stageMeta, avatarColor, initials, formatDate, PRIORITY_CONFIG, applicantClassLabel } from '../constants.js';
+import { stageMeta, avatarColor, initials, formatDate, PRIORITY_CONFIG, applicantClassLabel,
+         applicantDisplayName, applicantInitials, heardAboutLabel, triStateLabel,
+         ENQUIRY_SOURCE_LABEL, HEARD_ABOUT_OPTIONS } from '../constants.js';
 import { Section, Field, inputCls, DetailSection, DetailRow } from './AdmissionsPrimitives.jsx';
 
 /* ── Print letter modal ───────────────────────────────────── */
@@ -142,9 +144,37 @@ export default function DetailPanel({ applicant, onClose, onStageChange }) {
     parentName:       a.parentName       ?? '',
     parentPhone:      a.parentPhone      ?? '',
     parentEmail:      a.parentEmail      ?? '',
+    // 2026-11 — enquiry follow-up. Selects are strings so the form stays
+    // plain HTML; buildUpdatePayload() converts to the tri-state booleans
+    // the API stores (null = not sure).
+    learnerAge:          a.learnerAge ?? '',
+    tourCompleted:       a.tourCompleted === true ? 'yes' : a.tourCompleted === false ? 'no' : 'unknown',
+    assessmentCompleted: a.assessmentCompleted === true ? 'yes' : a.assessmentCompleted === false ? 'no' : 'unknown',
+    heardAbout:          a.heardAbout ?? '',
+    heardAboutOther:     a.heardAboutOther ?? '',
     priority:         a.priority         ?? 'normal',
     notes:            a.notes            ?? '',
   });
+
+  /* The edit form holds select strings; the API wants booleans/nulls.
+     One conversion point so every save path below agrees. */
+  function buildUpdatePayload() {
+    const payload = {
+      ...editForm,
+      learnerAge: editForm.learnerAge === '' ? null : Number(editForm.learnerAge),
+      tourCompleted:       editForm.tourCompleted === 'yes' ? true : editForm.tourCompleted === 'no' ? false : null,
+      assessmentCompleted: editForm.assessmentCompleted === 'yes' ? true : editForm.assessmentCompleted === 'no' ? false : null,
+      heardAbout: editForm.heardAbout || null,
+      heardAboutOther: editForm.heardAbout === 'other' ? editForm.heardAboutOther : '',
+    };
+    /* A light enquiry has no learner names on purpose. The application
+       schema still requires a non-empty name for a real APPLICATION, so an
+       empty string here would fail that validation — omit the keys instead
+       and let the stored blank names stay blank. */
+    if (!payload.firstName) delete payload.firstName;
+    if (!payload.lastName)  delete payload.lastName;
+    return payload;
+  }
 
   const updateMut = useMutation({
     mutationFn: data => admissionsApi.update(a.id ?? a._id, data),
@@ -246,13 +276,13 @@ export default function DetailPanel({ applicant, onClose, onStageChange }) {
           <div className="flex items-start justify-between">
             <div className="flex items-center gap-3">
               <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${av} flex items-center justify-center text-white text-sm font-bold shrink-0`}>
-                {initials(editing ? editForm.firstName : a.firstName, editing ? editForm.lastName : a.lastName)}
+                {editing ? initials(editForm.firstName, editForm.lastName) : applicantInitials(a)}
               </div>
               <div>
                 <h2 className="text-base font-semibold text-slate-900">
                   {editing
                     ? `${editForm.firstName} ${editForm.lastName}`
-                    : `${a.firstName} ${a.middleName ? a.middleName + ' ' : ''}${a.lastName}`}
+                    : applicantDisplayName(a)}
                 </h2>
                 <div className="flex items-center gap-2 mt-1">
                   <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full ring-1 ${sm.light}`}>
@@ -275,7 +305,7 @@ export default function DetailPanel({ applicant, onClose, onStageChange }) {
                     Cancel
                   </button>
                   <button
-                    onClick={() => updateMut.mutate(editForm)}
+                    onClick={() => updateMut.mutate(buildUpdatePayload())}
                     disabled={updateMut.isPending}
                     className="flex items-center gap-1 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
                   >
@@ -368,6 +398,52 @@ export default function DetailPanel({ applicant, onClose, onStageChange }) {
                   </Field>
                 </div>
               </Section>
+              {/* 2026-11 — the follow-up facts the enquiry form captures.
+                  Tri-state: "not sure" is a distinct answer from "no". */}
+              <Section label={`Enquiry Follow-up${a.enquirySource ? ` · ${ENQUIRY_SOURCE_LABEL[a.enquirySource] || a.enquirySource}` : ''}`}>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Learner Age">
+                    <input
+                      type="number" min={2} max={25} inputMode="numeric"
+                      value={editForm.learnerAge}
+                      onChange={e => setF('learnerAge', e.target.value)}
+                      className={inputCls()}
+                    />
+                  </Field>
+                  <Field label="How they heard about us">
+                    <select value={editForm.heardAbout} onChange={e => setF('heardAbout', e.target.value)} className={inputCls()}>
+                      <option value="">Not captured</option>
+                      {HEARD_ABOUT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </Field>
+                </div>
+                {editForm.heardAbout === 'other' && (
+                  <Field label="Where?">
+                    <input
+                      value={editForm.heardAboutOther}
+                      onChange={e => setF('heardAboutOther', e.target.value)}
+                      maxLength={160}
+                      className={inputCls()}
+                    />
+                  </Field>
+                )}
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="School tour">
+                    <select value={editForm.tourCompleted} onChange={e => setF('tourCompleted', e.target.value)} className={inputCls()}>
+                      <option value="unknown">Not sure / not yet</option>
+                      <option value="yes">Yes — had a tour</option>
+                      <option value="no">No — not yet</option>
+                    </select>
+                  </Field>
+                  <Field label="Assessment">
+                    <select value={editForm.assessmentCompleted} onChange={e => setF('assessmentCompleted', e.target.value)} className={inputCls()}>
+                      <option value="unknown">Not sure / not yet</option>
+                      <option value="yes">Yes — completed</option>
+                      <option value="no">No — not yet</option>
+                    </select>
+                  </Field>
+                </div>
+              </Section>
               <Section label="Notes">
                 <textarea
                   value={editForm.notes}
@@ -435,6 +511,18 @@ export default function DetailPanel({ applicant, onClose, onStageChange }) {
                   <DetailRow label="Phone" value={a.parentPhone || '—'} icon={<Phone size={11} className="text-slate-400 shrink-0" />} />
                   <DetailRow label="Email" value={a.parentEmail || '—'} icon={<Mail  size={11} className="text-slate-400 shrink-0" />} />
                 </DetailSection>
+
+                {/* Enquiry follow-up — only when this lead carries any of it,
+                    so a full application form doesn't grow five empty rows. */}
+                {(a.enquirySource || a.learnerAge || a.tourCompleted != null || a.assessmentCompleted != null || a.heardAbout) && (
+                  <DetailSection icon={<Users size={14} />} label="Enquiry">
+                    {a.learnerAge ? <DetailRow label="Learner age"  value={String(a.learnerAge)} /> : null}
+                    <DetailRow label="Source"       value={ENQUIRY_SOURCE_LABEL[a.enquirySource] || '—'} />
+                    <DetailRow label="Heard about"  value={heardAboutLabel(a.heardAbout) || '—'} />
+                    <DetailRow label="School tour"  value={triStateLabel(a.tourCompleted)} />
+                    <DetailRow label="Assessment"   value={triStateLabel(a.assessmentCompleted)} />
+                  </DetailSection>
+                )}
 
                 {/* Timeline */}
                 <DetailSection icon={<Calendar size={14} />} label="Timeline">

@@ -7617,7 +7617,7 @@ On an 8-core Windows machine the full suite runs 7 test files at once. A few tes
 - Load route modules at the top of a test file, not inside `app()` or the first request. A route that lazily `require`s another module on first use (e.g. `academic-config.js`'s transition-year loads `routes/behaviour`) should have that module required at the top of its test too. Example: `ops.test.js`, `platform-memberships.test.js`, `academic-config-transition-behaviour-reset.test.js`.
 - `package.json` `jest.testTimeout` is 30000 (was 15000) as a margin for slow machines. A genuinely stuck test still fails; GitHub runs are unaffected.
 
-## Timetable Phase 2: Availability, Double Lessons, Room Types, Rules (v5.267.0, 2026-11-12)
+## Timetable Phase 2: Availability, Double Lessons, Room Types, Rules (v5.268.0, 2026-11-12)
 
 Inputs for the Phase 3 generator. None of them blocks a manual edit.
 
@@ -7628,7 +7628,7 @@ Inputs for the Phase 3 generator. None of them blocks a manual edit.
 - **`subjects.requiredRoomType`**: `classroom | lab | hall | sports | library | other | null`; `''` is treated as `null`.
 - Tests: `timetable-rules-availability.test.js`, plus additions to `teaching-assignments-permission-grant.test.js`, `subjects.test.js`, `timetable-placement.test.js`.
 
-## Timetable Phase 3: Automatic Generator (v5.268.0, 2026-11-12)
+## Timetable Phase 3: Automatic Generator (v5.269.0, 2026-11-12)
 
 Three layers in `server/utils/timetable-generator/`, plus one route file.
 

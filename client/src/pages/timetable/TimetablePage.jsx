@@ -118,7 +118,7 @@ export default function TimetablePage() {
   });
   const workingDays = settingsData?.data?.workingDays ?? DAYS;
 
-  // Teacher availability (v5.267.0): when each teacher can't teach.
+  // Teacher availability (v5.268.0): when each teacher can't teach.
   const { data: availabilityData } = useQuery({
     queryKey: ['timetable', 'availability'],
     queryFn:  () => ttApi.availability(),

@@ -263,6 +263,13 @@ export const publicApi = {
   schoolInfo: (slug) => _get(`/public/school-info${slug ? `?slug=${slug}` : ''}`),
   /** Resolve a slug to a school or a shared-login organization — no auth required */
   resolvePortal: (slug) => _get(`/public/resolve-portal${slug ? `?slug=${slug}` : ''}`),
+  /** The school's public admissions enquiry form — no auth required.
+      These two use the standard { success, data } envelope (the branding
+      helpers above answer raw), so unwrap here; screens see plain payloads. */
+  enquiryConfig: (slug) => _get(`/public/enquiry/${encodeURIComponent(slug)}`)
+    .then((res) => (res && res.data !== undefined ? res.data : res)),
+  submitEnquiry: (slug, data) => _post(`/public/enquiry/${encodeURIComponent(slug)}`, data)
+    .then((res) => (res && res.data !== undefined ? res.data : res)),
 };
 
 export const auth = {
@@ -630,10 +637,10 @@ export const timetable = {
   settings:     ()          => _get('/timetable/settings'),
   saveSettings: (data)      => _put('/timetable/settings', data),
   placement:    ()          => _get('/timetable/placement'),
-  // Teacher availability (v5.267.0)
+  // Teacher availability (v5.268.0)
   availability:     ()                 => _get('/timetable/availability'),
   saveAvailability: (teacherId, data)  => _put(`/timetable/availability/${encodeURIComponent(teacherId)}`, data),
-  // Automatic timetable (v5.268.0) — scope = { sectionKey } | { classIds }
+  // Automatic timetable (v5.269.0) — scope = { sectionKey } | { classIds }
   generator: {
     precheck: (scope)  => _post('/timetable/generate/precheck', { scope }),
     generate: (scope, budgetSeconds) => _post('/timetable/generate', { scope, ...(budgetSeconds ? { budgetSeconds } : {}) }),

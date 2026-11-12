@@ -44,7 +44,7 @@ const FEATURE_PLAN = {
   admissions:         'core',
   behaviour:          'core',
   timetable:          'core',
-  timetable_generator: 'core',   // automatic timetable (v5.268.0) — every plan, like the rest of Timetable
+  timetable_generator: 'core',   // automatic timetable (v5.269.0) — every plan, like the rest of Timetable
   bell_schedule:      'core',
   rooms:              'core',
   exams:              'core',

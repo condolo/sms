@@ -6,7 +6,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [v5.268.0] - 2026-11-12 - feat(timetable): Phase 3 — generate a section's timetable automatically
+## [v5.269.0] - 2026-11-12 - feat(timetable): Phase 3 — generate a section's timetable automatically
 
 Phase 3 of the plan towards an aSc-style automatic timetable generator. It uses the Phase 2 inputs (availability, doubles, room types, rules). The generator code had been started in an earlier session and left uncommitted; this finishes it, makes apply safe, and adds the screen.
 
@@ -41,7 +41,7 @@ Phase 3 of the plan towards an aSc-style automatic timetable generator. It uses 
   - Apply: 10 replaced and 12 added, nothing else changed, and no clash involves a generated lesson (the school's existing clashes went from 158 to 138).
   - Undo restored exactly the same 195 lessons as before.
 
-## [v5.267.1] - 2026-11-12 - fix(behaviour): id-less teacher accounts still unmatched, withdrawn entries shown to parents, staff "Recorded By" blank on older entries
+## [v5.268.1] - 2026-11-12 - fix(behaviour): id-less teacher accounts still unmatched, withdrawn entries shown to parents, staff "Recorded By" blank on older entries
 
 Follow-ups to v5.266.0.
 
@@ -53,7 +53,7 @@ Follow-ups to v5.266.0.
 ### Tests
 - `behaviour-parent-replies.test.js`: 29 tests (+4 for withdrawn entries and the Recorded By fallback, plus the id fixture change). Behaviour, parent-portal, messages and portal suites: 22 suites, 189 tests, all passing. RBAC (100%) and tenant (35) scanners unchanged.
 
-## [v5.267.0] - 2026-11-12 - feat(timetable): Phase 2 — teacher availability, double lessons, room types, timetable rules
+## [v5.268.0] - 2026-11-12 - feat(timetable): Phase 2 — teacher availability, double lessons, room types, timetable rules
 
 Phase 2 of the plan towards an aSc-style automatic timetable generator: the inputs the generator (Phase 3) will work from. Nothing here blocks editing by hand.
 
@@ -71,6 +71,25 @@ Phase 2 of the plan towards an aSc-style automatic timetable generator: the inpu
 - New `server/__tests__/routes/timetable-rules-availability.test.js` (12); double-lesson cases in `teaching-assignments-permission-grant.test.js` (3); room type in `subjects.test.js` (3); doubles in `timetable-placement.test.js` (1).
 - In the browser on the local demo school: Days & rules saved a limit of 4 lessons a day and Mathematics as a morning subject, and the draft showed 17 rule warnings ("Mr. Collins Waweru has 6 lessons on Monday (limit 4)"); Availability marked Collins Waweru off all Monday and Friday P1, the toolbar showed "Not available: Mon all day · Fri 07:30–08:30" and the warnings added "unavailable Monday all day but has Kiswahili at period 3"; editing a Kiswahili assignment refused 2 doubles in 3 periods and saved "5 periods/wk (incl. 1 double)"; Chemistry saved with Room needed: Lab.
 - Found while testing in the browser and fixed before commit: the Room needed field had landed in the department form instead of the subject form, and the subject form sent an empty room type that the server refused (the server now treats an empty value as "any room").
+## [v5.267.0] - 2026-11-12 - feat(referrals): anyone can refer a school and earn a cash bounty
+
+A public referral program for the SaaS side of Msingi. Anyone — an existing school's admin, a teacher, a parent, or someone with no Msingi account — can get a referral code, share an onboarding or demo link, and earn a fixed cash bounty when the referred school makes its first subscription payment. This is deliberately separate from the school-side "Referral" **fee** discount (`isReferralFamily`), which is unchanged.
+
+- **Creator-facing `/refer` page**: rebuilt around a payout-receipt hero with an interactive schools slider (1–10), a copy-paste "creator kit" (link-in-bio, WhatsApp/group post, short-video hook), a four-step payout path, creator-specific copy, and a lower-friction code claim. Adds Bricolage Grotesque display type + JetBrains Mono for the receipt; the indigo/lime campaign treatment is scoped to this page.
+- **Public partner signup** at `/refer` (`client/src/pages/ReferralProgram.jsx`): linked from the public nav ("Refer & Earn") and footer. Name, email, phone, optional payout number; returns a code (`MSINGI-XXXXXX`) plus `/onboard?ref=` and `/demo?ref=` links. The code, the share links **and the private dashboard link** are shown on the success screen and emailed. No platform login is created.
+- **Onboarding CSP fix**: `/onboard` is a legacy inline-script page; the global Helmet policy blocked its script and handlers, so the page’s buttons and `?ref=` prefill never ran. It now gets the same narrowly-scoped CSP override as `/platform` (`server/index.js`).
+- **Attribution** on the onboarding form (`onboard.html`, prefilled from `?ref=`), the demo request form (`client/src/pages/DemoRequest.jsx`), and operator provisioning. An invalid or blocked code fails the signup loudly; self-referral (same email) is refused. The same attribution is carried from `demo_requests` onto the tenant at provisioning.
+- **Conversion** on the first subscription payment (`POST /api/mpesa/subscription/callback`), or manually for offline/bank deals from the platform console. One conversion per school (unique index), idempotent, renewals never pay twice. The bounty is snapshotted at conversion time.
+- **Payouts** are recorded, not assumed: conversions stay `pending` until an operator marks them paid with an M-Pesa/bank reference at `POST /api/platform/referrals/:id/payouts`; the partner is emailed.
+- **Dynamic referee incentive** in `platform_settings.referralProgram`: `none`, `percent` or `fixed` off the referred school's **first** platform invoice. The program ships **closed** (`enabled: false`) until an operator reviews the bounty/incentive and turns it on in Platform → Referrals. Applied by `createBillingSnapshot()` and shown on the invoice, with `originalAmount`/`referralDiscount` kept on the snapshot. The M-Pesa subscription route now collects the discounted invoice total (and returns `NOTHING_DUE` if the credit covers it in full).
+- **Platform console** "Referrals" view: program settings, partner list with signups/conversions/pending/paid, block/unblock, partner detail, record offline payment, mark payouts, correct the payout number, and attach/correct a code on an existing school (demo/template tenants excluded). Gated by new `referrals.view` / `referrals.manage` capabilities and audited.
+- **Public API**: `GET /api/referrals/program`, `POST /api/referrals/partners`, `GET /api/referrals/validate`, `GET /api/referrals/hub/:token`. Partner emails are never exposed by validation; hub tokens are stored only as SHA-256 hashes.
+- **Indexes**: unique `referral_partners.code` / `.email` / `.hubTokenHash`, unique `referral_conversions.schoolId`, plus payout-status and school-attribution indexes.
+- **Public sign-in** at `/refer/login` (linked from `/refer` and the footer): enter the signup email and we email a fresh private dashboard link. There is still no password; the response is always generic, and requesting a new link rotates the token. Replaces the previous "re-submit the whole signup form" recovery path.
+- **Payout details + manual requests**: affiliates save an M-Pesa number or full bank details from the private dashboard, then request a payout of their available rewards. A request locks those conversions, emails the partner and alerts platform ops, and is visible in Platform → Referrals. Operators settle it with a required reference or reject it (which unlocks the rewards). One open request per partner, enforced by a partial unique index. Payout details are locked while a request is under review; every change emails the partner.
+- **Tests**: `server/__tests__/referral-program.test.js` (31 service rules: codes, blocked/self-referral, sign-in resend, idempotent conversion, first-payment-only, payout details, request/pay/reject, mixed-currency/reference guards, partner updates, discount modes) and `server/__tests__/routes/referrals-public.test.js` (10 HTTP-contract tests). Existing billing/demo/MPesa suites unchanged and passing.
+- **Review fixes** (post-review pass on the PR): a payout request can no longer be settled twice (the row write arbitrates, so a second operator gets `ALREADY_SETTLED` and no second "paid" email; an already-paid request can no longer be rejected into releasing its lock), a change of payout destination now alerts platform ops as well as the partner, a re-issued dashboard link keeps the previous one valid for 15 minutes (a resend can never lock an affiliate out or be used to DoS their link), the console's partner totals are grouped in the database instead of loading every conversion row, and the affiliate dashboard's success/error banner is typed explicitly rather than guessed from the message text.
+- Runbook and data model: `docs/REFERRAL_PROGRAM.md`.
 
 ## [v5.266.0] - 2026-11-12 - feat(behaviour): parents see who logged an entry and in which subject, and can reply to that teacher and the form teacher
 

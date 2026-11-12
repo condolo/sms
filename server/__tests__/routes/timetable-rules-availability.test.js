@@ -1,5 +1,5 @@
 /* ============================================================
-   v5.267.0 — timetable Phase 2: rules setup
+   v5.268.0 — timetable Phase 2: rules setup
    • Days & rules: timetable rules stored with the working days,
      partial updates merge, unknown rules refused.
    • Teacher availability: per staff record, any id form accepted,

@@ -189,4 +189,4 @@ If one of these can't be met, the lesson is left unplaced and listed with the re
 
 ---
 
-*Last reviewed: 2026-11-12 (v5.268.0) — checked directly against `client/src/pages/timetable/`, `server/routes/timetable.js` and `server/routes/timetable-generate.js`.*
+*Last reviewed: 2026-11-12 (v5.269.0) — checked directly against `client/src/pages/timetable/`, `server/routes/timetable.js` and `server/routes/timetable-generate.js`.*

@@ -78,7 +78,7 @@ function computePlacement({ assignments = [], slots = [], classes = [], subjects
     if (tName && !g.teachers.includes(tName)) g.teachers.push(tName);
     if (a.periodsPerWeek) g.needed += Number(a.periodsPerWeek);
     else g.missingTarget = true;
-    g.doubles += Number(a.doubleLessons) || 0;   // of `needed`, how many are double periods (v5.267.0)
+    g.doubles += Number(a.doubleLessons) || 0;   // of `needed`, how many are double periods (v5.268.0)
   }
 
   const lessons = slots.filter(s => s.isActive !== false && _lessonOnly(s));

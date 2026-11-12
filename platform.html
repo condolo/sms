@@ -142,6 +142,9 @@
       <button class="pa-nav-item" onclick="showView('billing')" id="nav-billing">
         <i class="fas fa-file-invoice"></i> Billing Overview
       </button>
+      <button class="pa-nav-item" onclick="showView('referrals')" id="nav-referrals">
+        <i class="fas fa-handshake"></i> Referrals
+      </button>
       <button class="pa-nav-item" onclick="showView('team')" id="nav-team" style="display:none">
         <i class="fas fa-users-gear"></i> Team
       </button>
@@ -332,6 +335,7 @@ function _applyCapabilityUI() {
     'nav-demos':     'onboarding.view',
     'nav-tickets':   'tickets.view',
     'nav-billing':   'billing.view',
+    'nav-referrals': 'referrals.view',
     'nav-diagnostics': 'diagnostics.view',
     'nav-announcements': 'content.manage',
     'nav-branding':  'content.manage',
@@ -514,10 +518,10 @@ function showView(view) {
   document.querySelectorAll('.pa-nav-item').forEach(el => el.classList.remove('active'));
   document.getElementById('nav-' + view)?.classList.add('active');
 
-  const titles = { overview:'Overview', mywork:'My Work', pending:'Pending Approvals', demos:'Demo Requests', tickets:'Support Tickets', schools:'Registered Schools', organizations:'Organizations', provision:'Provision New School', announcements:'System Announcements', diagnostics:'System Diagnostics', branding:'Branding & Platform Settings', landing:'Landing Page CMS', billing:'Billing Overview', team:'Platform Team' };
+  const titles = { overview:'Overview', mywork:'My Work', pending:'Pending Approvals', demos:'Demo Requests', tickets:'Support Tickets', schools:'Registered Schools', organizations:'Organizations', provision:'Provision New School', announcements:'System Announcements', diagnostics:'System Diagnostics', branding:'Branding & Platform Settings', landing:'Landing Page CMS', billing:'Billing Overview', referrals:'Referral Program', team:'Platform Team' };
   document.getElementById('view-title').textContent = titles[view] || view;
 
-  const views = { overview: renderOverview, mywork: renderMyWork, pending: renderPending, demos: renderDemoRequests, tickets: renderTickets, schools: renderSchools, organizations: renderOrganizations, provision: renderProvision, announcements: renderAnnouncements, diagnostics: renderDiagnostics, branding: renderBranding, landing: renderLandingCMS, billing: renderBillingOverview, team: renderTeam };
+  const views = { overview: renderOverview, mywork: renderMyWork, pending: renderPending, demos: renderDemoRequests, tickets: renderTickets, schools: renderSchools, organizations: renderOrganizations, provision: renderProvision, announcements: renderAnnouncements, diagnostics: renderDiagnostics, branding: renderBranding, landing: renderLandingCMS, billing: renderBillingOverview, referrals: renderReferrals, team: renderTeam };
   (views[view] || (() => {}))();
 }
 
@@ -2604,6 +2608,13 @@ async function renderProvision() {
         </div>
         <div class="pa-form-row">
           <div class="pa-field">
+            <label>Referral code (optional)</label>
+            <input type="text" id="p-referral" placeholder="MSINGI-XXXXXX" maxlength="40" style="text-transform:uppercase">
+          </div>
+          <div class="pa-field"></div>
+        </div>
+        <div class="pa-form-row">
+          <div class="pa-field">
             <label>Currency</label>
             <select id="p-currency">
               <option value="KES">KES — Kenyan Shilling</option>
@@ -2670,7 +2681,8 @@ async function doProvision() {
       name, shortName: g('p-short'), slug,
       plan: g('p-plan'), currency: g('p-currency'), timezone: 'Africa/Nairobi',
       adminName: g('p-admin-name'), adminEmail: email, adminPassword: pw,
-      organizationId
+      organizationId,
+      referralCode: g('p-referral') || undefined
     });
     toast(`${name} provisioned successfully!`, 'success');
     showView('schools');
@@ -3478,6 +3490,467 @@ async function renderBillingOverview() {
    Visible only with the 'operators.manage' capability; every call is
    re-checked server-side.
    ══════════════════════════════════════════════════════════════ */
+/* ──────────────────────────────────────────────────────────────
+   REFERRAL PROGRAM
+   Platform growth partners ("anyone refers a school"), not the
+   school's own fee discount. Program settings, attribution fixes,
+   offline conversions and payouts all live here.
+   ────────────────────────────────────────────────────────────── */
+let _referralSchoolsCache = null;
+
+function _refMoney(amount, currency) {
+  return `${currency || 'KES'} ${Number(amount || 0).toLocaleString()}`;
+}
+
+function _refStatusChip(status) {
+  const map = {
+    active:  ['#dcfce7', '#166534', 'Active'],
+    blocked: ['#fee2e2', '#991b1b', 'Blocked'],
+    pending: ['#fef3c7', '#92400e', 'Pending payout'],
+    requested: ['#e0e7ff', '#3730a3', 'Under review'],
+    rejected: ['#fee2e2', '#991b1b', 'Not settled'],
+    paid:    ['#dcfce7', '#166534', 'Paid'],
+  };
+  const [bg, fg, label] = map[status] || ['#f1f5f9', '#475569', status || '-'];
+  return `<span style="background:${bg};color:${fg};padding:3px 10px;border-radius:999px;font-size:11.5px;font-weight:600;white-space:nowrap">${label}</span>`;
+}
+
+async function renderReferrals() {
+  const el = document.getElementById('pa-content');
+  el.innerHTML = '<div class="pa-loading"><i class="fas fa-circle-notch fa-spin"></i> Loading referral program.</div>';
+  const canManage = _can('referrals.manage');
+  try {
+    const [payload, schoolList] = await Promise.all([
+      api('GET', '/referrals'),
+      canManage
+        ? (_referralSchoolsCache
+            ? Promise.resolve(_referralSchoolsCache)
+            : api('GET', '/referrals/schools').then(r => r.data || []).catch(() => []))
+        : Promise.resolve([]),
+    ]);
+    _referralSchoolsCache = schoolList.length ? schoolList : _referralSchoolsCache;
+
+    const { partners = [], program = {}, totals = {} } = payload.data || {};
+    const incentive = program.refereeIncentive || { type: 'none', value: 0 };
+
+    el.innerHTML = `
+      <div class="pa-stats" style="margin-bottom:20px">
+        <div class="pa-stat-card">
+          <div class="pa-stat-label">Partners</div>
+          <div class="pa-stat-value">${partners.length}</div>
+          <div class="pa-stat-sub">${totals.signups || 0} school signups</div>
+        </div>
+        <div class="pa-stat-card">
+          <div class="pa-stat-label">Converted</div>
+          <div class="pa-stat-value">${totals.conversions || 0}</div>
+          <div class="pa-stat-sub">first payments received</div>
+        </div>
+        <div class="pa-stat-card">
+          <div class="pa-stat-label">Pending payout</div>
+          <div class="pa-stat-value" style="color:#f59e0b">${_refMoney(totals.pendingAmount, program.currency)}</div>
+          <div class="pa-stat-sub">not yet settled</div>
+        </div>
+        <div class="pa-stat-card">
+          <div class="pa-stat-label">Paid to date</div>
+          <div class="pa-stat-value" style="color:#22c55e">${_refMoney(totals.paidAmount, program.currency)}</div>
+          <div class="pa-stat-sub">settled rewards</div>
+        </div>
+      </div>
+
+      <div class="pa-card" style="margin-bottom:20px">
+        <div class="pa-card-header"><h3>Program settings</h3></div>
+        <div class="pa-form" style="padding:16px">
+          <div class="pa-form-row">
+            <div class="pa-field">
+              <label>Program</label>
+              <select id="rp-enabled">
+                <option value="true" ${program.enabled !== false ? 'selected' : ''}>Open — accepting new partners</option>
+                <option value="false" ${program.enabled === false ? 'selected' : ''}>Closed — pause signups and rewards</option>
+              </select>
+            </div>
+            <div class="pa-field">
+              <label>Referrer bounty (cash per converted school)</label>
+              <input type="number" min="0" step="100" id="rp-bounty" value="${Number(program.bountyAmount || 0)}">
+            </div>
+          </div>
+          <div class="pa-form-row">
+            <div class="pa-field">
+              <label>Referred school incentive</label>
+              <select id="rp-type">
+                <option value="none" ${incentive.type === 'none' ? 'selected' : ''}>No discount</option>
+                <option value="percent" ${incentive.type === 'percent' ? 'selected' : ''}>Percentage off first invoice</option>
+                <option value="fixed" ${incentive.type === 'fixed' ? 'selected' : ''}>Fixed amount off first invoice</option>
+              </select>
+            </div>
+            <div class="pa-field">
+              <label>Incentive value (% or amount)</label>
+              <input type="number" min="0" step="1" id="rp-value" value="${Number(incentive.value || 0)}">
+            </div>
+          </div>
+          <div class="pa-form-row">
+            <div class="pa-field">
+              <label>Code prefix</label>
+              <input type="text" id="rp-prefix" maxlength="12" value="${_esc(program.codePrefix || 'MSINGI')}">
+            </div>
+            <div class="pa-field">
+              <label>Currency</label>
+              <input type="text" id="rp-currency" maxlength="3" value="${_esc(program.currency || 'KES')}">
+            </div>
+          </div>
+          <div style="display:flex;justify-content:flex-end">
+            ${canManage ? '<button class="pa-btn primary" onclick="saveReferralSettings()"><i class="fas fa-save"></i> Save settings</button>' : ''}
+          </div>
+        </div>
+      </div>
+
+      <div class="pa-card" style="margin-bottom:20px">
+        <div class="pa-card-header">
+          <h3>Partners (${partners.length})</h3>
+          <button class="pa-btn" onclick="renderReferrals()"><i class="fas fa-sync-alt"></i> Refresh</button>
+        </div>
+        ${partners.length === 0 ? '<p style="color:#94a3b8;padding:16px 0">No referral partners yet. Share <strong>/refer</strong> to start the program.</p>' : `
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead>
+            <tr style="border-bottom:2px solid #e2e8f0">
+              <th style="text-align:left;padding:8px 12px;color:#64748b;font-size:11px;text-transform:uppercase">Partner</th>
+              <th style="text-align:left;padding:8px 12px;color:#64748b;font-size:11px;text-transform:uppercase">Code</th>
+              <th style="text-align:right;padding:8px 12px;color:#64748b;font-size:11px;text-transform:uppercase">Signups</th>
+              <th style="text-align:right;padding:8px 12px;color:#64748b;font-size:11px;text-transform:uppercase">Converted</th>
+              <th style="text-align:right;padding:8px 12px;color:#64748b;font-size:11px;text-transform:uppercase">Pending</th>
+              <th style="text-align:left;padding:8px 12px;color:#64748b;font-size:11px;text-transform:uppercase">Status</th>
+              <th style="text-align:right;padding:8px 12px"></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${partners.map(p => `
+              <tr style="border-bottom:1px solid #f1f5f9">
+                <td style="padding:10px 12px">
+                  <div style="font-weight:600;color:#0f172a">${_esc(p.name)}</div>
+                  <div style="font-size:11.5px;color:#94a3b8">${_esc(p.email)}</div>
+                </td>
+                <td style="padding:10px 12px;font-family:monospace;font-weight:700;color:#4f46e5">${_esc(p.code)}</td>
+                <td style="padding:10px 12px;text-align:right">${p.signups || 0}</td>
+                <td style="padding:10px 12px;text-align:right">${p.conversions || 0}</td>
+                <td style="padding:10px 12px;text-align:right;color:${p.pendingAmount ? '#b45309' : '#94a3b8'};font-weight:600">${_refMoney(p.pendingAmount, p.currency)}</td>
+                <td style="padding:10px 12px">${_refStatusChip(p.status)}</td>
+                <td style="padding:10px 12px;text-align:right;white-space:nowrap">
+                  <button class="pa-btn" onclick="openReferralPartner('${_esc(p.id)}')"><i class="fas fa-eye"></i> Open</button>
+                  ${canManage ? `<button class="pa-btn" onclick="setReferralStatus('${_esc(p.id)}','${p.status === 'active' ? 'blocked' : 'active'}')">
+                    <i class="fas fa-${p.status === 'active' ? 'ban' : 'rotate-left'}"></i> ${p.status === 'active' ? 'Block' : 'Unblock'}
+                  </button>` : ''}
+                </td>
+              </tr>`).join('')}
+          </tbody>
+        </table>`}
+      </div>
+
+      <div class="pa-card" style="margin-bottom:20px;display:${canManage ? '' : 'none'}">
+        <div class="pa-card-header"><h3>Attach a code to an existing school</h3></div>
+        <div class="pa-form" style="padding:16px">
+          <div class="pa-form-row">
+            <div class="pa-field">
+              <label>School</label>
+              <select id="ref-school">
+                <option value="">Select a school…</option>
+                ${(schoolList || []).filter(s => !s.isDemo).map(s => `<option value="${_esc(s.id)}">${_esc(s.name)}${s.slug ? ` (${_esc(s.slug)})` : ''}</option>`).join('')}
+              </select>
+            </div>
+            <div class="pa-field">
+              <label>Referral code</label>
+              <input type="text" id="ref-code" placeholder="MSINGI-XXXXXX" maxlength="40" style="text-transform:uppercase">
+            </div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+            <label style="font-size:12px;color:#64748b;display:flex;align-items:center;gap:6px">
+              <input type="checkbox" id="ref-force"> Replace an existing attribution
+            </label>
+            <button class="pa-btn primary" onclick="attachReferralCode()"><i class="fas fa-link"></i> Attach code</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="referral-detail"></div>`;
+  } catch (err) {
+    el.innerHTML = `<div class="pa-error">${_esc(_apiErrorMessage(err))}</div>`;
+  }
+}
+
+async function saveReferralSettings() {
+  const g = id => document.getElementById(id)?.value;
+  try {
+    await api('PUT', '/referrals/settings', {
+      enabled: g('rp-enabled') === 'true',
+      bountyAmount: Number(g('rp-bounty')) || 0,
+      currency: (g('rp-currency') || 'KES').toUpperCase(),
+      codePrefix: g('rp-prefix') || 'MSINGI',
+      refereeIncentive: {
+        type: g('rp-type') || 'none',
+        value: Number(g('rp-value')) || 0,
+      },
+    });
+    toast('Referral settings saved.', 'success');
+    renderReferrals();
+  } catch (err) {
+    toast('Could not save settings: ' + err.message, 'error');
+  }
+}
+
+async function openReferralPartner(id) {
+  const pane = document.getElementById('referral-detail');
+  pane.innerHTML = '<div class="pa-loading"><i class="fas fa-circle-notch fa-spin"></i> Loading partner.</div>';
+  try {
+    const payload = await api('GET', '/referrals/' + encodeURIComponent(id));
+    const { partner, referrals = [], payoutRequests = [] } = payload.data || {};
+    const payout = partner.payout || {};
+    const unlockedPending = referrals.filter(r => r.conversion && r.conversion.rewardStatus === 'pending' && !r.conversion.payoutRequestId);
+    const openRequests = payoutRequests.filter(r => r.status === 'requested');
+    const canManage = _can('referrals.manage');
+    const payoutLabel = payout.method === 'bank'
+      ? `${_esc(payout.bankName || 'Bank')} &middot; ${_esc(payout.bankAccountNumber || 'account')}`
+      : `M-Pesa &middot; ${_esc(payout.phone || payout.phoneMasked || '-')}`;
+
+    pane.innerHTML = `
+      <div class="pa-card">
+        <div class="pa-card-header">
+          <h3>${_esc(partner.name)} - ${_esc(partner.code)}</h3>
+          <div style="display:flex;gap:8px">
+            ${canManage ? `<button class="pa-btn" onclick="editReferralPayout('${_esc(partner.id)}')"><i class="fas fa-phone"></i> Payout details</button>` : ''}
+            ${!openRequests.length && unlockedPending.length && canManage ? `<button class="pa-btn primary" onclick="payReferralPayout('${_esc(partner.id)}')"><i class="fas fa-money-bill-wave"></i> Pay unlocked (${unlockedPending.length})</button>` : ''}
+            <button class="pa-btn" onclick="document.getElementById('referral-detail').innerHTML=''"><i class="fas fa-xmark"></i> Close</button>
+          </div>
+        </div>
+        <div style="padding:12px 16px;font-size:12.5px;color:#64748b">
+          ${_esc(partner.email || '')} &middot; ${_esc(partner.phone || '')} &middot; Payout: ${payoutLabel}
+          ${payout.bankAccountName ? ` &middot; ${_esc(payout.bankAccountName)}` : ''}
+          ${partner.schoolName ? ` &middot; ${_esc(partner.schoolName)}` : ''}
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead>
+            <tr style="border-bottom:2px solid #e2e8f0">
+              <th style="text-align:left;padding:8px 12px;color:#64748b;font-size:11px;text-transform:uppercase">School</th>
+              <th style="text-align:left;padding:8px 12px;color:#64748b;font-size:11px;text-transform:uppercase">Joined</th>
+              <th style="text-align:left;padding:8px 12px;color:#64748b;font-size:11px;text-transform:uppercase">Conversion</th>
+              <th style="text-align:left;padding:8px 12px;color:#64748b;font-size:11px;text-transform:uppercase">Reward</th>
+              <th style="text-align:right;padding:8px 12px"></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${referrals.length === 0 ? '<tr><td colspan="5" style="padding:18px 12px;color:#94a3b8">No schools attributed yet.</td></tr>' : referrals.map(r => `
+              <tr style="border-bottom:1px solid #f1f5f9">
+                <td style="padding:10px 12px">
+                  <div style="font-weight:600">${_esc(r.schoolName)}</div>
+                  <div style="font-size:11px;color:#94a3b8">${_esc(r.schoolSlug || '')}${r.isDemo ? ' &middot; demo' : ''}${r.schoolAdminEmail ? ` &middot; ${_esc(r.schoolAdminEmail)}` : ''}</div>
+                </td>
+                <td style="padding:10px 12px;color:#64748b;font-size:12px">${_fmtWhen(r.joinedAt)}</td>
+                <td style="padding:10px 12px">
+                  ${r.conversion
+                    ? `<span style="font-size:12px;color:#475569">${_esc(r.conversion.trigger === 'manual' ? 'Offline payment' : 'Subscription payment')}${r.conversion.reference ? ` &middot; ${_esc(r.conversion.reference)}` : ''}</span>`
+                    : '<span style="font-size:12px;color:#94a3b8">No payment yet</span>'}
+                </td>
+                <td style="padding:10px 12px">
+                  ${r.conversion ? `${_refStatusChip(r.conversion.rewardStatus)}<div style="font-size:11px;color:#94a3b8;margin-top:3px">${_refMoney(r.conversion.bountyAmount, r.conversion.currency)}</div>` : '-'}
+                </td>
+                <td style="padding:10px 12px;text-align:right;white-space:nowrap">
+                  ${!r.conversion
+                    ? (r.isDemo
+                        ? '<span style="font-size:11.5px;color:#94a3b8">Demo - no payment yet</span>'
+                        : (canManage
+                            ? `<button class="pa-btn" onclick="convertReferralSchool('${_esc(r.schoolId)}','${_esc(partner.id)}')"><i class="fas fa-check"></i> Record payment</button>`
+                            : '<span style="font-size:11.5px;color:#94a3b8">No payment yet</span>'))
+                    : (r.conversion.rewardStatus === 'pending'
+                        ? (r.conversion.payoutRequestId
+                            ? '<span style="font-size:11.5px;color:#b45309">Payout requested</span>'
+                            : (canManage
+                                ? `<button class="pa-btn primary" onclick="payReferralPayout('${_esc(partner.id)}','${_esc(r.conversion.id)}')"><i class="fas fa-money-bill-wave"></i> Mark paid</button>`
+                                : '<span style="font-size:11.5px;color:#b45309">Pending payout</span>'))
+                        : `<span style="font-size:11.5px;color:#94a3b8">Paid ${_fmtWhen(r.conversion.paidAt)}</span>`)}
+                </td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+
+        <div style="padding:16px;border-top:1px solid #e2e8f0">
+          <h4 style="margin:0 0 10px;font-size:13px;font-weight:700;color:#1e293b">Payout requests</h4>
+          ${payoutRequests.length === 0 ? '<p style="margin:0;font-size:12.5px;color:#94a3b8">No payout requests yet.</p>' : `
+          <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+            <thead>
+              <tr style="border-bottom:1px solid #e2e8f0">
+                <th style="text-align:left;padding:6px 4px;color:#64748b;font-size:10.5px;text-transform:uppercase">Requested</th>
+                <th style="text-align:right;padding:6px 4px;color:#64748b;font-size:10.5px;text-transform:uppercase">Amount</th>
+                <th style="text-align:left;padding:6px 4px;color:#64748b;font-size:10.5px;text-transform:uppercase">Payout to</th>
+                <th style="text-align:left;padding:6px 4px;color:#64748b;font-size:10.5px;text-transform:uppercase">Status</th>
+                <th style="text-align:right;padding:6px 4px"></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${payoutRequests.map(rq => {
+                const d = rq.payoutDetails || {};
+                const to = d.method === 'bank'
+                  ? `${_esc(d.bankName || 'Bank')} &middot; ${_esc(d.bankAccountName || '')} &middot; ${_esc(d.bankAccountNumber || '')}`
+                  : `M-Pesa &middot; ${_esc(d.phone || '')}`;
+                return `<tr style="border-bottom:1px solid #f1f5f9">
+                  <td style="padding:7px 4px;color:#64748b">${_fmtWhen(rq.requestedAt)}</td>
+                  <td style="padding:7px 4px;text-align:right;font-weight:600">${_refMoney(rq.amount, rq.currency)}</td>
+                  <td style="padding:7px 4px;font-size:11.5px">${to}</td>
+                  <td style="padding:7px 4px">${_refStatusChip(rq.status)}</td>
+                  <td style="padding:7px 4px;text-align:right;white-space:nowrap">
+                    ${rq.status === 'requested' && canManage
+                      ? `<button class="pa-btn primary" onclick="payReferralRequest('${_esc(rq.id)}','${_esc(d.method || rq.method || 'mpesa')}','${_esc(partner.id)}')"><i class="fas fa-money-bill-wave"></i> Mark paid</button>
+                         <button class="pa-btn" onclick="rejectReferralRequest('${_esc(rq.id)}','${_esc(partner.id)}')"><i class="fas fa-xmark"></i> Reject</button>`
+                      : (rq.status === 'paid'
+                          ? `<span style="font-size:11.5px;color:#94a3b8">${_fmtWhen(rq.paidAt)}${rq.payoutReference ? ` &middot; ${_esc(rq.payoutReference)}` : ''}</span>`
+                          : (rq.rejectionReason ? `<span style="font-size:11.5px;color:#b91c1c">${_esc(rq.rejectionReason)}</span>` : '-'))}
+                  </td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>`}
+        </div>
+      </div>`;
+  } catch (err) {
+    pane.innerHTML = `<div class="pa-error">${_esc(_apiErrorMessage(err))}</div>`;
+  }
+}
+
+async function setReferralStatus(id, status) {
+  if (status === 'blocked' && !confirm('Block this partner? Their existing conversions stay payable, but new signups with their code will be rejected.')) return;
+  try {
+    await api('PATCH', '/referrals/' + encodeURIComponent(id), { status });
+    toast(status === 'blocked' ? 'Partner blocked.' : 'Partner reactivated.', 'success');
+    renderReferrals();
+  } catch (err) {
+    toast('Could not update partner: ' + err.message, 'error');
+  }
+}
+
+async function editReferralPayout(partnerId) {
+  try {
+    const payload = await api('GET', '/referrals/' + encodeURIComponent(partnerId));
+    const payout = payload.data?.partner?.payout || {};
+    const method = prompt('Payout method (mpesa / bank):', payout.method || 'mpesa');
+    if (method === null) return;
+    const body = { method: method === 'bank' ? 'bank' : 'mpesa' };
+
+    if (body.method === 'mpesa') {
+      const phone = prompt('M-Pesa number:', payout.phone || '');
+      if (phone === null) return;
+      if (!phone.trim()) return toast('An M-Pesa number is required.', 'error');
+      body.payoutPhone = phone.trim();
+    } else {
+      const bankName = prompt('Bank name:', payout.bankName || '');
+      if (bankName === null) return;
+      const bankAccountName = prompt('Account name:', payout.bankAccountName || '');
+      if (bankAccountName === null) return;
+      const bankAccountNumber = prompt('Account number:', payout.bankAccountNumber || '');
+      if (bankAccountNumber === null) return;
+      const bankBranch = prompt('Branch (optional):', payout.bankBranch || '');
+      if (bankBranch === null) return;
+      body.bankName = bankName;
+      body.bankAccountName = bankAccountName;
+      body.bankAccountNumber = bankAccountNumber;
+      body.bankBranch = bankBranch;
+    }
+
+    await api('PATCH', '/referrals/' + encodeURIComponent(partnerId), body);
+    toast('Payout details updated.', 'success');
+    await renderReferrals();
+    openReferralPartner(partnerId);
+  } catch (err) {
+    toast('Could not update the payout details: ' + err.message, 'error');
+  }
+}
+
+async function convertReferralSchool(schoolId, partnerId) {
+  const reference = prompt('Payment reference for this school (bank slip, M-Pesa code, or "offline"):');
+  if (reference === null) return;
+  const amountRaw = prompt('Amount paid (optional, for the record):', '');
+  try {
+    const result = await api('POST', '/referrals/schools/' + encodeURIComponent(schoolId) + '/convert', {
+      reference: reference || null,
+      amountPaid: amountRaw ? Number(amountRaw) : null,
+    });
+    if (result.data?.recorded) toast('Conversion recorded.', 'success');
+    else toast('No conversion recorded — ' + (result.data?.reason || 'check the attribution.'), 'info');
+    if (partnerId) {
+      // Rebuild the table first (pending totals changed), then reopen the
+      // detail pane — opening before the rebuild would be wiped by it.
+      await renderReferrals();
+      openReferralPartner(partnerId);
+    }
+  } catch (err) {
+    toast('Could not record the payment: ' + err.message, 'error');
+  }
+}
+
+async function payReferralPayout(partnerId, conversionId) {
+  const method = prompt('Payout method (mpesa / bank):', 'mpesa');
+  if (method === null) return;
+  const reference = prompt('Payout reference (M-Pesa code or bank transaction ID):');
+  if (reference === null) return;
+  if (!reference.trim()) return toast('A payout reference is required.', 'error');
+  try {
+    const body = { method: method || 'mpesa', reference: reference.trim() };
+    if (conversionId) body.conversionIds = [conversionId];
+    const result = await api('POST', '/referrals/' + encodeURIComponent(partnerId) + '/payouts', body);
+    toast(`Paid ${_refMoney(result.data.total, result.data.currency)} for ${result.data.paid} conversion(s).`, 'success');
+    await renderReferrals();
+    openReferralPartner(partnerId);
+  } catch (err) {
+    toast('Could not record the payout: ' + err.message, 'error');
+  }
+}
+
+async function payReferralRequest(requestId, defaultMethod, partnerId) {
+  const method = prompt('Payout method (mpesa / bank):', defaultMethod || 'mpesa');
+  if (method === null) return;
+  const reference = prompt('Payout reference (M-Pesa code or bank transaction ID):');
+  if (reference === null) return;
+  if (!reference.trim()) return toast('A payout reference is required.', 'error');
+  try {
+    await api('POST', '/referrals/payout-requests/' + encodeURIComponent(requestId) + '/pay', {
+      method: method || defaultMethod || 'mpesa',
+      reference: reference.trim(),
+    });
+    toast('Payout request settled.', 'success');
+    await renderReferrals();
+    openReferralPartner(partnerId);
+  } catch (err) {
+    toast('Could not settle the payout request: ' + err.message, 'error');
+  }
+}
+
+async function rejectReferralRequest(requestId, partnerId) {
+  const reason = prompt('Reason for not settling this payout request:');
+  if (reason === null) return;
+  try {
+    await api('POST', '/referrals/payout-requests/' + encodeURIComponent(requestId) + '/reject', {
+      reason: reason || '',
+    });
+    toast('Payout request rejected; the rewards are available again.', 'success');
+    await renderReferrals();
+    openReferralPartner(partnerId);
+  } catch (err) {
+    toast('Could not reject the payout request: ' + err.message, 'error');
+  }
+}
+
+async function attachReferralCode() {
+  const schoolId = document.getElementById('ref-school')?.value;
+  const code = (document.getElementById('ref-code')?.value || '').trim();
+  const force = !!document.getElementById('ref-force')?.checked;
+  if (!schoolId) return toast('Choose a school first.', 'error');
+  if (!code) return toast('Enter a referral code.', 'error');
+  try {
+    const result = await api('POST', '/schools/' + encodeURIComponent(schoolId) + '/referral', { code, force });
+    toast(result.data.attribution
+      ? `Attached ${result.data.attribution.referralCode}.`
+      : 'Referral attribution removed.', 'success');
+    renderReferrals();
+  } catch (err) {
+    toast('Could not attach the code: ' + err.message, 'error');
+  }
+}
+
 let _teamCatalog = null;   // { capabilities, groups, templates }
 let _teamMembers = [];
 

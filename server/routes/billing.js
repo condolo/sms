@@ -28,9 +28,10 @@ const express        = require('express');
 const crypto         = require('crypto');
 const { authMiddleware } = require('../middleware/auth');
 const { _model }     = require('../utils/model');
-const { tenantModel, tenantContext } = require('../utils/tenant-model');
+const { tenantModel, tenantContext, platformModel } = require('../utils/tenant-model');
 const { ok, created, E } = require('../utils/response');
 const { STUDENT_RATE } = require('../config/pricing');
+const referralService = require('../services/referralService');
 
 const router = express.Router();
 
@@ -63,6 +64,22 @@ async function createBillingSnapshot(schoolId, { academicYear, term, tier, trigg
   const amount = activeCount * rate;
   const now    = new Date().toISOString();
 
+  /* Referral incentive: applies to the school's FIRST platform invoice only,
+     whatever the program is configured to (none / percent / fixed) at the
+     moment that invoice is created. Snapshot is immutable once written, so
+     changing the program later never rewrites a price already quoted. */
+  const School = platformModel('schools');
+  const school = await School.findOne({ id: schoolId })
+    .select('id name referralPartnerId referralCode')
+    .lean();
+  const priorSnapshots = await Snapshots.countDocuments({ schoolId });
+  const referralDiscount = await referralService.firstInvoiceDiscount({
+    school,
+    grossAmount: amount,
+    priorSnapshotCount: priorSnapshots,
+  });
+  const totalAmount = referralDiscount ? Math.max(0, amount - referralDiscount.amount) : amount;
+
   const snapshot = {
     id:              _uid(),
     schoolId,
@@ -72,7 +89,10 @@ async function createBillingSnapshot(schoolId, { academicYear, term, tier, trigg
     activeCount,
     tier,
     ratePerStudent:  rate,
-    totalAmount:     amount,
+    totalAmount,
+    ...(referralDiscount
+      ? { originalAmount: amount, referralDiscount }
+      : {}),
     status:          'pending',
     invoiceRef:      _invoiceRef(academicYear, term),
     triggerType,     // 'auto' (cron) | 'manual'
@@ -83,7 +103,7 @@ async function createBillingSnapshot(schoolId, { academicYear, term, tier, trigg
   };
 
   await Snapshots.create(snapshot);
-  console.log(`[billing] Snapshot created — school ${schoolId} | ${academicYear} T${term} | ${activeCount} students | KSh ${amount} | ${snapshot.invoiceRef}`);
+  console.log(`[billing] Snapshot created — school ${schoolId} | ${academicYear} T${term} | ${activeCount} students | KSh ${totalAmount}${referralDiscount ? ` (referral -${referralDiscount.amount})` : ''} | ${snapshot.invoiceRef}`);
   return { existing: false, snapshot };
 }
 

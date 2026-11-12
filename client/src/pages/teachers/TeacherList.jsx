@@ -858,7 +858,7 @@ function TeacherAssignmentsTab({ teacher, canEdit }) {
 
   const [showAdd, setShowAdd] = useState(false);
   const [af, setAf]           = useState({ classId: '', subjectId: '', streamId: '', preferredRoomId: '', periodsPerWeek: '', doubleLessons: '' });
-  // Inline edit of an existing assignment's lessons per week / double lessons (v5.267.0).
+  // Inline edit of an existing assignment's lessons per week / double lessons (v5.268.0).
   const [editId, setEditId]   = useState(null);
   const [ef, setEf]           = useState({ periodsPerWeek: '', doubleLessons: '' });
   const [efErr, setEfErr]     = useState('');

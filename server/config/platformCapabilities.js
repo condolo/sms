@@ -47,6 +47,9 @@ const CAPABILITIES = [
 
   { key: 'billing.view',      group: 'Billing',     label: 'View billing' },
 
+  { key: 'referrals.view',    group: 'Referrals',   label: 'View referral partners and conversions' },
+  { key: 'referrals.manage',  group: 'Referrals',   label: 'Manage referral settings, attribution and payouts' },
+
   { key: 'content.manage',    group: 'Content',     label: 'Announcements, branding, landing page, settings' },
 
   { key: 'diagnostics.view',  group: 'Diagnostics', label: 'Platform health, integrity and diagnostics' },
@@ -187,6 +190,19 @@ const POLICY = [
 
   /* Billing */
   { method: 'GET',    pattern: '/billing/all',                          cap: 'billing.view' },
+
+  /* Referrals — platform growth program (not the school fee discount) */
+  { method: 'GET',    pattern: '/referrals',                            cap: 'referrals.view' },
+  { method: 'GET',    pattern: '/referrals/settings',                   cap: 'referrals.view' },
+  { method: 'GET',    pattern: '/referrals/schools',                    cap: 'referrals.view' },
+  { method: 'PUT',    pattern: '/referrals/settings',                   cap: 'referrals.manage' },
+  { method: 'GET',    pattern: '/referrals/:id',                        cap: 'referrals.view' },
+  { method: 'PATCH',  pattern: '/referrals/:id',                        cap: 'referrals.manage' },
+  { method: 'POST',   pattern: '/referrals/:id/payouts',                cap: 'referrals.manage' },
+  { method: 'POST',   pattern: '/referrals/payout-requests/:id/pay',    cap: 'referrals.manage' },
+  { method: 'POST',   pattern: '/referrals/payout-requests/:id/reject', cap: 'referrals.manage' },
+  { method: 'POST',   pattern: '/referrals/schools/:id/convert',        cap: 'referrals.manage' },
+  { method: 'POST',   pattern: '/schools/:id/referral',                 cap: 'referrals.manage' },
 
   /* Diagnostics */
   { method: 'GET',    pattern: '/stats',                                cap: 'diagnostics.view' },

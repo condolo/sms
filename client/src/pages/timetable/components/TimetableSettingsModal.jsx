@@ -1,5 +1,5 @@
 /* ============================================================
-   TimetableSettingsModal — "Days & rules" (v5.265.0 days, v5.267.0 rules)
+   TimetableSettingsModal — "Days & rules" (v5.265.0 days, v5.268.0 rules)
    Working days: the days lessons can be placed on. Removing a day keeps
    its lessons (they stay visible to move or remove).
    Rules: how a good timetable looks. The automatic timetable generator

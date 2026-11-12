@@ -693,7 +693,7 @@ async function _draftProblems(req) {
   const untimed = all.filter(sl => !sl.startTime || !sl.endTime);
   const warnings = _overlapWarnings(all.filter(sl => sl.startTime && sl.endTime));
 
-  // Rule warnings (v5.267.0): lessons in a time the teacher marked unavailable, and teachers
+  // Rule warnings (v5.268.0): lessons in a time the teacher marked unavailable, and teachers
   // over the school's lessons-a-day limit. This academic year's lessons only. Never block.
   let ruleWarnings = [];
   try {
@@ -773,7 +773,7 @@ router.put('/settings', authMiddleware, PLAN, MODGATE, timetableManageAccess('up
   } catch (err) { console.error('[timetable PUT /settings]', err); return E.serverError(res); }
 });
 
-/* ── Teacher availability (utils/teacher-availability.js, v5.267.0) ──────────
+/* ── Teacher availability (utils/teacher-availability.js, v5.268.0) ──────────
    GET /availability            every teacher's unavailable times
    PUT /availability/:teacherId { blocks: [{day,start,end}], note } — replaces that teacher's.
    :teacherId may be any id form of the staff record (its id, userId or _id); it is stored

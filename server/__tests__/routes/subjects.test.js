@@ -154,7 +154,7 @@ describe('PATCH /api/subjects/:id/reactivate', () => {
   });
 });
 
-describe('room type a subject needs (v5.267.0)', () => {
+describe('room type a subject needs (v5.268.0)', () => {
   beforeEach(() => {
     mockStores.subjects = [{ id: 'sub_1', schoolId: SCHOOL, name: 'Chemistry', code: 'CHEM', departmentId: 'dep_1', isActive: true }];
   });

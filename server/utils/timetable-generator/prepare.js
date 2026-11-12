@@ -1,5 +1,5 @@
 /* ============================================================
-   Msingi — timetable generator: from a school's data to a problem (v5.268.0)
+   Msingi — timetable generator: from a school's data to a problem (v5.269.0)
 
    buildProblem(schoolId, ctx, scope) loads everything the solver needs
    and returns { problem, meta, precheck }:

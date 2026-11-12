@@ -43,7 +43,7 @@ export default function PublishModal({ publishing, alreadyPublished = false, war
             {warnings.length > 5 && <p className="text-[11px] text-amber-700">and {warnings.length - 5} more</p>}
           </div>
         )}
-        {/* Days & rules / teacher availability (v5.267.0) — warnings only. */}
+        {/* Days & rules / teacher availability (v5.268.0) — warnings only. */}
         {ruleWarningCount > 0 && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 space-y-1">
             <p className="text-[11px] font-semibold text-amber-800">

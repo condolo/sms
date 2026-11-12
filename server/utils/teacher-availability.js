@@ -1,5 +1,5 @@
 /* ============================================================
-   Msingi — teacher availability (v5.267.0)
+   Msingi — teacher availability (v5.268.0)
 
    When a teacher can't teach: e.g. part-time, "not Fridays", "not
    before 10:00 on Mondays". Stored per teacher in the

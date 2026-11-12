@@ -1,5 +1,5 @@
 /* ============================================================
-   Msingi — timetable generator worker thread (v5.268.0)
+   Msingi — timetable generator worker thread (v5.269.0)
    Runs solver.solve() off the main event loop so generating a big
    school's timetable (seconds of CPU) never stalls other requests.
    runSolver() is what callers use; under Jest it runs inline.

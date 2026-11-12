@@ -1,5 +1,5 @@
 /* ============================================================
-   Msingi — timetable generator: the solver (v5.268.0)
+   Msingi — timetable generator: the solver (v5.269.0)
 
    Pure: no database, no Express. prepare.js builds the problem from a
    school's data; this places lessons; the route stores and applies the

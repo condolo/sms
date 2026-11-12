@@ -167,7 +167,7 @@ describe('PUT/DELETE /api/teaching-assignments/:id — same permission path', ()
   });
 });
 
-/* ── Double lessons (v5.267.0) — two back-to-back periods each, counted in periodsPerWeek ── */
+/* ── Double lessons (v5.268.0) — two back-to-back periods each, counted in periodsPerWeek ── */
 describe('double lessons on a teaching assignment', () => {
   beforeEach(() => { mockJwtUser = { userId: 'usr_admin', schoolId: SCHOOL, role: 'admin', roles: [] }; });
 

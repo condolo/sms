@@ -19,11 +19,19 @@ import TurnstileWidget from '@/components/landing/TurnstileWidget';
 const ROLES = ['School owner / director', 'Principal / head teacher', 'Deputy / academic head', 'Finance / bursar', 'ICT / operations', 'Other'];
 const SIZES = ['Under 200 students', '200 – 500 students', '500 – 1,000 students', '1,000 – 3,000 students', 'Over 3,000 students'];
 
-const INITIAL = { name: '', schoolName: '', role: '', email: '', phone: '', schoolSize: '' };
+const INITIAL = { name: '', schoolName: '', role: '', email: '', phone: '', schoolSize: '', referralCode: '' };
+
+function _initialReferral() {
+  try {
+    return (new URLSearchParams(window.location.search).get('ref') || '').trim().toUpperCase().slice(0, 40);
+  } catch {
+    return '';
+  }
+}
 
 export default function DemoRequest() {
   const [step, setStep] = useState('form'); // form | otp | done | review
-  const [form, setForm] = useState(INITIAL);
+  const [form, setForm] = useState(() => ({ ...INITIAL, referralCode: _initialReferral() }));
   const [otp, setOtp] = useState('');
   const [requestId, setRequestId] = useState('');
   const [result, setResult] = useState(null);
@@ -150,6 +158,10 @@ export default function DemoRequest() {
                     <input value={form.phone} onChange={set('phone')} className={inputCls} placeholder="+254 7xx xxx xxx" />
                   </Field>
                 </div>
+                <Field label="Referral code (optional)">
+                  <input value={form.referralCode} onChange={set('referralCode')} className={inputCls}
+                    placeholder="e.g. MSINGI-7K4P2Q" maxLength={40} style={{ textTransform: 'uppercase' }} />
+                </Field>
 
                 <TurnstileWidget
                   ref={turnstileRef}

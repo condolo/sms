@@ -34,6 +34,8 @@ const COLS = [
       { label: 'Why Schools Choose Us', href: '/why-choose' },
       { label: 'The Msingi Difference', href: '/difference' },
       { label: 'Knowledge Centre',  href: '/knowledge'   },
+      { label: 'Refer a School',    href: '/refer'       },
+      { label: 'Affiliate Sign-In', href: '/refer/login' },
       { label: 'Contact',           href: '/contact'     },
     ],
   },
