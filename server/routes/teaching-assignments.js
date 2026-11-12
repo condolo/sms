@@ -271,10 +271,18 @@ router.post('/', authMiddleware, async (req, res) => { // rbac: canManage() belo
       const matchingUser = await tenantModel('users', tenantContext(req))
         .findOne({ schoolId, email: teacher.email.toLowerCase(), isActive: { $ne: false } }).select('id').lean();
       if (matchingUser) {
-        canonicalTeacherId = matchingUser.id;
-        tenantModel('teachers', tenantContext(req))
-          .updateOne({ schoolId, id: teacher.id }, { $set: { userId: matchingUser.id } })
-          .catch(() => {});
+        // A user doc with no `id` field (irregularly onboarded school) has a
+        // JWT userId of String(_id) — auth.js's `user.id || user._id` — so
+        // use that same form here. Plain `matchingUser.id` was undefined for
+        // them, which fell through to teacher.id below and saved a row the
+        // teacher could never see (2026-11-12, Mascit Lab Academy).
+        const loginId = matchingUser.id || (matchingUser._id ? String(matchingUser._id) : null);
+        if (loginId) {
+          canonicalTeacherId = loginId;
+          tenantModel('teachers', tenantContext(req))
+            .updateOne({ schoolId, id: teacher.id }, { $set: { userId: loginId } })
+            .catch(() => {});
+        }
       }
     }
     canonicalTeacherId = canonicalTeacherId || teacher.id;

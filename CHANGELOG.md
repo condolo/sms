@@ -6,6 +6,32 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.264.0] - 2026-11-12 - fix(attendance): teachers with assigned classes couldn't mark attendance; new "All Classes" permission
+
+Reported directly about Mascit Lab Academy: "teachers assigned classes cannot mark attendance … if a user is assigned full access of attendance role and permission in the setting, how can they still not take attendance?" Two independent causes, both fixed. Not yet confirmed against Mascit's live data (no database access from the machine this was built on) — see Verified below.
+
+**1. Assignments saved under a different ID form of the same teacher were invisible.** Attendance (and every other module using `scopeMiddleware`) found a teacher's classes by matching `teaching_assignments.teacherId === req.jwtUser.userId` exactly. Real rows also use the teacher's staff-record id (`teachers.id`) — created before the login existed or was linked — and, for a login whose user doc has no `id` field, the JWT carries `String(_id)` while assignment creation stored `matchingUser.id` (undefined → fell back to `teachers.id`). The two existing lazy re-key paths only fire while `teacher.userId` is unset, so many such rows were never re-keyed (the code already recorded 181 across 4 schools). Result: "This class is not in your assigned scope", with no error anywhere.
+- `scopeMiddleware._teacherIdForms()` resolves every id provably belonging to this login: its `id`, its `_id` string, and the staff record linked to it (or unlinked with its exact email). A staff record linked to a *different* login is never merged in. Any lookup failure falls back to the old exact match — never wider.
+- `_loadAssigned()` matches `teacherId` against all of them. Fixes Attendance, Markbook, Lessons and every other assigned-scope module at once.
+- `POST /api/teaching-assignments` now uses `matchingUser.id || String(matchingUser._id)`, so new rows for id-less logins are keyed by the id their token actually carries.
+
+**2. Nothing in Settings could widen which classes someone can mark.** The coarse Attendance grant only decides whether a person may use Attendance at all; class scope came only from assignments, form-teacher streams, or a hardcoded floor (admin/principal/deputy). New strict sub-permission **Attendance → All Classes (not just assigned)** (`attendance__all_classes`, `hasExplicitSubGrant`, no coarse fallback): View or Edit makes `resolveAttendanceScope` unrestricted, so the class picker, register, save, edit and delete all follow. Off by default for every role (client defaults updated so a "reset to defaults" can't grant it).
+
+### Changed
+- `server/middleware/scopeMiddleware.js` — `_teacherIdForms()`; `_loadAssigned()` matches every form.
+- `server/routes/teaching-assignments.js` — canonical teacher id falls back to `String(_id)`.
+- `server/utils/scopeEngine.js` — `resolveAttendanceScope` honours `attendance__all_classes`.
+- `server/config/moduleRegistry.js`, `client/src/pages/settings/SettingsPage.jsx` — new sub, default N for teacher / section_head / discipline_committee / parent.
+- `client/src/pages/help/HelpPage.jsx`, `docs/SCHOOL_ADMIN_GUIDE.md`, `docs/USER_GUIDE.md` — explained.
+
+### Tests
+- New `server/__tests__/attendance-teacher-id-forms.test.js` (11): staff-record-keyed rows, Mascit's id-less login shape, never merging another login's staff record, fail-closed on lookup error, and the All Classes grant (View, Edit, absent, floor roles).
+- `attendance-write-scope`, `attendance-stream-scope`, `classes-attendance-scope` — their `rbac` mocks now also stub `hasExplicitSubGrant` (returns false).
+
+### Verified
+- Unit/integration tests as above; full suite run locally before push.
+- **Not yet verified against Mascit's live data.** The read-only diagnostic (counts each teacher's assignments by ID form) is ready to run once database access is available.
+
 ## [v5.263.1] - 2026-11-11 - fix(lessons): lesson plan text boxes lost focus after every character typed
 
 Reported by a school: "when creating the lesson plan, the text box is not active all the time while typing, you have to click it after every single character you type." Not a recurrence of the parent-portal fixes (v5.211.1, v5.240.0) — those only covered the parent portal's message boxes. The lesson plan form had its own copy of the same bug since it was built (2026-09-23).

@@ -312,7 +312,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Register\n• Mark Attendance\n• Edit Records\n• Export / Print Register\n• School-Wide Report\n• View Absent Students & Contact Details\n• Attendance Conflicts (Present/Absent Mismatch)\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Register\n• Mark Attendance\n• Edit Records\n• Export / Print Register\n• School-Wide Report\n• View Absent Students & Contact Details\n• Attendance Conflicts (Present/Absent Mismatch)\n• All Classes (not just assigned) — lets a role or person see and mark every class, not only their own teaching or form-teacher classes\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
       {
         q: 'Can I take attendance straight from my dashboard?',

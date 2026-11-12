@@ -135,6 +135,11 @@ const MODULE_REGISTRY = [
     // not just the caller's own register.
     { key: 'absentees', label: 'View Absent Students & Contact Details' },
     { key: 'conflicts', label: 'Attendance Conflicts (Present/Absent Mismatch)' },
+    // Strict like the 3 above (hasExplicitSubGrant in scopeEngine.js's
+    // resolveAttendanceScope): widens WHICH classes this role/person can
+    // see and mark from "their teaching assignments + form-teacher
+    // streams" to every class. Never implied by the coarse grant.
+    { key: 'all_classes', label: 'All Classes (not just assigned)' },
   ]},
   { key: 'timetable', label: 'Timetable', section: 'Academic Management', icon: 'Calendar', navRoute: '/timetable', navOrder: 3, subs: [
     { key: 'view',          label: 'View Timetable' },

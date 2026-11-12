@@ -452,6 +452,21 @@ async function resolveAttendanceScope(req) {
   const { userId, schoolId, role, roles = [] } = req.jwtUser ?? {};
   const effectiveRole = role || roles[0] || '';
   if (ATTENDANCE_FLOOR_ROLES.has(effectiveRole)) return null;
+  // Settings → Roles & Permissions → Attendance → "All Classes (not just
+  // assigned)". Reported directly (2026-11-12): "if a user is assigned full
+  // access of attendance role and permission in the setting, how can they
+  // still not take attendance?" — the coarse attendance grant only ever
+  // answered "may this person use Attendance at all", never "which
+  // classes", and nothing in Settings could widen the class scope. This is
+  // the explicit, opt-in way to do that for any role or person. Strict
+  // (hasExplicitSubGrant, no coarse-grant fallback) so ordinary teachers,
+  // whose role already holds the coarse grant, stay limited to their own
+  // classes. View (read) or Edit (create) on this sub both widen scope;
+  // actually saving still needs the coarse attendance:create grant.
+  if (await hasExplicitSubGrant(req, 'attendance', 'all_classes', 'read')
+      || await hasExplicitSubGrant(req, 'attendance', 'all_classes', 'create')) {
+    return null;
+  }
   // level: 'assigned' — not because this role's own ROLE_SCOPE_LEVEL is
   // 'assigned' (several, like exams_officer, are 'school'), but because
   // hasNoAssignments()'s "does this caller have nothing at all" check

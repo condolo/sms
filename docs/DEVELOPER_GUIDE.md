@@ -7534,3 +7534,13 @@ grep -rn -E "^\s{2,}(function [A-Z][A-Za-z0-9]*\s*\(|const [A-Z][A-Za-z0-9]* = \
 ```
 
 Any hit that contains an `<input>`, `<textarea>`, `<select>` or contenteditable must be hoisted.
+
+## Teaching-Assignment ID Forms and Attendance "All Classes" (v5.264.0, 2026-11-12)
+
+**`teaching_assignments.teacherId` is not reliably the JWT `userId`.** It may also be the teacher's `teachers.id` (row created before the login existed or was linked) or the other form of the login's own id (`users.id` vs `String(users._id)` — a user doc with no `id` field gets a JWT `userId` of `String(_id)`, see `auth.js`'s `_buildTokenPayload`). The lazy re-key paths (`settings.js` invite-with-`staffId`, `timetable.js` `GET /my`) only fire while `teacher.userId` is unset, so they never fixed rows for already-linked teachers.
+
+- `scopeMiddleware._teacherIdForms(userId, schoolId)` returns every id provably belonging to that login: the userId, the user doc's `id` and `String(_id)`, and the `teachers.id` of the staff record linked to it — or unlinked with the same email. A staff record linked to a *different* login is never included. Lookup failure → `[userId]` (fail closed).
+- `_loadAssigned()` uses `teacherId: { $in: forms }`. Every module on `scopeMiddleware` / `resolve*Scope` benefits.
+- **Rule:** any new code that looks up a person's `teaching_assignments` by `teacherId` must go through `_loadAssigned()` / `_teacherIdForms()`, never `teacherId: req.jwtUser.userId` directly. Existing direct matches elsewhere (teacher-portal, elective checks, some exams/lessons paths) still use the exact form and are candidates for the same treatment.
+
+**Attendance class scope is now grantable from Settings.** `resolveAttendanceScope` returns `null` (unrestricted) when the caller holds `attendance__all_classes` with `read` or `create` via `hasExplicitSubGrant` (strict, no coarse fallback). The sub is listed in `moduleRegistry.js` and mirrored in `SettingsPage.jsx`'s `ALL_MODULES`; its role defaults are `N` everywhere the other strict attendance subs (`report`/`absentees`/`conflicts`) are `N`. Test files that `jest.mock('../../middleware/rbac')` and exercise `resolveAttendanceScope` must stub `hasExplicitSubGrant` too, or the call throws and the route 500s.

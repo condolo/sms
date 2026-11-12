@@ -50,7 +50,12 @@ let mockJwtUser = { userId: 'usr_admin', schoolId: SCHOOL_A, role: 'admin', role
 jest.mock('../../middleware/auth', () => ({
   authMiddleware: (req, _res, next) => { req.jwtUser = mockJwtUser; next(); },
 }));
-jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => next() }));
+jest.mock('../../middleware/rbac', () => ({
+  rbac: () => (_req, _res, next) => next(),
+  // resolveAttendanceScope's explicit 'All Classes' grant — off here, so
+  // these tests keep exercising the assignment/homeroom scope itself.
+  hasExplicitSubGrant: jest.fn(() => Promise.resolve(false)),
+}));
 jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) => next() }));
 
 let mockHomeroomTeacherRecord;

@@ -336,6 +336,14 @@ Each role has a permission matrix — you can customise what each role can **Vie
 
 Hover a role in the list and click the pencil icon — this works for both custom roles and Msingi's own built-in roles (Teacher, Finance, Deputy Principal, etc.). Renaming only changes the **name shown throughout the app**; it never changes what that role can access, and staff already assigned to it keep their access unaffected. A built-in role's rename can be reset back to its default name from the same dialog. A custom role can also be deleted entirely (trash icon); a built-in role can only be **hidden** from the invite form (eye icon) — existing staff already on it keep their access, and it can be restored at any time.
 
+### Who can take attendance for which classes *(2026-11)*
+
+Ticking **Attendance → Mark Attendance** lets a role *use* Attendance, but on its own it does not decide **which classes** they see. By default a person sees only:
+- classes and streams they have a **Teaching Assignment** for, and
+- streams where they are the **Form Teacher** or **Assistant Form Teacher** (Classes → class → stream).
+
+Admin, Principal and Deputy Principal always see every class. To let any other role or person mark **every** class (for example a Senior Teacher who covers registers), tick **Attendance → All Classes (not just assigned)**: View lets them see every class's register, Edit lets them mark it too. It is off by default for every role. The timetable does not need to be set up for any of this.
+
 ### Who can review submitted marks *(2026-10)*
 
 Teachers enter marks directly in **Exams → Markbook**; the current workflow does not require a submit-for-review step. Report-card publication locks the relevant marks. The **Review** tab remains for reviewing submission records and handling locked-mark correction/unlock workflows. The **Review / Approve Mark Submissions** Grades permission controls applicable review actions; check the Review screen's displayed status and action before making a correction. Do not tell teachers they must submit marks for approval before they can continue entering them (see changelog v5.177.0).

@@ -315,7 +315,7 @@ Navigate to **Timetable** to build the weekly schedule.
 
 ### Taking the Register
 1. Navigate to **Attendance**.
-2. Select your class (teachers see only their assigned classes).
+2. Select your class. Teachers see the classes they have a Teaching Assignment for, plus any stream they are Form Teacher of — the timetable does not need to be set up first. Staff given **All Classes (not just assigned)** in Settings see every class.
 3. Select the date (defaults to today).
 4. Mark each student: **Present**, **Absent**, **Late**, or **Excused**.
 5. Click **Save Register**.
