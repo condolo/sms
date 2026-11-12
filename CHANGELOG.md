@@ -6,6 +6,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.267.0] - 2026-11-12 - feat(timetable): Phase 2 — teacher availability, double lessons, room types, timetable rules
+
+Phase 2 of the plan towards an aSc-style automatic timetable generator: the inputs the generator (Phase 3) will work from. Nothing here blocks editing by hand.
+
+### Added
+- **Teacher availability** (Teacher View → **Availability**): tick the periods, or whole days, a teacher can't teach. Saved as clock-time blocks per staff record (`teacher_availability`, `GET /api/timetable/availability`, `PUT /api/timetable/availability/:teacherId`, any id form of the teacher accepted), so one entry holds for every section's bell schedule. `server/utils/teacher-availability.js`.
+- **Timetable rules** (the **Days** button is now **Days & rules**): most lessons a teacher teaches in a day (default 6), most times a class has a subject in a day (1), keep a teacher's lessons together, spread a subject across the week, chosen subjects in the morning (off), use preferred rooms. Stored at `schools.timetableSettings.rules`; `PUT /api/timetable/settings` accepts `rules` (partial, merged; unknown rules refused).
+- **Rule warnings** on the draft (publish bar and Publish window): lessons in a teacher's unavailable time (a lesson saved without clock times is caught only by a whole-day block), and teachers over the lessons-a-day limit. This academic year only. Publishing still goes ahead.
+- **Double lessons** on teaching assignments (`doubleLessons`; each uses 2 of `periodsPerWeek`, checked on create and update). Shown in Lessons to place ("incl. 1 double").
+- **Room needed** on subjects (`requiredRoomType`: the rooms registry's types; empty = any room).
+
+### Fixed
+- **Periods/wk could only be set when creating a teaching assignment**, so schools couldn't fill it in for existing assignments without deleting and re-adding them. Teachers → Assignments now has a pencil on each row to edit Periods / Week and Double lessons; rows without periods show "periods/wk not set".
+
+### Tests / verified
+- New `server/__tests__/routes/timetable-rules-availability.test.js` (12); double-lesson cases in `teaching-assignments-permission-grant.test.js` (3); room type in `subjects.test.js` (3); doubles in `timetable-placement.test.js` (1).
+- In the browser on the local demo school: Days & rules saved a limit of 4 lessons a day and Mathematics as a morning subject, and the draft showed 17 rule warnings ("Mr. Collins Waweru has 6 lessons on Monday (limit 4)"); Availability marked Collins Waweru off all Monday and Friday P1, the toolbar showed "Not available: Mon all day · Fri 07:30–08:30" and the warnings added "unavailable Monday all day but has Kiswahili at period 3"; editing a Kiswahili assignment refused 2 doubles in 3 periods and saved "5 periods/wk (incl. 1 double)"; Chemistry saved with Room needed: Lab.
+- Found while testing in the browser and fixed before commit: the Room needed field had landed in the department form instead of the subject form, and the subject form sent an empty room type that the server refused (the server now treats an empty value as "any room").
+
 ## [v5.266.0] - 2026-11-12 - feat(behaviour): parents see who logged an entry and in which subject, and can reply to that teacher and the form teacher
 
 Reported by a parent: "when we get an update on behaviour, I cannot see which teacher has updated. So I don't even know who to reply to and question. Like this one I can't tell which homework my son has not done." Their example, "Incomplete homework (first instance)", Classroom & Academic, 12 Nov, -1, showed no teacher and no subject. The teacher's name had been left out on purpose (the parent route never selected `reportedBy`), and incidents had no subject field at all.

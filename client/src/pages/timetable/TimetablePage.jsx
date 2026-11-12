@@ -37,7 +37,8 @@ import PublishModal           from './components/PublishModal.jsx';
 import RoomsTab               from './components/RoomsTab.jsx';
 import RoomView               from './components/RoomView.jsx';
 import PlacementView          from './components/PlacementView.jsx';
-import WorkingDaysModal       from './components/WorkingDaysModal.jsx';
+import TimetableSettingsModal from './components/TimetableSettingsModal.jsx';
+import AvailabilityModal      from './components/AvailabilityModal.jsx';
 import { Toast }              from './components/TimetablePrimitives.jsx';
 
 const VIEWS = [
@@ -96,6 +97,7 @@ export default function TimetablePage() {
   const [showPublishModal,setShowPublishModal] = useState(false);
   const [showImport,      setShowImport]      = useState(false);
   const [showDays,        setShowDays]        = useState(false);
+  const [showAvailability, setShowAvailability] = useState(false);
   const [toast,           setToast]           = useState(null);
 
   function showToast(msg, type = 'success') {
@@ -111,6 +113,14 @@ export default function TimetablePage() {
     staleTime: 5 * 60_000,
   });
   const workingDays = settingsData?.data?.workingDays ?? DAYS;
+
+  // Teacher availability (v5.267.0): when each teacher can't teach.
+  const { data: availabilityData } = useQuery({
+    queryKey: ['timetable', 'availability'],
+    queryFn:  () => ttApi.availability(),
+    staleTime: 60_000,
+  });
+  const availabilityByTeacher = Object.fromEntries((availabilityData?.data ?? []).map(a => [a.teacherId, a]));
 
   const { data: classesData } = useQuery({
     queryKey: ['classes', 'list'],
@@ -393,6 +403,14 @@ export default function TimetablePage() {
   }
 
   const selectedTeacher = teacherList.find(t => teacherKey(t) === teacherId);
+  const selectedAvailability = selectedTeacher ? availabilityByTeacher[selectedTeacher.id ?? String(selectedTeacher._id)] : null;
+  const unavailableSummary = (() => {
+    const blocks = selectedAvailability?.blocks ?? [];
+    if (!blocks.length) return '';
+    const byDay = {};
+    for (const b of blocks) (byDay[b.day] = byDay[b.day] || []).push(b.start === '00:00' && b.end === '23:59' ? 'all day' : `${b.start}–${b.end}`);
+    return Object.entries(byDay).map(([d, t]) => `${DAY_SHORT[d] ?? d} ${t.join(', ')}`).join(' · ');
+  })();
 
   /* ══════════════════════════════════════════════════════════
      RENDER
@@ -476,7 +494,7 @@ export default function TimetablePage() {
                   className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-white/40 bg-white/15 text-white hover:bg-white/25 transition"
                   title={`Working days: ${workingDays.map(d => DAY_SHORT[d]).join(', ')}`}
                 >
-                  <CalendarCheck size={12} /> Days
+                  <CalendarCheck size={12} /> Days &amp; rules
                 </button>
               )}
 
@@ -548,6 +566,9 @@ export default function TimetablePage() {
                 </span>
                 {publishStatus.doubleBookings > 0 && (
                   <span className="text-amber-700 font-medium shrink-0">· {publishStatus.doubleBookings} double booking{publishStatus.doubleBookings === 1 ? '' : 's'} to check</span>
+                )}
+                {publishStatus.ruleWarningCount > 0 && (
+                  <span className="text-amber-700 font-medium shrink-0">· {publishStatus.ruleWarningCount} rule warning{publishStatus.ruleWarningCount === 1 ? '' : 's'}</span>
                 )}
                 {publishStatus.staleLessons > 0 && (
                   <span className="text-amber-700 font-medium shrink-0">· {publishStatus.staleLessons} lesson{publishStatus.staleLessons === 1 ? '' : 's'} need review (period left its schedule)</span>
@@ -682,6 +703,19 @@ export default function TimetablePage() {
                     <> · {teacherByDay.filter(d => d.count > 0).map(d => `${DAY_SHORT[d.day]}(${d.count})`).join(' ')}</>
                   )}
                 </span>
+              )}
+              {selectedTeacher && (
+                <span className={`text-xs ${unavailableSummary ? 'text-rose-600' : 'text-slate-400'}`}>
+                  {unavailableSummary ? `Not available: ${unavailableSummary}` : 'Available at all times'}
+                </span>
+              )}
+              {selectedTeacher && canEdit && (
+                <button
+                  onClick={() => setShowAvailability(true)}
+                  className="ml-auto flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 transition"
+                >
+                  <UserX size={12} /> Availability
+                </button>
               )}
             </>
           )}
@@ -878,16 +912,35 @@ export default function TimetablePage() {
 
       <AnimatePresence>
         {showDays && (
-          <WorkingDaysModal
-            workingDays={workingDays}
+          <TimetableSettingsModal
+            settings={{ workingDays, rules: settingsData?.data?.rules ?? {} }}
             onClose={() => setShowDays(false)}
             onSaved={(r) => {
               setShowDays(false);
               qc.invalidateQueries({ queryKey: ['timetable', 'settings'] });
+              qc.invalidateQueries({ queryKey: ['timetable', 'status'] });
               const days = (r.workingDays ?? []).map(d => DAY_FULL[d]).join(', ');
               showToast(r.lessonsOnRemovedDays
-                ? `Working days: ${days}. ${r.lessonsOnRemovedDays} lesson${r.lessonsOnRemovedDays === 1 ? ' is' : 's are'} on a removed day — move or remove ${r.lessonsOnRemovedDays === 1 ? 'it' : 'them'}.`
-                : `Working days: ${days}.`);
+                ? `Saved. Working days: ${days}. ${r.lessonsOnRemovedDays} lesson${r.lessonsOnRemovedDays === 1 ? ' is' : 's are'} on a removed day — move or remove ${r.lessonsOnRemovedDays === 1 ? 'it' : 'them'}.`
+                : `Saved. Working days: ${days}.`);
+            }}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showAvailability && selectedTeacher && (
+          <AvailabilityModal
+            teacher={selectedTeacher}
+            teacherName={`${selectedTeacher.firstName ?? ''} ${selectedTeacher.lastName ?? ''}`.trim()}
+            record={selectedAvailability}
+            workingDays={workingDays}
+            onClose={() => setShowAvailability(false)}
+            onSaved={() => {
+              setShowAvailability(false);
+              qc.invalidateQueries({ queryKey: ['timetable', 'availability'] });
+              qc.invalidateQueries({ queryKey: ['timetable', 'status'] });
+              showToast('Availability saved.');
             }}
           />
         )}
@@ -899,6 +952,8 @@ export default function TimetablePage() {
             publishing={publishing}
             alreadyPublished={publishStatus.published}
             warnings={publishStatus.warnings ?? []}
+            ruleWarnings={publishStatus.ruleWarnings ?? []}
+            ruleWarningCount={publishStatus.ruleWarningCount ?? 0}
             onPublish={(termLabel) => doPublish(termLabel)}
             onClose={() => setShowPublishModal(false)}
           />

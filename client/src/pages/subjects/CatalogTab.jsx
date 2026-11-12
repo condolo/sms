@@ -204,6 +204,7 @@ function SubjectForm({ initial, departments, allSubjects = [], deptId, onSave, o
     color:        initial?.color        ?? '#6366F1',
     order:        initial?.order        ?? nextOrderFor(initialDeptId),
     description:  initial?.description  ?? '',
+    requiredRoomType: initial?.requiredRoomType ?? '',
   });
   function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
   // Re-derive the auto order only while creating — if the admin switches
@@ -299,6 +300,20 @@ function SubjectForm({ initial, departments, allSubjects = [], deptId, onSave, o
           )}
         </div>
         <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">Room needed</label>
+          <select value={form.requiredRoomType} onChange={e => set('requiredRoomType', e.target.value)}
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 bg-white">
+            <option value="">Any room</option>
+            <option value="lab">Lab</option>
+            <option value="hall">Hall</option>
+            <option value="sports">Sports ground / gym</option>
+            <option value="library">Library</option>
+            <option value="classroom">Classroom</option>
+            <option value="other">Other</option>
+          </select>
+          <p className="text-[11px] text-slate-400 mt-1">The automatic timetable will put this subject only in rooms of this type (Timetable → Rooms).</p>
+        </div>
+        <div>
           <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
           <textarea value={form.description} onChange={e => set('description', e.target.value)}
             rows={2} maxLength={500}
@@ -308,7 +323,7 @@ function SubjectForm({ initial, departments, allSubjects = [], deptId, onSave, o
       </div>
       <div className="shrink-0 flex justify-end gap-3 px-6 py-4 border-t border-slate-200 bg-slate-50">
         <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-slate-700 hover:bg-slate-200 transition">Cancel</button>
-        <button onClick={() => onSave(form)} disabled={saving || !form.name.trim() || !form.code.trim() || !form.departmentId}
+        <button onClick={() => onSave({ ...form, requiredRoomType: form.requiredRoomType || null })} disabled={saving || !form.name.trim() || !form.code.trim() || !form.departmentId}
           className="px-4 py-2 rounded-lg text-sm bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition font-medium">
           {saving ? 'Saving…' : 'Save Subject'}
         </button>

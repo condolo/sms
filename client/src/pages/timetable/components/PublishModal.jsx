@@ -9,7 +9,7 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Loader2, Zap } from 'lucide-react';
 
-export default function PublishModal({ publishing, alreadyPublished = false, warnings = [], onPublish, onClose }) {
+export default function PublishModal({ publishing, alreadyPublished = false, warnings = [], ruleWarnings = [], ruleWarningCount = 0, onPublish, onClose }) {
   const [termLabel, setTermLabel] = useState('');
 
   return (
@@ -41,6 +41,18 @@ export default function PublishModal({ publishing, alreadyPublished = false, war
               {warnings.slice(0, 5).map((w, i) => <li key={i}>{w}</li>)}
             </ul>
             {warnings.length > 5 && <p className="text-[11px] text-amber-700">and {warnings.length - 5} more</p>}
+          </div>
+        )}
+        {/* Days & rules / teacher availability (v5.267.0) — warnings only. */}
+        {ruleWarningCount > 0 && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 space-y-1">
+            <p className="text-[11px] font-semibold text-amber-800">
+              {ruleWarningCount} rule warning{ruleWarningCount === 1 ? '' : 's'} (teacher availability, lessons a day) — publishing still goes ahead
+            </p>
+            <ul className="text-[11px] text-amber-700 list-disc pl-4 space-y-0.5">
+              {ruleWarnings.slice(0, 5).map((w, i) => <li key={i}>{w}</li>)}
+            </ul>
+            {ruleWarningCount > 5 && <p className="text-[11px] text-amber-700">and {ruleWarningCount - 5} more</p>}
           </div>
         )}
         <div className="space-y-1.5">

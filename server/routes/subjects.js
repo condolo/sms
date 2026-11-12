@@ -28,6 +28,10 @@ const SubjectSchema = z.object({
   color:        z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional().nullable(),
   order:        z.number().int().min(0).optional().default(0),
   description:  z.string().max(500).optional(),
+  // The kind of room lessons of this subject need (v5.267.0), e.g. 'lab' for the sciences.
+  // Same types as the rooms registry (routes/rooms.js). Empty/null = any room. Read by the
+  // timetable generator.
+  requiredRoomType: z.preprocess(v => (v === '' ? null : v), z.enum(['classroom', 'lab', 'hall', 'sports', 'library', 'other']).nullable().optional()),
 });
 
 function _v(data) {

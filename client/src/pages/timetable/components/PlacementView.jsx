@@ -174,7 +174,7 @@ export default function PlacementView({ onOpenClass }) {
                   ) : (
                     <td className="px-4 py-2.5 text-xs font-medium text-slate-800">{r.teacherName || r.teacherId}</td>
                   )}
-                  <td className="px-3 py-2.5 text-center text-xs text-slate-700">{r.needed || (r.missingTarget ? '?' : 0)}{r.needed && r.missingTarget ? '+?' : ''}</td>
+                  <td className="px-3 py-2.5 text-center text-xs text-slate-700">{r.needed || (r.missingTarget ? '?' : 0)}{r.needed && r.missingTarget ? '+?' : ''}{r.doubles ? <span className="block text-[10px] text-slate-400">incl. {r.doubles} double{r.doubles === 1 ? '' : 's'}</span> : null}</td>
                   <td className="px-3 py-2.5 text-center text-xs text-slate-700">{r.placed}</td>
                   <td className={`px-3 py-2.5 text-center text-xs font-semibold ${r.remaining ? 'text-amber-700' : 'text-slate-300'}`}>{r.remaining}</td>
                   <td className="px-3 py-2.5"><StatusChip status={r.status} /></td>

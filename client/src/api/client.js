@@ -630,6 +630,9 @@ export const timetable = {
   settings:     ()          => _get('/timetable/settings'),
   saveSettings: (data)      => _put('/timetable/settings', data),
   placement:    ()          => _get('/timetable/placement'),
+  // Teacher availability (v5.267.0)
+  availability:     ()                 => _get('/timetable/availability'),
+  saveAvailability: (teacherId, data)  => _put(`/timetable/availability/${encodeURIComponent(teacherId)}`, data),
   // Substitution system
   substitutions: {
     list:        (params)   => _get('/timetable/substitutions', params),

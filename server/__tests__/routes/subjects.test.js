@@ -153,3 +153,30 @@ describe('PATCH /api/subjects/:id/reactivate', () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe('room type a subject needs (v5.267.0)', () => {
+  beforeEach(() => {
+    mockStores.subjects = [{ id: 'sub_1', schoolId: SCHOOL, name: 'Chemistry', code: 'CHEM', departmentId: 'dep_1', isActive: true }];
+  });
+
+  test('a real room type is saved, and null clears it', async () => {
+    let res = await supertest(buildApp()).put('/api/subjects/sub_1').send({ name: 'Chemistry', code: 'CHEM', departmentId: 'dep_1', requiredRoomType: 'lab' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.requiredRoomType).toBe('lab');
+    res = await supertest(buildApp()).put('/api/subjects/sub_1').send({ name: 'Chemistry', code: 'CHEM', departmentId: 'dep_1', requiredRoomType: null });
+    expect(res.status).toBe(200);
+    expect(res.body.data.requiredRoomType).toBeNull();
+  });
+
+  test('a room type the rooms registry does not have is refused', async () => {
+    const res = await supertest(buildApp()).put('/api/subjects/sub_1').send({ name: 'Chemistry', code: 'CHEM', departmentId: 'dep_1', requiredRoomType: 'kitchen' });
+    expect(res.status).toBe(400);
+  });
+});
+
+test('an empty room type from a form means "any room" (saved as null), not an error', async () => {
+  mockStores.subjects = [{ id: 'sub_1', schoolId: SCHOOL, name: 'Chemistry', code: 'CHEM', departmentId: 'dep_1', isActive: true, requiredRoomType: 'lab' }];
+  const res = await supertest(buildApp()).put('/api/subjects/sub_1').send({ name: 'Chemistry', code: 'CHEM', departmentId: 'dep_1', requiredRoomType: '' });
+  expect(res.status).toBe(200);
+  expect(res.body.data.requiredRoomType).toBeNull();
+});

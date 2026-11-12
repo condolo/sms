@@ -9,7 +9,7 @@ import {
   Search, X, Trash2, Eye, Loader2,
   AlertTriangle, Phone, Mail,
   Briefcase, Users, Edit2, Save, Calendar,
-  MapPin, Award, Download, ClipboardList, Plus, Filter,
+  MapPin, Award, Download, ClipboardList, Plus, Filter, Pencil,
 } from 'lucide-react';
 import {
   teachers as teachersApi,
@@ -857,7 +857,11 @@ function TeacherAssignmentsTab({ teacher, canEdit }) {
   const teacherId = teacher.userId ?? teacher.id ?? teacher._id;
 
   const [showAdd, setShowAdd] = useState(false);
-  const [af, setAf]           = useState({ classId: '', subjectId: '', streamId: '', preferredRoomId: '', periodsPerWeek: '' });
+  const [af, setAf]           = useState({ classId: '', subjectId: '', streamId: '', preferredRoomId: '', periodsPerWeek: '', doubleLessons: '' });
+  // Inline edit of an existing assignment's lessons per week / double lessons (v5.267.0).
+  const [editId, setEditId]   = useState(null);
+  const [ef, setEf]           = useState({ periodsPerWeek: '', doubleLessons: '' });
+  const [efErr, setEfErr]     = useState('');
   const [afErr, setAfErr]     = useState({});
 
   /* ── Fetch assignments for this teacher ─── */
@@ -919,12 +923,31 @@ function TeacherAssignmentsTab({ teacher, canEdit }) {
     onSuccess:  () => {
       invalidate();
       setShowAdd(false);
-      setAf({ classId: '', subjectId: '', streamId: '', preferredRoomId: '', periodsPerWeek: '' });
+      setAf({ classId: '', subjectId: '', streamId: '', preferredRoomId: '', periodsPerWeek: '', doubleLessons: '' });
       setAfErr({});
       toast.success('Assignment added.');
     },
     onError: err => setAfErr({ _s: err?.message ?? 'Failed to add assignment' }),
   });
+
+  const updateMut = useMutation({
+    mutationFn: ({ id, data }) => assignmentsApi.update(id, data),
+    onSuccess:  () => { invalidate(); setEditId(null); setEfErr(''); toast.success('Assignment updated.'); },
+    onError:    err => setEfErr(err?.message ?? 'Failed to update assignment.'),
+  });
+
+  function startEdit(a) {
+    setEditId(a.id ?? a._id);
+    setEf({ periodsPerWeek: a.periodsPerWeek ? String(a.periodsPerWeek) : '', doubleLessons: a.doubleLessons ? String(a.doubleLessons) : '' });
+    setEfErr('');
+  }
+  function saveEdit() {
+    const ppw = ef.periodsPerWeek ? Number(ef.periodsPerWeek) : null;
+    const dbl = ef.doubleLessons ? Number(ef.doubleLessons) : 0;
+    if (dbl && !ppw) { setEfErr('Set periods per week first.'); return; }
+    if (dbl * 2 > (ppw || 0)) { setEfErr(`${dbl} double${dbl === 1 ? '' : 's'} need${dbl === 1 ? 's' : ''} ${dbl * 2} periods.`); return; }
+    updateMut.mutate({ id: editId, data: { periodsPerWeek: ppw, doubleLessons: dbl } });
+  }
 
   const removeMut = useMutation({
     mutationFn: id => assignmentsApi.remove(id),
@@ -947,6 +970,9 @@ function TeacherAssignmentsTab({ teacher, canEdit }) {
     if (!af.classId)   e.classId   = 'Select a class';
     if (!af.subjectId) e.subjectId = 'Select a subject';
     if (streamRequired && !af.streamId) e.streamId = 'This subject is compulsory here — select the stream this teacher covers';
+    if (af.doubleLessons && Number(af.doubleLessons) * 2 > Number(af.periodsPerWeek || 0)) {
+      e.doubleLessons = af.periodsPerWeek ? `${af.doubleLessons} double(s) need ${Number(af.doubleLessons) * 2} periods` : 'Set periods per week first';
+    }
     if (Object.keys(e).length) { setAfErr(e); return; }
     createMut.mutate({
       teacherId,
@@ -955,6 +981,7 @@ function TeacherAssignmentsTab({ teacher, canEdit }) {
       ...(af.streamId          ? { streamId:         af.streamId }                : {}),
       ...(af.preferredRoomId  ? { preferredRoomId:  af.preferredRoomId }          : {}),
       ...(af.periodsPerWeek   ? { periodsPerWeek:   Number(af.periodsPerWeek) }   : {}),
+      ...(af.doubleLessons    ? { doubleLessons:    Number(af.doubleLessons) }    : {}),
     });
   }
 
@@ -1077,6 +1104,23 @@ function TeacherAssignmentsTab({ teacher, canEdit }) {
               </div>
             </div>
 
+            {/* Double lessons — two back-to-back periods each, counted in Periods / Week */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Double lessons / Week</label>
+                <input
+                  type="number" min="0" max="20"
+                  value={af.doubleLessons}
+                  onChange={e => setField('doubleLessons', e.target.value)}
+                  placeholder="e.g. 1"
+                  className={`mt-1 ${fCls(afErr.doubleLessons)}`}
+                />
+                {afErr.doubleLessons
+                  ? <p className="text-[10px] text-red-500 mt-0.5">{afErr.doubleLessons}</p>
+                  : <p className="text-[10px] text-slate-400 mt-0.5">Each double uses 2 of the periods above.</p>}
+              </div>
+            </div>
+
             <div className="flex items-center justify-end gap-2 pt-1">
               <button
                 onClick={() => { setShowAdd(false); setAfErr({}); }}
@@ -1126,11 +1170,46 @@ function TeacherAssignmentsTab({ teacher, canEdit }) {
                   {a.preferredRoomName && (
                     <span className="text-[10px] text-slate-400">· Room: {a.preferredRoomName}</span>
                   )}
-                  {a.periodsPerWeek && (
-                    <span className="text-[10px] text-slate-400">· {a.periodsPerWeek} periods/wk</span>
+                  {a.periodsPerWeek ? (
+                    <span className="text-[10px] text-slate-400">
+                      · {a.periodsPerWeek} periods/wk{a.doubleLessons ? ` (incl. ${a.doubleLessons} double${a.doubleLessons === 1 ? '' : 's'})` : ''}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-amber-600">· periods/wk not set</span>
                   )}
                 </div>
+                {editId === (a.id ?? a._id) && (
+                  <div className="mt-2 flex flex-wrap items-end gap-2">
+                    <label className="text-[10px] text-slate-500">
+                      Periods / wk
+                      <input type="number" min="1" max="40" value={ef.periodsPerWeek}
+                        onChange={e => setEf(f => ({ ...f, periodsPerWeek: e.target.value }))}
+                        className="block mt-0.5 w-20 text-xs px-2 py-1 rounded-md border border-slate-200" />
+                    </label>
+                    <label className="text-[10px] text-slate-500">
+                      Doubles / wk
+                      <input type="number" min="0" max="20" value={ef.doubleLessons}
+                        onChange={e => setEf(f => ({ ...f, doubleLessons: e.target.value }))}
+                        className="block mt-0.5 w-20 text-xs px-2 py-1 rounded-md border border-slate-200" />
+                    </label>
+                    <button onClick={saveEdit} disabled={updateMut.isPending}
+                      className="text-xs font-medium bg-slate-900 text-white px-3 py-1 rounded-md disabled:opacity-50">
+                      {updateMut.isPending ? 'Saving…' : 'Save'}
+                    </button>
+                    <button onClick={() => setEditId(null)} className="text-xs text-slate-500 px-2 py-1">Cancel</button>
+                    {efErr && <p className="w-full text-[10px] text-red-500">{efErr}</p>}
+                  </div>
+                )}
               </div>
+              {canEdit && editId !== (a.id ?? a._id) && (
+                <button
+                  onClick={() => startEdit(a)}
+                  className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition"
+                  title="Edit periods per week / double lessons"
+                >
+                  <Pencil size={12} />
+                </button>
+              )}
               {canEdit && (
                 <button
                   onClick={() => removeMut.mutate(a.id ?? a._id)}

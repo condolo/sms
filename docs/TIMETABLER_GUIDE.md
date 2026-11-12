@@ -15,9 +15,11 @@
 7. [Cover / Substitution](#7-cover--substitution)
 8. [Publishing](#8-publishing)
 9. [Lessons to Place](#9-lessons-to-place)
-10. [Working Days](#10-working-days)
+10. [Days & Rules](#10-days--rules)
 11. [Locking a Lesson](#11-locking-a-lesson)
 12. [Importing a Timetable](#12-importing-a-timetable)
+13. [Teacher Availability](#13-teacher-availability)
+14. [Lessons per Week, Double Lessons and Room Types](#14-lessons-per-week-double-lessons-and-room-types)
 
 ---
 
@@ -95,11 +97,26 @@ The list is only as good as the assignments: set **Periods/wk** on every assignm
 
 ---
 
-## 10. Working Days
+## 10. Days & Rules
 
-Click **Days** to choose the days lessons can go on. The default is Monday to Friday; tick **Saturday** if the school teaches on Saturdays. The grids, the day picker when adding a lesson, and the import all follow this setting.
+Click **Days & rules**.
+
+**Working days.** Choose the days lessons can go on. The default is Monday to Friday; tick **Saturday** if the school teaches on Saturdays. The grids, the day picker when adding a lesson, and the import all follow this setting.
 
 Removing a day doesn't delete anything: lessons already on that day stay visible so you can move or remove them, and you're told how many there are.
+
+**Rules.** How a good timetable looks. The automatic timetable (coming next) follows them; editing by hand is never blocked. Each rule can be switched off.
+
+| Rule | Default |
+|---|---|
+| Most lessons a teacher teaches in a day | On, 6 |
+| Most times a class has the same subject in a day (a double counts once) | On, 1 |
+| Keep each teacher's lessons together, with few free periods in between | On |
+| Spread each subject across the week | On |
+| Put chosen subjects in the morning where possible | Off (pick the subjects) |
+| Use each teacher's preferred room when it's free | On |
+
+A teacher over the lessons-a-day limit shows as a **rule warning** in the publish bar and the Publish window (with teachers marked unavailable, §13). Publishing still goes ahead.
 
 ---
 
@@ -115,4 +132,21 @@ Click **Import** to load lessons from a spreadsheet (template provided, up to 50
 
 ---
 
-*Last reviewed: 2026-11-12 (v5.265.0) — checked directly against `client/src/pages/timetable/` and `server/routes/timetable.js`.*
+## 13. Teacher Availability
+
+In **Teacher View**, pick a teacher and click **Availability**. Tick the periods the teacher can't teach, or **Whole day** for a day off (part-time staff, a regular commitment elsewhere). Add a note if useful, then **Save**. The toolbar then shows, for example, "Not available: Mon all day · Fri 07:30–08:30".
+
+Times are saved as clock times, so one entry works for every section's bell schedule. The automatic timetable will keep these times free. If a lesson already sits in an unavailable time, it shows as a rule warning, never as a block.
+
+---
+
+## 14. Lessons per Week, Double Lessons and Room Types
+
+These are set outside the Timetable module, and both the **Lessons to place** list and the automatic timetable read them:
+
+- **Periods / Week and Double lessons** — Teachers → a teacher → **Assignments**. Set them when adding an assignment, or hover an existing one and click the pencil to change them. Each double lesson uses two of the week's periods, so 5 periods with 1 double means one double and three singles. Assignments with no periods set show "periods/wk not set".
+- **Room needed** — Subjects → edit a subject → **Room needed** (Lab, Hall, Sports ground, Library, Classroom, Other, or Any room). For example, set Chemistry to Lab. Make sure the rooms themselves have the right type under **Rooms**.
+
+---
+
+*Last reviewed: 2026-11-12 (v5.267.0) — checked directly against `client/src/pages/timetable/` and `server/routes/timetable.js`.*

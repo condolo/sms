@@ -166,3 +166,34 @@ describe('PUT/DELETE /api/teaching-assignments/:id — same permission path', ()
     expect(res.status).toBe(200);
   });
 });
+
+/* ── Double lessons (v5.267.0) — two back-to-back periods each, counted in periodsPerWeek ── */
+describe('double lessons on a teaching assignment', () => {
+  beforeEach(() => { mockJwtUser = { userId: 'usr_admin', schoolId: SCHOOL, role: 'admin', roles: [] }; });
+
+  test('create stores doubleLessons when they fit in periodsPerWeek', async () => {
+    const res = await supertest(buildApp()).post('/api/teaching-assignments').send({ ...VALID_BODY, periodsPerWeek: 6, doubleLessons: 2 });
+    expect(res.status).toBe(201);
+    expect(res.body.data).toMatchObject({ periodsPerWeek: 6, doubleLessons: 2 });
+  });
+
+  test('create refuses more doubles than the week holds, or doubles with no periodsPerWeek', async () => {
+    let res = await supertest(buildApp()).post('/api/teaching-assignments').send({ ...VALID_BODY, periodsPerWeek: 3, doubleLessons: 2 });
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toMatch(/need 4 periods, but only 3/);
+    res = await supertest(buildApp()).post('/api/teaching-assignments').send({ ...VALID_BODY, doubleLessons: 1 });
+    expect(res.status).toBe(400);
+  });
+
+  test('update checks doubles against the stored periodsPerWeek when only doubles change', async () => {
+    mockAssignments = makeCollection([{ id: 'ta_1', schoolId: SCHOOL, teacherId: 'usr_teacher1', periodsPerWeek: 4, doubleLessons: 0 }]);
+    let res = await supertest(buildApp()).put('/api/teaching-assignments/ta_1').send({ doubleLessons: 3 });
+    expect(res.status).toBe(400);
+    res = await supertest(buildApp()).put('/api/teaching-assignments/ta_1').send({ doubleLessons: 2 });
+    expect(res.status).toBe(200);
+    expect(mockAssignments._docs[0].doubleLessons).toBe(2);
+    // Lowering periodsPerWeek below what the doubles need is refused too.
+    res = await supertest(buildApp()).put('/api/teaching-assignments/ta_1').send({ periodsPerWeek: 3 });
+    expect(res.status).toBe(400);
+  });
+});

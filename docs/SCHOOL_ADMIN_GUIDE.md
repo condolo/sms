@@ -228,7 +228,7 @@ If a staff member never received their welcome email, has forgotten their passwo
 | **Admissions Officer** | Admissions module |
 | **Finance** | Finance module only |
 | **HR** | HR & Payroll module only |
-| **Timetabler** | Timetable builder only — including working days, locking lessons and the Lessons to place checklist (see the [Timetabler Guide](TIMETABLER_GUIDE.md)) |
+| **Timetabler** | Timetable builder only — including working days and timetable rules, teacher availability, locking lessons and the Lessons to place checklist (see the [Timetabler Guide](TIMETABLER_GUIDE.md)) |
 | **Discipline Committee** | Behaviour & Pastoral module |
 | **Parent** | Read-only: their children's data, events, messaging |
 | **Student** | Read-only: own profile, events, timetable |

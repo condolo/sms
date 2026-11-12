@@ -22,6 +22,7 @@
      GET    /teacher/:teacherId      Teacher weekly schedule (array)
      GET    /settings                Working days (PUT to change)
      GET    /placement               Lessons to place: needed per week vs on the draft
+     GET    /availability            Teacher unavailable times (PUT /availability/:teacherId)
      GET    /:id                     Single slot
      POST   /                        Create slot (with conflict checks)
      POST   /bulk                    Bulk create / replace (clash-checked, all or nothing)
@@ -47,15 +48,16 @@ const { resolveAcademicPeriod } = require('../utils/academic-period');
 const { isYearArchived } = require('../utils/archival');
 const ScopeEngine = require('../utils/scopeEngine');
 const { timesOverlap, checkConflicts, batchConflicts } = require('../utils/timetable-conflicts');
-const { getTimetableSettings, setWorkingDays, notWorkingDayMsg, ALL_DAYS } = require('../utils/timetable-settings');
+const { getTimetableSettings, setWorkingDays, setRules, notWorkingDayMsg, ALL_DAYS } = require('../utils/timetable-settings');
+const teacherAvailability = require('../utils/teacher-availability');
 const { computePlacement } = require('../utils/timetable-placement');
 
 const router = express.Router();
 
 // Every successful change to the draft marks it as changed, so Publish becomes available.
-// Publishing, substitution cover and the working-days setting are not timetable changes.
+// Publishing, substitution cover, the days/rules settings and teacher availability are not timetable changes.
 router.use((req, res, next) => {
-  if (['POST', 'PUT', 'DELETE'].includes(req.method) && !/^\/(publish|unpublish|substitutions|settings)/.test(req.path)) {
+  if (['POST', 'PUT', 'DELETE'].includes(req.method) && !/^\/(publish|unpublish|substitutions|settings|availability)/.test(req.path)) {
     res.on('finish', () => {
       if (res.statusCode < 300 && req.jwtUser?.schoolId) {
         markTimetableChanged(req.jwtUser.schoolId).catch(err => console.error('[timetable] change mark failed:', err.message));
@@ -683,17 +685,41 @@ function _overlapWarnings(slots) {
 // What is wrong with the draft. Untimed lessons block publish. Double bookings and stale lessons are reported.
 async function _draftProblems(req) {
   const { schoolId } = req.jwtUser;
-  const all = await tenantModel('timetable', tenantContext(req))
+  const ctx = tenantContext(req);
+  const all = await tenantModel('timetable', ctx)
     .find({ schoolId, isActive: true })
-    .select('day startTime endTime teacherId classId streamId room subject scheduleStale')
+    .select('day period startTime endTime teacherId teacherName classId streamId room subject type scheduleStale academicYearId')
     .lean();
   const untimed = all.filter(sl => !sl.startTime || !sl.endTime);
   const warnings = _overlapWarnings(all.filter(sl => sl.startTime && sl.endTime));
+
+  // Rule warnings (v5.267.0): lessons in a time the teacher marked unavailable, and teachers
+  // over the school's lessons-a-day limit. This academic year's lessons only. Never block.
+  let ruleWarnings = [];
+  try {
+    const period = await resolveAcademicPeriod(schoolId, ctx, {});
+    const yearId = period.error ? null : (period.academicYearId ?? null);
+    const thisYear = all.filter(sl => (sl.academicYearId ?? null) === yearId);
+    const [{ rules }, availability, teachers] = await Promise.all([
+      getTimetableSettings(schoolId),
+      tenantModel('teacher_availability', ctx).find({ schoolId }).select('teacherId blocks').lean(),
+      tenantModel('teachers', ctx).find({ schoolId }).select('id userId title firstName lastName').lean(),
+    ]);
+    ruleWarnings = [
+      ...teacherAvailability.unavailableWarnings(thisYear, availability, teachers),
+      ...(rules.maxTeacherLessonsPerDay.on ? teacherAvailability.overloadWarnings(thisYear, teachers, rules.maxTeacherLessonsPerDay.value) : []),
+    ];
+  } catch (err) {
+    console.error('[timetable] rule warnings failed (non-fatal):', err.message);
+  }
+
   return {
     untimedLessons: untimed.length,
     staleLessons: all.filter(sl => sl.scheduleStale).length,
     doubleBookings: warnings.length,
     warnings: warnings.slice(0, 20),
+    ruleWarningCount: ruleWarnings.length,
+    ruleWarnings: ruleWarnings.slice(0, 20),
   };
 }
 
@@ -704,22 +730,80 @@ router.get('/settings', authMiddleware, PLAN, MODGATE, timetableManageAccess('re
   } catch (err) { console.error('[timetable GET /settings]', err); return E.serverError(res); }
 });
 
-const SettingsSchema = z.object({ workingDays: z.array(z.enum(ALL_DAYS)).min(1).max(7) });
+const RuleOnOff = z.object({ on: z.boolean().optional() }).strict();
+const RuleValue = z.object({ on: z.boolean().optional(), value: z.number().int().min(1).max(20).optional() }).strict();
+const SettingsSchema = z.object({
+  workingDays: z.array(z.enum(ALL_DAYS)).min(1).max(7).optional(),
+  // Partial: only the rules sent are changed (utils/timetable-settings.js DEFAULT_RULES).
+  rules: z.object({
+    maxTeacherLessonsPerDay: RuleValue.optional(),
+    maxSubjectPerDay:        RuleValue.optional(),
+    avoidTeacherGaps:        RuleOnOff.optional(),
+    spreadAcrossWeek:        RuleOnOff.optional(),
+    coreSubjectsMorning:     z.object({ on: z.boolean().optional(), subjectIds: z.array(z.string().max(100)).max(50).optional() }).strict().optional(),
+    usePreferredRooms:       RuleOnOff.optional(),
+  }).strict().optional(),
+}).refine(d => d.workingDays || d.rules, { message: 'Send workingDays or rules.' });
 
 router.put('/settings', authMiddleware, PLAN, MODGATE, timetableManageAccess('update'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { data, error } = _validate(SettingsSchema, req.body);
     if (error) return E.validation(res, error);
-    // Removing a day leaves its lessons in place (they still show, and can be moved or removed);
-    // it only stops new lessons going on that day. Say how many are affected.
-    const saved = await setWorkingDays(schoolId, data.workingDays);
-    const dropped = ALL_DAYS.filter(d => !saved.workingDays.includes(d));
-    const stranded = dropped.length
-      ? await tenantModel('timetable', tenantContext(req)).countDocuments({ schoolId, isActive: true, day: { $in: dropped } })
-      : 0;
-    return ok(res, { ...saved, lessonsOnRemovedDays: stranded });
+    let stranded = 0;
+    if (data.workingDays) {
+      // Removing a day leaves its lessons in place (they still show, and can be moved or removed);
+      // it only stops new lessons going on that day. Say how many are affected.
+      const saved = await setWorkingDays(schoolId, data.workingDays);
+      const dropped = ALL_DAYS.filter(d => !saved.workingDays.includes(d));
+      stranded = dropped.length
+        ? await tenantModel('timetable', tenantContext(req)).countDocuments({ schoolId, isActive: true, day: { $in: dropped } })
+        : 0;
+    }
+    if (data.rules) {
+      // Core subjects must be this school's own subjects.
+      const ids = data.rules.coreSubjectsMorning?.subjectIds;
+      if (ids?.length) {
+        const found = await tenantModel('subjects', tenantContext(req)).find({ schoolId, id: { $in: ids } }).select('id').lean();
+        data.rules.coreSubjectsMorning.subjectIds = found.map(x => x.id);
+      }
+      await setRules(schoolId, data.rules);
+    }
+    return ok(res, { ...(await getTimetableSettings(schoolId)), lessonsOnRemovedDays: stranded });
   } catch (err) { console.error('[timetable PUT /settings]', err); return E.serverError(res); }
+});
+
+/* ── Teacher availability (utils/teacher-availability.js, v5.267.0) ──────────
+   GET /availability            every teacher's unavailable times
+   PUT /availability/:teacherId { blocks: [{day,start,end}], note } — replaces that teacher's.
+   :teacherId may be any id form of the staff record (its id, userId or _id); it is stored
+   under the staff record's own id. */
+router.get('/availability', authMiddleware, PLAN, MODGATE, timetableManageAccess('read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const docs = await tenantModel('teacher_availability', tenantContext(req)).find({ schoolId })
+      .select('teacherId blocks note updatedAt').lean();
+    return ok(res, docs.map(({ _id, ...d }) => d));
+  } catch (err) { console.error('[timetable GET /availability]', err); return E.serverError(res); }
+});
+
+router.put('/availability/:teacherId', authMiddleware, PLAN, MODGATE, timetableManageAccess('update'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const teacher = await _resolveTeacherByAnyId(schoolId, tenantContext(req), req.params.teacherId);
+    if (!teacher) return E.notFound(res, 'Teacher not found');
+    const { blocks, error } = teacherAvailability.normaliseBlocks(req.body?.blocks ?? []);
+    if (error) return E.badRequest(res, error);
+    const note = typeof req.body?.note === 'string' ? req.body.note.trim().slice(0, 300) : '';
+    const teacherId = teacher.id || String(teacher._id);
+    const now = new Date().toISOString();
+    await tenantModel('teacher_availability', tenantContext(req)).updateOne(
+      { schoolId, teacherId },
+      { $set: { blocks, note, updatedAt: now, updatedBy: userId }, $setOnInsert: { id: uuidv4(), schoolId, teacherId, createdAt: now } },
+      { upsert: true },
+    );
+    return ok(res, { teacherId, blocks, note, updatedAt: now });
+  } catch (err) { console.error('[timetable PUT /availability/:teacherId]', err); return E.serverError(res); }
 });
 
 /* ── GET /api/timetable/placement ─ Lessons to place (utils/timetable-placement.js) ──
@@ -733,7 +817,7 @@ router.get('/placement', authMiddleware, PLAN, MODGATE, timetableManageAccess('r
     const yearId = period.error ? null : (period.academicYearId ?? null);
     const [assignments, slots, classes, subjects, teachers] = await Promise.all([
       tenantModel('teaching_assignments', ctx).find({ schoolId })
-        .select('classId className streamId streamName subjectId subjectName teacherId teacherName periodsPerWeek').limit(20000).lean(),
+        .select('classId className streamId streamName subjectId subjectName teacherId teacherName periodsPerWeek doubleLessons').limit(20000).lean(),
       tenantModel('timetable', ctx).find({ schoolId, isActive: true, academicYearId: yearId })
         .select('classId streamId subject subjectId teacherId teacherName type isActive').limit(20000).lean(),
       tenantModel('classes', ctx).find({ schoolId }).select('id name').lean(),

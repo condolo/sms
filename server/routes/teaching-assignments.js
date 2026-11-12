@@ -156,7 +156,20 @@ const AssignmentSchema = z.object({
   streamId:        z.string().min(1).optional(),
   preferredRoomId: z.string().optional(),
   periodsPerWeek:  z.number().int().min(1).max(40).optional(),
+  // How many of those lessons are double periods (two back-to-back periods each), for the
+  // timetable generator (v5.267.0). 2 × doubleLessons must fit in periodsPerWeek.
+  doubleLessons:   z.number().int().min(0).max(20).optional(),
 });
+
+/* Doubles count two periods each, so they must fit in the week's total. */
+function _doublesProblem(periodsPerWeek, doubleLessons) {
+  if (!doubleLessons) return null;
+  if (!periodsPerWeek) return 'Set periods per week before double lessons.';
+  if (doubleLessons * 2 > periodsPerWeek) {
+    return `${doubleLessons} double lesson${doubleLessons === 1 ? '' : 's'} need${doubleLessons === 1 ? 's' : ''} ${doubleLessons * 2} periods, but only ${periodsPerWeek} a week are set.`;
+  }
+  return null;
+}
 
 /* ── GET /api/teaching-assignments ──────────────────────────── */
 router.get('/', authMiddleware, async (req, res) => { // rbac: self-scoped below for plain teachers, open to all other real roles — see header comment
@@ -223,6 +236,8 @@ router.post('/', authMiddleware, async (req, res) => { // rbac: canManage() belo
     const result = AssignmentSchema.safeParse(req.body);
     if (!result.success) return E.validation(res, result.error.issues);
     const { data } = result;
+    const doublesErr = _doublesProblem(data.periodsPerWeek, data.doubleLessons);
+    if (doublesErr) return E.badRequest(res, doublesErr);
 
     // Resolve entities — denormalise names at write time
     const [teacher, subject, cls, room] = await Promise.all([
@@ -370,6 +385,7 @@ router.post('/', authMiddleware, async (req, res) => { // rbac: canManage() belo
       preferredRoomId:   room?.id            ?? null,
       preferredRoomName: room?.name          ?? null,
       periodsPerWeek:    data.periodsPerWeek ?? null,
+      doubleLessons:     data.doubleLessons ?? 0,
       assignedBy:        userId,
       assignedByRole:    role,
     });
@@ -383,7 +399,7 @@ router.post('/', authMiddleware, async (req, res) => { // rbac: canManage() belo
   }
 });
 
-/* ── PUT /api/teaching-assignments/:id — update preferred room / periods ── */
+/* ── PUT /api/teaching-assignments/:id — update preferred room / periods / double lessons ── */
 router.put('/:id', authMiddleware, async (req, res) => { // rbac: canManage() below — real-role + HOD department-scope check
   try {
     const { schoolId, userId } = req.jwtUser;
@@ -397,6 +413,7 @@ router.put('/:id', authMiddleware, async (req, res) => { // rbac: canManage() be
     const UpdateSchema = z.object({
       preferredRoomId: z.string().optional().nullable(),
       periodsPerWeek:  z.number().int().min(1).max(40).optional().nullable(),
+      doubleLessons:   z.number().int().min(0).max(20).optional().nullable(),
     });
     const result = UpdateSchema.safeParse(req.body);
     if (!result.success) return E.validation(res, result.error.issues);
@@ -416,6 +433,13 @@ router.put('/:id', authMiddleware, async (req, res) => { // rbac: canManage() be
       }
     }
     if ('periodsPerWeek' in result.data) patch.periodsPerWeek = result.data.periodsPerWeek;
+    if ('doubleLessons' in result.data) patch.doubleLessons = result.data.doubleLessons ?? 0;
+    {
+      const ppw = 'periodsPerWeek' in patch ? patch.periodsPerWeek : existing.periodsPerWeek;
+      const dbl = 'doubleLessons' in patch ? patch.doubleLessons : (existing.doubleLessons || 0);
+      const doublesErr = _doublesProblem(ppw, dbl);
+      if (doublesErr) return E.badRequest(res, doublesErr);
+    }
 
     const doc = await tenantModel('teaching_assignments', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },

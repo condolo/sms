@@ -310,7 +310,9 @@ Navigate to **Timetable** to build the weekly schedule.
 - Click an empty slot to assign a subject and teacher.
 - A lesson that would put a class, teacher or room in two places at once is refused, with the reason. Imports skip such rows and say why.
 - **Lessons to place** shows, for each class and subject, how many lessons a week are needed (from teaching assignments), how many are placed, and how many are left.
-- **Days** sets the working days (add Saturday if your school teaches then).
+- **Days & rules** sets the working days (add Saturday if your school teaches then) and the timetable rules (e.g. most lessons a teacher teaches in a day).
+- In **Teacher View**, **Availability** marks the periods or days a teacher can't teach.
+- Set **Periods / Week** and **Double lessons** on each teacher's assignments (Teachers → Assignments), and **Room needed** on subjects that need a lab or hall.
 - Tick **Lock this lesson** to pin a lesson so it can't be changed or removed until unlocked.
 - Print or export the timetable from the action bar.
 - Full details: [Timetabler Guide](TIMETABLER_GUIDE.md).

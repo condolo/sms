@@ -70,3 +70,8 @@ test('lessons no assignment asks for are listed; non-lessons (assembly) are igno
   expect(r.unassigned).toEqual([expect.objectContaining({ className: 'Year 7', subjectName: 'English', placed: 1 })]);
   expect(r.summary.unassignedLessons).toBe(1);
 });
+
+test('double lessons are added up per class subject (v5.267.0)', () => {
+  const r = computePlacement({ assignments: [A({ periodsPerWeek: 6, doubleLessons: 2 })], slots: [], classes, subjects, teachers });
+  expect(r.classes[0]).toMatchObject({ needed: 6, doubles: 2 });
+});

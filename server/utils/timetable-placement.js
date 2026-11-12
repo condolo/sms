@@ -70,7 +70,7 @@ function computePlacement({ assignments = [], slots = [], classes = [], subjects
         classId: ck(a.classId), className: className.get(ck(a.classId)) || a.className || '',
         streamId: a.streamId || null, streamName: a.streamName || null,
         subjectId: a.subjectId, subjectName: a.subjectName || '',
-        teachers: [], needed: 0, missingTarget: false, placed: 0,
+        teachers: [], needed: 0, doubles: 0, missingTarget: false, placed: 0,
       });
     }
     const g = groups.get(key);
@@ -78,6 +78,7 @@ function computePlacement({ assignments = [], slots = [], classes = [], subjects
     if (tName && !g.teachers.includes(tName)) g.teachers.push(tName);
     if (a.periodsPerWeek) g.needed += Number(a.periodsPerWeek);
     else g.missingTarget = true;
+    g.doubles += Number(a.doubleLessons) || 0;   // of `needed`, how many are double periods (v5.267.0)
   }
 
   const lessons = slots.filter(s => s.isActive !== false && _lessonOnly(s));
