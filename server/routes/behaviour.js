@@ -439,19 +439,22 @@ router.get('/incidents', authMiddleware, PLAN, MODGATE, behaviourAccess('read'),
 
     // Reported directly: show who recorded each incident, not just what
     // happened — one lookup for the whole page, not one per row.
-    const reporterIds = [...new Set(docs.map(d => d.reportedBy).filter(Boolean))];
+    // reportedBy, else createdBy (older/seeded rows carry only createdBy —
+    // parents already saw a name for those while staff saw "—"); matched by
+    // `id` or `_id`, same as utils/behaviour-replies.js.
+    const reporterIds = [...new Set(docs.map(behaviourReplies.loggerOf).filter(Boolean))];
     const reporterDocs = reporterIds.length
-      ? await tenantModel('users', tenantContext(req)).find({ schoolId, id: { $in: reporterIds } }).select('id name role').lean()
+      ? await tenantModel('users', tenantContext(req)).find({ schoolId, ...behaviourReplies.byUserIds(reporterIds) }).select('id name role').lean()
       : [];
-    const reporterMap = Object.fromEntries(reporterDocs.map(u => [u.id, { name: u.name, role: u.role }]));
+    const reporterMap = Object.fromEntries(reporterDocs.map(u => [behaviourReplies.userKey(u), { name: u.name, role: u.role }]));
     // Parent replies on each row (count, and unread for this user) — one
     // query for the page; see utils/behaviour-replies.js.
     const replies = await behaviourReplies.replyCounts(tenantContext(req), schoolId, docs.map(d => d.id), { viewerId: req.jwtUser.userId })
       .catch(() => ({}));
     const docsWithReporter = docs.map(d => ({
       ...d,
-      reportedByName: reporterMap[d.reportedBy]?.name || null,
-      reportedByRole: reporterMap[d.reportedBy]?.role || null,
+      reportedByName: reporterMap[behaviourReplies.loggerOf(d)]?.name || null,
+      reportedByRole: reporterMap[behaviourReplies.loggerOf(d)]?.role || null,
       replyCount: replies[d.id]?.count || 0,
       unreadReplies: replies[d.id]?.unread || 0,
     }));

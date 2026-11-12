@@ -52,7 +52,7 @@ function displayName(name) {
 function userKey(u) { return u.id || String(u._id); }
 function byUserIds(ids) {
   const list = [...new Set((ids || []).filter(Boolean).map(String))];
-  const oids = list.filter(v => /^[a-fd]{24}$/i.test(v)).map(v => new mongoose.Types.ObjectId(v));
+  const oids = list.filter(v => /^[a-f\d]{24}$/i.test(v)).map(v => new mongoose.Types.ObjectId(v));
   return oids.length ? { $or: [{ id: { $in: list } }, { _id: { $in: oids } }] } : { id: { $in: list } };
 }
 async function findUser(ctx, schoolId, userId, fields) {

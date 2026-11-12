@@ -6,6 +6,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.267.1] - 2026-11-12 - fix(behaviour): id-less teacher accounts still unmatched, withdrawn entries shown to parents, staff "Recorded By" blank on older entries
+
+Follow-ups to v5.266.0.
+
+### Fixed
+- **The v5.266.0 audit fix for accounts with no `id` field (user id = `String(_id)`) didn't work for real ids.** `byUserIds()` in `server/utils/behaviour-replies.js` recognised an ObjectId with `/^[a-fd]{24}$/i`, which has no digits (the `\d` was lost), so almost no real id matched and those teachers still showed no name and got no replies. Now `/^[a-f\d]{24}$/i`. The test used an all-letter id (`aaaa…`), which hid the bug. It now uses a realistic mixed id, and it fails against the old pattern.
+- **A withdrawn (soft-deleted) behaviour entry was still shown to parents.** `DELETE /api/behaviour/incidents/:id` only sets `status: 'resolved'` and `deletedAt`, and the parent routes didn't filter on that. Parents no longer see such entries in Incident History, the dashboard points total or the latest reward/comment, and can't reply on them (404). An explicit `deletedAt: null` still counts as not deleted. Staff views are unchanged; they don't filter deleted entries either.
+- **Staff Incidents "Recorded By" showed "—" for entries with only `createdBy`** (e.g. the demo's seeded ones), while parents already saw a name for the same entries. It now falls back to `createdBy` and matches `id` or `_id`, the same lookup the parent side uses.
+
+### Tests
+- `behaviour-parent-replies.test.js`: 29 tests (+4 for withdrawn entries and the Recorded By fallback, plus the id fixture change). Behaviour, parent-portal, messages and portal suites: 22 suites, 189 tests, all passing. RBAC (100%) and tenant (35) scanners unchanged.
+
 ## [v5.267.0] - 2026-11-12 - feat(timetable): Phase 2 — teacher availability, double lessons, room types, timetable rules
 
 Phase 2 of the plan towards an aSc-style automatic timetable generator: the inputs the generator (Phase 3) will work from. Nothing here blocks editing by hand.

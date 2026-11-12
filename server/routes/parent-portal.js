@@ -44,6 +44,12 @@ const { createDirectMessage } = require('./messages');
 const { forStudent } = require('../utils/assignment-view');
 const behaviourReplies = require('../utils/behaviour-replies');
 
+/* DELETE /api/behaviour/incidents/:id is a soft delete (status 'resolved' +
+   deletedAt). A withdrawn entry must not reach a parent: not in the
+   history, not in the dashboard points, not open for replies. Same clause
+   student-portal.js uses for its own soft-deleted rows. */
+const NOT_DELETED_INCIDENT = { $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }] };
+
 const router = express.Router();
 
 function _requireParent(req, res) {
@@ -461,7 +467,7 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
       nextDueInvoice,
       borrowedBooksDocs,
     ] = await Promise.all([
-      Behaviour.find({ schoolId, studentId: childId })
+      Behaviour.find({ schoolId, studentId: childId, ...NOT_DELETED_INCIDENT })
         .sort({ date: -1, createdAt: -1 }).limit(50)
         .select('id points type category description date title reportedBy createdBy classId subjectName').lean()
         .catch(() => []),
@@ -916,7 +922,7 @@ router.get('/behaviour/:childId', authMiddleware, PLAN, async (req, res) => {
     if (_unlinked(req, res, childId)) return;
 
     const docs = await tenantModel('behaviour_incidents', tenantContext(req))
-      .find({ schoolId, studentId: childId })
+      .find({ schoolId, studentId: childId, ...NOT_DELETED_INCIDENT })
       .sort({ date: -1, createdAt: -1 })
       .limit(200)
       .select('id date type category title description severity points location action detention detentionDate reportedBy createdBy classId subjectName')
@@ -961,7 +967,7 @@ async function _ownIncident(req, res) {
   const { childId, incidentId } = req.params;
   if (_unlinked(req, res, childId)) return null;
   const incident = await tenantModel('behaviour_incidents', tenantContext(req))
-    .findOne({ schoolId, id: incidentId, studentId: childId })
+    .findOne({ schoolId, id: incidentId, studentId: childId, ...NOT_DELETED_INCIDENT })
     .select('id studentId studentName title date points reportedBy createdBy classId').lean();
   if (!incident) { E.notFound(res, 'Behaviour entry not found.'); return null; }
   return incident;

@@ -158,7 +158,9 @@ describe('parent sees who logged each entry and where', () => {
 });
 
 describe('accounts saved without an `id` field (user id = String(_id))', () => {
-  const HEX = 'aaaaaaaaaaaaaaaaaaaaaaaa';
+  // Digits AND letters, like a real ObjectId — an all-letter id once hid a
+  // regex that only accepted [a-f] (no digits) in byUserIds().
+  const HEX = '64b7f0c2e4a1d93f5c8b2a17';
   beforeEach(() => {
     mockDb.data.users.push({ _id: HEX, schoolId: S, role: 'teacher', name: 'Mrs Idless', email: 'idless@school.test' });
     mockDb.data.behaviour_incidents.push({ id: 'inc_idless', schoolId: S, studentId: 'stu_1', classId: 'cls_6', reportedBy: HEX, title: 'Late homework', points: -1, date: '2026-11-11' });
@@ -349,4 +351,39 @@ describe('displayName', () => {
     ['', 'School staff'],
     [null, 'School staff'],
   ])('%p → %p', (input, out) => expect(displayName(input)).toBe(out));
+});
+
+describe('withdrawn (soft-deleted) entries never reach a parent', () => {
+  beforeEach(() => {
+    const inc = mockDb.data.behaviour_incidents.find(i => i.id === 'inc_1');
+    Object.assign(inc, { status: 'resolved', deletedAt: '2026-11-12T10:00:00Z', deletedBy: 'usr_t1' });
+  });
+
+  test('not in the history', async () => {
+    const res = await as(PARENT).get('/api/parent-portal/behaviour/stu_1');
+    expect(res.status).toBe(200);
+    expect(res.body.data.map(d => d.id)).not.toContain('inc_1');
+    expect(res.body.data.map(d => d.id)).toContain('inc_2');
+  });
+
+  test('cannot be replied on or read as a thread', async () => {
+    expect((await as(PARENT).post('/api/parent-portal/behaviour/stu_1/inc_1/replies').send({ body: 'x' })).status).toBe(404);
+    expect((await as(PARENT).get('/api/parent-portal/behaviour/stu_1/inc_1/replies')).status).toBe(404);
+  });
+
+  test('an explicit deletedAt: null still counts as not deleted', async () => {
+    mockDb.data.behaviour_incidents.find(i => i.id === 'inc_2').deletedAt = null;
+    const res = await as(PARENT).get('/api/parent-portal/behaviour/stu_1');
+    expect(res.body.data.map(d => d.id)).toContain('inc_2');
+  });
+});
+
+describe('staff Incidents list: Recorded By', () => {
+  test('falls back to createdBy when reportedBy is missing', async () => {
+    mockDb.data.behaviour_incidents.push({ id: 'inc_seeded', schoolId: S, studentId: 'stu_1', createdBy: 'usr_t2', title: 'Seeded entry', points: 2, date: '2026-11-01' });
+    const res = await as(ADMIN).get('/api/behaviour/incidents?studentId=stu_1&limit=50');
+    expect(res.status).toBe(200);
+    expect(res.body.data.find(d => d.id === 'inc_seeded').reportedByName).toBe('Ms Wanjiru');
+    expect(res.body.data.find(d => d.id === 'inc_1').reportedByName).toBe('Mr Otieno');
+  });
 });
