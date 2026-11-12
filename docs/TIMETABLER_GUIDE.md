@@ -20,6 +20,7 @@
 12. [Importing a Timetable](#12-importing-a-timetable)
 13. [Teacher Availability](#13-teacher-availability)
 14. [Lessons per Week, Double Lessons and Room Types](#14-lessons-per-week-double-lessons-and-room-types)
+15. [Generating a Timetable Automatically](#15-generating-a-timetable-automatically)
 
 ---
 
@@ -149,4 +150,43 @@ These are set outside the Timetable module, and both the **Lessons to place** li
 
 ---
 
-*Last reviewed: 2026-11-12 (v5.267.0) — checked directly against `client/src/pages/timetable/` and `server/routes/timetable.js`.*
+## 15. Generating a Timetable Automatically
+
+**Timetable → Generate** builds a section's timetable (or chosen classes') for you, from the teaching assignments.
+
+**Before you start:** set **Periods / Week** (and double lessons) on the assignments you want placed (section 14), mark rooms with their type and subjects with the room they need, enter teacher availability (section 13), and check **Days & rules** (section 10). Lock any lesson that must stay exactly where it is (section 11).
+
+1. Choose **A section** (recommended) or **Chosen classes**, then click **Check**. You'll see:
+   - how many lessons will be placed;
+   - how many unlocked draft lessons of those subjects will be replaced;
+   - how many other lessons (subjects with no periods per week set) stay where they are;
+   - anything that can't fit. Red means part of the timetable won't fit, for example a teacher needs more lessons than they have free periods, a class needs more lessons than it has periods, or no room of a needed type exists. Amber means worth knowing, for example assignments left out because they have no periods per week.
+2. Click **Generate** (or **Generate anyway** if there are red items: it places everything it can). It takes up to about 10 seconds.
+3. Check the result:
+   - how many lessons were placed, and how many times a rule had to be bent (a teacher over their daily limit, a subject twice in a day, gaps in a teacher's day);
+   - every lesson it couldn't place, with the reason;
+   - a preview of each class's week (purple = double lesson).
+4. Click **Apply to draft**, then confirm. This replaces the unlocked draft lessons of the subjects it placed, in those classes only.
+   - Locked lessons stay.
+   - Lessons of subjects with no periods per week stay.
+   - Other sections stay.
+   - Nothing reaches teachers, students or parents until you **Publish** (section 8).
+5. Changed your mind? Under **Recent runs**, **Undo** removes the generated lessons and puts the replaced ones back. Only the most recently applied run can be undone, and undo also removes any generated lesson you edited by hand after applying.
+
+**What it never breaks:**
+- a class, teacher or room is never in two places at once (a whole-class lesson blocks every stream);
+- a teacher is never placed in a time they marked unavailable;
+- a subject that needs a lab (or other room type) only gets a free room of that type that is big enough for the class;
+- a double lesson always uses two back-to-back periods with no break between them.
+
+If one of these can't be met, the lesson is left unplaced and listed with the reason, rather than placed wrongly.
+
+**What it tries to follow** (from Days & rules): a teacher's most lessons per day, a subject at most N times a day, no gaps in a teacher's day, subjects spread across the week, chosen subjects in the morning, preferred rooms.
+
+**If the timetable changed after you generated** (for example someone added a lesson in another section that now clashes), **Apply** is refused with the reason. Generate again.
+
+**Who can use it:** the scheduling roles (Admin, Principal, Deputy, Timetabler), or a role that has both **Manage Whole-School Timetable (Admin Console)** and **Generate Timetable (automatic)** ticked under Settings → Roles & Permissions → Timetable.
+
+---
+
+*Last reviewed: 2026-11-12 (v5.268.0) — checked directly against `client/src/pages/timetable/`, `server/routes/timetable.js` and `server/routes/timetable-generate.js`.*

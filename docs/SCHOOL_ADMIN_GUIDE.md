@@ -228,7 +228,7 @@ If a staff member never received their welcome email, has forgotten their passwo
 | **Admissions Officer** | Admissions module |
 | **Finance** | Finance module only |
 | **HR** | HR & Payroll module only |
-| **Timetabler** | Timetable builder only — including working days and timetable rules, teacher availability, locking lessons and the Lessons to place checklist (see the [Timetabler Guide](TIMETABLER_GUIDE.md)) |
+| **Timetabler** | Timetable builder only — including working days and timetable rules, teacher availability, locking lessons, the Lessons to place checklist and generating a timetable automatically (see the [Timetabler Guide](TIMETABLER_GUIDE.md)). To let another role generate, tick both **Manage Whole-School Timetable (Admin Console)** and **Generate Timetable (automatic)** under Settings → Roles & Permissions → Timetable |
 | **Discipline Committee** | Behaviour & Pastoral module |
 | **Parent** | Read-only: their children's data, events, messaging |
 | **Student** | Read-only: own profile, events, timetable |

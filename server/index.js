@@ -293,6 +293,7 @@ app.use('/api/behaviour',       require('./routes/behaviour'));
 app.use('/api/council',         require('./routes/council'));
 app.use('/api/exams',           require('./routes/exams'));
 app.use('/api/admissions',      require('./routes/admissions'));
+app.use('/api/timetable/generate', require('./routes/timetable-generate'));   // before /api/timetable (its /:id)
 app.use('/api/timetable',       require('./routes/timetable'));
 app.use('/api/messages',        require('./routes/messages'));
 app.use('/api/academic-config', require('./routes/academic-config'));

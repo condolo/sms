@@ -7627,3 +7627,41 @@ Inputs for the Phase 3 generator. None of them blocks a manual edit.
 - **`teaching_assignments.doubleLessons`** (int ≥ 0, default 0): `2 × doubleLessons ≤ periodsPerWeek`, enforced on POST and on PUT against the merged values. `computePlacement` sums it into `doubles` per class subject.
 - **`subjects.requiredRoomType`**: `classroom | lab | hall | sports | library | other | null`; `''` is treated as `null`.
 - Tests: `timetable-rules-availability.test.js`, plus additions to `teaching-assignments-permission-grant.test.js`, `subjects.test.js`, `timetable-placement.test.js`.
+
+## Timetable Phase 3: Automatic Generator (v5.268.0, 2026-11-12)
+
+Three layers in `server/utils/timetable-generator/`, plus one route file.
+
+**`prepare.js` `buildProblem(schoolId, ctx, scope)`** → `{ problem, meta, precheck }`. `scope` = `{ sectionKey }` (class `sectionKey`, else the same name inference as `_inferSection`) or `{ classIds }` (any id form). It loads classes, streams, assignments, subjects, rooms, teachers, `teacher_availability`, the current academic year's active lessons and active students (class sizes). It resolves each scope class's bell (`resolveBellSchedule`) into slots = working days × non-break periods; `doubleStarts` = a period whose next bell row is also a lesson (no break between).
+- **Units:** one per period from each assignment with `periodsPerWeek`. Locked lessons of that class|stream|subject are subtracted first; `doubleLessons` become 2-period units.
+- **Replaced vs fixed:**
+  - *Replaced* (`meta.replaceIds`): unlocked in-scope lessons of a **target group**. A target group is a class|stream|subject that has an assignment with `periodsPerWeek`; the subject is matched by `subjectId` or case-insensitive name.
+  - *Fixed* (busy time): everything else — lessons outside the scope, locked lessons, and in-scope lessons of subjects with no target or of non-lesson types.
+  - So a half-filled set of assignments never deletes the rest of a class's timetable. Untimed lessons take times from their class's bell, or are ignored with a warning.
+- **Ids:** teachers are keyed by the staff record's id, with `id`/`userId`/`_id` all mapped to it; classes are keyed by `id || String(_id)`, and `meta.scopeIdForms` keeps every form.
+- **Precheck codes:**
+  - errors: `no_classes`, `no_periods`, `nothing_to_place`, `class_overfull`, `no_doubles`, `teacher_overfull` (needed here + busy elsewhere > free periods), `no_room_type`;
+  - warnings: `no_target`, `kept_lessons`, `untimed`, `doubles_trimmed`.
+
+**`solver.js` `solve(problem, { budgetMs, maxRuns, seed })`** — pure; the header comment documents the problem shape.
+- *Hard rules (never broken; the unit is left unplaced instead):* class/stream (a whole-class lesson blocks every stream), teacher, room, teacher unavailability, room type and capacity, doubles back-to-back.
+- *Soft rules (`PENALTY` weights):* daily teacher limit, subject per day, teacher gaps, adjacent days, core subjects in the afternoon, preferred room.
+- *Method:* most-constrained-first greedy, plus a one-step repair (move one blocking placed unit), restarted with seeded shuffles (mulberry32) until the budget runs out; the best run is fewest unplaced, then lowest score.
+- *Unplaced reasons* (`REASON_TEXT`): a missing room type always wins.
+- *`violations`* counts only teacher-days and subject-days the generated lessons touch, so overloads already on the timetable aren't blamed on the run.
+
+**`worker.js` `runSolver`** runs the solver in a `worker_threads` Worker (inline under Jest, or with `TIMETABLE_SOLVER_INLINE=1`), with a kill timer of budget + 30 s.
+
+**`routes/timetable-generate.js`** is mounted at `/api/timetable/generate`, before `/api/timetable` (whose `/:id` would otherwise catch it).
+
+| Route | Notes |
+|---|---|
+| `POST /precheck` `{scope}` | `{ precheck, lessonsNeeded, classes, replaceable, kept }` |
+| `POST /` `{scope, budgetSeconds? 2–30, default 10}` | stores a run in `timetable_generation_runs` and returns the summary (no lessons); 400 `NOTHING_TO_GENERATE` |
+| `GET /runs`, `GET /runs/:id` | latest 20 / one run, with its `lessons` and `unplaced` (`backup` and `replaceIds` are never returned) |
+| `POST /runs/:id/apply` | deletes only the `replaceIds` lessons that still exist and are unlocked, then re-checks every generated lesson with `checkConflicts` (excluding those). A clash gives 409 `STALE_RUN` and nothing is written. Then it inserts the lessons (`generationRunId`, academic year/term), saves `backup`, and calls `markTimetableChanged`. Applying twice gives 409. |
+| `POST /runs/:id/undo` | only the most recently applied, not yet undone run: deletes `generationRunId` lessons and restores `backup`, skipping ids that already exist |
+
+Access: `TIMETABLE_FLOOR_ROLES`, or `hasExplicitSubGrant(req, 'timetable', 'generate', 'update')` (new sub `timetable__generate` in `config/moduleRegistry.js`, no coarse fallback). Plan: `FEATURE_PLAN.timetable_generator = 'core'`. Client: `components/GenerateView.jsx` ("Generate" tab, `canGenerate`); `timetable.generator.*` in `api/client.js`. The tab sits inside the admin console, so a non-floor role also needs `timetable__manage`.
+
+Tests: `server/__tests__/timetable-generator-solver.test.js` (pure solver, with an independent hard-rule checker) and `server/__tests__/routes/timetable-generate.test.js` (precheck, access, generate, apply/undo, stale run, id forms, kept lessons; uses `fixtures/fake-tenant-db.js`, which now also has `updateOne`, `insertMany` and `deleteMany`).

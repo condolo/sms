@@ -119,6 +119,26 @@ function createFakeDb(seed = {}) {
         }
         return { modifiedCount: n };
       },
+      updateOne: async (filter, update) => {
+        const r = rows().find(x => matches(x, filter));
+        if (!r) return { modifiedCount: 0 };
+        for (const [path, v] of Object.entries(update.$set || {})) {
+          const keys = path.split('.');
+          let o = r;
+          for (const k of keys.slice(0, -1)) o = (o[k] = o[k] || {});
+          o[keys[keys.length - 1]] = v;
+        }
+        return { modifiedCount: 1 };
+      },
+      insertMany: async (docs) => {
+        for (const d of docs) rows().push({ createdAt: new Date(Date.now() + (seq++)).toISOString(), ...JSON.parse(JSON.stringify(d)) });
+        return docs;
+      },
+      deleteMany: async (filter) => {
+        const before = rows().length;
+        data[name] = rows().filter(r => !matches(r, filter));
+        return { deletedCount: before - data[name].length };
+      },
     };
   }
 

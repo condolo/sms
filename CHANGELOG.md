@@ -6,6 +6,41 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.268.0] - 2026-11-12 - feat(timetable): Phase 3 — generate a section's timetable automatically
+
+Phase 3 of the plan towards an aSc-style automatic timetable generator. It uses the Phase 2 inputs (availability, doubles, room types, rules). The generator code had been started in an earlier session and left uncommitted; this finishes it, makes apply safe, and adds the screen.
+
+### Added
+- **Timetable → Generate.** Choose a section (or classes) and run **Check**. It lists what will be placed, what will be replaced, and anything that can't fit: a teacher or class needing more lessons than it has periods, no room of a needed type, assignments with no periods per week, no back-to-back periods for doubles. Then **Generate**. You see:
+  - how many lessons were placed and how many times a rule had to be bent;
+  - every unplaced lesson with its reason;
+  - a preview of each class's week.
+
+  **Apply to draft** puts it on the draft; nothing reaches anyone until Publish. **Undo** (most recent run) puts back what it replaced.
+- **Hard rules, never broken:**
+  - no class, stream, teacher or room in two places at once;
+  - never in a teacher's unavailable time;
+  - a subject needing a room type only gets a free room of that type, big enough for the class;
+  - doubles use back-to-back periods with no break between.
+- **Rules followed where possible:** Days & rules (teacher daily limit, subject per day, no teacher gaps, spread across the week, core subjects in the morning, preferred rooms).
+- **Method and data:** most-constrained-first placement with a one-step repair and seeded restarts, run in a worker thread so the server isn't blocked (`server/utils/timetable-generator/`: `prepare.js`, `solver.js`, `worker.js`). Runs are stored in `timetable_generation_runs`. Routes: `POST /api/timetable/generate/precheck`, `POST /api/timetable/generate`, `GET /api/timetable/generate/runs[/:id]`, `POST /api/timetable/generate/runs/:id/apply|undo`.
+- **New permission "Generate Timetable (automatic)"** (`timetable__generate`, strict grant). The scheduling roles have it by default. `FEATURE_PLAN.timetable_generator` is on every plan.
+
+### Fixed (in the unfinished code, before it shipped)
+- **Apply would have deleted lessons it didn't regenerate.** It replaced every unlocked lesson in the scope. On the demo school that meant swapping 120 lessons for 13, since most assignments there have no periods per week. It now replaces only lessons of the subjects it placed (class + stream + subject with a target); the rest stay and the generator works around them.
+- **Apply missed lessons that store their class as `String(_id)`** when the class also has an `id`. It now matches every id form.
+- **"Rule breaks" counted overloads already on the timetable** (33 on the demo versus 2 actually caused by the run). It now counts only days the generated lessons touch.
+- **A subject needing a lab when no lab exists** was reported as "the class has no free period". The missing room type is now always the reason given.
+- **Unplaced and precheck lists said "(no teacher)"** for assignments that store only a `teacherId`. They now show the teacher's name.
+
+### Tests / verified
+- `server/__tests__/timetable-generator-solver.test.js` (13: valid placements, fixed lessons, unavailability, doubles, labs and capacity, overfull classes, streams, soft rules, reproducible seed, a realistic section, missing-lab reason, pre-existing overloads). New `server/__tests__/routes/timetable-generate.test.js` (12: access including the strict grant, validation, other school's run, precheck counts and errors, a generated run respecting locked lessons, out-of-scope teachers and doubles, apply keeping locked/other-subject/other-section lessons, apply twice, undo restoring exactly, undo only the latest run, stale run refused, `_id`-form classes). The `_id`-form test fails without the fix. Timetable, RBAC, plan and settings suites: 54 suites, 531 tests passing. RBAC (100%) and tenant (35) scanners unchanged. Client production build compiles.
+- In the browser on the local demo school, as admin, Timetable → Generate → Secondary → Check:
+  - Check listed 13 lessons to place, 10 to replace and 110 to keep, flagged "Chemistry needs a room of type lab", and showed teacher names.
+  - Generate placed 12 of 13 in 0.2 s, with Chemistry unplaced because no lab is registered.
+  - Apply: 10 replaced and 12 added, nothing else changed, and no clash involves a generated lesson (the school's existing clashes went from 158 to 138).
+  - Undo restored exactly the same 195 lessons as before.
+
 ## [v5.267.1] - 2026-11-12 - fix(behaviour): id-less teacher accounts still unmatched, withdrawn entries shown to parents, staff "Recorded By" blank on older entries
 
 Follow-ups to v5.266.0.

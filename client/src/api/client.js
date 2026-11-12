@@ -633,6 +633,15 @@ export const timetable = {
   // Teacher availability (v5.267.0)
   availability:     ()                 => _get('/timetable/availability'),
   saveAvailability: (teacherId, data)  => _put(`/timetable/availability/${encodeURIComponent(teacherId)}`, data),
+  // Automatic timetable (v5.268.0) — scope = { sectionKey } | { classIds }
+  generator: {
+    precheck: (scope)  => _post('/timetable/generate/precheck', { scope }),
+    generate: (scope, budgetSeconds) => _post('/timetable/generate', { scope, ...(budgetSeconds ? { budgetSeconds } : {}) }),
+    runs:     ()       => _get('/timetable/generate/runs'),
+    run:      (id)     => _get(`/timetable/generate/runs/${id}`),
+    apply:    (id)     => _post(`/timetable/generate/runs/${id}/apply`),
+    undo:     (id)     => _post(`/timetable/generate/runs/${id}/undo`),
+  },
   // Substitution system
   substitutions: {
     list:        (params)   => _get('/timetable/substitutions', params),

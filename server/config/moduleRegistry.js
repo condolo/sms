@@ -165,6 +165,10 @@ const MODULE_REGISTRY = [
     // see GET /timetable/my, /my-children, both deliberately outside this
     // gate).
     { key: 'manage', label: 'Manage Whole-School Timetable (Admin Console)' },
+    // Automatic timetable (v5.268.0, routes/timetable-generate.js). Same
+    // posture as `manage`: hasExplicitSubGrant-gated, no coarse fallback —
+    // replacing a section's draft is never handed out by accident.
+    { key: 'generate', label: 'Generate Timetable (automatic)' },
   ]},
   { key: 'subjects', label: 'Subjects', section: 'Academic Management', icon: 'Library', navRoute: '/subjects', navOrder: 7, subs: [
     { key: 'view',   label: 'View Subjects & Departments' },

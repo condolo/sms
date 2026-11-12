@@ -9,7 +9,7 @@ import { AnimatePresence } from 'framer-motion';
 import {
   CalendarDays, Plus, AlertCircle, CheckCircle2, BarChart3,
   Clock, User, LayoutGrid, Globe, UserX, Zap, Download, Printer,
-  DoorOpen, Upload, MonitorPlay, ListChecks, CalendarCheck,
+  DoorOpen, Upload, MonitorPlay, ListChecks, CalendarCheck, Wand2,
 } from 'lucide-react';
 import {
   timetable    as ttApi,
@@ -37,6 +37,7 @@ import PublishModal           from './components/PublishModal.jsx';
 import RoomsTab               from './components/RoomsTab.jsx';
 import RoomView               from './components/RoomView.jsx';
 import PlacementView          from './components/PlacementView.jsx';
+import GenerateView           from './components/GenerateView.jsx';
 import TimetableSettingsModal from './components/TimetableSettingsModal.jsx';
 import AvailabilityModal      from './components/AvailabilityModal.jsx';
 import { Toast }              from './components/TimetablePrimitives.jsx';
@@ -44,6 +45,7 @@ import { Toast }              from './components/TimetablePrimitives.jsx';
 const VIEWS = [
   { id: 'class',    label: 'Class Grid',   Icon: LayoutGrid                    },
   { id: 'placement', label: 'Lessons to place', Icon: ListChecks              },
+  { id: 'generate', label: 'Generate',     Icon: Wand2,   generateOnly: true   },
   { id: 'teacher',  label: 'Teacher View', Icon: User                          },
   { id: 'overview', label: 'Institution',  Icon: Globe                         },
   { id: 'rooms',    label: 'Rooms',        Icon: DoorOpen, adminOnly: true      },
@@ -76,6 +78,8 @@ export default function TimetablePage() {
   const isFloorRole = TIMETABLE_FLOOR_ROLES.includes(role);
   const isAdminRole = isFloorRole || can('timetable__manage', 'read');
   const canEdit      = isFloorRole || can('timetable__manage', 'update');
+  // Same gate as routes/timetable-generate.js: floor roles, or the strict "Generate Timetable" grant.
+  const canGenerate  = isFloorRole || can('timetable__generate', 'update');
 
   // Non-admin roles see the read-only portal
   if (!isAdminRole) return <TimetablePortal />;
@@ -527,7 +531,7 @@ export default function TimetablePage() {
               decorative circles above) — same convention as SettingsPage.jsx
               and InventoryPage.jsx's tab bars. */}
           <div className="flex gap-0.5 mt-5 overflow-x-auto">
-            {VIEWS.filter(v => !v.adminOnly || canEdit).map(v => (
+            {VIEWS.filter(v => (!v.adminOnly || canEdit) && (!v.generateOnly || canGenerate)).map(v => (
               <button
                 key={v.id}
                 onClick={() => setActiveView(v.id)}
@@ -864,6 +868,9 @@ export default function TimetablePage() {
           <PlacementView
             onOpenClass={(cid, sid) => { setSection('all'); setClassId(cid); setStreamId(sid || ''); setActiveView('class'); }}
           />
+        )}
+        {activeView === 'generate' && canGenerate && (
+          <GenerateView classList={classList} sections={sectionTabs} days={workingDays} />
         )}
         {activeView === 'cover'    && <CoverTab teachers={teacherList} />}
 
