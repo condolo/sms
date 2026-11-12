@@ -1070,6 +1070,7 @@ const SCHOOL_TABS = [
   { id: 'academics',  label: 'Academics & Staff',     Icon: ClipboardList },
   { id: 'portals',    label: 'Portals & Learning',    Icon: MonitorPlay },
   { id: 'admissions', label: 'Admissions & Payments', Icon: GraduationCap },
+  { id: 'email',      label: 'Email & SMTP',          Icon: Mail },
 ];
 
 function SchoolTab() {
@@ -1695,7 +1696,14 @@ function SchoolTab() {
       </>
       )}
 
-      {/* ── Sticky Save Bar ── */}
+      {/* ── Email & SMTP — its own tab and its own save, separate from the
+             school-profile form. The card has separate Save/Test buttons. ── */}
+      {schoolTab === 'email' && (
+        <SmtpCard school={school} onSaved={() => qc.invalidateQueries({ queryKey: ['settings','school'] })} />
+      )}
+
+      {/* ── Sticky Save Bar (school profile tabs only — SMTP saves itself) ── */}
+      {schoolTab !== 'email' && (
       <div className="sticky bottom-0 z-10 -mx-1 px-1 pt-3 pb-4 bg-gradient-to-t from-slate-50 via-slate-50/90 to-transparent">
         <div className="flex items-center gap-3 bg-white border border-slate-200 rounded-xl px-4 py-3 shadow-sm">
           {form ? (
@@ -1718,9 +1726,7 @@ function SchoolTab() {
           </button>
         </div>
       </div>
-
-      {/* Custom SMTP — separate save, outside the main form submit */}
-      <SmtpCard school={school} onSaved={() => qc.invalidateQueries({ queryKey: ['settings','school'] })} />
+      )}
     </form>
   );
 }
