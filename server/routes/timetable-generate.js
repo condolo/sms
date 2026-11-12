@@ -206,15 +206,44 @@ router.post('/runs/:id/apply', authMiddleware, planGate('timetable_generator'), 
       if (clash) return fail(res, 'STALE_RUN', `The timetable changed since this was generated: ${clash} Generate again.`, 409);
     }
 
-    if (toReplace.length) {
-      const withId = toReplace.filter(l => l.id).map(l => l.id);
-      const noId = toReplace.filter(l => !l.id).map(l => l._id);
-      await Timetable.deleteMany({ schoolId, $or: [{ id: { $in: withId } }, { _id: { $in: noId } }] });
+    // 1. Claim the run and save the backup BEFORE touching any lesson. The
+    //    claim is atomic (only a run still 'generated' moves to 'applying'),
+    //    so two admins can't apply the same run at once, and if anything
+    //    below fails the replaced lessons are on record.
+    const backup = toReplace.map(({ _id, ...l }) => l);
+    const claim = await Runs(req).updateOne(
+      { schoolId, id: run.id, status: 'generated', appliedAt: { $exists: false } },
+      { $set: { status: 'applying', backup, applyStartedAt: now, applyStartedBy: userId } },
+    );
+    if (!claim || claim.modifiedCount === 0) return E.conflict(res, 'This run is already being applied, or has been.');
+
+    // 2. Replace. If inserting fails part-way, take out what got in and put
+    //    the replaced lessons back, so the draft ends as it started.
+    let deleted = false;
+    try {
+      if (toReplace.length) {
+        const withId = toReplace.filter(l => l.id).map(l => l.id);
+        const noId = toReplace.filter(l => !l.id).map(l => l._id);
+        await Timetable.deleteMany({ schoolId, $or: [{ id: { $in: withId } }, { _id: { $in: noId } }] });
+        deleted = true;
+      }
+      await Timetable.insertMany(docs, { ordered: false });
+    } catch (err) {
+      console.error('[timetable-generate apply] write failed, rolling back:', err.message);
+      try {
+        await Timetable.deleteMany({ schoolId, generationRunId: run.id });
+        if (deleted && backup.length) await Timetable.insertMany(backup, { ordered: false });
+        await Runs(req).updateOne({ schoolId, id: run.id }, { $set: { status: 'generated', applyFailedAt: new Date().toISOString(), applyError: String(err.message).slice(0, 300) } });
+      } catch (rbErr) {
+        // Rollback itself failed: the backup is still saved on the run (status 'applying').
+        console.error('[timetable-generate apply] ROLLBACK FAILED — backup kept on run', run.id, rbErr.message);
+        return fail(res, 'APPLY_FAILED', 'Applying failed and the draft could not be put back automatically. The replaced lessons are saved on this run; contact support with the run id.', 500);
+      }
+      return fail(res, 'APPLY_FAILED', 'Applying failed, so nothing was changed. Try again.', 500);
     }
-    await Timetable.insertMany(docs, { ordered: false });
-    await Runs(req).updateOne({ schoolId, id: run.id }, {
-      $set: { status: 'applied', appliedAt: now, appliedBy: userId, backup: toReplace.map(({ _id, ...l }) => l) },
-    });
+
+    // 3. Done.
+    await Runs(req).updateOne({ schoolId, id: run.id }, { $set: { status: 'applied', appliedAt: now, appliedBy: userId } });
     await markTimetableChanged(schoolId);
     return ok(res, { applied: docs.length, replaced: toReplace.length });
   } catch (err) { console.error('[timetable-generate POST /runs/:id/apply]', err); return E.serverError(res); }

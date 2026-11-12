@@ -252,3 +252,146 @@ describe('apply and undo', () => {
     expect(mockDb.data.timetable.map(l => l.id)).not.toContain('L_old');
   });
 });
+
+describe('option blocks (electives), v5.269.1', () => {
+  // Form 1A has 8 periods. Already used: locked English 1, Art 1; to place:
+  // Maths 3 + English 1 + Physics 2 + History 2 = 10 if one after another.
+  // It only fits if Physics and History share periods — they are options
+  // and no student takes both.
+  beforeEach(() => {
+    mockDb.data.subjects.push({ id: 'phy', schoolId: S, name: 'Physics' }, { id: 'his', schoolId: S, name: 'History' });
+    mockDb.data.teachers.push(
+      { id: 'tch3', schoolId: S, userId: 'u_t3', firstName: 'Cy', lastName: 'Phys' },
+      { id: 'tch4', schoolId: S, userId: 'u_t4', firstName: 'Di', lastName: 'Hist' },
+    );
+    mockDb.data.class_subjects = [
+      { schoolId: S, classId: 'c1', subjectId: 'phy', isCompulsoryForClass: false },
+      { schoolId: S, classId: 'c1', subjectId: 'his', isCompulsoryForClass: false },
+      { schoolId: S, classId: 'c1', subjectId: 'math', isCompulsoryForClass: true },
+    ];
+    mockDb.data.students = [
+      { id: 'st1', schoolId: S, classId: 'c1', streamId: 'sA', status: 'active' },
+      { id: 'st2', schoolId: S, classId: 'c1', streamId: 'sB', status: 'active' },
+    ];
+    mockDb.data.student_subjects = [
+      { schoolId: S, studentId: 'st1', subjectId: 'phy' },
+      { schoolId: S, studentId: 'st2', subjectId: 'his' },
+    ];
+    // Physics entered once per stream (same teacher) — must become ONE group of 2 lessons, not 4.
+    mockDb.data.teaching_assignments.push(
+      { id: 'ta5', schoolId: S, classId: 'c1', className: 'Form 1A', streamId: 'sA', streamName: 'A', subjectId: 'phy', subjectName: 'Physics', teacherId: 'u_t3', periodsPerWeek: 2 },
+      { id: 'ta5b', schoolId: S, classId: 'c1', className: 'Form 1A', streamId: 'sB', streamName: 'B', subjectId: 'phy', subjectName: 'Physics', teacherId: 'u_t3', periodsPerWeek: 2 },
+      { id: 'ta6', schoolId: S, classId: 'c1', className: 'Form 1A', subjectId: 'his', subjectName: 'History', teacherId: 'u_t4', periodsPerWeek: 2 },
+    );
+  });
+
+  const lessonsOf = async (runId) => (await as(ADMIN).get(`/api/timetable/generate/runs/${runId}`)).body.data.lessons;
+  const at = l => `${l.day}|${l.startTime}`;
+
+  test('options run side by side, so the whole week fits; each option group is placed once', async () => {
+    const pre = (await as(ADMIN).post('/api/timetable/generate/precheck').send(SCOPE)).body.data;
+    expect(pre.lessonsNeeded).toBe(13);
+    expect(pre.precheck.filter(p => p.level === 'error')).toEqual([]);
+    const run = await generate();
+    expect(run.stats).toMatchObject({ lessonsNeeded: 13, unitsUnplaced: 0 });
+    const lessons = await lessonsOf(run.id);
+    const phy = lessons.filter(l => l.subjectId === 'phy');
+    const his = lessons.filter(l => l.subjectId === 'his');
+    expect(phy).toHaveLength(2);
+    expect(his).toHaveLength(2);
+    expect([...phy, ...his].every(l => l.streamId === null)).toBe(true);
+    // Never beside a compulsory Form 1A lesson (or the locked one / Art).
+    const c1Other = lessons.filter(l => l.classId === 'c1' && !['phy', 'his'].includes(l.subjectId)).map(at).concat(['monday|08:00', 'tuesday|09:40']);
+    for (const l of [...phy, ...his]) expect(c1Other).not.toContain(at(l));
+    // And they did share at least one period (8 periods, 10 lessons).
+    expect(phy.some(p => his.some(h => at(h) === at(p)))).toBe(true);
+  });
+
+  test('a student taking both: the two never share a period, and what can\'t fit is listed', async () => {
+    mockDb.data.student_subjects.push({ schoolId: S, studentId: 'st1', subjectId: 'his' });
+    const run = await generate();
+    const lessons = await lessonsOf(run.id);
+    const phy = lessons.filter(l => l.subjectId === 'phy').map(at);
+    const his = lessons.filter(l => l.subjectId === 'his').map(at);
+    expect(phy.some(t => his.includes(t))).toBe(false);
+    expect(run.stats.unitsUnplaced).toBeGreaterThan(0);
+  });
+
+  test('no enrolment recorded: a warning, and the option is kept apart from everything', async () => {
+    mockDb.data.student_subjects = [];
+    const pre = (await as(ADMIN).post('/api/timetable/generate/precheck').send(SCOPE)).body.data;
+    expect(pre.precheck.find(p => p.code === 'elective_no_enrolment').message).toMatch(/Physics|History/);
+    const run = await generate();
+    const lessons = await lessonsOf(run.id);
+    const c1 = lessons.filter(l => l.classId === 'c1').map(at);
+    expect(new Set(c1).size).toBe(c1.length);   // nothing in Form 1A overlaps
+  });
+});
+
+describe('apply is safe if writing fails part-way', () => {
+  // Fail the next `count` timetable inserts (each after writing one doc, i.e. part-way).
+  function failNextTimetableInsert(count = 1) {
+    const orig = mockDb.model.bind(mockDb);
+    let left = count;
+    mockDb.model = (name) => {
+      const m = orig(name);
+      if (name === 'timetable') {
+        const realInsert = m.insertMany;
+        m.insertMany = async (docs) => {
+          if (left <= 0) return realInsert(docs);
+          left -= 1;
+          await realInsert(docs.slice(0, 1));
+          throw new Error('disk full');
+        };
+      }
+      return m;
+    };
+  }
+
+  test('if even the rollback fails, the run keeps the backup and says so', async () => {
+    const run = await generate();
+    failNextTimetableInsert(2);
+    const res = await as(ADMIN).post(`/api/timetable/generate/runs/${run.id}/apply`);
+    expect(res.status).toBe(500);
+    expect(res.body.error.message).toMatch(/could not be put back/);
+    const saved = mockDb.data.timetable_generation_runs.find(r => r.id === run.id);
+    expect(saved.status).toBe('applying');
+    expect(saved.backup.map(l => l.id)).toEqual(['L_old']);
+  });
+
+  test('a failed insert puts the draft back exactly, and the run can be applied again', async () => {
+    const run = await generate();
+    failNextTimetableInsert();
+    const res = await as(ADMIN).post(`/api/timetable/generate/runs/${run.id}/apply`);
+    expect(res.status).toBe(500);
+    expect(res.body.error.code).toBe('APPLY_FAILED');
+    expect(mockDb.data.timetable.map(l => l.id).sort()).toEqual(['L_art', 'L_locked', 'L_old', 'L_primary']);
+    expect(mockDb.data.timetable_generation_runs.find(r => r.id === run.id)).toMatchObject({ status: 'generated' });
+    expect(markTimetableChanged).not.toHaveBeenCalled();
+    const again = await as(ADMIN).post(`/api/timetable/generate/runs/${run.id}/apply`);
+    expect(again.status).toBe(200);
+  });
+
+  test('the backup is saved before any lesson is deleted', async () => {
+    const run = await generate();
+    const orig = mockDb.model.bind(mockDb);
+    let backupAtDelete;
+    mockDb.model = (name) => {
+      const m = orig(name);
+      if (name === 'timetable') {
+        const realDelete = m.deleteMany;
+        m.deleteMany = async (f) => { backupAtDelete = mockDb.data.timetable_generation_runs.find(r => r.id === run.id).backup; return realDelete(f); };
+      }
+      return m;
+    };
+    await as(ADMIN).post(`/api/timetable/generate/runs/${run.id}/apply`);
+    expect(backupAtDelete.map(l => l.id)).toEqual(['L_old']);
+  });
+
+  test('a run already being applied (by someone else) is refused, nothing changes', async () => {
+    const run = await generate();
+    mockDb.data.timetable_generation_runs.find(r => r.id === run.id).status = 'applying';
+    expect((await as(ADMIN).post(`/api/timetable/generate/runs/${run.id}/apply`)).status).toBe(409);
+    expect(mockDb.data.timetable.map(l => l.id).sort()).toEqual(['L_art', 'L_locked', 'L_old', 'L_primary']);
+  });
+});

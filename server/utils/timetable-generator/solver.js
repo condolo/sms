@@ -20,6 +20,10 @@
                                                     ones and every lesson outside
                                                     the scope
      unavailable { [teacherKey]: [{ day, start, end }] }
+     groups     { [groupId]: { streams: [streamId…]|null, shareWith: [groupId…] } }
+                elective (option) groups, v5.269.1: a unit or fixed lesson
+                with `groupId` is an elective group's lesson (streamId null);
+                see audienceClash() for when it may share a period
      rooms      [{ id, name, type, capacity }]
      rules      utils/timetable-settings.js DEFAULT_RULES shape
 
@@ -91,6 +95,31 @@ class Busy {
 /** A class lesson clashes when both are the same audience or either is whole-class. */
 const sameAudience = (streamA, streamB) => !streamA || !streamB || streamA === streamB;
 
+/* Elective (option) groups, v5.269.1. problem.groups[groupId] =
+   { streams: [streamId…] | null (unknown/any), shareWith: [groupId…] }.
+   Two lessons of the same class clash unless this says they can't:
+     regular vs regular   same/whole-class audience (sameAudience)
+     group vs group       clash unless listed in shareWith (no shared student)
+     group vs regular     clash if the regular lesson is whole-class, or its
+                          stream holds any of the group's students, or the
+                          group's streams are unknown
+   Unknown always clashes — never risk a student in two places. */
+function audienceClash(problem, a, b) {
+  const ga = a.groupId || null;
+  const gb = b.groupId || null;
+  if (!ga && !gb) return sameAudience(a.streamId, b.streamId);
+  if (ga && gb) {
+    if (ga === gb) return true;
+    const g = problem.groups?.[ga];
+    return !g || !(g.shareWith || []).includes(gb);
+  }
+  const g = problem.groups?.[ga || gb];
+  const regularStream = ga ? b.streamId : a.streamId;
+  if (!regularStream) return true;
+  if (!g || !g.streams) return true;
+  return g.streams.includes(regularStream);
+}
+
 function buildState(problem) {
   const st = {
     classBusy: new Busy(), teacherBusy: new Busy(), roomBusy: new Busy(),
@@ -100,7 +129,7 @@ function buildState(problem) {
   };
   for (const [fi, f] of problem.fixed.entries()) {
     const ref = `fixed:${fi}`;
-    if (f.classId) st.classBusy.add(f.classId, f.day, { start: f.start, end: f.end, streamId: f.streamId || null, ref });
+    if (f.classId) st.classBusy.add(f.classId, f.day, { start: f.start, end: f.end, streamId: f.streamId || null, groupId: f.groupId || null, ref });
     if (f.teacherKey) {
       st.teacherBusy.add(f.teacherKey, f.day, { start: f.start, end: f.end, ref });
       const k = `${f.teacherKey}|${f.day}`;
@@ -149,7 +178,7 @@ function check(problem, st, unit, startIdx) {
     }
   };
 
-  note(st.classBusy.clashes(unit.classId, day, start, end, x => sameAudience(unit.streamId, x.streamId)), 'class');
+  note(st.classBusy.clashes(unit.classId, day, start, end, x => audienceClash(problem, unit, x)), 'class');
   const un = (problem.unavailable[unit.teacherKey] || []).find(b => b.day === day && overlaps(start, end, b.start, b.end));
   if (un) return { ok: false, reason: 'unavailable', blockers: [] };
   if (unit.teacherKey) note(st.teacherBusy.clashes(unit.teacherKey, day, start, end), 'teacher');
@@ -215,7 +244,7 @@ function cost(problem, st, unit, at) {
 
 function place(st, unit, at) {
   const ref = unit.id;
-  st.classBusy.add(unit.classId, at.day, { start: at.start, end: at.end, streamId: unit.streamId || null, ref });
+  st.classBusy.add(unit.classId, at.day, { start: at.start, end: at.end, streamId: unit.streamId || null, groupId: unit.groupId || null, ref });
   if (unit.teacherKey) {
     st.teacherBusy.add(unit.teacherKey, at.day, { start: at.start, end: at.end, ref });
     const k = `${unit.teacherKey}|${at.day}`;
@@ -398,4 +427,4 @@ function solve(problem, options = {}) {
   return { placements, unplaced: best.unplaced, violations: best.ev.violations, score: best.ev.score, runs, durationMs: Date.now() - t0 };
 }
 
-module.exports = { solve, PENALTY, REASON_TEXT, _internals: { rng, Busy, check, cost, evaluate, sameAudience } };
+module.exports = { solve, PENALTY, REASON_TEXT, _internals: { rng, Busy, check, cost, evaluate, sameAudience, audienceClash } };

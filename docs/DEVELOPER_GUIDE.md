@@ -7665,3 +7665,30 @@ Three layers in `server/utils/timetable-generator/`, plus one route file.
 Access: `TIMETABLE_FLOOR_ROLES`, or `hasExplicitSubGrant(req, 'timetable', 'generate', 'update')` (new sub `timetable__generate` in `config/moduleRegistry.js`, no coarse fallback). Plan: `FEATURE_PLAN.timetable_generator = 'core'`. Client: `components/GenerateView.jsx` ("Generate" tab, `canGenerate`); `timetable.generator.*` in `api/client.js`. The tab sits inside the admin console, so a non-floor role also needs `timetable__manage`.
 
 Tests: `server/__tests__/timetable-generator-solver.test.js` (pure solver, with an independent hard-rule checker) and `server/__tests__/routes/timetable-generate.test.js` (precheck, access, generate, apply/undo, stale run, id forms, kept lessons; uses `fixtures/fake-tenant-db.js`, which now also has `updateOne`, `insertMany` and `deleteMany`).
+
+### Option blocks (electives) and safe apply (v5.269.1)
+
+**One rule: `server/utils/elective-groups.js`.**
+- `loadElectiveInfo(ctx, schoolId, classIds)` reads `class_subjects` rows with `isCompulsoryForClass: false`, the active students of those classes, and their `student_subjects` rows.
+- `canShareSlot(info, classId, subjA, subjB)` is true only when both subjects are electives of the class, they're different subjects, each has at least one enrolled student of that class, and no student takes both.
+- Anything unknown is not shareable. Every place that can let two lessons of one class share a period uses this function.
+
+**Clash checks** (`utils/timetable-conflicts.js`):
+- `checkConflicts` drops a class-clash candidate when `canShareSlot` holds for the two `subjectId`s. Enrolment is loaded only when there is a candidate class clash, so ordinary saves cost nothing extra.
+- `batchConflicts(slots, electiveInfo?)` does the same for bulk save; `POST /bulk` loads `electiveInfo` for the batch's classes.
+- Nothing that was allowed before is refused now. Teacher and room rules are unchanged. A missing `subjectId` still clashes.
+
+**Generator:**
+- `prepare.js` merges elective info across a class's id forms. Elective assignments become one group per class + subject + teacher (`groupId = "<classKey>|g:<subjectId>|<teacherKey>"`; rows entered once per stream merge, using the largest periods/week, with an `elective_rows_differ` warning).
+- In-scope elective lessons already on the timetable join their group, and elective targets and locks are keyed `<class>|*|<subject>`.
+- `problem.groups[gid] = { streams, shareWith }`: `streams` are the streams of the enrolled students (null if unknown or if any student has no stream); `shareWith` lists the groups `canShareSlot` allows.
+- In `solver.js`, `audienceClash()` replaces `sameAudience` for class busy time. Group vs group clashes unless listed in `shareWith`. Group vs a regular lesson clashes if that lesson is whole-class, or its stream is in `streams`, or `streams` is unknown.
+- New precheck warning `elective_no_enrolment`. `class_overfull` adds the busiest group touching the stream (a lower bound, so it never over-reports).
+
+**Apply (`routes/timetable-generate.js`):**
+1. It atomically claims the run (`status: 'generated'` → `'applying'`, with `backup` saved) before deleting anything, so two people applying at once get a 409.
+2. It deletes the replaced lessons, then inserts the new ones.
+3. On any write error it deletes `generationRunId` lessons, re-inserts `backup`, sets the status back to `'generated'` and returns 500 `APPLY_FAILED` ("nothing was changed").
+4. If the rollback itself fails, the run stays `'applying'` with `backup` saved and the response says so.
+
+Tests: `server/__tests__/timetable-elective-clashes.test.js`; option and apply-failure cases in `timetable-generate.test.js`. The solver tests use a roster checker that works out actual student membership, independently of `audienceClash`.

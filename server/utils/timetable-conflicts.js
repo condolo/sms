@@ -8,7 +8,9 @@
 
    A clash is:
      1. the same class (or the same stream, or a whole-class lesson
-        against any stream) twice in one period;
+        against any stream) twice in one period — unless both are
+        electives of that class that no student takes together (an
+        option block; utils/elective-groups.js canShareSlot, v5.269.1);
      2. the same teacher in two lessons whose clock times overlap,
         across sections (Primary P3 09:30–10:30 vs Secondary P2
         09:30–11:00 is a clash even though the period keys differ);
@@ -18,6 +20,7 @@
 'use strict';
 
 const { tenantModel } = require('./tenant-model');
+const { loadElectiveInfo, canShareSlot } = require('./elective-groups');
 
 /** True if two HH:MM ranges overlap (touching ends do not overlap). */
 function timesOverlap(start1, end1, start2, end2) {
@@ -59,9 +62,16 @@ async function checkConflicts(schoolId, data, exclude = null) {
   const base = { schoolId, day: data.day, isActive: true, academicYearId: data.academicYearId ?? null };
   const keep = (s) => !excluded.has(_slotId(s));
 
-  // 1. Class / stream
+  // 1. Class / stream — except two electives no student takes both of
+  //    (an option block, utils/elective-groups.js). Enrolment is loaded only
+  //    when there is a candidate clash, so ordinary saves cost nothing extra.
   const classSlots = (await Timetable.find({ ...base, classId: data.classId, period: data.period }).lean()).filter(keep);
-  const classConflict = classSlots.find(s => _sameAudience(data, s));
+  let classCandidates = classSlots.filter(s => _sameAudience(data, s));
+  if (classCandidates.length && data.subjectId && classCandidates.some(s => s.subjectId)) {
+    const info = await loadElectiveInfo({ schoolId }, schoolId, [data.classId]);
+    classCandidates = classCandidates.filter(s => !canShareSlot(info, data.classId, data.subjectId, s.subjectId));
+  }
+  const classConflict = classCandidates[0];
   if (classConflict) {
     return `Slot already exists for this ${data.streamId && classConflict.streamId ? 'stream' : 'class'} on ${data.day} period ${data.period}.`;
   }
@@ -107,14 +117,15 @@ async function checkConflicts(schoolId, data, exclude = null) {
  * Clashes between lessons inside one batch (before any of them is saved).
  * Same three rules as checkConflicts. Returns [{ index, otherIndex, message }].
  */
-function batchConflicts(slots) {
+function batchConflicts(slots, electiveInfo = null) {
   const out = [];
   for (let i = 0; i < slots.length; i++) {
     for (let j = 0; j < i; j++) {
       const a = slots[i], b = slots[j];
       if (a.day !== b.day || (a.academicYearId ?? null) !== (b.academicYearId ?? null)) continue;
       let why = null;
-      if (a.classId === b.classId && String(a.period) === String(b.period) && _sameAudience(a, b)) why = 'the same class';
+      if (a.classId === b.classId && String(a.period) === String(b.period) && _sameAudience(a, b)
+        && !(electiveInfo && canShareSlot(electiveInfo, a.classId, a.subjectId, b.subjectId))) why = 'the same class';
       else if (_overlaps(a, b)) {
         if (a.teacherId && a.teacherId === b.teacherId) why = 'the same teacher';
         else if (_roomKey(a) && _roomKey(a) === _roomKey(b)) why = 'the same room';

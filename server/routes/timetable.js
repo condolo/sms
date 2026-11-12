@@ -48,6 +48,7 @@ const { resolveAcademicPeriod } = require('../utils/academic-period');
 const { isYearArchived } = require('../utils/archival');
 const ScopeEngine = require('../utils/scopeEngine');
 const { timesOverlap, checkConflicts, batchConflicts } = require('../utils/timetable-conflicts');
+const { loadElectiveInfo } = require('../utils/elective-groups');
 const { getTimetableSettings, setWorkingDays, setRules, notWorkingDayMsg, ALL_DAYS } = require('../utils/timetable-settings');
 const teacherAvailability = require('../utils/teacher-availability');
 const { computePlacement } = require('../utils/timetable-placement');
@@ -1782,7 +1783,9 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, timetableManageAccess('creat
     // Clash checks — the same rules as adding a single lesson (v5.265.0; before, a bulk save
     // skipped them). Inside the batch first, then against what is saved, ignoring the lessons
     // this batch replaces. Nothing is written if any lesson clashes.
-    const clashes = batchConflicts(toInsert).map(c => ({ index: c.index, message: c.message }));
+    // Electives no student takes together may share a period (option blocks, v5.269.1).
+    const electiveInfo = await loadElectiveInfo(tenantContext(req), schoolId, [...new Set(toInsert.map(s => s.classId).filter(Boolean))]);
+    const clashes = batchConflicts(toInsert, electiveInfo).map(c => ({ index: c.index, message: c.message }));
     for (let i = 0; i < toInsert.length && clashes.length < 20; i++) {
       const msg = await checkConflicts(schoolId, toInsert[i], replacedIds);
       if (msg) clashes.push({ index: i, message: msg });

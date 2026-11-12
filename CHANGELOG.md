@@ -6,6 +6,42 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.269.1] - 2026-11-12 - fix(timetable): option blocks (electives) on the timetable and in the generator; applying a generated timetable can no longer lose lessons
+
+The two gaps found in the post-Phase-3 review.
+
+### Fixed
+- **Electives (option subjects) weren't understood anywhere on the timetable.** An elective's students come from every stream of a class (`class_subjects.isCompulsoryForClass === false`, enrolment in `student_subjects`). The impact:
+  - **The clash checks** (add, edit, bulk save, import) refused any two lessons of one class in the same period, so an option block (Physics | History at the same time) couldn't even be entered by hand.
+  - **The generator** treated an elective as a whole-class lesson, so options were placed one after another. If the elective's assignment named a stream, students in other streams could be double-booked.
+
+  **Now:** two lessons of one class may share a period only when both are electives and no student takes both (`server/utils/elective-groups.js` `canShareSlot`). Every path uses the same rule, and anything unknown (no `subjectId`, nobody enrolled) still clashes exactly as before.
+  - The generator schedules each option as one group, placed once even if the assignment was entered once per stream.
+  - An option runs beside other options its students don't take, never beside a whole-class lesson or a stream lesson containing any of its students.
+  - An option with nobody enrolled is kept apart from everything, with a new precheck warning.
+- **Applying a generated timetable could lose lessons.** Apply deleted the replaced lessons, then inserted the new ones, and only then saved the backup. If the insert failed, the old lessons were gone with no copy. Now:
+  - the backup is saved and the run atomically claimed (`'applying'`) before anything is deleted, which also stops two people applying the same run at once;
+  - a failed write removes whatever got in, restores the backup, and reports "nothing was changed";
+  - if even that fails, the backup stays on the run and the response says so.
+
+### Tests / verified
+- New `server/__tests__/timetable-elective-clashes.test.js` (6): an option beside an option with no shared student is allowed; shared student, compulsory subject, nobody enrolled, same subject or no `subjectId` all still clash; teacher rule unchanged; another school's enrolment ignored; bulk save follows the same rule.
+- Solver: +5 tests. A roster checker works out which students are in each lesson, independently of the solver's own rule. Making the solver treat every option pair as shareable makes the shared-student test fail.
+- Route tests (+7):
+  - options share periods so a too-full week fits;
+  - per-stream rows merge into one group;
+  - a shared student means the options never overlap;
+  - nobody enrolled means a warning and the option is kept apart;
+  - a failed insert part-way restores the draft exactly and the run can be applied again;
+  - the backup exists before any delete;
+  - a failed rollback keeps the backup;
+  - a run already being applied gets a 409.
+- Full server suite: 418 suites, 4559 tests passing. RBAC (100%) and tenant (35) scanners unchanged.
+- On the local demo school:
+  - the Secondary precheck lists the options with nobody enrolled;
+  - after enrolling Form 1A students in ICT and Geography and giving them 2 periods a week, generating Form 1A placed both as option groups;
+  - adding a Geography lesson by hand beside an existing Form 1A ICT lesson was accepted (it was refused before), while Mathematics in that period is still refused as a class clash.
+
 ## [v5.269.0] - 2026-11-12 - feat(timetable): Phase 3 — generate a section's timetable automatically
 
 Phase 3 of the plan towards an aSc-style automatic timetable generator. It uses the Phase 2 inputs (availability, doubles, room types, rules). The generator code had been started in an earlier session and left uncommitted; this finishes it, makes apply safe, and adds the screen.

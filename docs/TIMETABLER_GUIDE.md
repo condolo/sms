@@ -173,6 +173,8 @@ These are set outside the Timetable module, and both the **Lessons to place** li
    - Nothing reaches teachers, students or parents until you **Publish** (section 8).
 5. Changed your mind? Under **Recent runs**, **Undo** removes the generated lessons and puts the replaced ones back. Only the most recently applied run can be undone, and undo also removes any generated lesson you edited by hand after applying.
 
+If applying fails part-way (for example a connection drop), the draft is put back as it was and you see "Applying failed, so nothing was changed". Just try again.
+
 **What it never breaks:**
 - a class, teacher or room is never in two places at once (a whole-class lesson blocks every stream);
 - a teacher is never placed in a time they marked unavailable;
@@ -180,6 +182,12 @@ These are set outside the Timetable module, and both the **Lessons to place** li
 - a double lesson always uses two back-to-back periods with no break between them.
 
 If one of these can't be met, the lesson is left unplaced and listed with the reason, rather than placed wrongly.
+
+**Option subjects (electives).** A subject that isn't compulsory for a class (Classes → subjects, "compulsory" unticked) is an option. Its students come from any stream and are the ones enrolled in it under Students → Subjects.
+- **The generator schedules each option as one group**, once, even if its assignment was entered once per stream.
+- **Two options can run in the same period** (an option block, e.g. Physics | History | Business) when no student takes both. Before this, you couldn't put two lessons of one class in the same period at all, even by hand. Now adding a lesson, bulk save and import all allow it under the same rule.
+- **An option never runs beside a whole-class lesson**, nor beside a stream lesson that any of its students are in.
+- **If nobody is recorded as taking an option**, Check warns you. The generator then keeps that option apart from every other lesson of the class, so it can never put a student in two places. Enrol students in their options first to get proper option blocks.
 
 **What it tries to follow** (from Days & rules): a teacher's most lessons per day, a subject at most N times a day, no gaps in a teacher's day, subjects spread across the week, chosen subjects in the morning, preferred rooms.
 
@@ -189,4 +197,4 @@ If one of these can't be met, the lesson is left unplaced and listed with the re
 
 ---
 
-*Last reviewed: 2026-11-12 (v5.269.0) — checked directly against `client/src/pages/timetable/`, `server/routes/timetable.js` and `server/routes/timetable-generate.js`.*
+*Last reviewed: 2026-11-12 (v5.269.1) — checked directly against `client/src/pages/timetable/`, `server/routes/timetable.js`, `server/routes/timetable-generate.js` and `server/utils/elective-groups.js`.*

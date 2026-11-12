@@ -48,7 +48,17 @@ function assertValid(p, result) {
     for (let j = 0; j < i; j++) {
       const a = items[i], b = items[j];
       if (!ov(a, b)) continue;
-      if (a.classId && a.classId === b.classId && (!a.streamId || !b.streamId || a.streamId === b.streamId)) throw new Error(`class clash ${a.classId} ${a.day} ${a.start}`);
+      if (a.classId && a.classId === b.classId) {
+        if (p.__roster) {
+          // Independent of the solver's own rule: who is actually in each lesson.
+          const who = (x) => {
+            if (x.groupId) return new Set(p.__roster.groups[x.groupId] || Object.keys(p.__roster.students));
+            return new Set(Object.entries(p.__roster.students).filter(([, st]) => !x.streamId || st === x.streamId).map(([s]) => s));
+          };
+          const wa = who(a);
+          if ([...who(b)].some(s => wa.has(s))) throw new Error(`student clash ${a.classId} ${a.day} ${a.start}`);
+        } else if (!a.streamId || !b.streamId || a.streamId === b.streamId) throw new Error(`class clash ${a.classId} ${a.day} ${a.start}`);
+      }
       if (a.teacherKey && a.teacherKey === b.teacherKey) throw new Error(`teacher clash ${a.teacherKey} ${a.day} ${a.start}`);
       if (a.roomId && a.roomId === b.roomId) throw new Error(`room clash ${a.roomId} ${a.day} ${a.start}`);
     }
@@ -207,4 +217,96 @@ test('rule breaks count only days the generated lessons touch, not overloads alr
   const r = solve(p, { budgetMs: 300 });
   expect(r.placements).toHaveLength(1);
   expect(r.violations.teacherOverDay).toBe(0);
+});
+
+/* ── Elective (option) groups, v5.269.1 ─────────────────────────────
+   Class A: streams s1 (students a1–a3) and s2 (b1–b3). Physics takes
+   a1, b1; History takes a2, b2; Art takes a1 (also in Physics). */
+function electiveProblem(over = {}) {
+  const roster = {
+    students: { a1: 's1', a2: 's1', a3: 's1', b1: 's2', b2: 's2', b3: 's2' },
+    groups: { 'A|g:phy|TP': ['a1', 'b1'], 'A|g:his|TH': ['a2', 'b2'], 'A|g:art|TA': ['a1'] },
+  };
+  const g = (gid) => ({ ...audience('A'), groupId: gid, label: gid });
+  return problem({
+    audiences: {
+      'A|': audience('A'),
+      'A|s1': audience('A', 's1'), 'A|s2': audience('A', 's2'),
+      'A|g:phy|TP': g('A|g:phy|TP'), 'A|g:his|TH': g('A|g:his|TH'), 'A|g:art|TA': g('A|g:art|TA'),
+    },
+    groups: {
+      'A|g:phy|TP': { streams: ['s1', 's2'], shareWith: ['A|g:his|TH'] },
+      'A|g:his|TH': { streams: ['s1', 's2'], shareWith: ['A|g:phy|TP', 'A|g:art|TA'] },
+      'A|g:art|TA': { streams: ['s1'], shareWith: ['A|g:his|TH'] },
+    },
+    __roster: roster,
+    ...over,
+  });
+}
+const optionUnits = (gid, subjectId, teacherKey, n) => many(n, { audKey: gid, classId: 'A', streamId: null, groupId: gid, subjectId, teacherKey });
+
+test('options no student shares run in the same periods, which is what makes a full week fit', () => {
+  // 12 whole-class + 8 Physics + 8 History = 28 one after another, but the class has 20 periods.
+  const p = electiveProblem({
+    units: [
+      ...many(12, { audKey: 'A|', classId: 'A', subjectId: 'core', teacherKey: 'TC' }),
+      ...optionUnits('A|g:phy|TP', 'phy', 'TP', 8),
+      ...optionUnits('A|g:his|TH', 'his', 'TH', 8),
+    ],
+  });
+  const r = solve(p, { budgetMs: 2000 });
+  expect(r.unplaced).toEqual([]);
+  assertValid(p, r);
+});
+
+test('options that share a student never overlap; a group never overlaps a whole-class lesson', () => {
+  const p = electiveProblem({
+    units: [
+      ...many(4, { audKey: 'A|', classId: 'A', subjectId: 'core', teacherKey: 'TC' }),
+      ...optionUnits('A|g:phy|TP', 'phy', 'TP', 6),
+      ...optionUnits('A|g:art|TA', 'art', 'TA', 6),   // a1 takes both
+    ],
+  });
+  const r = solve(p, { budgetMs: 1000 });
+  expect(r.unplaced).toEqual([]);
+  assertValid(p, r);   // the roster checker throws on any a1 double-booking
+});
+
+test('an option whose students are all in s1 can run alongside an s2-only lesson, never an s1 one', () => {
+  const p = electiveProblem({
+    units: [
+      ...optionUnits('A|g:art|TA', 'art', 'TA', 10),
+      ...many(10, { audKey: 'A|s2', classId: 'A', streamId: 's2', subjectId: 'x2', teacherKey: 'T2' }),
+      ...many(10, { audKey: 'A|s1', classId: 'A', streamId: 's1', subjectId: 'x1', teacherKey: 'T1' }),
+    ],
+  });
+  const r = solve(p, { budgetMs: 2000 });
+  expect(r.unplaced).toEqual([]);   // s1: 10 + 10 = 20 periods exactly; Art must sit beside s2's lessons
+  assertValid(p, r);
+});
+
+test('an option with unknown enrolment is kept apart from everything in the class', () => {
+  const p = electiveProblem({
+    groups: { 'A|g:phy|TP': { streams: null, shareWith: [] } },
+    __roster: { students: { a1: 's1', b1: 's2' }, groups: {} },   // unknown → treated as everyone
+    units: [
+      ...optionUnits('A|g:phy|TP', 'phy', 'TP', 5),
+      ...many(15, { audKey: 'A|s2', classId: 'A', streamId: 's2', subjectId: 'x2', teacherKey: 'T2' }),
+    ],
+  });
+  const r = solve(p, { budgetMs: 1000 });
+  expect(r.unplaced).toEqual([]);
+  assertValid(p, r);
+});
+
+test('audienceClash: unknown or missing group info always clashes', () => {
+  const { audienceClash } = require('../utils/timetable-generator/solver')._internals;
+  const p = { groups: { G1: { streams: ['s1'], shareWith: ['G2'] }, G2: { streams: ['s2'], shareWith: ['G1'] } } };
+  expect(audienceClash(p, { groupId: 'G1' }, { groupId: 'G2' })).toBe(false);
+  expect(audienceClash(p, { groupId: 'G1' }, { groupId: 'G3' })).toBe(true);      // G3 unknown
+  expect(audienceClash(p, { groupId: 'G1' }, { groupId: 'G1' })).toBe(true);      // same group
+  expect(audienceClash(p, { groupId: 'G1' }, { streamId: null })).toBe(true);     // whole class
+  expect(audienceClash(p, { groupId: 'G1' }, { streamId: 's2' })).toBe(false);
+  expect(audienceClash(p, { groupId: 'G1' }, { streamId: 's1' })).toBe(true);
+  expect(audienceClash({ groups: {} }, { groupId: 'GX' }, { streamId: 's2' })).toBe(true);
 });
