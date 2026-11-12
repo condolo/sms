@@ -1143,7 +1143,15 @@ function SchoolTab() {
   );
 
   return (
-    <form onSubmit={e => { e.preventDefault(); mutate(f); }} className="max-w-5xl space-y-4">
+    <form
+      onSubmit={e => { e.preventDefault(); mutate(f); }}
+      onKeyDown={e => {
+        /* SMTP lives in its own tab but inside this form; Enter in an SMTP
+           field must never submit (and save) the school profile. */
+        if (schoolTab === 'email' && e.key === 'Enter' && e.target?.tagName === 'INPUT') e.preventDefault();
+      }}
+      className="max-w-5xl space-y-4"
+    >
       {/* Toast */}
       <div className="h-8 flex items-center">
         <AnimatePresence>
@@ -1916,7 +1924,7 @@ function SmtpCard({ school = {}, onSaved }) {
           >
             {toast.ok ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}
             {toast.text}
-            <button onClick={() => setToast(null)} className="ml-auto opacity-60 hover:opacity-100"><X size={11} /></button>
+            <button type="button" onClick={() => setToast(null)} className="ml-auto opacity-60 hover:opacity-100"><X size={11} /></button>
           </motion.div>
         )}
       </AnimatePresence>
