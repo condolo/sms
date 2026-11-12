@@ -344,6 +344,14 @@ Ticking **Attendance → Mark Attendance** lets a role *use* Attendance, but on 
 
 Admin, Principal and Deputy Principal always see every class. To let any other role or person mark **every** class (for example a Senior Teacher who covers registers), tick **Attendance → All Classes (not just assigned)**: View lets them see every class's register, Edit lets them mark it too. It is off by default for every role. The timetable does not need to be set up for any of this.
 
+### Parent replies on behaviour entries — who receives them *(2026-11)*
+
+Parents now see the name of the staff member who logged each behaviour entry (display name only, never email or phone) and the subject, and can reply on the entry. A reply goes to:
+- the staff member who logged the entry, and
+- the child's stream **Form Teacher** and **Assistant Form Teacher** (Classes → class → stream), if they are different people.
+
+So that replies reach someone, make sure each stream has a form teacher set and that teachers' HR records are linked to their login accounts. If neither the logger nor a form teacher has an active account, the parent is told to use **Messages** instead. Replies arrive in staff **Messages** and the bell; the email follows your **New Message** notification setting (Settings → Notifications), the same as any other direct message. Admin, Principal, Deputy Principal, HOD and the Discipline Committee can open and answer any entry's conversations from **Behaviour → Incidents**; other staff only see the ones they're part of. No new permission needs ticking.
+
 ### Who can review submitted marks *(2026-10)*
 
 Teachers enter marks directly in **Exams → Markbook**; the current workflow does not require a submit-for-review step. Report-card publication locks the relevant marks. The **Review** tab remains for reviewing submission records and handling locked-mark correction/unlock workflows. The **Review / Approve Mark Submissions** Grades permission controls applicable review actions; check the Review screen's displayed status and action before making a correction. Do not tell teachers they must submit marks for approval before they can continue entering them (see changelog v5.177.0).

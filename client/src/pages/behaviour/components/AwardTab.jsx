@@ -31,6 +31,22 @@ export default function AwardTab() {
   const [note, setNote]         = useState('');
   const [stuSearch, setStuSearch] = useState('');
   const [toast, setToast]       = useState(null);
+  const [subjectId, setSubjectId] = useState(null); // null = not chosen yet (auto-default applies); '' = "no particular subject"
+
+  /* Subject / lesson the entry is about (v5.266.0) — parents asked "which
+     homework?". The student's class subjects, the teacher's own first;
+     defaults to the teacher's subject when they teach exactly one there. */
+  const { data: subjData } = useQuery({
+    queryKey: ['behaviour', 'subject-options', sid],
+    queryFn:  () => behaviourApi.subjectOptions(sid),
+    enabled:  !!sid,
+    staleTime: 5 * 60_000,
+  });
+  const subjectOptions = subjData?.data ?? [];
+  const mySubjects = subjectOptions.filter(s => s.mine);
+  // A choice made for a previously picked student doesn't carry over.
+  const chosen = subjectId === '' || subjectOptions.some(s => s.id === subjectId) ? subjectId : null;
+  const effectiveSubjectId = chosen ?? (mySubjects.length === 1 ? mySubjects[0].id : '');
 
   /* School's configurable categories — each returned category still
      carries ALL its items; only categories containing at least one item
@@ -104,7 +120,7 @@ export default function AwardTab() {
 
   function reset() {
     setStep(1); setSid(''); setSName(''); setType('');
-    setCategory(null); setItem(null); setDescription(''); setNote(''); setStuSearch('');
+    setCategory(null); setItem(null); setDescription(''); setNote(''); setStuSearch(''); setSubjectId(null);
   }
 
   function submit() {
@@ -122,6 +138,7 @@ export default function AwardTab() {
       points:       pts,
       severity:     Math.abs(pts) >= 10 ? 'critical' : Math.abs(pts) >= 5 ? 'high' : Math.abs(pts) >= 3 ? 'medium' : 'low',
       note:         note.trim() || undefined,
+      subjectId:    effectiveSubjectId || undefined,
       date:         new Date().toISOString().slice(0, 10),
     });
   }
@@ -390,6 +407,21 @@ export default function AwardTab() {
                   {nextMs.pts - (currentMerits + (pts ?? 0))} pts to {nextMs.badge} milestone.
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Subject / lesson — shown to the parent with who logged it */}
+          {subjectOptions.length > 0 && (
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1.5">Subject / lesson <span className="font-normal text-slate-400">(shown to the parent)</span></label>
+              <select
+                value={effectiveSubjectId}
+                onChange={e => setSubjectId(e.target.value)}
+                className="w-full text-sm px-3 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 text-slate-800"
+              >
+                <option value="">No particular subject</option>
+                {subjectOptions.map(s => <option key={s.id} value={s.id}>{s.name}{s.mine ? ' (your subject)' : ''}</option>)}
+              </select>
             </div>
           )}
 

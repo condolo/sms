@@ -6,6 +6,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.266.0] - 2026-11-12 - feat(behaviour): parents see who logged an entry and in which subject, and can reply to that teacher and the form teacher
+
+Reported by a parent: "when we get an update on behaviour, I cannot see which teacher has updated. So I don't even know who to reply to and question. Like this one I can't tell which homework my son has not done." Their example, "Incomplete homework (first instance)", Classroom & Academic, 12 Nov, -1, showed no teacher and no subject. The teacher's name had been left out on purpose (the parent route never selected `reportedBy`), and incidents had no subject field at all.
+
+### Added
+- **Who and where on every parent-facing entry.** Behaviour & Rewards (Latest Reward, Teacher Comment) and every Incident History row now show "Logged by *name* · *subject* · *class*". Display name only: an empty name, or one that is really an email or phone number, shows as "School staff"; ids, emails and phones never reach the parent. `note` and `witnesses` are still never selected.
+- **Subject on entries.** `behaviour_incidents.subjectId`/`subjectName`; Award Points has a **Subject / lesson** picker (the class's subjects, the teacher's own first, pre-selected when they teach just one there). `subjectName` is always re-read from `subjects`, never taken as typed. For older entries the subject is shown only when the logger teaches exactly one subject in that class. `GET /api/behaviour/subject-options`.
+- **Parent replies on an entry.** "Reply to teacher" under each entry. A reply goes to the logger and the child's form teacher (and assistant form teacher), resolved by the server, and is stored as an ordinary `messages` document through `createDirectMessage`. That means staff get it in Messages and the bell, by email when the school's **New Message** email setting is on, and by push. One thread per (entry, parent): a co-guardian doesn't see yours. Parents see answers in the same thread, with an "N new" badge. `GET/POST /api/parent-portal/behaviour/:childId/:incidentId/replies`.
+- **Staff side.** New **Behaviour → Parent Replies** tab (unread badge) and an "N parent replies · N new" link on Incidents rows, both opening a conversation panel with a reply box. Only staff on the conversation, the logger, the form teacher, management and the Discipline Committee can read or answer it; staff can only answer a thread a parent started, and only while that parent is still linked to the child. `GET /api/behaviour/replies`, `GET/POST /api/behaviour/incidents/:id/replies`; `GET /api/behaviour/incidents` rows carry `replyCount`/`unreadReplies`.
+- `server/utils/behaviour-replies.js` (shared logic); `server/__tests__/fixtures/fake-tenant-db.js` (in-memory `tenantModel` stand-in with real filtering and `select` projection).
+
+### Fixed
+- The parent's points tile showed **"+-1"** for a negative total (the "+" was hard-coded). It now shows "-1", and "+" only for positive totals.
+
+### Tests / verified
+- New `server/__tests__/routes/behaviour-parent-replies.test.js` (23 tests, run through the real routes and real `createDirectMessage`): display name only and no leaked ids/emails/notes; another child's entry is refused (unlinked child 403, own child with a foreign or other-school entry 404); recipients come from the server, never from the client; email follows the New Message setting; logger = form teacher gets one copy; non-participant teachers get 403 and management gets in; no staff-opened threads; parent no longer linked gives 409; co-guardian threads kept separate; other-school messages are invisible; subject picker and subject resolution. `parent-portal-mobile-screens.test.js` updated: `reportedBy` is now selected, so the test pins that it's stripped from the response. Behaviour, parent-portal, messages and portal suites: 37 suites, all passing. RBAC (100%) and tenant (35) scanners unchanged. Client production build compiles.
+- In the browser on the local demo school: as teacher@demo, Award Points for Amara Osei with "Incomplete homework (first instance)" (subject pre-selected: Mathematics). As parent@demo, the entry showed "Logged by Demo Teacher · Mathematics · Form 1A", "-1" points rather than "+-1", and the reply box said "Goes to Demo Teacher (logged this)". Sent a reply (the textarea kept focus while typing). As the teacher, the Parent Replies tab showed 1 unread; opened it and answered. As the parent, the entry showed "Conversation (2) · 1 new" and the answer, and the bell count went up. The notification email was attempted (no local SMTP catcher was running, so delivery was refused).
+
 ## [v5.265.1] - 2026-11-12 - fix(auth): password reset on a group portal said "School 'tis' not found"
 
 Reported by a parent on the TIS Group of Schools portal: **Forgot password → Send reset link** showed "School 'tis' not found".

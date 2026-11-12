@@ -6,7 +6,9 @@
    ============================================================ */
 import { useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
-import { BarChart3, Star, Scale, Send, Home, Tag } from 'lucide-react';
+import { BarChart3, Star, Scale, Send, Home, Tag, MessageCircle } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { behaviour as behaviourApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 import OverviewTab   from './components/OverviewTab.jsx';
 import AwardTab      from './components/AwardTab.jsx';
@@ -14,17 +16,27 @@ import IncidentsTab  from './components/IncidentsTab.jsx';
 import AppealsTab    from './components/AppealsTab.jsx';
 import HousesTab     from './components/HousesTab.jsx';
 import CategoriesTab from './components/CategoriesTab.jsx';
+import ParentRepliesTab from './components/ParentRepliesTab.jsx';
 
 export default function BehaviourPage() {
   const [tab, setTab] = useState('overview');
   const role    = useAuthStore(s => s.session?.user?.role ?? '');
   const isAdmin = role === 'admin' || role === 'superadmin';
 
+  // Unread parent replies (v5.266.0) — badge on the Parent Replies tab.
+  const { data: repliesData } = useQuery({
+    queryKey: ['behaviour', 'replies', 'inbox'],
+    queryFn: () => behaviourApi.replies.inbox().then(r => r.data),
+    refetchInterval: 60_000,
+  });
+  const unreadReplies = repliesData?.unreadTotal ?? 0;
+
   const TABS = [
     { id: 'overview',   label: 'Overview',     icon: BarChart3 },
     { id: 'award',      label: 'Award Points',  icon: Star      },
     { id: 'incidents',  label: 'Incidents',     icon: Scale     },
     { id: 'appeals',    label: 'Appeals',       icon: Send      },
+    { id: 'replies',    label: 'Parent Replies', icon: MessageCircle, badge: unreadReplies },
     { id: 'houses',     label: 'Houses',        icon: Home      },
     ...(isAdmin ? [{ id: 'categories', label: 'Categories', icon: Tag }] : []),
   ];
@@ -59,6 +71,7 @@ export default function BehaviourPage() {
               >
                 <Icon size={14} />
                 {t.label}
+                {t.badge > 0 && <span className="ml-0.5 px-1.5 py-0.5 rounded-full bg-indigo-600 text-white text-[10px] font-semibold leading-none">{t.badge}</span>}
               </button>
             );
           })}
@@ -72,6 +85,7 @@ export default function BehaviourPage() {
           {tab === 'award'      && <AwardTab      key="award"      />}
           {tab === 'incidents'  && <IncidentsTab  key="incidents"  />}
           {tab === 'appeals'    && <AppealsTab    key="appeals"    />}
+          {tab === 'replies'    && <ParentRepliesTab key="replies" />}
           {tab === 'houses'     && <HousesTab     key="houses"     />}
           {tab === 'categories' && <CategoriesTab key="categories" />}
         </AnimatePresence>

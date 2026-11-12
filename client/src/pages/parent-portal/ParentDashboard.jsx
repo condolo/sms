@@ -41,6 +41,7 @@ import {
 import NotificationBell from '@/components/layout/NotificationBell.jsx';
 import FloatingHelp from '@/components/help/FloatingHelp.jsx';
 import MessagesPanel from './components/MessagesPanel.jsx';
+import BehaviourReplyThread from './components/BehaviourReplyThread.jsx';
 import ThreadView from '@/pages/messages/components/ThreadView.jsx';
 import TransportRideCard from '@/components/transport/TransportRideCard.jsx';
 import { messages as messagesApi, parentMessaging, parentPortal, auth as authApi } from '@/api/client.js';
@@ -1669,6 +1670,24 @@ export default function ParentDashboard() {
     );
   }
 
+  /* "Logged by Mr Otieno · Mathematics · Year 6" — asked for by a parent who
+     couldn't tell who to ask, or which homework. Display names only. */
+  function _whoAndWhere(inc) {
+    const where = [inc?.subjectName, inc?.className].filter(Boolean).join(' · ');
+    if (!inc?.recordedBy && !where) return null;
+    return (
+      <p className="text-[11px] text-slate-500 mt-0.5">
+        {inc.recordedBy && <>Logged by <span className="font-semibold text-slate-700">{inc.recordedBy}</span></>}
+        {inc.recordedBy && where ? ' · ' : ''}{where}
+      </p>
+    );
+  }
+
+  /* Opening a conversation marks its answers read: reflect that on the row. */
+  function _onReplySeen(incidentId, patch) {
+    setBehaviourFull(list => Array.isArray(list) ? list.map(i => (i.id === incidentId ? { ...i, ...patch } : i)) : list);
+  }
+
   function BehaviourPage() {
     return (
       <>
@@ -1676,7 +1695,7 @@ export default function ParentDashboard() {
         <CardHeader icon={Star} iconClass="text-amber-500" title="Behaviour & Rewards" />
         <div className="px-[18px] py-4 flex items-center gap-4">
           <div className="w-14 h-14 rounded-xl bg-amber-50 border border-amber-100 flex items-center justify-center flex-shrink-0">
-            <span className="text-lg font-extrabold text-amber-600">+{totalPoints}</span>
+            <span className="text-lg font-extrabold text-amber-600">{totalPoints > 0 ? '+' : ''}{totalPoints}</span>
           </div>
           <div className="flex-1">
             <p className="text-[13px] font-semibold text-slate-800">Behaviour Points</p>
@@ -1685,12 +1704,14 @@ export default function ParentDashboard() {
               <div className="mt-2 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
                 <p className="text-[10px] font-semibold text-amber-600 uppercase tracking-wide">Latest Reward</p>
                 <p className="text-[12px] font-medium text-slate-800 mt-0.5">{latestReward.title || latestReward.category || 'Reward'}</p>
+                {_whoAndWhere(latestReward)}
               </div>
             )}
             {latestComment?.description && (
               <div className="mt-2 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
                 <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Teacher Comment</p>
                 <p className="text-[11px] text-slate-700 italic mt-0.5">"{latestComment.description}"</p>
+                {_whoAndWhere(latestComment)}
               </div>
             )}
           </div>
@@ -1716,6 +1737,7 @@ export default function ParentDashboard() {
                     <div className="flex-1 min-w-0">
                       <p className="text-[13px] font-semibold text-slate-800">{inc.title}</p>
                       <p className="text-[11px] text-slate-400 mt-0.5">{inc.category || ''}{inc.category && inc.date ? ' · ' : ''}{inc.date ? _fmtDate(inc.date) : ''}</p>
+                      {_whoAndWhere(inc)}
                     </div>
                     <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${positive ? 'text-emerald-700 bg-emerald-50' : (inc.points ?? 0) < 0 ? 'text-red-700 bg-red-50' : 'text-slate-600 bg-slate-100'}`}>
                       {positive ? '+' : ''}{inc.points ?? 0}
@@ -1724,6 +1746,7 @@ export default function ParentDashboard() {
                   {inc.description && <p className="text-[12px] text-slate-600 mt-1.5">{inc.description}</p>}
                   {inc.action && <p className="text-[11px] text-slate-400 mt-1">Action taken: {inc.action}</p>}
                   {inc.detention && <p className="text-[11px] text-amber-600 mt-1">Detention{inc.detentionDate ? ` · ${_fmtDate(inc.detentionDate)}` : ''}</p>}
+                  {inc.id && <BehaviourReplyThread childId={activeChildId} incident={inc} onSeen={_onReplySeen} />}
                 </div>
               );
             })}

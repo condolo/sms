@@ -868,6 +868,39 @@ _logBody()                        // Renders log modal inner HTML from _logState
 _logRefresh()                     // Preserves student/date, re-renders modal body
 ```
 
+### Who logged it, subject, and parent replies (v5.266.0)
+
+Shared logic: `server/utils/behaviour-replies.js`.
+
+**What parents see.** `GET /api/parent-portal/behaviour/:childId` and the dashboard's `behaviourSummary.latestReward/latestComment` now add `recordedBy` (display name of `reportedBy || createdBy`), `subjectName`, `subjectInferred`, `className`, `replyCount`, `unreadReplies`. `reportedBy`/`createdBy`/`classId` are selected only for the lookup and stripped before the response. `displayName()` turns an empty name, or a name that is really an email or phone number, into "School staff". `note` and `witnesses` are still never selected.
+
+**Subject.** `behaviour_incidents.subjectId` + `subjectName` (optional). On create/update, `subjectName` is re-read from `subjects` by `subjectId`; a free-typed `subjectName` without a valid `subjectId` is dropped. Older entries: `whereRecorded()` fills the subject only when the logger has exactly one `teaching_assignments` subject in the incident's class (`subjectInferred: true`). Award Points gets its picker from `GET /api/behaviour/subject-options?studentId=` (the class's `class_subjects`, the caller's own first, `mine: true`).
+
+**Replies reuse `messages`**, via `createDirectMessage` (routes/messages.js), so they get the inbox, the bell, the `new_message` email (when `notif-settings` allows it) and push for free. Extra fields on the message:
+
+| field | value |
+|---|---|
+| `behaviourIncidentId` | incident id |
+| `behaviourParentId` | userId of the parent who opened the conversation |
+| `behaviourThread` | `behaviour:<incidentId>:<parentUserId>`, one thread per (entry, parent), so co-guardians don't see each other's |
+| `context` | `{ type: 'behaviour', title, detail }` |
+| `studentId` | the child |
+
+Recipients are always resolved server-side by `incidentStaff()`: the logger plus the student's stream `formTeacherId` / `assistantFormTeacherId` (→ `teachers.userId`), de-duplicated, active non-portal accounts only.
+
+| Route | Who | Notes |
+|---|---|---|
+| `GET /api/parent-portal/behaviour/:childId/:incidentId/replies` | parent of that child | own thread + recipient names; marks read |
+| `POST /api/parent-portal/behaviour/:childId/:incidentId/replies` `{body}` | parent of that child | 403 unlinked child, 404 entry not this child's / other school, 409 no staff to receive |
+| `GET /api/behaviour/replies` | staff | threads the user sent to or received; `unreadTotal` |
+| `GET /api/behaviour/incidents/:id/replies` | staff | all threads for logger / form teacher / management / discipline_committee; otherwise only threads they're in (403 if none); marks read |
+| `POST /api/behaviour/incidents/:id/replies` `{parentUserId, body}` | same as GET | answers an existing thread only (404 otherwise); parent must still be linked to the student (409); goes to the parent + current incident staff + earlier staff senders |
+| `GET /api/behaviour/incidents` | (existing) | rows now carry `replyCount`, `unreadReplies` |
+
+Staff reply routes are `// rbac: participant-scoped` (no `behaviourAccess` gate, so a form teacher without behaviour:read can still answer). Portal roles get 403. Bodies are capped at 2000 characters.
+
+Client: `client/src/pages/parent-portal/components/BehaviourReplyThread.jsx` (parent), `client/src/pages/behaviour/components/ParentRepliesTab.jsx` + `ReplyThreadPanel.jsx` (staff), the Parent Replies tab badge in `BehaviourPage.jsx`, and the reply link in `IncidentsTab.jsx`. Tests: `server/__tests__/routes/behaviour-parent-replies.test.js`, which uses the reusable in-memory `tenantModel` stand-in `server/__tests__/fixtures/fake-tenant-db.js`.
+
 ---
 
 ## 13. Audit Log

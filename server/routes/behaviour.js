@@ -29,6 +29,8 @@ const { getWorkflowConfig, saveWorkflowConfig, resolveStep } = require('../utils
 const { isManagement } = require('../utils/subject-scope');
 const { htmlToPdfBufferOrFallback } = require('../utils/html-to-pdf');
 const { renderIncidentsReportHtml, renderIncidentsReportPdf } = require('../utils/behaviour-report');
+const behaviourReplies = require('../utils/behaviour-replies');
+const { createDirectMessage } = require('./messages');
 
 const router = express.Router();
 const PLAN   = planGate('behaviour');
@@ -86,6 +88,10 @@ const IncidentSchema = z.object({
   category:     z.string().max(100).optional(), // denormalized category name for display, same convention as library loans' bookTitle
   itemId:       z.string().optional(),           // the specific item within the category that was awarded
   itemLabel:    z.string().max(200).optional(),   // denormalized item label, same convention as category above
+  // Where it happened (2026-11-12): parents asked "which homework?". Optional;
+  // subjectName is re-resolved server-side from subjectId on create/update.
+  subjectId:    z.string().max(100).optional(),
+  subjectName:  z.string().max(150).optional(),
   academicYearId: z.string().optional(),
   termId:       z.string().optional(),
   type:         z.enum(['merit', 'demerit', 'neutral']).default('demerit'),
@@ -438,7 +444,17 @@ router.get('/incidents', authMiddleware, PLAN, MODGATE, behaviourAccess('read'),
       ? await tenantModel('users', tenantContext(req)).find({ schoolId, id: { $in: reporterIds } }).select('id name role').lean()
       : [];
     const reporterMap = Object.fromEntries(reporterDocs.map(u => [u.id, { name: u.name, role: u.role }]));
-    const docsWithReporter = docs.map(d => ({ ...d, reportedByName: reporterMap[d.reportedBy]?.name || null, reportedByRole: reporterMap[d.reportedBy]?.role || null }));
+    // Parent replies on each row (count, and unread for this user) — one
+    // query for the page; see utils/behaviour-replies.js.
+    const replies = await behaviourReplies.replyCounts(tenantContext(req), schoolId, docs.map(d => d.id), { viewerId: req.jwtUser.userId })
+      .catch(() => ({}));
+    const docsWithReporter = docs.map(d => ({
+      ...d,
+      reportedByName: reporterMap[d.reportedBy]?.name || null,
+      reportedByRole: reporterMap[d.reportedBy]?.role || null,
+      replyCount: replies[d.id]?.count || 0,
+      unreadReplies: replies[d.id]?.unread || 0,
+    }));
 
     return ok(res, docsWithReporter, paginate(page, limit, total));
   } catch (err) { console.error('[behaviour/incidents GET]', err); return E.serverError(res); }
@@ -663,6 +679,7 @@ router.post('/incidents', authMiddleware, PLAN, MODGATE, behaviourAccess('create
       if (!data.studentName) data.studentName = `${student.firstName} ${student.lastName}`.trim();
       data.classId = student.classId || data.classId;
     }
+    await _resolveSubjectName(req, data);
 
     const doc = await tenantModel('behaviour_incidents', tenantContext(req)).create({
       ...data,
@@ -746,6 +763,7 @@ router.put('/incidents/:id', authMiddleware, PLAN, MODGATE, behaviourAccess('upd
       data.academicYearId = period.academicYearId;
       data.termId          = period.termId;
     }
+    if (data.subjectId !== undefined || data.subjectName !== undefined) await _resolveSubjectName(req, data);
 
     const doc = await Incidents.findOneAndUpdate(
       { id: req.params.id, schoolId },
@@ -779,6 +797,210 @@ router.delete('/incidents/:id', authMiddleware, PLAN, MODGATE, behaviourAccess('
     if (!doc) return E.notFound(res, 'Incident not found');
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) { console.error('[behaviour/incidents DELETE/:id]', err); return E.serverError(res); }
+});
+
+/* The subject an incident is recorded against comes only from a real
+   subjects row — a free-typed name is dropped, so what a parent reads is
+   always a subject the school actually has. Empty subjectId clears it. */
+async function _resolveSubjectName(req, data) {
+  const { schoolId } = req.jwtUser;
+  if (!data.subjectId) {
+    if (data.subjectId === '' ) { data.subjectId = null; data.subjectName = null; }
+    else { delete data.subjectId; delete data.subjectName; }
+    return;
+  }
+  const subject = await tenantModel('subjects', tenantContext(req))
+    .findOne({ schoolId, id: data.subjectId }).select('id name').lean();
+  if (subject) data.subjectName = subject.name;
+  else { delete data.subjectId; delete data.subjectName; }
+}
+
+/* GET /api/behaviour/subject-options?studentId= — subjects in the student's
+   class curriculum for the Award Points form's "Subject / lesson" picker,
+   the caller's own teaching subjects first (mine: true). */
+router.get('/subject-options', authMiddleware, PLAN, MODGATE, behaviourAccess('create'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const studentId = strParam(req.query.studentId);
+    if (!studentId) return ok(res, []);
+    const ctx = tenantContext(req);
+    const student = await tenantModel('students', ctx).findOne({ schoolId, id: studentId }).select('classId').lean();
+    if (!student?.classId) return ok(res, []);
+    const [links, mine] = await Promise.all([
+      tenantModel('class_subjects', ctx).find({ schoolId, classId: student.classId }).select('subjectId').lean(),
+      tenantModel('teaching_assignments', ctx).find({ schoolId, classId: student.classId, teacherId: userId }).select('subjectId').lean(),
+    ]);
+    const mineIds = new Set(mine.map(m => m.subjectId).filter(Boolean));
+    const ids = [...new Set([...links.map(l => l.subjectId), ...mineIds].filter(Boolean))];
+    if (!ids.length) return ok(res, []);
+    const subjects = await tenantModel('subjects', ctx).find({ schoolId, id: { $in: ids } }).select('id name').lean();
+    const out = subjects
+      .map(s => ({ id: s.id, name: s.name, mine: mineIds.has(s.id) }))
+      .sort((a, b) => (b.mine - a.mine) || String(a.name).localeCompare(String(b.name)));
+    return ok(res, out);
+  } catch (err) { console.error('[behaviour/subject-options GET]', err); return E.serverError(res); }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   PARENT REPLIES (2026-11-12) — see utils/behaviour-replies.js.
+   Staff see a conversation when they are on it (sent or received a
+   message in it), or are the logger / the child's form teacher, or are
+   school management / discipline committee. Portal accounts never reach
+   these routes.
+   ══════════════════════════════════════════════════════════════ */
+function _staffOnly(req, res) {
+  if (behaviourReplies.PORTAL_ROLES.has(req.jwtUser?.role)) {
+    E.forbidden(res, 'Staff only.');
+    return false;
+  }
+  return true;
+}
+
+function _isParticipant(msgs, userId) {
+  return msgs.some(m => m.senderId === userId || (m.recipients || []).includes(userId));
+}
+
+async function _incidentForReplies(req, res) {
+  const { schoolId } = req.jwtUser;
+  const incident = await tenantModel('behaviour_incidents', tenantContext(req))
+    .findOne({ schoolId, id: req.params.id })
+    .select('id studentId studentName title date points category reportedBy createdBy classId subjectName').lean();
+  if (!incident) { E.notFound(res, 'Incident not found'); return null; }
+  return incident;
+}
+
+/* GET /api/behaviour/replies — this staff member's parent-reply conversations, newest first. */
+router.get('/replies', authMiddleware, PLAN, MODGATE, async (req, res) => { // rbac: participant-scoped — only conversations this user sent to or received, enforced in the query
+  if (!_staffOnly(req, res)) return;
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const ctx = tenantContext(req);
+    const msgs = await tenantModel('messages', ctx).find({
+      schoolId,
+      behaviourThread: { $exists: true },
+      $or: [{ senderId: userId }, { recipients: userId }],
+    }).sort({ createdAt: -1 }).limit(500)
+      .select('id senderId senderName senderRole recipients body createdAt isRead behaviourThread behaviourIncidentId behaviourParentId').lean();
+
+    const threads = new Map();
+    for (const m of msgs) {
+      let t = threads.get(m.behaviourThread);
+      if (!t) {
+        t = { threadKey: m.behaviourThread, incidentId: m.behaviourIncidentId, parentUserId: m.behaviourParentId, parentName: null, last: m, count: 0, unread: 0 };
+        threads.set(m.behaviourThread, t);
+      }
+      t.count += 1;
+      if (behaviourReplies.PORTAL_ROLES.has(m.senderRole) && m.senderName) t.parentName = t.parentName || m.senderName;
+      if ((m.recipients || []).includes(userId) && !(m.isRead && m.isRead[userId])) t.unread += 1;
+    }
+    const incidentIds = [...new Set([...threads.values()].map(t => t.incidentId))];
+    const incidents = incidentIds.length
+      ? await tenantModel('behaviour_incidents', ctx).find({ schoolId, id: { $in: incidentIds } })
+        .select('id studentName title date points category subjectName').lean()
+      : [];
+    const byId = Object.fromEntries(incidents.map(i => [i.id, i]));
+    const out = [...threads.values()].map(t => ({
+      threadKey: t.threadKey,
+      incidentId: t.incidentId,
+      parentUserId: t.parentUserId,
+      parentName: t.parentName || 'Parent',
+      incident: byId[t.incidentId] || null,
+      lastMessage: behaviourReplies.publicMessage(t.last, userId),
+      count: t.count,
+      unread: t.unread,
+    }));
+    return ok(res, { threads: out, unreadTotal: out.reduce((n, t) => n + t.unread, 0) });
+  } catch (err) { console.error('[behaviour/replies GET]', err); return E.serverError(res); }
+});
+
+/* GET /api/behaviour/incidents/:id/replies — the parent conversations on one entry. */
+router.get('/incidents/:id/replies', authMiddleware, PLAN, MODGATE, async (req, res) => { // rbac: participant-scoped — logger, form teacher, management/discipline, or a member of the conversation, enforced inline below
+  if (!_staffOnly(req, res)) return;
+  try {
+    const incident = await _incidentForReplies(req, res);
+    if (!incident) return;
+    const { schoolId, userId, role } = req.jwtUser;
+    const ctx = tenantContext(req);
+    const staff = await behaviourReplies.incidentStaff(ctx, schoolId, incident);
+    const seesAll = isManagement(req) || role === 'discipline_committee' || staff.some(s => s.userId === userId);
+
+    const all = await tenantModel('messages', ctx).find({ schoolId, behaviourIncidentId: incident.id })
+      .sort({ createdAt: 1 })
+      .select('id senderId senderName senderRole recipients body createdAt isRead behaviourThread behaviourParentId').lean();
+    const grouped = new Map();
+    for (const m of all) {
+      if (!grouped.has(m.behaviourThread)) grouped.set(m.behaviourThread, []);
+      grouped.get(m.behaviourThread).push(m);
+    }
+    const visible = [...grouped.entries()].filter(([, msgs]) => seesAll || _isParticipant(msgs, userId));
+    if (!seesAll && !visible.length) return E.forbidden(res, 'You are not on a conversation about this entry.');
+
+    const threads = visible.map(([key, msgs]) => ({
+      threadKey: key,
+      parentUserId: msgs[0].behaviourParentId,
+      parentName: msgs.find(m => behaviourReplies.PORTAL_ROLES.has(m.senderRole))?.senderName || 'Parent',
+      canReply: seesAll || _isParticipant(msgs, userId),
+      messages: msgs.map(m => behaviourReplies.publicMessage(m, userId)),
+    }));
+    await Promise.all(visible.map(([key]) => behaviourReplies.markThreadRead(ctx, schoolId, key, userId)));
+
+    const { reportedBy, createdBy, classId, ...incidentOut } = incident;
+    return ok(res, { incident: incidentOut, threads, staff: staff.map(s => ({ name: s.name, reason: s.reason })) });
+  } catch (err) { console.error('[behaviour/incidents/:id/replies GET]', err); return E.serverError(res); }
+});
+
+/* POST /api/behaviour/incidents/:id/replies — { parentUserId, body }.
+   Answers an existing parent conversation; goes to that parent and the
+   other staff on it. A teacher cannot open a new one here (use Messages). */
+router.post('/incidents/:id/replies', authMiddleware, PLAN, MODGATE, async (req, res) => { // rbac: participant-scoped — same access as the GET above, enforced inline below
+  if (!_staffOnly(req, res)) return;
+  try {
+    const { body, error } = behaviourReplies.cleanBody(req.body?.body);
+    if (error) return E.badRequest(res, error);
+    const parentUserId = strParam(req.body?.parentUserId);
+    if (!parentUserId) return E.badRequest(res, 'Which parent are you replying to?');
+    const incident = await _incidentForReplies(req, res);
+    if (!incident) return;
+    const { schoolId, userId, role } = req.jwtUser;
+    const ctx = tenantContext(req);
+
+    const key = behaviourReplies.threadKey(incident.id, parentUserId);
+    const msgs = await behaviourReplies.threadMessages(ctx, schoolId, key);
+    if (!msgs.length) return E.notFound(res, 'No conversation with that parent on this entry.');
+
+    const staff = await behaviourReplies.incidentStaff(ctx, schoolId, incident);
+    const allowed = isManagement(req) || role === 'discipline_committee'
+      || staff.some(s => s.userId === userId) || _isParticipant(msgs, userId);
+    if (!allowed) return E.forbidden(res, 'You are not on this conversation.');
+
+    // The parent must still be a parent of this child, in this school.
+    const parent = await tenantModel('users', ctx).findOne({ schoolId, id: parentUserId }).select('id role studentIds guardianOf isActive').lean();
+    const linked = parent && ['parent', 'guardian'].includes(parent.role) && parent.isActive !== false
+      && [...(parent.studentIds || []), ...(parent.guardianOf || [])].includes(incident.studentId);
+    if (!linked) return E.conflict(res, 'That parent is no longer linked to this student.');
+
+    const priorStaff = msgs.filter(m => !behaviourReplies.PORTAL_ROLES.has(m.senderRole)).map(m => m.senderId);
+    const recipientUserIds = [...new Set([parentUserId, ...staff.map(s => s.userId), ...priorStaff])].filter(id => id && id !== userId);
+
+    const me = await tenantModel('users', ctx).findOne({ schoolId, id: userId }).select('name').lean();
+    const senderName = behaviourReplies.displayName(me?.name);
+    const msg = await createDirectMessage(req, {
+      recipientUserIds,
+      subject: `Reply from ${senderName} on behaviour entry: ${incident.title}`,
+      body,
+      senderName,
+      senderRole: role,
+      extra: {
+        kind: 'text',
+        context: behaviourReplies.contextFor(incident),
+        behaviourIncidentId: incident.id,
+        behaviourParentId: parentUserId,
+        behaviourThread: key,
+        studentId: incident.studentId,
+      },
+    });
+    return created(res, { message: behaviourReplies.publicMessage(msg, userId) });
+  } catch (err) { console.error('[behaviour/incidents/:id/replies POST]', err); return E.serverError(res); }
 });
 
 /* ══════════════════════════════════════════════════════════════

@@ -313,9 +313,9 @@ Navigate to **Timetable** to build the weekly schedule.
 - **Days** sets the working days (add Saturday if your school teaches then).
 - Tick **Lock this lesson** to pin a lesson so it can't be changed or removed until unlocked.
 - Print or export the timetable from the action bar.
+- Full details: [Timetabler Guide](TIMETABLER_GUIDE.md).
 
 ---
-- Full details: [Timetabler Guide](TIMETABLER_GUIDE.md).
 
 ## 7. Attendance
 
@@ -650,6 +650,13 @@ Parents and guardians can now send a message directly from the **Messages** page
 
 You can only choose from staff categories that genuinely exist for your child — there is no way to message another parent through this feature. The staff member receives your message in their normal inbox, with an email notification, the same as any other message.
 
+### Parent Portal — Who logged a behaviour entry, and replying to it *(2026-11)*
+On **Behaviour & Rewards**, every entry (the Latest Reward, the Teacher Comment and each row of **Incident History**) now says who logged it and where, for example *Logged by Mr Otieno · Mathematics · Year 6*. Only the staff member's name is shown, never their email or phone number.
+
+To ask about an entry, click **Reply to teacher** under it, write your question and click **Send**. The box tells you who it goes to: the teacher who logged the entry and your child's class (form) teacher, if that is a different person. Their answers appear in the same conversation under the entry; the button shows **Conversation (2) · 1 new** when there's something you haven't read, and the reply also arrives in your **Messages** and the bell, with an email if your school sends message emails. Each parent or guardian has their own conversation: a second guardian on the same child does not see yours.
+
+If an entry has no teacher linked to it any more (for example, the teacher has left), the box says so; use **Messages** instead.
+
 ---
 
 ## 11b. eLearning — Online Sessions *(Standard plan)*
@@ -804,6 +811,15 @@ Stages reset per half-term. Thresholds are cumulative demerit points:
 
 ### PDF Report
 Click **Report** in the page header to generate and print a full behaviour report for the current period. Includes: House Cup, Stage Alerts, Persistent Patterns, Student Summary, and Staff Activity.
+
+### Subject and Parent Replies *(2026-11)*
+**Subject / lesson.** When you award or log points (**Behaviour → Award Points**), the confirm step has a **Subject / lesson** picker listing the student's class subjects, your own first. If you teach only one subject in that class it is already selected. Parents see it next to your name ("Logged by Mr Otieno · Mathematics · Year 6"), so they know which homework or lesson the entry is about. Choose **No particular subject** for things like corridor behaviour. For older entries with no subject, the parent sees the subject only when the teacher who logged it teaches exactly one subject in that class.
+
+**Parent replies.** Parents can reply on any entry for their own child. A reply goes to the teacher who logged it and to the child's form teacher (and assistant form teacher). It arrives in your **Messages** inbox and bell, with an email when the school's **New Message** email notification is on.
+- **Behaviour → Parent Replies** lists every conversation you're part of, newest first; the tab shows how many are unread. Click one to read it and reply. Your answer goes to the parent and to the other staff on the conversation.
+- On **Behaviour → Incidents**, an entry with replies shows "2 parent replies · 1 new"; click it to open the same conversation.
+- You can only answer a conversation a parent started. To contact a parent first, use **Messages**.
+- Leadership (admin, principal, deputy, HOD) and the Discipline Committee can open and answer any entry's conversations.
 
 ---
 
@@ -1015,5 +1031,6 @@ Sub-tabs:
 ### What Parents Can Do
 - View their children's attendance, grades, and behaviour
 - Add notes to pending appeals for their children
+- See who logged each behaviour entry and in which subject, and reply to that teacher and the form teacher on the entry itself
 - Receive automated notifications (absences, milestones, demerit stages, invoices)
 - Send messages via the Communication module

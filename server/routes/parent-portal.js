@@ -42,6 +42,7 @@ const { messageExtras } = require('../utils/message-extras');
 const { transportRidesFor } = require('../utils/transport-ride');
 const { createDirectMessage } = require('./messages');
 const { forStudent } = require('../utils/assignment-view');
+const behaviourReplies = require('../utils/behaviour-replies');
 
 const router = express.Router();
 
@@ -462,7 +463,7 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
     ] = await Promise.all([
       Behaviour.find({ schoolId, studentId: childId })
         .sort({ date: -1, createdAt: -1 }).limit(50)
-        .select('points type category description date title').lean()
+        .select('id points type category description date title reportedBy createdBy classId subjectName').lean()
         .catch(() => []),
       student.classId
         ? Exams.find({ schoolId, classId: student.classId, date: { $gte: todayISO } })
@@ -523,8 +524,15 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
 
     // Behaviour summary
     const totalPoints   = bRecords.reduce((sum, r) => sum + (Number(r.points) || 0), 0);
-    const latestReward  = bRecords.find(r => (Number(r.points) || 0) > 0) || null;
-    const latestComment = bRecords[0] || null;
+    // Who logged it and where (display name only, staff ids stripped) — the
+    // same treatment as the full history in GET /behaviour/:childId.
+    const latestRewardRaw = bRecords.find(r => (Number(r.points) || 0) > 0) || null;
+    const summaryPicks = [latestRewardRaw, bRecords[0]].filter(Boolean);
+    const summaryOut = await _withRecordedByAndWhere(req, summaryPicks)
+      .catch(() => summaryPicks.map(({ reportedBy, createdBy, classId, ...d }) => d));
+    const summaryById = Object.fromEntries(summaryOut.map(d => [d.id, d]));
+    const latestReward  = latestRewardRaw ? summaryById[latestRewardRaw.id] ?? null : null;
+    const latestComment = bRecords[0] ? summaryById[bRecords[0].id] ?? null : null;
     const badgeLevel    = totalPoints >= 500 ? 'gold' : totalPoints >= 200 ? 'silver' : totalPoints >= 50 ? 'bronze' : null;
 
     // Class teacher name(s) — main + assistant/co-homeroom teacher
@@ -802,11 +810,13 @@ router.get('/attendance/:childId', authMiddleware, PLAN, async (req, res) => {
    an explicit allow-list, not a deny-list (same defensive convention
    medical.js's /alerts route documents) — so a future field added to
    IncidentSchema is invisible here by default, not leaked by accident.
-   `note` (the teacher's private annotation), `witnesses` (other
-   students' userIds) and `reportedBy`/name/role (staff identity) are
-   deliberately never selected: those are the three fields that would
-   turn "my child's own incident record" into "the staff's internal
-   case file" if shown verbatim — see behaviour.js's IncidentSchema. */
+   `note` (the teacher's private annotation) and `witnesses` (other
+   students' userIds) are deliberately never selected: they would turn
+   "my child's own incident record" into "the staff's internal case
+   file" — see behaviour.js's IncidentSchema. Since v5.266.0 the
+   logger's id IS read, because parents asked who logged an entry, but
+   only to look up a display name (`recordedBy`); the id, role, email
+   and phone never reach the response (_withRecordedByAndWhere below). */
 /* ══════════════════════════════════════════════════════════════
    GET /api/parent-portal/calendar?month=YYYY-MM
    The school calendar for a parent, month-scoped. Events are already
@@ -909,12 +919,125 @@ router.get('/behaviour/:childId', authMiddleware, PLAN, async (req, res) => {
       .find({ schoolId, studentId: childId })
       .sort({ date: -1, createdAt: -1 })
       .limit(200)
-      .select('id date type category title description severity points location action detention detentionDate')
+      .select('id date type category title description severity points location action detention detentionDate reportedBy createdBy classId subjectName')
       .lean();
 
-    return ok(res, docs);
+    return ok(res, await _withRecordedByAndWhere(req, docs));
   } catch (err) {
     console.error('[parent-portal GET /behaviour/:childId]', err);
+    return E.serverError(res);
+  }
+});
+
+/* Reported by a parent (2026-11-12): an entry named no teacher and no
+   subject, so they couldn't tell who to ask or "which homework". Adds the
+   logger's DISPLAY NAME (never email/phone/userId — see
+   behaviour-replies.js displayName), the subject and class, and this
+   parent's own reply counts. reportedBy/createdBy/classId are read only to
+   look those up and are stripped before the response. */
+async function _withRecordedByAndWhere(req, docs) {
+  if (!docs.length) return docs;
+  const ctx = tenantContext(req);
+  const { schoolId, userId } = req.jwtUser;
+  const [names, where, counts] = await Promise.all([
+    behaviourReplies.recorderNames(ctx, schoolId, docs),
+    behaviourReplies.whereRecorded(ctx, schoolId, docs),
+    behaviourReplies.replyCounts(ctx, schoolId, docs.map(d => d.id), { viewerId: userId, parentUserId: userId }),
+  ]);
+  return docs.map(({ reportedBy, createdBy, classId, ...d }) => ({
+    ...d,
+    recordedBy: names[reportedBy || createdBy] || null,
+    subjectName: where[d.id]?.subjectName || null,
+    subjectInferred: where[d.id]?.subjectInferred || false,
+    className: where[d.id]?.className || null,
+    replyCount: counts[d.id]?.count || 0,
+    unreadReplies: counts[d.id]?.unread || 0,
+  }));
+}
+
+/* One of this parent's own child's incidents, or a 403/404 already sent. */
+async function _ownIncident(req, res) {
+  const { schoolId } = req.jwtUser;
+  const { childId, incidentId } = req.params;
+  if (_unlinked(req, res, childId)) return null;
+  const incident = await tenantModel('behaviour_incidents', tenantContext(req))
+    .findOne({ schoolId, id: incidentId, studentId: childId })
+    .select('id studentId studentName title date points reportedBy createdBy classId').lean();
+  if (!incident) { E.notFound(res, 'Behaviour entry not found.'); return null; }
+  return incident;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   GET /api/parent-portal/behaviour/:childId/:incidentId/replies
+   This parent's own conversation about one entry, plus who a reply
+   reaches (display names only). Marks staff answers in it as read.
+   ══════════════════════════════════════════════════════════════ */
+router.get('/behaviour/:childId/:incidentId/replies', authMiddleware, PLAN, async (req, res) => {
+  if (!_requireParent(req, res)) return;
+  try {
+    const incident = await _ownIncident(req, res);
+    if (!incident) return;
+    const { schoolId, userId } = req.jwtUser;
+    const ctx = tenantContext(req);
+    const key = behaviourReplies.threadKey(incident.id, userId);
+    const [msgs, staff] = await Promise.all([
+      behaviourReplies.threadMessages(ctx, schoolId, key),
+      behaviourReplies.incidentStaff(ctx, schoolId, incident),
+    ]);
+    await behaviourReplies.markThreadRead(ctx, schoolId, key, userId);
+    return ok(res, {
+      messages: msgs.map(m => behaviourReplies.publicMessage(m, userId)),
+      recipients: staff.map(s => ({ name: s.name, reason: s.reason })),
+    });
+  } catch (err) {
+    console.error('[parent-portal GET behaviour replies]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   POST /api/parent-portal/behaviour/:childId/:incidentId/replies
+   Body: { body }. Goes to the staff member who logged the entry and the
+   child's form teacher(s) — resolved here, never taken from the client.
+   ══════════════════════════════════════════════════════════════ */
+router.post('/behaviour/:childId/:incidentId/replies', authMiddleware, PLAN, async (req, res) => {
+  if (!_requireParent(req, res)) return;
+  try {
+    const { body, error } = behaviourReplies.cleanBody(req.body?.body);
+    if (error) return E.badRequest(res, error);
+    const incident = await _ownIncident(req, res);
+    if (!incident) return;
+    const { schoolId, userId, role } = req.jwtUser;
+    const ctx = tenantContext(req);
+
+    const staff = await behaviourReplies.incidentStaff(ctx, schoolId, incident);
+    if (!staff.length) {
+      return E.conflict(res, 'No teacher is linked to this entry any more. Please use Messages to contact the school.');
+    }
+
+    const me = await tenantModel('users', ctx).findOne({ schoolId, id: userId }).select('name').lean();
+    const senderName = (me?.name && !me.name.includes('@')) ? me.name : 'Parent';
+    const msg = await createDirectMessage(req, {
+      recipientUserIds: staff.map(s => s.userId),
+      subject: `Parent reply on behaviour entry: ${incident.title}${incident.studentName ? ` (${incident.studentName})` : ''}`,
+      body,
+      senderName,
+      senderRole: role,
+      extra: {
+        kind: 'text',
+        context: behaviourReplies.contextFor(incident),
+        behaviourIncidentId: incident.id,
+        behaviourParentId: userId,
+        behaviourThread: behaviourReplies.threadKey(incident.id, userId),
+        studentId: incident.studentId,
+      },
+    });
+    return created(res, {
+      message: behaviourReplies.publicMessage(msg, userId),
+      recipients: staff.map(s => ({ name: s.name, reason: s.reason })),
+    });
+  } catch (err) {
+    console.error('[parent-portal POST behaviour reply]', err);
     return E.serverError(res);
   }
 });

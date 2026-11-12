@@ -9,7 +9,8 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
-import { Scale, Search, Download } from 'lucide-react';
+import { Scale, Search, Download, MessageCircle } from 'lucide-react';
+import ReplyThreadPanel from './ReplyThreadPanel.jsx';
 import { behaviour as behaviourApi, classes as classesApi, streams as streamsApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 import { LIMIT, TypeBadge, PaginationBar, EmptyMsg, ErrState } from './BehaviourPrimitives.jsx';
@@ -32,6 +33,7 @@ export default function IncidentsTab() {
   const [dateTo, setDateTo]     = useState('');
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState('');
+  const [repliesFor, setRepliesFor] = useState(null); // incident id whose parent replies are open
 
   const role = useAuthStore(s => s.session?.user?.role ?? '');
   const canExport = MANAGEMENT_ROLES.includes(role);
@@ -170,6 +172,17 @@ export default function IncidentsTab() {
                   <td className="px-4 py-3 text-slate-600 max-w-[200px]">
                     <span className="block truncate">{r.description ?? r.category ?? '—'}</span>
                     {r.note && <span className="block text-xs text-slate-400 italic truncate">{r.note}</span>}
+                    {r.subjectName && <span className="block text-xs text-slate-400 truncate">{r.subjectName}</span>}
+                    {r.replyCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setRepliesFor(r.id)}
+                        className={`mt-1 inline-flex items-center gap-1 text-xs font-medium ${r.unreadReplies ? 'text-indigo-600' : 'text-slate-500'} hover:underline`}
+                      >
+                        <MessageCircle size={12} />
+                        {r.replyCount} parent {r.replyCount === 1 ? 'reply' : 'replies'}{r.unreadReplies ? ` · ${r.unreadReplies} new` : ''}
+                      </button>
+                    )}
                   </td>
                   <td className="px-4 py-3 hidden sm:table-cell"><TypeBadge type={r.type} /></td>
                   <td className="px-4 py-3 text-slate-500 text-xs hidden md:table-cell">{r.category ?? '—'}</td>
@@ -189,6 +202,7 @@ export default function IncidentsTab() {
           <PaginationBar page={page} totalPages={totalPages} total={total} limit={LIMIT} onPage={setPage} />
         </div>
       )}
+      {repliesFor && <ReplyThreadPanel incidentId={repliesFor} onClose={() => { setRepliesFor(null); refetch(); }} />}
     </motion.div>
   );
 }

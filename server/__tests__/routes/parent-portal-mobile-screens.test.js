@@ -435,11 +435,15 @@ describe('GET /api/parent-portal/behaviour/:childId', () => {
 
     // The route's own .select() is the real redaction mechanism (a real
     // Mongo query only ever returns what's named here) — pin that the
-    // three staff-internal fields are never even asked for.
+    // staff-internal note and witnesses are never even asked for.
     const selectArg = mockCollections.behaviour_incidents.find.mock.results[0].value.select.mock.calls[0][0];
     expect(selectArg).not.toMatch(/\bnote\b/);
     expect(selectArg).not.toMatch(/\bwitnesses\b/);
-    expect(selectArg).not.toMatch(/\breportedBy\b/);
+    // v5.266.0: reportedBy IS now read — parents asked who logged an entry —
+    // but only to look up the display name; the id itself is stripped.
+    expect(late).not.toHaveProperty('reportedBy');
+    expect(late).not.toHaveProperty('createdBy');
+    expect(JSON.stringify(res.body)).not.toMatch(/usr_teacher_otieno/);
   });
 
   test('a sibling who is not linked to this parent is refused', async () => {

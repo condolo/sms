@@ -459,6 +459,13 @@ export const behaviour = {
     create: (data) => _post('/behaviour/points-reset', data ?? {}),
     latest: ()     => _get('/behaviour/points-reset/latest'),
   },
+  subjectOptions: (studentId) => _get('/behaviour/subject-options', { studentId }),
+  // Parent replies on entries (v5.266.0)
+  replies: {
+    inbox:  ()                         => _get('/behaviour/replies'),
+    thread: (incidentId)               => _get(`/behaviour/incidents/${incidentId}/replies`),
+    send:   (incidentId, parentUserId, body) => _post(`/behaviour/incidents/${incidentId}/replies`, { parentUserId, body }),
+  },
 };
 
 export const medical = {
@@ -980,6 +987,10 @@ export const parentPortal = {
    *  `route: null` means the route was deleted — hide the times rather than
    *  claiming the run still exists. */
   transport: (childId) => _get(`/parent-portal/transport/${childId}`),
+  /** Parent replies on a behaviour entry (v5.266.0) — this parent's own
+   *  thread only; recipients are resolved server-side. */
+  behaviourReplies:   (childId, incidentId)       => _get(`/parent-portal/behaviour/${childId}/${incidentId}/replies`),
+  sendBehaviourReply: (childId, incidentId, body) => _post(`/parent-portal/behaviour/${childId}/${incidentId}/replies`, { body }),
 };
 
 // Student-safe compose — recipients are a server-resolved category list
