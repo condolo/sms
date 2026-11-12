@@ -58,7 +58,8 @@ than trying to charge zero.
    private hub link; all are shown on screen and emailed.
 1a. **Recover the dashboard link** — `/refer/login` (also linked from `/refer` and the footer). The partner
    enters their signup email; we re-send the private link. The response is deliberately generic, and a new
-   link rotates the old token.
+   link rotates the old token — but the previous link stays valid for a **15-minute grace window**, so a
+   resend can never strand the partner (or be used by a third party to kill their link).
 2. **Attribute** — the school enters the code on onboarding, the demo request form, or an operator attaches it
    to an existing school. `resolveAttribution()` rejects unknown or blocked codes and self-referral (same email).
 3. **First invoice** — `createBillingSnapshot()` applies the referee incentive if configured, on the school's
@@ -120,7 +121,10 @@ than trying to charge zero.
   Abuse has little value because a payout requires a real school and a real first payment.
 - Payout details are editable through the bearer dashboard link. A leaked link can change the destination, so
   payouts are reviewed manually and the operator should verify the destination with the partner before paying.
-  Details are locked while a request is under review, and every change emails the partner.
+  Details are locked while a request is under review, and every change emails **the partner and platform ops**
+  (so a hijacked link is visible to staff before money moves).
+- A payout request can only be settled once: the row write arbitrates, so two operators (or a retry) cannot
+  both mark it paid, and a settled request cannot then be rejected into releasing its lock.
 - Refunds/clawbacks after a reward is paid are not automated; handle manually and document in the partner note.
 - Attribution is intentionally write-once at signup. Operators can correct it explicitly with `force`.
 

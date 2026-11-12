@@ -22,10 +22,12 @@ jest.mock('../utils/tenant-model', () => {
   function matches(doc, filter = {}) {
     return Object.entries(filter).every(([key, expected]) => {
       const actual = doc[key];
+      if (key === '$or') return expected.some((sub) => matches(doc, sub));
       if (expected === null) return actual == null;
       if (expected && typeof expected === 'object' && !Array.isArray(expected)) {
         if ('$in' in expected) return expected.$in.includes(actual);
         if ('$ne' in expected) return actual !== expected.$ne;
+        if ('$gt' in expected) return actual != null && new Date(actual) > new Date(expected.$gt);
       }
       return actual === expected;
     });
@@ -88,6 +90,7 @@ jest.mock('../utils/email', () => ({
   sendReferralPayoutRequested: jest.fn(async () => true),
   sendReferralPayoutRequestAlert: jest.fn(async () => true),
   sendReferralPayoutDetailsUpdated: jest.fn(async () => true),
+  sendReferralPayoutDetailsAlert: jest.fn(async () => true),
   sendReferralPayoutRejected: jest.fn(async () => true),
 }));
 
@@ -365,6 +368,51 @@ describe('payout details and manual payout requests', () => {
     expect(paid).toMatchObject({ ok: true, request: { status: 'paid', payoutReference: 'MPESA-123' } });
     expect(platformModel('referral_conversions')._docs.every((c) => c.rewardStatus === 'paid')).toBe(true);
     expect(platformModel('referral_payout_requests')._docs[0].status).toBe('paid');
+  });
+
+  test('a request cannot be settled twice — the second settle is refused and no second email goes out', async () => {
+    seed('referral_partners', [partner]);
+    seed('referral_conversions', [
+      { id: 'rcv_1', partnerId: 'ref_1', schoolName: 'Riverside', bountyAmount: 5000, currency: 'KES', rewardStatus: 'pending' },
+    ]);
+    seed('referral_payout_requests', []);
+
+    const requested = await referral.requestPayout({ token: TOKEN });
+    expect(requested.ok).toBe(true);
+
+    const first = await referral.payPayoutRequest({ requestId: requested.request.id, reference: 'MPESA-1' });
+    expect(first.ok).toBe(true);
+
+    const second = await referral.payPayoutRequest({ requestId: requested.request.id, reference: 'MPESA-2' });
+    expect(second).toMatchObject({ ok: false, code: 'ALREADY_SETTLED' });
+    expect(email.sendReferralPayout).toHaveBeenCalledTimes(1);
+    expect(platformModel('referral_conversions')._docs[0].rewardStatus).toBe('paid');
+  });
+
+  test('an already-paid request cannot then be rejected (which would release the lock)', async () => {
+    seed('referral_partners', [partner]);
+    seed('referral_conversions', [
+      { id: 'rcv_1', partnerId: 'ref_1', schoolName: 'Riverside', bountyAmount: 5000, currency: 'KES', rewardStatus: 'paid', payoutRequestId: 'rpr_paid' },
+    ]);
+    seed('referral_payout_requests', [
+      { id: 'rpr_paid', partnerId: 'ref_1', partnerCode: 'MSINGI-ABC234', partnerName: 'Jane', partnerEmail: 'jane@example.com', amount: 5000, currency: 'KES', conversionIds: ['rcv_1'], status: 'paid' },
+    ]);
+
+    const rejected = await referral.rejectPayoutRequest({ requestId: 'rpr_paid', reason: 'changed my mind' });
+    expect(rejected).toMatchObject({ ok: false, code: 'ALREADY_SETTLED' });
+    expect(platformModel('referral_conversions')._docs[0].payoutRequestId).toBe('rpr_paid');
+  });
+
+  test('a re-issued dashboard link keeps the previous one valid for a short grace window', async () => {
+    seed('referral_partners', [{ ...partner, hubTokenHash: HASH }]);
+
+    const before = await referral.getHub(TOKEN);
+    expect(before.ok).toBe(true);
+
+    await referral.resendHubLink({ email: 'jane@example.com' });
+
+    const after = await referral.getHub(TOKEN);
+    expect(after.ok).toBe(true);
   });
 
   test('rejecting a request unlocks its conversions', async () => {

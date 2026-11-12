@@ -62,7 +62,7 @@ export default function ReferralHub() {
   const { token } = useParams();
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
+  const [notice, setNotice] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState('');
   const [editPayout, setEditPayout] = useState(false);
@@ -103,7 +103,7 @@ export default function ReferralHub() {
   async function savePayout(event) {
     event.preventDefault();
     setBusy('payout');
-    setNotice('');
+    setNotice(null);
     try {
       const res = await fetch(`/api/referrals/hub/${encodeURIComponent(token || '')}/payout-details`, {
         method: 'PATCH',
@@ -113,10 +113,10 @@ export default function ReferralHub() {
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json.success) throw new Error(json?.error?.message || 'Could not save payout details.');
       setEditPayout(false);
-      setNotice('Payout details saved. We emailed you a confirmation.');
+      setNotice({ text: 'Payout details saved. We emailed you a confirmation.', ok: true });
       await load();
     } catch (err) {
-      setNotice(err.message);
+      setNotice({ text: err.message, ok: false });
     } finally {
       setBusy('');
     }
@@ -124,7 +124,7 @@ export default function ReferralHub() {
 
   async function requestPayout() {
     setBusy('request');
-    setNotice('');
+    setNotice(null);
     try {
       const res = await fetch(`/api/referrals/hub/${encodeURIComponent(token || '')}/payout-requests`, {
         method: 'POST',
@@ -133,10 +133,10 @@ export default function ReferralHub() {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json.success) throw new Error(json?.error?.message || 'Could not request a payout.');
-      setNotice('Payout requested. Our team will review it and email you the reference.');
+      setNotice({ text: 'Payout requested. Our team will review it and email you the reference.', ok: true });
       await load();
     } catch (err) {
-      setNotice(err.message);
+      setNotice({ text: err.message, ok: false });
     } finally {
       setBusy('');
     }
@@ -221,8 +221,8 @@ export default function ReferralHub() {
               </div>
 
               {notice && (
-                <div className={`mb-6 rounded-xl border px-4 py-3 text-sm ${/saved|requested/i.test(notice) ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-rose-200 bg-rose-50 text-rose-800'}`}>
-                  {notice}
+                <div className={`mb-6 rounded-xl border px-4 py-3 text-sm ${notice.ok ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-rose-200 bg-rose-50 text-rose-800'}`}>
+                  {notice.text}
                 </div>
               )}
 

@@ -1684,6 +1684,22 @@ async function sendReferralPayoutDetailsUpdated({ name, email: toEmail, methodLa
   return _send(toEmail, 'Your Msingi payout details changed', html);
 }
 
+async function sendReferralPayoutDetailsAlert({ partnerName, partnerEmail, previousLabel, methodLabel }) {
+  const to = PLATFORM_EMAIL || SUPPORT_EMAIL;
+  const html = await _wrap(`
+    <h2>Referral payout details changed</h2>
+    <p>A partner changed where their rewards should be paid. Payouts are manual, so please confirm the new destination with the partner before settling anything.</p>
+    <div class="info">
+      <p><strong>Partner:</strong> ${_escapeHtml(partnerName || '')}</p>
+      <p><strong>Email:</strong> ${_escapeHtml(partnerEmail || '')}</p>
+      <p><strong>Was:</strong> ${_escapeHtml(previousLabel || 'nothing on file')}</p>
+      <p><strong>Now:</strong> ${_escapeHtml(methodLabel || '')}</p>
+    </div>
+    <p>If this was not the partner themselves, treat the dashboard link as compromised and block the partner.</p>
+  `);
+  return _send(to, `Referral payout details changed — ${partnerName || 'partner'}`, html);
+}
+
 async function sendReferralPayoutRejected({ name, email: toEmail, amount, currency, reason }) {
   const money = `${currency || 'KES'} ${Number(amount || 0).toLocaleString()}`;
   const html = await _wrap(`
@@ -1755,5 +1771,6 @@ module.exports = {
   sendReferralPayoutRequested,
   sendReferralPayoutRequestAlert,
   sendReferralPayoutDetailsUpdated,
+  sendReferralPayoutDetailsAlert,
   sendReferralPayoutRejected,
 };

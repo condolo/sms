@@ -219,8 +219,36 @@ function payoutMethodLabel(payout) {
 
 async function _partnerByHubToken(token) {
   if (!token) return null;
+  const hash = _hashToken(token);
   const Partners = platformModel('referral_partners');
-  return Partners.findOne({ hubTokenHash: _hashToken(token) }).lean();
+  /* A re-issued link must not instantly kill the one the partner is
+     reading: the previous hash stays valid for a short grace window so a
+     resend can never lock somebody out of their own dashboard (or let a
+     third party DoS it by requesting a resend). */
+  return Partners.findOne({
+    $or: [
+      { hubTokenHash: hash },
+      { hubTokenHashPrev: hash, hubTokenPrevUntil: { $gt: new Date() } },
+    ],
+  }).lean();
+}
+
+/** Issue a fresh dashboard token, keeping the previous one valid for
+ *  HUB_TOKEN_GRACE_MS so an email handover never strands the partner. */
+const HUB_TOKEN_GRACE_MS = 15 * 60 * 1000;
+
+async function _rotateHubToken(partner, Partners) {
+  const token = _randomToken();
+  const now = new Date();
+  await Partners.updateOne({ id: partner.id }, {
+    $set: {
+      hubTokenHash: _hashToken(token),
+      hubTokenHashPrev: partner.hubTokenHash || null,
+      hubTokenPrevUntil: new Date(now.getTime() + HUB_TOKEN_GRACE_MS).toISOString(),
+      updatedAt: now.toISOString(),
+    },
+  });
+  return token;
 }
 
 /** Validate/normalise a payout-details patch. Returns the exact fields to
@@ -323,7 +351,7 @@ async function createPartner({ name, email: emailAddr, phone, payoutPhone, schoo
   const Partners = platformModel('referral_partners');
   const email_ = String(emailAddr || '').trim().toLowerCase();
 
-  const existing = await Partners.findOne({ email: email_ }).select('id code status').lean();
+  const existing = await Partners.findOne({ email: email_ }).select('id code status hubTokenHash').lean();
   if (existing) {
     if (existing.status === 'blocked') {
       return {
@@ -334,14 +362,10 @@ async function createPartner({ name, email: emailAddr, phone, payoutPhone, schoo
     }
     // Re-send the welcome mail so a genuine partner who lost the first one
     // can recover. A fresh hub token is issued (the old one is stored only
-    // as a hash and can never be recovered), which also revokes the old link
-    // — the safe default when the request may not be from the original owner.
+    // as a hash and can never be recovered); the previous link stays valid
+    // for a short grace window so nobody is locked out by the handover.
     const settings = await getProgramSettings();
-    const freshToken = _randomToken();
-    await Partners.updateOne(
-      { id: existing.id },
-      { $set: { hubTokenHash: _hashToken(freshToken), updatedAt: _nowIso() } },
-    );
+    const freshToken = await _rotateHubToken(existing, Partners);
     const freshPartner = await Partners.findOne({ id: existing.id }).lean();
     if (freshPartner) {
       await _sendWelcome(freshPartner, settings, buildLinks(freshPartner, freshToken)).catch(() => {});
@@ -664,9 +688,8 @@ async function resendHubLink({ email: emailAddr } = {}) {
   if (!partner || partner.status !== 'active') return { ok: true, sent: false };
 
   const settings = await getProgramSettings();
-  const token = _randomToken();
+  const token = await _rotateHubToken(partner, Partners);
   const now = _nowIso();
-  await Partners.updateOne({ id: partner.id }, { $set: { hubTokenHash: _hashToken(token), updatedAt: now } });
 
   const fresh = { ...partner, hubTokenHash: _hashToken(token) };
   await _sendWelcome(fresh, settings, buildLinks(fresh, token)).catch((err) => {
@@ -704,6 +727,8 @@ async function updatePayoutDetails({ token, patch = {} }) {
     };
   }
 
+  const previousLabel = payoutMethodLabel(payoutSummary(partner));
+
   const normalised = _normalisePayoutPatch(patch, partner);
   if (!normalised.ok) return normalised;
 
@@ -721,6 +746,16 @@ async function updatePayoutDetails({ token, patch = {} }) {
     email: partner.email,
     methodLabel: payoutMethodLabel(payout),
   }).catch((err) => console.error('[referral] payout details email failed:', err.message));
+
+  /* Ops must know a payout destination moved: the dashboard link is a
+     bearer credential, so a leaked link could otherwise redirect a payout
+     without anyone noticing until the money went out. */
+  await email.sendReferralPayoutDetailsAlert({
+    partnerName: partner.name,
+    partnerEmail: partner.email,
+    previousLabel,
+    methodLabel: payoutMethodLabel(payout),
+  }).catch((err) => console.error('[referral] payout details alert failed:', err.message));
 
   AuditService.log({
     action: 'referral.payout_details_updated',
@@ -880,7 +915,7 @@ async function payPayoutRequest({ requestId, reference, method, actor = null }) 
     .select('id schoolName bountyAmount currency')
     .lean();
 
-  await Requests.updateOne(
+  const settled = await Requests.updateOne(
     { id: request.id, status: 'requested' },
     {
       $set: {
@@ -894,6 +929,13 @@ async function payPayoutRequest({ requestId, reference, method, actor = null }) 
       },
     },
   );
+
+  /* Two operators (or a retry) can land here at the same time. The write
+     filter above is the arbiter: whoever did not change the row must not
+     send the "paid" email or claim the money twice. */
+  if (!settled || settled.modifiedCount === 0) {
+    return { ok: false, code: 'ALREADY_SETTLED', message: 'This request was already settled by another operator.' };
+  }
 
   await Conversions.updateMany(
     { id: { $in: request.conversionIds || [] }, rewardStatus: 'pending' },
@@ -909,22 +951,29 @@ async function payPayoutRequest({ requestId, reference, method, actor = null }) 
     },
   );
 
+  /* Report what was actually marked paid, not what the request claimed. */
+  const paidConversions = await Conversions.find({ payoutRequestId: request.id, rewardStatus: 'paid' })
+    .select('id schoolName bountyAmount currency')
+    .lean();
+  const paidAmount = paidConversions.reduce((sum, c) => sum + (Number(c.bountyAmount) || 0), 0);
+  const settledAmount = paidAmount || Number(request.amount) || 0;
+
   AuditService.log({
     action: 'platform.referral_payout_request.paid',
     actor: actor || { userId: 'system', role: 'system', email: null },
     schoolId: null,
     target: { type: 'referral_payout_request', id: request.id, label: request.partnerCode },
-    details: { amount: request.amount, currency: request.currency, method: methodText, reference: referenceText, conversionIds: request.conversionIds },
+    details: { amount: settledAmount, currency: request.currency, method: methodText, reference: referenceText, conversionIds: request.conversionIds },
   });
 
   await email.sendReferralPayout({
     name: request.partnerName,
     email: request.partnerEmail,
-    amount: request.amount,
+    amount: settledAmount,
     currency: request.currency,
     method: methodLabel,
     reference: referenceText,
-    schoolNames: conversions.map((c) => c.schoolName).filter(Boolean),
+    schoolNames: (paidConversions.length ? paidConversions : conversions).map((c) => c.schoolName).filter(Boolean),
   }).catch((err) => console.error('[referral] payout email failed:', err.message));
 
   return {
@@ -946,7 +995,7 @@ async function rejectPayoutRequest({ requestId, reason = '', actor = null }) {
 
   const now = _nowIso();
   const reasonText = String(reason || '').trim().slice(0, 500);
-  await Requests.updateOne(
+  const rejected = await Requests.updateOne(
     { id: request.id, status: 'requested' },
     {
       $set: {
@@ -958,6 +1007,13 @@ async function rejectPayoutRequest({ requestId, reason = '', actor = null }) {
       },
     },
   );
+
+  /* Same arbitration as the pay path: a request that another operator has
+     already settled must not be "rejected" here, and must not have its
+     locked conversions released. */
+  if (!rejected || rejected.modifiedCount === 0) {
+    return { ok: false, code: 'ALREADY_SETTLED', message: 'This request was already settled by another operator.' };
+  }
 
   await Conversions.updateMany(
     { id: { $in: request.conversionIds || [] }, payoutRequestId: request.id },
@@ -1021,8 +1077,12 @@ async function listPartners({ limit = 500 } = {}) {
     .limit(Math.min(Number(limit) || 500, 1000))
     .lean();
 
-  const [conversions, schoolCounts, program] = await Promise.all([
-    Conversions.find({}).select('partnerId bountyAmount currency rewardStatus').lean(),
+  const [conversionGroups, schoolCounts, program] = await Promise.all([
+    /* Grouped in the database: the console must not pull every conversion
+       row in the platform into memory just to count them per partner. */
+    Conversions.aggregate([
+      { $group: { _id: { partnerId: '$partnerId', rewardStatus: '$rewardStatus' }, count: { $sum: 1 }, amount: { $sum: '$bountyAmount' } } },
+    ]),
     Schools.aggregate([
       { $match: { referralPartnerId: { $ne: null } } },
       { $group: { _id: '$referralPartnerId', count: { $sum: 1 } } },
@@ -1032,12 +1092,15 @@ async function listPartners({ limit = 500 } = {}) {
 
   const counts = new Map(schoolCounts.map((r) => [r._id, r.count]));
   const byPartner = new Map();
-  for (const c of conversions) {
-    if (!byPartner.has(c.partnerId)) byPartner.set(c.partnerId, { conversions: 0, pendingAmount: 0, paidAmount: 0 });
-    const agg = byPartner.get(c.partnerId);
-    agg.conversions += 1;
-    if (c.rewardStatus === 'pending') agg.pendingAmount += Number(c.bountyAmount) || 0;
-    if (c.rewardStatus === 'paid') agg.paidAmount += Number(c.bountyAmount) || 0;
+  for (const group of conversionGroups) {
+    const partnerId = group._id?.partnerId;
+    if (!partnerId) continue;
+    if (!byPartner.has(partnerId)) byPartner.set(partnerId, { conversions: 0, pendingAmount: 0, paidAmount: 0 });
+    const agg = byPartner.get(partnerId);
+    agg.conversions += group.count || 0;
+    const amount = Number(group.amount) || 0;
+    if (group._id?.rewardStatus === 'pending') agg.pendingAmount += amount;
+    if (group._id?.rewardStatus === 'paid') agg.paidAmount += amount;
   }
 
   return partners.map((p) => {
@@ -1235,12 +1298,11 @@ async function attachToSchool({ schoolId, code, force = false, actor = null }) {
  *  exposed beyond the partner's own aggregate. */
 async function getHub(token) {
   if (!token) return { ok: false, code: 'NOT_FOUND', message: 'This referral dashboard link is not valid.' };
-  const Partners = platformModel('referral_partners');
   const Conversions = platformModel('referral_conversions');
   const Schools = platformModel('schools');
   const Requests = platformModel('referral_payout_requests');
 
-  const partner = await Partners.findOne({ hubTokenHash: _hashToken(token) }).lean();
+  const partner = await _partnerByHubToken(token);
   if (!partner) return { ok: false, code: 'NOT_FOUND', message: 'This referral dashboard link is not valid.' };
 
   const [schools, conversions, program, payoutRequests] = await Promise.all([
