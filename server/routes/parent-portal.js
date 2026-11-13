@@ -43,6 +43,7 @@ const { transportRidesFor } = require('../utils/transport-ride');
 const { createDirectMessage } = require('./messages');
 const { forStudent } = require('../utils/assignment-view');
 const behaviourReplies = require('../utils/behaviour-replies');
+const { studentStreamOr, filterElectivesForStudent } = require('../utils/lesson-audience');
 
 /* DELETE /api/behaviour/incidents/:id is a soft delete (status 'resolved' +
    deletedAt). A withdrawn entry must not reach a parent: not in the
@@ -218,7 +219,7 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
        the term/attendance filters resolved below. */
     const [student, school, academicYears] = await Promise.all([
       Students.findOne({ id: childId, schoolId })
-        .select('firstName lastName admissionNumber classId className streamId photo status dateOfBirth gender')
+        .select('id firstName lastName admissionNumber classId className streamId photo status dateOfBirth gender')
         .lean(),
       // Live-resolved, not the schools.academicYear cached field — that
       // field is only ever written by academic-config.js's year-transition
@@ -236,9 +237,7 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
     // a child in one stream had EVERY stream's lessons for their class
     // merged into "Today's Timetable" — not just a display quirk, a real
     // case of showing a parent the wrong stream's subject/teacher/room.
-    const timetableStreamOr = student.streamId
-      ? [{ streamId: student.streamId }, { streamId: { $exists: false } }]
-      : [{ streamId: { $exists: false } }];
+    const timetableStreamOr = studentStreamOr(student.streamId);
 
     const { year: currentYearDoc, term: currentTermDoc, termNumber: currentTermNumber } = resolveCurrentPeriod(academicYears);
     const academicYear = currentYearDoc?.name || '';
@@ -516,7 +515,8 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
       student.classId && (await isTimetablePublished(schoolId))
         ? Timetable.find({ schoolId, classId: student.classId, day: todayDay, isActive: true, $or: timetableStreamOr })
             .sort({ startTime: 1 })
-            .select('subject teacherName startTime endTime room').lean()
+            .select('subject subjectId teacherName coTeacherNames startTime endTime room').lean()
+            .then(rows => filterElectivesForStudent(tenantContext(req), schoolId, student, rows))   // options they take only (v5.270.0)
             .then(rows => rows.map(s => ({ ...s, subjectName: s.subject }))) // alias — see student-portal.js
             .catch(() => [])
         : [],
@@ -1089,25 +1089,25 @@ router.get('/timetable/:childId', authMiddleware, PLAN, async (req, res) => {
     if (_unlinked(req, res, childId)) return;
 
     const student = await tenantModel('students', tenantContext(req))
-      .findOne({ id: childId, schoolId }).select('classId streamId').lean();
+      .findOne({ id: childId, schoolId }).select('id classId streamId').lean();
     if (!student?.classId) return ok(res, { slots: [] });
 
     // Unpublished timetables are not shown to parents — same gate the
     // dashboard's own timetableToday already applies.
     if (!(await isTimetablePublished(schoolId))) return ok(res, { slots: [] });
 
-    const streamOr = student.streamId
-      ? [{ streamId: student.streamId }, { streamId: { $exists: false } }]
-      : [{ streamId: { $exists: false } }];
+    const streamOr = studentStreamOr(student.streamId);
 
     const Timetable = await publishedReader(schoolId, tenantContext(req));
     const docs = await Timetable.find({ schoolId, classId: student.classId, isActive: true, $or: streamOr })
       .sort({ day: 1, startTime: 1 })
       .limit(200)
-      .select('subject teacherName day startTime endTime room')
+      .select('subject subjectId teacherName coTeacherNames day startTime endTime room')
       .lean();
+    // Option lessons only if the child takes that option (v5.270.0).
+    const mine = await filterElectivesForStudent(tenantContext(req), schoolId, student, docs);
 
-    return ok(res, { slots: docs.map(s => ({ ...s, subjectName: s.subject })) });
+    return ok(res, { slots: mine.map(s => ({ ...s, subjectName: s.subject })) });
   } catch (err) {
     console.error('[parent-portal GET /timetable/:childId]', err);
     return E.serverError(res);

@@ -1069,6 +1069,10 @@ export const teachingAssignments = {
   update: (id, data)   => _put(`/teaching-assignments/${id}`, data),
   /** Remove an assignment */
   remove: (id)         => _delete(`/teaching-assignments/${id}`),
+  /** Taught together (v5.270.0): make two rows of the same class + subject one set of lessons
+      (co-teaching and/or combined streams), or take a row out of its set. */
+  link:   (id, withId) => _post(`/teaching-assignments/${id}/link`, { withId }),
+  unlink: (id)         => _post(`/teaching-assignments/${id}/unlink`),
   /** Convenience: find the teacher assigned to a subject in a class (and,
       for compulsory subjects with separate per-stream teachers, the stream) */
   lookup: (classId, subjectId, streamId) =>

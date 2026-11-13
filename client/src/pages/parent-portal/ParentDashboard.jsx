@@ -45,6 +45,7 @@ import BehaviourReplyThread from './components/BehaviourReplyThread.jsx';
 import ThreadView from '@/pages/messages/components/ThreadView.jsx';
 import TransportRideCard from '@/components/transport/TransportRideCard.jsx';
 import { messages as messagesApi, parentMessaging, parentPortal, auth as authApi } from '@/api/client.js';
+import { lessonTeachers, lessonIsForStream, isCombined } from '@/utils/lessonLabels.js';
 
 /* ── API helpers ────────────────────────────────────────────────── */
 const API_BASE = import.meta.env.VITE_API_BASE || '';
@@ -961,7 +962,7 @@ export default function ParentDashboard() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className={`text-[13px] font-bold truncate ${isNow ? 'text-slate-900' : 'text-slate-700'}`}>{slot.subjectName}</p>
-                      <p className="text-[11px] text-slate-400 truncate mt-0.5">{[slot.room, slot.teacherName].filter(Boolean).join(' · ')}</p>
+                      <p className="text-[11px] text-slate-400 truncate mt-0.5">{[slot.room, lessonTeachers(slot)].filter(Boolean).join(' · ')}</p>
                     </div>
                   </div>
                 );
@@ -1458,7 +1459,7 @@ export default function ParentDashboard() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className={`text-[13px] font-bold truncate ${isNow ? 'text-slate-900' : 'text-slate-700'}`}>{slot.subjectName}</p>
-                    <p className="text-[11px] text-slate-400 truncate mt-0.5 flex items-center gap-1">{slot.room && <><MapPin size={9} />{slot.room}</>}{slot.teacherName ? ` · ${slot.teacherName}` : ''}</p>
+                    <p className="text-[11px] text-slate-400 truncate mt-0.5 flex items-center gap-1">{slot.room && <><MapPin size={9} />{slot.room}</>}{lessonTeachers(slot) ? ` · ${lessonTeachers(slot)}` : ''}</p>
                   </div>
                   {isNow && <span className="text-[11px] font-semibold text-amber-600 bg-amber-100 px-2.5 py-[4px] rounded-full flex-shrink-0">In progress</span>}
                 </div>
@@ -1490,7 +1491,7 @@ export default function ParentDashboard() {
                       <div key={`tt-week-${day}-${i}`} className="flex items-center gap-3">
                         <span className="text-[11px] text-slate-400 min-w-[52px] flex-shrink-0">{slot.startTime}</span>
                         <span className="text-[12px] font-medium text-slate-700 truncate">{slot.subjectName}</span>
-                        <span className="text-[11px] text-slate-400 truncate">{slot.teacherName}{slot.room ? ` · ${slot.room}` : ''}</span>
+                        <span className="text-[11px] text-slate-400 truncate">{lessonTeachers(slot)}{slot.room ? ` · ${slot.room}` : ''}</span>
                       </div>
                     ))}
                 </div>

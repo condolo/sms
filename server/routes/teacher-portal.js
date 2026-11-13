@@ -11,6 +11,7 @@ const { v4: uuidv4 }     = require('uuid');
 const { authMiddleware } = require('../middleware/auth');
 const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
+const { teacherLessonClause } = require('../utils/lesson-audience');
 const { isTimetablePublished, publishedReader } = require('../utils/timetable-publish');
 const { ok, created, E } = require('../utils/response');
 const { resolveTeacher } = require('../utils/resolveTeacher');
@@ -69,7 +70,7 @@ async function _teacherAudience(req) {
     tenantModel('teaching_assignments', tenantContext(req))
       .find({ schoolId, teacherId: { $in: ownerIds } }).select('classId').lean().catch(() => []),
     tenantModel('timetable', tenantContext(req))
-      .find({ schoolId, teacherId: { $in: ownerIds }, isActive: true }).select('classId').lean().catch(() => []),
+      .find({ schoolId, ...teacherLessonClause(ownerIds), isActive: true }).select('classId').lean().catch(() => []),
     // The form-teacher arm reads the streams - classes.formTeacherId is a
     // legacy, never-written field, so a probe there matched nothing, ever.
     teacher
@@ -993,7 +994,7 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
       // still says who teaches what, and hiding a teacher's own classes
       // because the timetabler has not hit publish is a data bug, not a rule.
       tenantModel('timetable', tenantContext(req))
-        .find({ schoolId, teacherId: { $in: assignmentOwnerIds }, isActive: true })
+        .find({ schoolId, ...teacherLessonClause(assignmentOwnerIds), isActive: true })
         .select('classId subjectId subject').lean().catch(() => []),
       Streams.find({
         schoolId,
@@ -1022,9 +1023,10 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
       schoolId,
       day: todayDay,
       isActive: true,
-      $or: [{ teacherId }, { teacherId: userId }],
+      // Lessons they teach as main teacher or co-teacher (v5.270.0).
+      ...teacherLessonClause([teacherId, userId]),
     }).sort({ startTime: 1 })
-      .select('subject subjectId classId streamId period periodNumber startTime endTime room teacherName')
+      .select('subject subjectId classId streamId streamIds period periodNumber startTime endTime room teacherName coTeacherNames')
       .lean();
 
     // 'timetable' stores only the FK ids (classId/streamId), not the
@@ -1033,7 +1035,7 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     // teaching_assignments list below), since an admin-scheduled lesson
     // can exist without a matching assignment record.
     const todayClassIdsRaw  = [...new Set(rawTimetableToday.map(s => s.classId).filter(Boolean))];
-    const todayStreamIdsRaw = [...new Set(rawTimetableToday.map(s => s.streamId).filter(Boolean))];
+    const todayStreamIdsRaw = [...new Set(rawTimetableToday.flatMap(s => [s.streamId, ...(s.streamIds || [])]).filter(Boolean))];
     const [todayClassNameDocs, todayStreamNameDocs] = await Promise.all([
       todayClassIdsRaw.length  ? Classes.find({ id: { $in: todayClassIdsRaw }, schoolId }).select('id name').lean().catch(() => []) : [],
       todayStreamIdsRaw.length ? Streams.find({ id: { $in: todayStreamIdsRaw }, schoolId }).select('id name').lean().catch(() => []) : [],
@@ -1044,7 +1046,8 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
       ...s,
       subjectName: s.subject,
       className:   todayClassNameMap[s.classId] ?? null,
-      streamName:  s.streamId ? (todayStreamNameMap[s.streamId] ?? null) : null,
+      streamName:  s.streamId ? (todayStreamNameMap[s.streamId] ?? null)
+        : (s.streamIds && s.streamIds.length ? s.streamIds.map(id => todayStreamNameMap[id] ?? id).join(' + ') : null),
     }));
 
     // Classes that appear in today's timetable
@@ -1065,13 +1068,25 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
       : [];
     const submittedKeys = new Set(todayAttCombos.map(a => _slotKey(a.classId, a.streamId)));
 
-    const attendanceStatus = timetableToday.map(slot => ({
+    /* A whole-class lesson has no streamId, while every attendance record
+       is stamped with the STUDENT'S stream. Keying that slot by
+       `classId::''` therefore never matched a real register — the teacher
+       marked the class, saw every name green, and Home still said "1
+       register still open". A register is filed once a day for a class, so
+       any attendance row for that class/date means the whole-class lesson
+       is submitted. Stream-specific slots keep the exact per-stream check. */
+    const submittedClassIds = new Set(todayAttCombos.map(a => a.classId));
+
+    // A lesson for streams taught together (v5.270.0) still has one register per stream.
+    const attendanceStatus = timetableToday.flatMap(slot => (slot.streamIds && slot.streamIds.length ? slot.streamIds : [slot.streamId ?? null]).map(sid => ({
       classId:   slot.classId,
       className: slot.className,
-      streamId:  slot.streamId ?? null,
-      streamName: slot.streamName ?? null,
-      submitted: submittedKeys.has(_slotKey(slot.classId, slot.streamId)),
-    }));
+      streamId:  sid,
+      streamName: sid ? (todayStreamNameMap[sid] ?? null) : null,
+      submitted: sid
+        ? submittedKeys.has(_slotKey(slot.classId, sid))
+        : submittedClassIds.has(slot.classId),
+    })));
     // Deduplicate by (classId, streamId) — NOT classId alone, which used
     // to silently merge two different streams' lessons into one entry.
     const attStatusMap = {};

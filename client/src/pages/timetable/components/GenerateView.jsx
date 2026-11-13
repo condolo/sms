@@ -20,6 +20,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Wand2, Loader2, AlertCircle, AlertTriangle, CheckCircle2, Undo2, ClipboardCheck, History } from 'lucide-react';
 import { timetable as ttApi } from '@/api/client.js';
 import { DAY_SHORT } from '../constants.js';
+import { lessonTeachers, lessonIsForStream, isCombined } from '@/utils/lessonLabels.js';
 
 const classKey = c => c.id ?? c._id;
 
@@ -58,7 +59,7 @@ function ClassPreview({ name, lessons, days }) {
                     {at(d, t.start).map((l, i) => (
                       <div key={i} className={`rounded px-1.5 py-1 mb-0.5 ${l.doubleId ? 'bg-violet-50 border border-violet-200' : 'bg-slate-50 border border-slate-200'}`}>
                         <p className="font-semibold text-slate-800 truncate">{l.subject}</p>
-                        <p className="text-[10px] text-slate-500 truncate">{l.teacherName}{l.room ? ` · ${l.room}` : ''}</p>
+                        <p className="text-[10px] text-slate-500 truncate">{lessonTeachers(l)}{l.room ? ` · ${l.room}` : ''}{isCombined(l) ? ' · streams together' : ''}</p>
                       </div>
                     ))}
                   </td>

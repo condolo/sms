@@ -18,12 +18,14 @@ const { tenantModel } = require('./tenant-model');
 const { dispatchNotification } = require('./notify-dispatch');
 const { notifyGuardiansForStudents } = require('./notify-students');
 
-const TIMETABLE_FIELDS = ['day', 'period', 'startTime', 'endTime', 'room', 'teacherId', 'subjectId'];
+const { lessonTeacherIds, lessonStreams } = require('./lesson-audience');
+
+const TIMETABLE_FIELDS = ['day', 'period', 'startTime', 'endTime', 'room', 'teacherId', 'coTeacherIds', 'subjectId'];
 const ROUTE_FIELDS = ['departureTime', 'arrivalTime', 'stops'];
 
 const TIMETABLE_LABEL = {
   day: 'Day', period: 'Period', startTime: 'Start', endTime: 'End',
-  room: 'Room', teacherId: 'Teacher', subjectId: 'Subject',
+  room: 'Room', teacherId: 'Teacher', coTeacherIds: 'Also teaching', subjectId: 'Subject',
 };
 const ROUTE_LABEL = { departureTime: 'Departure', arrivalTime: 'Arrival', stops: 'Stops' };
 
@@ -38,6 +40,7 @@ function _changedFields(before = {}, after = {}, fields = []) {
 function _describe(field, before, after, labelMap, names = {}) {
   const render = (value) => {
     if (value == null || value === '') return 'not set';
+    if (Array.isArray(value) && field === 'coTeacherIds') return value.length ? value.map(v => names[v] || 'a teacher').join(', ') : 'none';
     if (Array.isArray(value)) return value.length ? `${value.length} stop${value.length === 1 ? '' : 's'}` : 'none';
     return names[value] || String(value);
   };
@@ -53,28 +56,50 @@ async function notifyTimetableChange({ ctx, schoolId, before, after }) {
   if (!changed.length) return { sent: 0, skipped: true };
 
   const slot = after || before;
-  const [klass, subject, teacher] = await Promise.all([
+  // Lessons store a teacher's LOGIN id (users.id); staff records are `teachers`
+  // with id + userId. Look them up by either form (v5.270.0 — before, the
+  // lookup used teachers.id only and never selected userId, so names were
+  // missing and the incoming teacher was never told).
+  const allTeacherIds = [...new Set([...lessonTeacherIds(before || {}), ...lessonTeacherIds(after || {})])];
+  const [klass, subject, teacherDocs] = await Promise.all([
     slot.classId ? tenantModel('classes', ctx).findOne({ schoolId, id: slot.classId }).select('id name').lean() : null,
     slot.subjectId ? tenantModel('subjects', ctx).findOne({ schoolId, id: slot.subjectId }).select('id name').lean() : null,
-    slot.teacherId ? tenantModel('teachers', ctx).findOne({ schoolId, id: slot.teacherId }).select('id firstName lastName').lean() : null,
+    allTeacherIds.length
+      ? tenantModel('teachers', ctx).find({ schoolId, $or: [{ id: { $in: allTeacherIds } }, { userId: { $in: allTeacherIds } }] }).select('id userId firstName lastName').lean()
+      : [],
   ]);
-
+  const teacherOf = id => teacherDocs.find(t => t.id === id || t.userId === id) || null;
   const names = {};
-  if (teacher) names[teacher.id] = [teacher.firstName, teacher.lastName].filter(Boolean).join(' ');
-  if (before?.teacherId && before.teacherId !== slot.teacherId) {
-    const oldTeacher = await tenantModel('teachers', ctx).findOne({ schoolId, id: before.teacherId })
-      .select('id firstName lastName').lean().catch(() => null);
-    if (oldTeacher) names[oldTeacher.id] = [oldTeacher.firstName, oldTeacher.lastName].filter(Boolean).join(' ');
+  for (const id of allTeacherIds) {
+    const t = teacherOf(id);
+    if (t) names[id] = [t.firstName, t.lastName].filter(Boolean).join(' ');
   }
+  const teacher = teacherOf(slot.teacherId);
 
   const className = klass?.name || slot.classId || 'the class';
   const subjectName = subject?.name || 'lesson';
   const lines = changed.map(f => _describe(f, before, after, TIMETABLE_LABEL, names));
 
-  const students = slot.classId
+  // Only the families of students the lesson is for (v5.270.0): its stream(s),
+  // or for an option subject the students who take it. Before, every student
+  // of the class was told about a change to one stream's lesson.
+  const audienceStreams = [...new Set([...(lessonStreams(before || {}) || []), ...(lessonStreams(after || {}) || [])])];
+  const wholeClass = !lessonStreams(before || {}) || !lessonStreams(after || {});
+  let students = slot.classId
     ? await tenantModel('students', ctx)
-        .find({ schoolId, classId: slot.classId, status: 'active' }).select('id').lean()
+        .find({ schoolId, classId: slot.classId, status: 'active', ...(wholeClass ? {} : { streamId: { $in: audienceStreams } }) })
+        .select('id classId').lean()
     : [];
+  if (students.length && slot.subjectId) {
+    const elective = await tenantModel('class_subjects', ctx)
+      .findOne({ schoolId, classId: slot.classId, subjectId: slot.subjectId, isCompulsoryForClass: false }).select('subjectId').lean();
+    if (elective) {
+      const takes = await tenantModel('student_subjects', ctx)
+        .find({ schoolId, subjectId: slot.subjectId, studentId: { $in: students.map(s => s.id) } }).select('studentId').lean();
+      const ids = new Set(takes.map(t => t.studentId));
+      students = students.filter(s => ids.has(s.id));
+    }
+  }
 
   const subjectLine = `${subjectName} — ${className} has changed`;
   const body = lines.join('\n');
@@ -92,11 +117,19 @@ async function notifyTimetableChange({ ctx, schoolId, before, after }) {
     });
   }
 
-  // The teacher who now owns the lesson, if it changed hands.
-  if (teacher?.userId && before?.teacherId && before.teacherId !== slot.teacherId) {
+  // Teachers who now teach the lesson and didn't before (main teacher or co-teacher).
+  const beforeT = new Set(lessonTeacherIds(before || {}));
+  const incoming = before ? lessonTeacherIds(after || {}).filter(id => !beforeT.has(id)) : [];
+  const recipients = [];
+  for (const id of incoming) {
+    const t = teacherOf(id);
+    const userId = t?.userId || null;
+    if (userId && !recipients.some(r => r.userId === userId)) recipients.push({ userId, name: names[id] || '', email: '' });
+  }
+  if (recipients.length) {
     await dispatchNotification({
       ctx, schoolId, eventKey: 'timetable_change', actorUserId: 'system',
-      recipients: [{ userId: teacher.userId, name: names[teacher.id], email: '' }],
+      recipients,
       inAppSubject: `You now teach ${subjectName} — ${className}`,
       inAppBody: body,
       emailDigestSubject: `You now teach ${subjectName} — ${className}`,
@@ -104,7 +137,7 @@ async function notifyTimetableChange({ ctx, schoolId, before, after }) {
     }).catch(() => {});
   }
 
-  return { sent: students.length + (teacher?.userId ? 1 : 0), changed };
+  return { sent: students.length + recipients.length, changed };
 }
 
 /**

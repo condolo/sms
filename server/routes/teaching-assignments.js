@@ -20,6 +20,10 @@
    See scopeEngine.js / scopeMiddleware.js for how streamId then flows
    into what a teacher can actually see.
 
+   Taught together (v5.270.0): rows sharing `lessonGroupId` are one set
+   of lessons (co-teaching and/or combined streams). POST /:id/link,
+   POST /:id/unlink; see the section near the end of this file.
+
    This feeds:
      - Timetable slot editor auto-fill (GET ?classId=X&subjectId=Y&streamId=Z)
      - Teacher profile "Assignments" tab (GET ?teacherId=X)
@@ -219,6 +223,28 @@ router.get('/', authMiddleware, async (req, res) => { // rbac: self-scoped below
       .find(filter)
       .sort({ subjectName: 1, className: 1 })
       .lean();
+
+    // Rows saved without a denormalised teacherName (imports, seed data) showed
+    // as a blank or "Teacher" wherever this list is read — the "Teach together"
+    // panel, the slot editor's auto-fill. Fill it from the staff record (v5.270.0).
+    // Best-effort: a failed name lookup must never break the list itself.
+    const unnamed = [...new Set(docs.filter(d => !d.teacherName && d.teacherId).map(d => d.teacherId))];
+    if (unnamed.length) {
+      try {
+        const staff = await tenantModel('teachers', tenantContext(req))
+          .find({ schoolId, $or: [{ userId: { $in: unnamed } }, { id: { $in: unnamed } }] })
+          .select('id userId title firstName lastName').lean();
+        const nameOf = new Map();
+        for (const t of staff || []) {
+          const n = [t.title, t.firstName, t.lastName].filter(Boolean).join(' ');
+          if (t.userId) nameOf.set(t.userId, n);
+          if (t.id) nameOf.set(t.id, n);
+        }
+        for (const d of docs) if (!d.teacherName && nameOf.has(d.teacherId)) d.teacherName = nameOf.get(d.teacherId);
+      } catch (err) {
+        console.error('[teaching-assignments GET] teacher names (ignored):', err.message);
+      }
+    }
 
     return ok(res, docs);
   } catch (err) {
@@ -447,6 +473,18 @@ router.put('/:id', authMiddleware, async (req, res) => { // rbac: canManage() be
       { new: true, runValidators: false },
     ).lean();
 
+    // Taught together (v5.270.0): one set of lessons, so periods/week and
+    // doubles stay the same on every row of the group.
+    if (existing.lessonGroupId && ('periodsPerWeek' in patch || 'doubleLessons' in patch)) {
+      const shared = {};
+      if ('periodsPerWeek' in patch) shared.periodsPerWeek = patch.periodsPerWeek;
+      if ('doubleLessons' in patch) shared.doubleLessons = patch.doubleLessons;
+      await tenantModel('teaching_assignments', tenantContext(req)).updateMany(
+        { schoolId, lessonGroupId: existing.lessonGroupId, id: { $ne: existing.id } },
+        { $set: { ...shared, updatedBy: userId } },
+      );
+    }
+
     invalidateScopeCache(existing.teacherId, schoolId);
     return ok(res, doc);
   } catch (err) {
@@ -468,9 +506,93 @@ router.delete('/:id', authMiddleware, async (req, res) => { // rbac: canManage()
 
     await tenantModel('teaching_assignments', tenantContext(req)).deleteOne({ id: req.params.id, schoolId });
     invalidateScopeCache(existing.teacherId, schoolId);
+    await _tidyGroup(req, existing.lessonGroupId);
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) {
     console.error('[teaching-assignments DELETE /:id]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   TAUGHT TOGETHER (v5.270.0) — `lessonGroupId`
+   Rows sharing a lessonGroupId are ONE set of lessons:
+     - two teachers, same class/stream/subject  → co-teaching
+       (both are in every lesson);
+     - same subject in two streams of a class    → combined streams
+       (the streams are taught together);
+     - or both at once.
+   Each row stays an ordinary assignment, so every assignment-based scope
+   (attendance, marks, lesson plans…) keeps working unchanged for each
+   teacher and stream. The timetable generator, Lessons to place and the
+   lesson views read the group. Periods/week and doubles are kept equal
+   across a group (it is one set of lessons).
+   ══════════════════════════════════════════════════════════════ */
+
+/* A group of one is no group: clear it. */
+async function _tidyGroup(req, groupId) {
+  if (!groupId) return;
+  const { schoolId } = req.jwtUser;
+  const TA = tenantModel('teaching_assignments', tenantContext(req));
+  const left = await TA.find({ schoolId, lessonGroupId: groupId }).select('id').lean();
+  if (left.length === 1) await TA.updateOne({ schoolId, id: left[0].id }, { $set: { lessonGroupId: null } });
+}
+
+/* POST /api/teaching-assignments/:id/link — { withId } */
+router.post('/:id/link', authMiddleware, async (req, res) => { // rbac: canManage() below for both rows — real-role + HOD department-scope check
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const withId = typeof req.body?.withId === 'string' ? req.body.withId : '';
+    if (!withId || withId === req.params.id) return E.badRequest(res, 'Choose another assignment to teach together with.');
+    const TA = tenantModel('teaching_assignments', tenantContext(req));
+    const [a, b] = await Promise.all([
+      TA.findOne({ schoolId, id: req.params.id }).lean(),
+      TA.findOne({ schoolId, id: withId }).lean(),
+    ]);
+    if (!a || !b) return E.notFound(res, 'Assignment not found');
+    if (!(await canManage(req, a.departmentId)) || !(await canManage(req, b.departmentId))) return E.forbidden(res);
+    if (String(a.subjectId) !== String(b.subjectId)) return E.badRequest(res, 'Only lessons of the same subject can be taught together.');
+    // Same class, in any of its id forms.
+    const cls = await tenantModel('classes', tenantContext(req)).findOne(_classQuery(schoolId, a.classId)).select('id').lean();
+    const forms = cls ? [cls.id, cls._id && String(cls._id)].filter(Boolean).map(String) : [String(a.classId)];
+    if (!forms.includes(String(b.classId))) return E.badRequest(res, 'Only lessons of the same class can be taught together.');
+    // Two rows for the same teacher and stream can't exist (POST refuses), but
+    // a whole-class row plus a stream row of the same class would make no sense together.
+    if (!a.streamId !== !b.streamId) return E.badRequest(res, 'A whole-class assignment can\'t be combined with a single stream\'s. Use one row per stream.');
+
+    const groupId = a.lessonGroupId || b.lessonGroupId || uuidv4();
+    // Merging two existing groups: move every row of b's group into a's.
+    const otherGroup = a.lessonGroupId && b.lessonGroupId && a.lessonGroupId !== b.lessonGroupId ? b.lessonGroupId : null;
+    const filter = { schoolId, $or: [{ id: { $in: [a.id, b.id] } }, ...(otherGroup ? [{ lessonGroupId: otherGroup }] : []), ...(a.lessonGroupId ? [{ lessonGroupId: a.lessonGroupId }] : [])] };
+    const members = await TA.find(filter).select('id teacherId').lean();
+    // One set of lessons: the row you link from sets periods/week and doubles for all.
+    await TA.updateMany({ schoolId, id: { $in: members.map(m => m.id) } }, {
+      $set: { lessonGroupId: groupId, periodsPerWeek: a.periodsPerWeek ?? null, doubleLessons: a.doubleLessons || 0, updatedBy: userId },
+    });
+    for (const m of members) invalidateScopeCache(m.teacherId, schoolId);
+    const out = await TA.find({ schoolId, lessonGroupId: groupId }).lean();
+    return ok(res, { lessonGroupId: groupId, members: out });
+  } catch (err) {
+    console.error('[teaching-assignments POST /:id/link]', err);
+    return E.serverError(res);
+  }
+});
+
+/* POST /api/teaching-assignments/:id/unlink — taught on its own again */
+router.post('/:id/unlink', authMiddleware, async (req, res) => { // rbac: canManage() below — real-role + HOD department-scope check
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const TA = tenantModel('teaching_assignments', tenantContext(req));
+    const row = await TA.findOne({ schoolId, id: req.params.id }).lean();
+    if (!row) return E.notFound(res, 'Assignment not found');
+    if (!(await canManage(req, row.departmentId))) return E.forbidden(res);
+    if (!row.lessonGroupId) return ok(res, { id: row.id, lessonGroupId: null });
+    await TA.updateOne({ schoolId, id: row.id }, { $set: { lessonGroupId: null, updatedBy: userId } });
+    await _tidyGroup(req, row.lessonGroupId);
+    invalidateScopeCache(row.teacherId, schoolId);
+    return ok(res, { id: row.id, lessonGroupId: null });
+  } catch (err) {
+    console.error('[teaching-assignments POST /:id/unlink]', err);
     return E.serverError(res);
   }
 });

@@ -29,10 +29,9 @@ function chain(result) {
   return { select: () => chain(result), sort: () => chain(result), lean: () => Promise.resolve(result) };
 }
 function matches(doc, filter) {
-  return Object.entries(filter).every(([k, v]) => {
-    if (v === null) return doc[k] === null || doc[k] === undefined;
-    return doc[k] === v;
-  });
+  // Shared MongoDB-like matcher (v5.270.0): lesson filters now use $and,
+  // null-matches-missing and array fields, which this file's own matcher didn't model.
+  return require('../fixtures/fake-tenant-db').matches(doc, filter);
 }
 function makeStore(seed = []) {
   const docs = seed.map(d => ({ ...d }));
@@ -45,7 +44,9 @@ function makeStore(seed = []) {
         Object.assign(existing, update.$set);
         return { lastErrorObject: { updatedExisting: true }, value: existing };
       }
-      const created = { ...filter, ...update.$set, ...update.$setOnInsert };
+      // Like MongoDB, operator keys in the filter ($or…) are not copied onto the new document.
+      const plain = Object.fromEntries(Object.entries(filter).filter(([k]) => !k.startsWith('$')));
+      const created = { ...plain, ...update.$set, ...update.$setOnInsert };
       docs.push(created);
       return { lastErrorObject: { updatedExisting: false }, value: created };
     },
@@ -269,5 +270,45 @@ describe('POST /api/import-export/timetable — teacher id resolution', () => {
     // The exact bug: this used to be String(t._id) — some ObjectId-shaped
     // string matching nothing else in the system computes for this teacher.
     expect(mockStores.timetable._docs()[0].teacherId).toBe('tch_brian');
+  });
+});
+
+/* ── v5.270.0: streams taught together, co-teachers, and an export that re-imports ── */
+describe('taught together', () => {
+  const post = rows => supertest(buildApp()).post('/api/import-export/timetable').set('Content-Type', 'application/json').send({ rows });
+
+  test('"7i + 7ii" imports as one lesson for both streams; "alsoTeaching" as a co-teacher', async () => {
+    const res = await post([row({ streamName: '7i + 7ii', subject: 'PE', teacherName: 'Agnes Otieno', alsoTeaching: 'Brian Kamau' })]);
+    expect(res.status).toBe(201);
+    const [slot] = mockStores.timetable._docs();
+    expect(slot).toMatchObject({ streamId: null, streamIds: ['strm_7i', 'strm_7ii'], teacherId: 'usr_agnes', coTeacherIds: ['tch_brian'], coTeacherNames: ['Brian Kamau'] });
+  });
+
+  test('a co-teacher name that isn\'t a teacher skips the row with the reason', async () => {
+    const res = await post([row({ teacherName: 'Agnes Otieno', alsoTeaching: 'Nobody Here' })]);
+    expect(res.status).toBe(422);
+    expect(res.body.data.errors[0]).toMatchObject({ field: 'alsoTeaching' });
+    expect(mockStores.timetable._docs()).toHaveLength(0);
+  });
+
+  test('re-importing the same combined row updates that lesson; a plain 7i row is a different lesson', async () => {
+    await post([row({ streamName: '7i + 7ii', subject: 'PE' })]);
+    await post([row({ streamName: '7ii + 7i', subject: 'Games' })]);   // same streams, any order
+    expect(mockStores.timetable._docs()).toHaveLength(1);
+    expect(mockStores.timetable._docs()[0].subject).toBe('Games');
+  });
+
+  test('export writes streamName and alsoTeaching, so an exported file imports back the same', async () => {
+    mockStores.timetable = makeStore([
+      { id: 'l1', schoolId: SCHOOL, isActive: true, classId: 'cls_yr7', streamIds: ['strm_7i', 'strm_7ii'], day: 'monday', period: '1', subject: 'PE', teacherName: 'Agnes Otieno', coTeacherNames: ['Brian Kamau'], type: 'lesson' },
+      { id: 'l2', schoolId: SCHOOL, isActive: true, classId: 'cls_yr7', streamId: 'strm_7i', day: 'monday', period: '2', subject: 'Maths', teacherName: 'Agnes Otieno', type: 'lesson' },
+    ]);
+    const res = await supertest(buildApp()).get('/api/import-export/export/timetable');
+    expect(res.status).toBe(200);
+    const lines = res.text.trim().split(/\r?\n/);
+    expect(lines[0]).toMatch(/className,streamName,day,period,subject,teacherName,alsoTeaching,room,type/);
+    expect(lines.find(l => l.includes('PE'))).toMatch(/7i \+ 7ii/);
+    expect(lines.find(l => l.includes('PE'))).toMatch(/Brian Kamau/);
+    expect(lines.find(l => l.includes('Maths'))).toMatch(/,7i,/);
   });
 });

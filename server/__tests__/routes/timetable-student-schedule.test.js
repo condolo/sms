@@ -18,14 +18,9 @@
 const SCHOOL = 'sch_demo';
 
 function matchesFilter(doc, filter) {
-  return Object.entries(filter || {}).every(([key, cond]) => {
-    if (key === '$or') return cond.some((sub) => matchesFilter(doc, sub));
-    if (cond && typeof cond === 'object' && !Array.isArray(cond)) {
-      if ('$exists' in cond) return cond.$exists ? doc[key] !== undefined : doc[key] === undefined;
-      return false;
-    }
-    return doc[key] === cond;
-  });
+  // Shared MongoDB-like matcher (v5.270.0): lesson filters now use $and,
+  // null-matches-missing and array fields, which this file's own matcher didn't model.
+  return require('../fixtures/fake-tenant-db').matches(doc, filter);
 }
 function mockChain(rows) {
   let data = Array.isArray(rows) ? [...rows] : rows;

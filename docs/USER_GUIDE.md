@@ -229,7 +229,7 @@ Click any student row to open their full profile:
 - **Attendance tab**: monthly attendance breakdown
 - **Behaviour tab**: merit/demerit history, current stage, milestone badges
 - **Finance tab**: invoice history and payment status
-- **Timetable tab**: this student's own weekly schedule — their class+stream's lessons, grouped by day. Same schedule a form teacher sees on the class grid, filtered to this one student; there's no separate per-student/elective schedule in Msingi.
+- **Timetable tab**: this student's own weekly schedule — their class's whole-class lessons, their stream's lessons (including lessons their stream shares with another), and only the option subjects they're enrolled in, grouped by day. The student and parent portals show the same.
 - **Medical tab**: emergency contact, doctor/clinic details, medical notes
 - **Portal tab** (admin/principal/deputy only): create or reset the student's own login and, if a parent email is on file, the parent's login; deactivate or reactivate the student. See `SCHOOL_ADMIN_GUIDE.md` §7 for the full workflow, including bulk activation for many students at once.
 
@@ -314,6 +314,9 @@ Navigate to **Timetable** to build the weekly schedule.
 - In **Teacher View**, **Availability** marks the periods or days a teacher can't teach.
 - Set **Periods / Week** and **Double lessons** on each teacher's assignments (Teachers → Assignments), and **Room needed** on subjects that need a lab or hall.
 - Tick **Lock this lesson** to pin a lesson so it can't be changed or removed until unlocked.
+- **Teaching together** (*2026-11*): two teachers can share the same lessons (co-teaching), and two streams can have a lesson together (e.g. 7i + 7ii PE). Link their assignments under Teachers → Assignments (people icon), or use **Also teaching** / **Taught together with** when adding a lesson. Co-taught lessons appear on every teacher's timetable as "Teacher A & Teacher B"; combined lessons appear on each stream's timetable.
+- **Subject time rules** in Days & rules say when a subject must not be taught (e.g. no PE in lesson 1).
+- **Generate** builds a timetable automatically from the assignments and rules.
 - Print or export the timetable from the action bar.
 - Full details: [Timetabler Guide](TIMETABLER_GUIDE.md).
 

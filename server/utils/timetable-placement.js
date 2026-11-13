@@ -16,10 +16,16 @@
      whole-class lessons of the subject (a whole-class lesson teaches
      every stream). A whole-class assignment counts whole-class lessons.
    • The teacher on the lesson doesn't decide which assignment it counts
-     for; two teachers sharing one class + subject are added together.
+     for; two teachers sharing one class + subject are added together —
+     unless their rows are linked "taught together" (lessonGroupId,
+     v5.270.0): then they are ONE set of lessons, counted once.
+   • Streams taught together: a lesson with streamIds counts for each of
+     those streams (v5.270.0). Co-teachers count it in their totals.
    • Only lessons (type "lesson") count — not assembly, breaks, etc.
    ============================================================ */
 'use strict';
+
+const { lessonStreams, lessonTeacherIds } = require('./lesson-audience');
 
 function _lessonOnly(s) { return !s.type || s.type === 'lesson'; }
 
@@ -70,12 +76,18 @@ function computePlacement({ assignments = [], slots = [], classes = [], subjects
         classId: ck(a.classId), className: className.get(ck(a.classId)) || a.className || '',
         streamId: a.streamId || null, streamName: a.streamName || null,
         subjectId: a.subjectId, subjectName: a.subjectName || '',
-        teachers: [], needed: 0, doubles: 0, missingTarget: false, placed: 0,
+        teachers: [], needed: 0, doubles: 0, missingTarget: false, placed: 0, _linked: new Set(),
       });
     }
     const g = groups.get(key);
     const tName = a.teacherName || teacherName.get(tk(a.teacherId)) || '';
     if (tName && !g.teachers.includes(tName)) g.teachers.push(tName);
+    // Rows linked "taught together" are one set of lessons: count it once.
+    if (a.lessonGroupId) {
+      g.taughtTogether = true;
+      if (g._linked.has(a.lessonGroupId)) continue;
+      g._linked.add(a.lessonGroupId);
+    }
     if (a.periodsPerWeek) g.needed += Number(a.periodsPerWeek);
     else g.missingTarget = true;
     g.doubles += Number(a.doubleLessons) || 0;   // of `needed`, how many are double periods (v5.268.0)
@@ -88,7 +100,8 @@ function computePlacement({ assignments = [], slots = [], classes = [], subjects
     let hit = false;
     for (const g of groups.values()) {
       if (g.classId !== c || g.subjectId !== sub) continue;
-      const fits = g.streamId ? (!s.streamId || s.streamId === g.streamId) : !s.streamId;
+      const st = lessonStreams(s);
+      const fits = g.streamId ? (!st || st.includes(String(g.streamId))) : !st;
       if (fits) { g.placed++; hit = true; }
     }
     if (hit) counted.add(i);
@@ -99,7 +112,7 @@ function computePlacement({ assignments = [], slots = [], classes = [], subjects
     : g.placed > g.needed ? 'over'
     : g.missingTarget ? 'no_target' : 'done';
 
-  const classRows = [...groups.values()].map(g => ({
+  const classRows = [...groups.values()].map(({ _linked, ...g }) => ({
     ...g,
     remaining: Math.max(0, g.needed - g.placed),
     status: statusOf(g),
@@ -112,8 +125,9 @@ function computePlacement({ assignments = [], slots = [], classes = [], subjects
   const extra = new Map();
   lessons.forEach((s, i) => {
     if (counted.has(i)) return;
-    const key = `${ck(s.classId)}|${s.streamId || ''}|${sk(s)}`;
-    if (!extra.has(key)) extra.set(key, { classId: ck(s.classId), className: className.get(ck(s.classId)) || '', streamId: s.streamId || null, subjectName: s.subject || '(no subject)', placed: 0 });
+    const st = lessonStreams(s);
+    const key = `${ck(s.classId)}|${st ? st.join('+') : ''}|${sk(s)}`;
+    if (!extra.has(key)) extra.set(key, { classId: ck(s.classId), className: className.get(ck(s.classId)) || '', streamId: st && st.length === 1 ? st[0] : null, streamIds: st && st.length > 1 ? st : null, subjectName: s.subject || '(no subject)', placed: 0 });
     extra.get(key).placed++;
   });
   const unassigned = [...extra.values()].sort((x, y) => x.className.localeCompare(y.className, undefined, { numeric: true }) || x.subjectName.localeCompare(y.subjectName));
@@ -131,9 +145,10 @@ function computePlacement({ assignments = [], slots = [], classes = [], subjects
     if (a.periodsPerWeek) r.needed += Number(a.periodsPerWeek); else r.missingTarget = true;
   }
   for (const s of lessons) {
-    const key = tk(s.teacherId);
-    if (!key) continue;
-    tRow(key, s.teacherName).placed++;
+    lessonTeacherIds(s).forEach((id, i) => {   // co-teachers too (v5.270.0)
+      const key = tk(id);
+      if (key) tRow(key, i === 0 ? s.teacherName : (s.coTeacherNames || [])[i - 1]).placed++;
+    });
   }
   const teacherRows = [...tRows.values()].map(r => ({
     ...r,

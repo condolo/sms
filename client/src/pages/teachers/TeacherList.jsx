@@ -851,6 +851,62 @@ function TeacherDetailSlideOver({ teacher: initialTeacher, canEdit, canDelete, o
 }
 
 /* ── Teaching Assignments Tab ────────────────────────────── */
+/* Taught together (v5.270.0): the other teachers/streams with the same class +
+   subject, and whether each is in this row's set. Linking makes them ONE set
+   of lessons — two teachers in every lesson (co-teaching) and/or two streams
+   taught together. Periods per week follow this row. */
+function TogetherPanel({ a, onClose, onChanged }) {
+  const { toast } = useToast();
+  const { data, isLoading } = useQuery({
+    queryKey: ['teaching-assignments', 'together', a.classId, a.subjectId],
+    queryFn: () => assignmentsApi.list({ classId: a.classId, subjectId: a.subjectId }),
+  });
+  const myId = a.id ?? a._id;
+  const others = (data?.data ?? []).filter(x => (x.id ?? x._id) !== myId);
+  const inSet = x => !!a.lessonGroupId && x.lessonGroupId === a.lessonGroupId;
+  const linkMut = useMutation({
+    mutationFn: other => assignmentsApi.link(myId, other.id ?? other._id),
+    onSuccess: () => { toast.success('Now taught together.'); onChanged(); },
+    onError: err => toast.error(err?.message ?? 'Could not link.'),
+  });
+  const unlinkMut = useMutation({
+    mutationFn: row => assignmentsApi.unlink(row.id ?? row._id),
+    onSuccess: () => { toast.success('Taught separately again.'); onChanged(); },
+    onError: err => toast.error(err?.message ?? 'Could not unlink.'),
+  });
+  const who = x => `${x.teacherName ?? 'Teacher'}${x.streamName ? ` · ${x.streamName}` : ' · whole class'}`;
+  return (
+    <div className="mt-2 rounded-lg border border-violet-200 bg-violet-50/50 p-2.5 space-y-2">
+      <p className="text-[11px] text-slate-600">
+        Teach <span className="font-semibold">{a.subjectName}</span> in <span className="font-semibold">{a.className}</span> together with:
+      </p>
+      {isLoading ? <p className="text-[11px] text-slate-400">Loading…</p> : !others.length ? (
+        <p className="text-[11px] text-slate-500">No other teacher or stream has this subject in this class yet. Add the other assignment first (on that teacher&apos;s page), then link it here.</p>
+      ) : (
+        <ul className="space-y-1">
+          {others.map(x => (
+            <li key={x.id ?? x._id} className="flex items-center justify-between gap-2 text-[11px]">
+              <span className="text-slate-700">{who(x)}</span>
+              {inSet(x) ? (
+                <button onClick={() => unlinkMut.mutate(x)} disabled={unlinkMut.isPending} className="px-2 py-0.5 rounded border border-slate-300 text-slate-600 hover:bg-white disabled:opacity-50">Taught together · unlink</button>
+              ) : (
+                <button onClick={() => linkMut.mutate(x)} disabled={linkMut.isPending} className="px-2 py-0.5 rounded bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">Teach together</button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="text-[10px] text-slate-500">Same stream, another teacher = both teach every lesson. Another stream = the streams have the lesson together. The set uses this row&apos;s periods per week.</p>
+      <div className="flex gap-2">
+        {a.lessonGroupId && (
+          <button onClick={() => unlinkMut.mutate(a)} disabled={unlinkMut.isPending} className="text-[11px] text-slate-600 underline">Take this row out of the set</button>
+        )}
+        <button onClick={onClose} className="text-[11px] text-slate-500 ml-auto">Close</button>
+      </div>
+    </div>
+  );
+}
+
 function TeacherAssignmentsTab({ teacher, canEdit }) {
   const qc = useQueryClient();
   const { toast } = useToast();
@@ -863,6 +919,7 @@ function TeacherAssignmentsTab({ teacher, canEdit }) {
   const [ef, setEf]           = useState({ periodsPerWeek: '', doubleLessons: '' });
   const [efErr, setEfErr]     = useState('');
   const [afErr, setAfErr]     = useState({});
+  const [togetherId, setTogetherId] = useState(null);   // row whose "Teach together" panel is open
 
   /* ── Fetch assignments for this teacher ─── */
   const { data: aData, isLoading: loadingA } = useQuery({
@@ -1177,7 +1234,17 @@ function TeacherAssignmentsTab({ teacher, canEdit }) {
                   ) : (
                     <span className="text-[10px] text-amber-600">· periods/wk not set</span>
                   )}
+                  {a.lessonGroupId && (
+                    <span className="text-[10px] font-medium text-violet-700 bg-violet-50 px-1.5 rounded">Taught together</span>
+                  )}
                 </div>
+                {togetherId === (a.id ?? a._id) && (
+                  <TogetherPanel
+                    a={a}
+                    onClose={() => setTogetherId(null)}
+                    onChanged={() => { qc.invalidateQueries({ queryKey: ['teaching-assignments'] }); setTogetherId(null); }}
+                  />
+                )}
                 {editId === (a.id ?? a._id) && (
                   <div className="mt-2 flex flex-wrap items-end gap-2">
                     <label className="text-[10px] text-slate-500">
@@ -1201,6 +1268,16 @@ function TeacherAssignmentsTab({ teacher, canEdit }) {
                   </div>
                 )}
               </div>
+              {canEdit && (
+                <button
+                  onClick={() => setTogetherId(togetherId === (a.id ?? a._id) ? null : (a.id ?? a._id))}
+                  className={`${a.lessonGroupId ? '' : 'opacity-0 group-hover:opacity-100'} p-1.5 text-slate-400 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition`}
+                  title="Teach together (another teacher in the same lessons, or streams taught together)"
+                  aria-label="Teach together"
+                >
+                  <Users size={12} />
+                </button>
+              )}
               {canEdit && editId !== (a.id ?? a._id) && (
                 <button
                   onClick={() => startEdit(a)}

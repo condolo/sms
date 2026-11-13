@@ -22,6 +22,7 @@
    ============================================================ */
 'use strict';
 const { publishedReader } = require('./timetable-publish');
+const { teacherLessonClause, lessonTeacherIds } = require('./lesson-audience');
 
 const cron         = require('node-cron');
 const { _model }   = require('./model');
@@ -72,14 +73,14 @@ async function _getPendingTeachers(schoolId, academicYear, dayOfWeek) {
   const teacherIds = [...new Set(assignments.map(a => a.teacherId))];
   const slots      = await (await publishedReader(schoolId, { schoolId })).find({
     schoolId,
-    teacherId: { $in: teacherIds },
+    ...teacherLessonClause(teacherIds),   // as main teacher or co-teacher (v5.270.0)
     day: dayOfWeek,
-  }).select('teacherId classId subjectId').lean();
+  }).select('teacherId coTeacherIds classId subjectId').lean();
 
   if (!slots.length) return [];
 
   // Teachers who taught today
-  const taughtToday = new Set(slots.map(s => s.teacherId));
+  const taughtToday = new Set(slots.flatMap(s => lessonTeacherIds(s)));
 
   // Filter assignments to those teachers
   const relevantAssignments = assignments.filter(a => taughtToday.has(a.teacherId));

@@ -35,7 +35,39 @@ const DEFAULT_RULES = Object.freeze({
   coreSubjectsMorning:     { on: false, subjectIds: [] },
   // Use each teacher's preferred room (from their teaching assignment) when it's free.
   usePreferredRooms:       { on: true },
+  // Subject time rules (v5.270.0): when a subject must NOT be taught, e.g.
+  // "no PE in lesson 1", "no Chemistry on Friday". Positions are a class's
+  // lesson number in the day (1 = first lesson, breaks not counted), so one
+  // rule works for every section's bell schedule. The generator never
+  // breaks these; a lesson placed by hand there is shown as a warning.
+  subjectTimes:            { on: true, items: [] },
 });
+
+const MAX_POSITION = 15;
+
+/** [{ subjectId, notPositions: [1..15], notDays: [day] }] — cleaned, one item per subject, empty items dropped. */
+function normaliseSubjectTimes(items) {
+  const bySubject = new Map();
+  for (const it of Array.isArray(items) ? items : []) {
+    if (!it || typeof it !== 'object' || !it.subjectId) continue;
+    const positions = [...new Set((Array.isArray(it.notPositions) ? it.notPositions : []).map(Number)
+      .filter(n => Number.isInteger(n) && n >= 1 && n <= MAX_POSITION))].sort((a, b) => a - b);
+    const days = ALL_DAYS.filter(d => (Array.isArray(it.notDays) ? it.notDays : []).map(x => String(x).toLowerCase()).includes(d));
+    if (!positions.length && !days.length) continue;
+    bySubject.set(String(it.subjectId), { subjectId: String(it.subjectId), notPositions: positions, notDays: days });
+  }
+  return [...bySubject.values()].slice(0, 100);
+}
+
+/** Is this subject barred at this day / lesson position (1-based)? Returns a short reason or null. */
+function subjectTimeBlock(rules, subjectId, day, position) {
+  if (!rules?.subjectTimes?.on || !subjectId) return null;
+  const item = (rules.subjectTimes.items || []).find(i => i.subjectId === String(subjectId));
+  if (!item) return null;
+  if (item.notDays.includes(day)) return `not on ${dayLabel(day)}`;
+  if (item.notPositions.includes(position)) return `not in lesson ${position}`;
+  return null;
+}
 
 /** Keep only real day names, once each, in week order. Empty → the default. */
 function normaliseDays(days) {
@@ -58,6 +90,7 @@ function normaliseRules(stored) {
     if ('subjectIds' in def) {
       rule.subjectIds = Array.isArray(s.subjectIds) ? [...new Set(s.subjectIds.map(String))].slice(0, 50) : [];
     }
+    if ('items' in def) rule.items = normaliseSubjectTimes(s.items);
     out[key] = rule;
   }
   return out;
@@ -102,6 +135,7 @@ function notWorkingDayMsg(day) {
 }
 
 module.exports = {
-  ALL_DAYS, DEFAULT_WORKING_DAYS, DEFAULT_RULES,
-  normaliseDays, normaliseRules, getTimetableSettings, setWorkingDays, setRules, notWorkingDayMsg, dayLabel,
+  ALL_DAYS, DEFAULT_WORKING_DAYS, DEFAULT_RULES, MAX_POSITION,
+  normaliseDays, normaliseRules, normaliseSubjectTimes, subjectTimeBlock,
+  getTimetableSettings, setWorkingDays, setRules, notWorkingDayMsg, dayLabel,
 };

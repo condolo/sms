@@ -16,6 +16,7 @@ import { classes as classesApi, streams as streamsApi, teachers as teachersApi, 
 import { teacherPortalApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 import { useSections } from '@/hooks/useSections.js';
+import { lessonTeachers, lessonIsForStream, isCombined } from '@/utils/lessonLabels.js';
 
 const STREAM_COLORS = [
   'from-violet-500 to-purple-600','from-blue-500 to-cyan-500',
@@ -463,10 +464,10 @@ export default function ClassDetail() {
                           <div className={`h-1.5 rounded-full transition-all ${fillColor}`} style={{ width: `${fillPct}%` }} />
                         </div>
                       )}
-                      {s.teacherName && (
+                      {lessonTeachers(s) && (
                         <div className="flex items-center gap-2 text-xs text-slate-500">
                           <UserCheck size={12} className="shrink-0" />
-                          <span className="truncate">{s.teacherName}</span>
+                          <span className="truncate">{lessonTeachers(s)}</span>
                         </div>
                       )}
                       {s.assistantTeacherName && (

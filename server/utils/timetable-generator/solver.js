@@ -105,20 +105,41 @@ const sameAudience = (streamA, streamB) => !streamA || !streamB || streamA === s
                           stream holds any of the group's students, or the
                           group's streams are unknown
    Unknown always clashes — never risk a student in two places. */
+/* The streams a lesson/unit is for: streams taught together (streamIds,
+   v5.270.0), one stream, or null for the whole class. */
+const streamsOf = x => (x.streamIds && x.streamIds.length ? x.streamIds : (x.streamId ? [x.streamId] : null));
+const intersects = (a, b) => a.some(s => b.includes(s));
+
+/* Every teacher of a unit/lesson: the main teacher and co-teachers (v5.270.0). */
+const teachersOf = x => (x.coTeacherKeys && x.coTeacherKeys.length ? [x.teacherKey, ...x.coTeacherKeys] : [x.teacherKey]).filter(Boolean);
+
+/* Subject time rules (v5.270.0): is this subject barred at this day / lesson position (1-based)? */
+function subjectBarred(problem, subjectId, day, position) {
+  const rule = problem.rules?.subjectTimes;
+  if (!rule?.on || !subjectId || !(rule.items || []).length) return false;
+  if (!problem.__subjectTimes) problem.__subjectTimes = new Map(rule.items.map(i => [String(i.subjectId), i]));
+  const item = problem.__subjectTimes.get(String(subjectId));
+  return !!item && ((item.notDays || []).includes(day) || (item.notPositions || []).includes(position));
+}
+
 function audienceClash(problem, a, b) {
   const ga = a.groupId || null;
   const gb = b.groupId || null;
-  if (!ga && !gb) return sameAudience(a.streamId, b.streamId);
+  if (!ga && !gb) {
+    const sa = streamsOf(a);
+    const sb = streamsOf(b);
+    return !sa || !sb || intersects(sa, sb);
+  }
   if (ga && gb) {
     if (ga === gb) return true;
     const g = problem.groups?.[ga];
     return !g || !(g.shareWith || []).includes(gb);
   }
   const g = problem.groups?.[ga || gb];
-  const regularStream = ga ? b.streamId : a.streamId;
-  if (!regularStream) return true;
+  const regular = streamsOf(ga ? b : a);
+  if (!regular) return true;
   if (!g || !g.streams) return true;
-  return g.streams.includes(regularStream);
+  return intersects(g.streams, regular);
 }
 
 function buildState(problem) {
@@ -130,10 +151,10 @@ function buildState(problem) {
   };
   for (const [fi, f] of problem.fixed.entries()) {
     const ref = `fixed:${fi}`;
-    if (f.classId) st.classBusy.add(f.classId, f.day, { start: f.start, end: f.end, streamId: f.streamId || null, groupId: f.groupId || null, ref });
-    if (f.teacherKey) {
-      st.teacherBusy.add(f.teacherKey, f.day, { start: f.start, end: f.end, ref });
-      const k = `${f.teacherKey}|${f.day}`;
+    if (f.classId) st.classBusy.add(f.classId, f.day, { start: f.start, end: f.end, streamId: f.streamId || null, streamIds: f.streamIds || null, groupId: f.groupId || null, ref });
+    for (const t of teachersOf(f)) {
+      st.teacherBusy.add(t, f.day, { start: f.start, end: f.end, ref });
+      const k = `${t}|${f.day}`;
       st.teacherDay.set(k, (st.teacherDay.get(k) || 0) + 1);
     }
     if (f.roomId) st.roomBusy.add(f.roomId, f.day, { start: f.start, end: f.end, ref });
@@ -179,10 +200,15 @@ function check(problem, st, unit, startIdx) {
     }
   };
 
+  // Subject time rules are hard: never placed in a barred day or lesson position (every period of a double).
+  if (segs.some(s => subjectBarred(problem, unit.subjectId, s.day, s.dayPos + 1))) return { ok: false, reason: 'subject_time', blockers: [] };
   note(st.classBusy.clashes(unit.classId, day, start, end, x => audienceClash(problem, unit, x)), 'class');
-  const un = (problem.unavailable[unit.teacherKey] || []).find(b => b.day === day && overlaps(start, end, b.start, b.end));
-  if (un) return { ok: false, reason: 'unavailable', blockers: [] };
-  if (unit.teacherKey) note(st.teacherBusy.clashes(unit.teacherKey, day, start, end), 'teacher');
+  // Every teacher of the lesson (co-teaching) must be available and free.
+  const teachers = teachersOf(unit);
+  for (const t of teachers) {
+    if ((problem.unavailable[t] || []).some(b => b.day === day && overlaps(start, end, b.start, b.end))) return { ok: false, reason: 'unavailable', blockers: [] };
+  }
+  for (const t of teachers) note(st.teacherBusy.clashes(t, day, start, end), 'teacher');
 
   // Room: a required type must be found; otherwise the preferred room if free, else none.
   let room = null;
@@ -226,17 +252,22 @@ function cost(problem, st, unit, at) {
   const r = problem.rules;
   const { day, start, end, segs } = at;
   let c = 0;
-  if (r.maxTeacherLessonsPerDay?.on && unit.teacherKey) {
-    const n = (st.teacherDay.get(`${unit.teacherKey}|${day}`) || 0) + unit.length;
-    if (n > r.maxTeacherLessonsPerDay.value) c += PENALTY.teacherOverDay * (n - r.maxTeacherLessonsPerDay.value);
+  const teachers = teachersOf(unit);
+  if (r.maxTeacherLessonsPerDay?.on) {
+    for (const t of teachers) {
+      const n = (st.teacherDay.get(`${t}|${day}`) || 0) + unit.length;
+      if (n > r.maxTeacherLessonsPerDay.value) c += PENALTY.teacherOverDay * (n - r.maxTeacherLessonsPerDay.value);
+    }
   }
   if (r.maxSubjectPerDay?.on) {
     const n = (st.subjDay.get(`${unit.audKey}|${unit.subjectId}|${day}`) || 0) + 1;
     if (n > r.maxSubjectPerDay.value) c += PENALTY.subjectOverDay * (n - r.maxSubjectPerDay.value);
   }
-  if (r.avoidTeacherGaps?.on && unit.teacherKey) {
-    const same = st.teacherBusy.clashes(unit.teacherKey, day, '00:00', '23:59');
-    if (same.length && !same.some(x => x.end === start || x.start === end)) c += PENALTY.teacherGap;
+  if (r.avoidTeacherGaps?.on) {
+    for (const t of teachers) {
+      const same = st.teacherBusy.clashes(t, day, '00:00', '23:59');
+      if (same.length && !same.some(x => x.end === start || x.start === end)) c += PENALTY.teacherGap;
+    }
   }
   if (r.spreadAcrossWeek?.on) {
     const di = problem.days.indexOf(day);
@@ -254,10 +285,10 @@ function cost(problem, st, unit, at) {
 
 function place(st, unit, at) {
   const ref = unit.id;
-  st.classBusy.add(unit.classId, at.day, { start: at.start, end: at.end, streamId: unit.streamId || null, groupId: unit.groupId || null, ref });
-  if (unit.teacherKey) {
-    st.teacherBusy.add(unit.teacherKey, at.day, { start: at.start, end: at.end, ref });
-    const k = `${unit.teacherKey}|${at.day}`;
+  st.classBusy.add(unit.classId, at.day, { start: at.start, end: at.end, streamId: unit.streamId || null, streamIds: unit.streamIds || null, groupId: unit.groupId || null, ref });
+  for (const t of teachersOf(unit)) {
+    st.teacherBusy.add(t, at.day, { start: at.start, end: at.end, ref });
+    const k = `${t}|${at.day}`;
     st.teacherDay.set(k, (st.teacherDay.get(k) || 0) + unit.length);
   }
   if (at.room) st.roomBusy.add(at.room.id, at.day, { start: at.start, end: at.end, ref });
@@ -270,9 +301,9 @@ function unplace(st, unit) {
   const at = st.placed.get(unit.id);
   if (!at) return null;
   st.classBusy.remove(unit.classId, at.day, unit.id);
-  if (unit.teacherKey) {
-    st.teacherBusy.remove(unit.teacherKey, at.day, unit.id);
-    const k = `${unit.teacherKey}|${at.day}`;
+  for (const t of teachersOf(unit)) {
+    st.teacherBusy.remove(t, at.day, unit.id);
+    const k = `${t}|${at.day}`;
     st.teacherDay.set(k, (st.teacherDay.get(k) || 0) - unit.length);
   }
   if (at.room) st.roomBusy.remove(at.room.id, at.day, unit.id);
@@ -308,6 +339,8 @@ const REASON_TEXT = {
   no_room_type: 'no room of the type this subject needs is registered (Timetable → Rooms)',
   movable:      'every time that fits is already taken by other lessons',
   double:       'the class has no two back-to-back periods without a break between them',
+  subject_time: 'the subject\'s time rules (Days & rules) leave no free period that fits',
+  subject_time_full: 'the periods the subject\'s time rules (Days & rules) allow are all taken',
 };
 
 function reasonFor(problem, unit, reasons) {
@@ -315,6 +348,8 @@ function reasonFor(problem, unit, reasons) {
   if (unit.requiredRoomType && !problem.rooms.some(r => r.type === unit.requiredRoomType)) return REASON_TEXT.no_room_type;
   if (unit.length === 2 && !(problem.audiences[unit.audKey]?.doubleStarts || []).length) return REASON_TEXT.double;
   const top = Object.entries(reasons).sort((a, b) => b[1] - a[1])[0];
+  // The time rules shut some periods and the rest are taken: say so, rather than only "taken".
+  if (top && reasons.subject_time && ['movable', 'class', 'teacher'].includes(top[0])) return REASON_TEXT.subject_time_full;
   return top ? REASON_TEXT[top[0]] : 'no period fits';
 }
 
@@ -323,16 +358,20 @@ function difficultyOrder(problem, random) {
   const teacherLoad = new Map();
   const audLoad = new Map();
   for (const u of problem.units) {
-    if (u.teacherKey) teacherLoad.set(u.teacherKey, (teacherLoad.get(u.teacherKey) || 0) + u.length);
+    for (const t of teachersOf(u)) teacherLoad.set(t, (teacherLoad.get(t) || 0) + u.length);
     audLoad.set(u.audKey, (audLoad.get(u.audKey) || 0) + u.length);
   }
   const score = (u) => {
     const aud = problem.audiences[u.audKey];
     const slots = aud ? aud.slots.length || 1 : 1;
-    const unavailable = (problem.unavailable[u.teacherKey] || []).length;
+    const ts = teachersOf(u);
+    const unavailable = ts.reduce((s, t) => s + (problem.unavailable[t] || []).length, 0);
+    const load = Math.max(0, ...ts.map(t => teacherLoad.get(t) || 0));
     return (u.length === 2 ? 1000 : 0)
       + (u.requiredRoomType ? 500 : 0)
-      + 100 * ((teacherLoad.get(u.teacherKey) || 0) / slots)
+      + (ts.length > 1 ? 300 : 0)                          // co-taught: every teacher must be free
+      + (problem.rules?.subjectTimes?.on && (problem.rules.subjectTimes.items || []).some(i => String(i.subjectId) === String(u.subjectId)) ? 200 : 0)
+      + 100 * (load / slots)
       + 50 * ((audLoad.get(u.audKey) || 0) / slots)
       + 10 * unavailable
       + random() * 20;
@@ -380,7 +419,7 @@ function evaluate(problem, st) {
   const touchedSubjectDays = new Set();
   for (const [unitId, at] of st.placed) {
     const u = unitById.get(unitId);
-    if (u.teacherKey) touchedTeacherDays.add(`${u.teacherKey}|${at.day}`);
+    for (const t of teachersOf(u)) touchedTeacherDays.add(`${t}|${at.day}`);
     touchedSubjectDays.add(`${u.audKey}|${u.subjectId}|${at.day}`);
   }
   if (r.maxTeacherLessonsPerDay?.on) {

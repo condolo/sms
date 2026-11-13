@@ -330,7 +330,7 @@ const TEMPLATES = {
   timetable: {
     plan:    'timetable',
     rbacRes: 'timetable',
-    headers: ['className', 'streamName', 'day', 'period', 'subject', 'teacherName', 'room', 'type'],
+    headers: ['className', 'streamName', 'day', 'period', 'subject', 'teacherName', 'alsoTeaching', 'room', 'type'],
     examples: [
       { className: 'Form 4A', streamName: '',  day: 'monday',    period: '1', subject: 'Mathematics', teacherName: 'Grace Akinyi', room: 'Room 101', type: 'lesson' },
       { className: 'Form 4A', streamName: '',  day: 'monday',    period: '2', subject: 'Physics',     teacherName: 'Brian Kamau',  room: 'Lab 1',    type: 'lesson' },
@@ -338,6 +338,7 @@ const TEMPLATES = {
       { className: 'Form 4A', streamName: '',  day: 'wednesday', period: '3', subject: 'Assembly',    teacherName: '',             room: 'Hall',     type: 'assembly' },
       { className: 'Year 7',  streamName: '7i',  day: 'monday', period: '1', subject: 'Mathematics', teacherName: 'Grace Akinyi', room: 'Room 101', type: 'lesson' },
       { className: 'Year 7',  streamName: '7ii', day: 'monday', period: '1', subject: 'Mathematics', teacherName: 'Brian Kamau',  room: 'Room 102', type: 'lesson' },
+      { className: 'Year 7',  streamName: '7i + 7ii', day: 'tuesday', period: '2', subject: 'PE', teacherName: 'Grace Akinyi', alsoTeaching: 'Brian Kamau', room: 'Field', type: 'lesson' },
     ],
     notes: [
       '# TIMETABLE IMPORT TEMPLATE — Msingi School Management',
@@ -349,10 +350,12 @@ const TEMPLATES = {
       '#                 (e.g. 7i and 7ii each have their own Maths teacher) — without',
       '#                 it, two rows for the same class/day/period overwrite each',
       '#                 other instead of creating two separate slots.',
-      '#   day         — REQUIRED: monday | tuesday | wednesday | thursday | friday',
+      '#                 Streams taught together: join names with +, e.g. 7i + 7ii.',
+      '#   day         — REQUIRED: one of the school working days (Timetable → Days & rules)',
       '#   period      — REQUIRED: lesson period number, e.g. 1, 2, 3',
       '#   subject     — subject name, e.g. Mathematics (optional)',
       '#   teacherName — teacher first + last name, e.g. Grace Akinyi (matched to active staff)',
+      '#   alsoTeaching — optional co-teachers in the same lesson, separated by ; (each must be a teacher)',
       '#   room        — room name, e.g. Lab 1 or Room 202 (optional)',
       '#   type        — lesson | assembly | registration | free  (default: lesson)',
       '#',
@@ -1647,15 +1650,25 @@ async function _importTimetable(rows, schoolId, userId) {
     // second, stream-specific slot (exactly the multi-stream case this
     // module's stream-scoping work exists to support — see teaching-
     // assignments.js).
+    // "A + B" = streams taught together (v5.270.0) → streamIds; one name → streamId.
     let streamId = null;
+    let streamIds = null;
     if (r.streamName?.trim()) {
-      const streamKey   = `${classId}::${r.streamName.trim().toLowerCase()}`;
-      const streamEntry = streamMap[streamKey];
-      if (!streamEntry) {
-        results.errors.push({ row, field: 'streamName', message: `Stream '${r.streamName}' not found in class '${r.className}'. Create it first, then re-import.` });
+      const names = r.streamName.split('+').map(x => x.trim()).filter(Boolean);
+      const ids = [];
+      let bad = null;
+      for (const nm of names) {
+        const entry = streamMap[`${classId}::${nm.toLowerCase()}`];
+        if (!entry) { bad = nm; break; }
+        ids.push(entry.id);
+      }
+      if (bad) {
+        results.errors.push({ row, field: 'streamName', message: `Stream '${bad}' not found in class '${r.className}'. Create it first, then re-import.` });
         results.skipped++; continue;
       }
-      streamId = streamEntry.id;
+      const uniq = [...new Set(ids)].sort();
+      if (uniq.length === 1) streamId = uniq[0];
+      else streamIds = uniq;
     }
 
     const type = r.type?.trim().toLowerCase() || 'lesson';
@@ -1683,11 +1696,36 @@ async function _importTimetable(rows, schoolId, userId) {
       // If no match — keep the raw name string so data is not silently lost
     }
 
+    // Co-teachers (v5.270.0): "alsoTeaching" names, separated by ";" or ",".
+    // They are clash-checked like the main teacher, so each must be a real
+    // teacher — an unknown name skips the row with the reason.
+    let coTeacherIds = [];
+    let coTeacherNames = [];
+    if (r.alsoTeaching?.trim()) {
+      const names = r.alsoTeaching.split(/[;,]/).map(x => x.trim()).filter(Boolean);
+      const unknown = names.filter(nm => !teacherMap[nm.toLowerCase()]?.teacherId);
+      if (unknown.length) {
+        results.errors.push({ row, field: 'alsoTeaching', message: `Teacher '${unknown[0]}' (alsoTeaching) not found. Check the name, then re-import.` });
+        results.skipped++; continue;
+      }
+      for (const nm of names) {
+        const m = teacherMap[nm.toLowerCase()];
+        if (m.teacherId === teacherId || coTeacherIds.includes(m.teacherId)) continue;
+        coTeacherIds.push(m.teacherId);
+        coTeacherNames.push(m.teacherName);
+      }
+    }
+
     try {
+      // The cell a row writes to: this class/day/period and this audience
+      // (whole class, one stream, or exactly these streams together).
       const filter = {
         schoolId, classId, day, period,
         streamId:       streamId || null,
         academicYearId: currentPeriod.academicYearId || null,
+        ...(streamIds
+          ? { streamIds }
+          : { $or: [{ streamIds: { $exists: false } }, { streamIds: null }, { streamIds: { $size: 0 } }] }),
       };
 
       // A row updates the lesson already in this cell, if any. A locked lesson is never
@@ -1699,8 +1737,8 @@ async function _importTimetable(rows, schoolId, userId) {
         results.skipped++; continue;
       }
       const clash = await checkTimetableConflicts(schoolId, {
-        classId, streamId: streamId || undefined, day, period,
-        teacherId, room: r.room?.trim() || undefined,
+        classId, streamId: streamId || undefined, streamIds: streamIds || undefined, day, period,
+        teacherId, coTeacherIds, room: r.room?.trim() || undefined,
         startTime: slotTime.start, endTime: slotTime.end,
         academicYearId: currentPeriod.academicYearId || null,
       }, existing ? (existing.id || String(existing._id)) : null);
@@ -1713,9 +1751,12 @@ async function _importTimetable(rows, schoolId, userId) {
           subject:        r.subject?.trim() || undefined,
           teacherId:      teacherId   || undefined,
           teacherName:    teacherName || undefined,
+          coTeacherIds,
+          coTeacherNames,
           room:           r.room?.trim() || undefined,
           type,
           streamId:       streamId || null,
+          streamIds:      streamIds || [],
           academicYearId: currentPeriod.academicYearId || undefined,
           termId:         currentPeriod.termId         || undefined,
           isActive:       true,
@@ -2255,18 +2296,30 @@ router.get('/export/:type', authMiddleware, /* rbac: dynamic — checked via EXP
       ]);
 
       const classById = {};
-      for (const c of classes) classById[c.id] = c.name;
+      for (const c of classes) { if (c.id) classById[c.id] = c.name; if (c._id) classById[String(c._id)] = c.name; }
+      // Streams by id, so the file says which stream a lesson is for. Before
+      // v5.270.0 the export had no stream column, so re-importing an exported
+      // file turned every stream lesson into a whole-class lesson.
+      const streamDocs = await tenantModel('streams', tenantContext(req)).find({ schoolId }).select('id name').lean();
+      const streamById = Object.fromEntries(streamDocs.map(s => [s.id, s.name]));
 
-      const headers = ['className', 'day', 'period', 'subject', 'teacherName', 'room', 'type'];
-      const rows    = slots.map(s => ({
-        className:   s.classId ? (classById[s.classId] || s.classId) : '',
-        day:         s.day || '',
-        period:      s.period || '',
-        subject:     s.subject || '',
-        teacherName: s.teacherName || '',
-        room:        s.room || '',
-        type:        s.type || 'lesson',
-      }));
+      // Same columns the importer reads: streamName ("A + B" = streams taught
+      // together) and alsoTeaching (co-teachers, separated by ";").
+      const headers = ['className', 'streamName', 'day', 'period', 'subject', 'teacherName', 'alsoTeaching', 'room', 'type'];
+      const rows    = slots.map(s => {
+        const st = s.streamIds && s.streamIds.length ? s.streamIds : (s.streamId ? [s.streamId] : []);
+        return {
+          className:    s.classId ? (classById[s.classId] || s.classId) : '',
+          streamName:   st.map(id => streamById[id] || id).join(' + '),
+          day:          s.day || '',
+          period:       s.period || '',
+          subject:      s.subject || '',
+          teacherName:  s.teacherName || '',
+          alsoTeaching: (s.coTeacherNames || []).filter(Boolean).join('; '),
+          room:         s.room || '',
+          type:         s.type || 'lesson',
+        };
+      });
 
       csv = toCSV(headers, rows);
       res.setHeader('Content-Disposition', `attachment; filename="msingi_timetable_${_dateStamp()}.csv"`);

@@ -41,6 +41,7 @@ import GenerateView           from './components/GenerateView.jsx';
 import TimetableSettingsModal from './components/TimetableSettingsModal.jsx';
 import AvailabilityModal      from './components/AvailabilityModal.jsx';
 import { Toast }              from './components/TimetablePrimitives.jsx';
+import { lessonTeachers, lessonIsForStream, isCombined } from '@/utils/lessonLabels.js';
 
 const VIEWS = [
   { id: 'class',    label: 'Class Grid',   Icon: LayoutGrid                    },
@@ -233,7 +234,7 @@ export default function TimetablePage() {
   // whole-class slot (no streamId — e.g. Assembly). Until a stream is picked
   // (for a class that has streams), show nothing rather than an ambiguous mix.
   const classSlots = hasStreams
-    ? (streamId ? rawClassSlots.filter(s => !s.streamId || s.streamId === streamId) : [])
+    ? (streamId ? rawClassSlots.filter(s => lessonIsForStream(s, streamId)) : [])   // streams taught together too (v5.270.0)
     : rawClassSlots;
 
   const { data: teacherData, isLoading: teacherLoading } = useQuery({
@@ -329,7 +330,7 @@ export default function TimetablePage() {
         const slot = classSlots.find(s => String(s.period) === String(b.p) && s.day === day);
         if (slot) {
           const parts = [slot.subject];
-          if (slot.teacherName)          parts.push(slot.teacherName);
+          if (lessonTeachers(slot))      parts.push(lessonTeachers(slot));
           if (slot.assistantTeacherName) parts.push(`+ ${slot.assistantTeacherName}`);
           if (slot.room)                 parts.push(slot.room);
           row.push(parts.join(' · '));
@@ -363,7 +364,7 @@ export default function TimetablePage() {
         if (!slot) return '<td class="empty">—</td>';
         return `<td>
           <div class="subj">${slot.subject || '—'}</div>
-          ${slot.teacherName          ? `<div class="meta">${slot.teacherName}</div>`            : ''}
+          ${lessonTeachers(slot)      ? `<div class="meta">${lessonTeachers(slot)}</div>`        : ''}
           ${slot.assistantTeacherName ? `<div class="meta">+ ${slot.assistantTeacherName}</div>` : ''}
           ${slot.room                 ? `<div class="meta">${slot.room}</div>`                   : ''}
         </td>`;

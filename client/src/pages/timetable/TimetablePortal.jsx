@@ -20,6 +20,7 @@ import { timetable as ttApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 import RoleGuide from '@/components/RoleGuide.jsx';
 import { DAYS, DAY_SHORT, DAY_FULL, daysToShow } from './constants.js';
+import { lessonTeachers, lessonIsForStream, isCombined } from '@/utils/lessonLabels.js';
 
 /* ── Days: Monday–Friday, plus Saturday/Sunday when there are lessons on them (v5.265.0) ── */
 
@@ -128,8 +129,8 @@ function ReadGrid({ slots, days: baseDays = DAYS }) {
                           <p className={`text-[11px] font-semibold leading-tight truncate ${col.text}`}>
                             {slot.subject || '—'}
                           </p>
-                          {slot.teacherName && (
-                            <p className={`text-[10px] mt-0.5 truncate ${col.sub} opacity-80`}>{slot.teacherName}</p>
+                          {lessonTeachers(slot) && (
+                            <p className={`text-[10px] mt-0.5 truncate ${col.sub} opacity-80`}>{lessonTeachers(slot)}</p>
                           )}
                           {slot.assistantTeacherName && (
                             <p className={`text-[10px] truncate ${col.sub} opacity-60`}>+ {slot.assistantTeacherName}</p>

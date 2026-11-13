@@ -22,6 +22,7 @@ import NotificationBell from '@/components/layout/NotificationBell.jsx';
 import FloatingHelp from '@/components/help/FloatingHelp.jsx';
 import TransportRideCard from '@/components/transport/TransportRideCard.jsx';
 import { auth as authApi, studentMessaging, studentPortalApi } from '@/api/client.js';
+import { lessonTeachers, lessonIsForStream, isCombined } from '@/utils/lessonLabels.js';
 
 /* ── API ────────────────────────────────────────────────────────── */
 const API_BASE = import.meta.env.VITE_API_BASE || '';
@@ -975,7 +976,7 @@ export default function StudentDashboard() {
                             {slot.subjectName}
                           </p>
                           <p className="text-[11px] text-slate-400 truncate mt-0.5">
-                            {[slot.room, slot.teacherName].filter(Boolean).join(' · ')}
+                            {[slot.room, lessonTeachers(slot)].filter(Boolean).join(' · ')}
                           </p>
                         </div>
 

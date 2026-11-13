@@ -14,6 +14,7 @@ function getPath(doc, path) {
 }
 
 function matchValue(actual, cond) {
+  if (cond instanceof RegExp) return Array.isArray(actual) ? actual.some(a => cond.test(a)) : typeof actual === 'string' && cond.test(actual);
   if (cond && typeof cond === 'object' && !Array.isArray(cond) && !(cond instanceof Date)) {
     return Object.entries(cond).every(([op, v]) => {
       switch (op) {
@@ -21,13 +22,22 @@ function matchValue(actual, cond) {
         case '$in': { const vs = v.map(x => (x && typeof x === 'object' ? String(x) : x)); return Array.isArray(actual) ? actual.some(a => vs.includes(a)) : vs.includes(actual); }
         case '$ne': return Array.isArray(actual) ? !actual.includes(v) : actual !== v;
         case '$exists': return v ? actual !== undefined : actual === undefined;
+        case '$size': return Array.isArray(actual) && actual.length === v;
+        case '$nin': { const vs = v.map(x => (x && typeof x === 'object' ? String(x) : x)); return Array.isArray(actual) ? !actual.some(a => vs.includes(a)) : !vs.includes(actual); }
+        case '$regex': { const re = v instanceof RegExp ? v : new RegExp(v, cond.$options || ''); return typeof actual === 'string' && re.test(actual); }
+        case '$options': return true;
         case '$gte': return actual >= v;
         case '$lte': return actual <= v;
+        case '$gt': return actual > v;
+        case '$lt': return actual < v;
         default: throw new Error(`fake-tenant-db: unsupported operator ${op}`);
       }
     });
   }
+  // Mongo: an array value matches an array field exactly (same items, same order).
+  if (Array.isArray(cond)) return Array.isArray(actual) && actual.length === cond.length && actual.every((v, i) => v === cond[i]);
   if (Array.isArray(actual)) return actual.includes(cond);
+  if (cond === null) return actual === null || actual === undefined;   // Mongo: null matches missing too
   return actual === cond;
 }
 

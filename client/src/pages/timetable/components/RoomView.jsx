@@ -28,6 +28,7 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { DoorOpen, AlertTriangle } from 'lucide-react';
 import { DAYS, DAY_FULL, DAY_SHORT, UNTIMED_BAND, slotColor, bandKeyOf, timeBandsFromSlots, daysToShow } from '../constants.js';
+import { lessonTeachers, lessonIsForStream, isCombined } from '@/utils/lessonLabels.js';
 
 /* ── Build room-slot map: { [room]: { [day]: { [period]: slot[] } } } ── */
 function buildRoomMap(slots) {
@@ -84,9 +85,9 @@ function RoomCell({ entries, conflictSlotIds }) {
             {s.scheduleStale && (
               <p className="text-[9px] font-semibold text-amber-700">⚠ Period not in schedule — review</p>
             )}
-            {s.teacherName && (
+            {lessonTeachers(s) && (
               <p className={`text-[10px] truncate ${thisEntryConflicts ? 'text-red-600' : col.sub} opacity-80`}>
-                {s.teacherName}
+                {lessonTeachers(s)}
               </p>
             )}
             {s.className && (

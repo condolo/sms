@@ -32,6 +32,8 @@ const EMPTY_FORM = {
   day: 'monday', period: '1', subject: '',
   teacherId: '', teacherName: '',
   assistantTeacherId: '', assistantTeacherName: '',
+  // Taught together (v5.270.0): co-teachers are in the lesson and clash-checked like the main teacher.
+  coTeacherIds: [], coTeacherNames: [],
   room: '', roomId: '', type: 'lesson', locked: false,
 };
 
@@ -56,6 +58,8 @@ export default function AddSlotSlideOver({
         teacherName: editSlot.teacherName ?? '',
         assistantTeacherId:   editSlot.assistantTeacherId   ?? '',
         assistantTeacherName: editSlot.assistantTeacherName ?? '',
+        coTeacherIds:   editSlot.coTeacherIds   ?? [],
+        coTeacherNames: editSlot.coTeacherNames ?? [],
         room:        editSlot.room        ?? '',
         roomId:      editSlot.roomId      ?? '',
         type:        editSlot.type        ?? 'lesson',
@@ -78,14 +82,17 @@ export default function AddSlotSlideOver({
   // a specific stream's grid should stay scoped to that stream throughout,
   // not just for compulsory subjects). Empty = whole-class slot (e.g. a
   // genuine school-wide Assembly/Registration entry).
-  const [streamId,          setStreamId]          = useState(editSlot?.streamId ?? defaults?.streamId ?? '');
+  const [streamId,          setStreamId]          = useState(editSlot?.streamId ?? editSlot?.streamIds?.[0] ?? defaults?.streamId ?? '');
+  // Other streams taught together with `streamId` in this lesson (v5.270.0).
+  const [togetherStreams,   setTogetherStreams]   = useState(editSlot?.streamIds?.slice(1) ?? []);
 
   // Re-init when editSlot changes (user clicks a different slot)
   useEffect(() => {
     setFormState(buildForm());
     setErrors({});
     setSubjectId(editSlot?.subjectId ?? '');
-    setStreamId(editSlot?.streamId ?? defaults?.streamId ?? '');
+    setStreamId(editSlot?.streamId ?? editSlot?.streamIds?.[0] ?? defaults?.streamId ?? '');
+    setTogetherStreams(editSlot?.streamIds?.slice(1) ?? []);
     setUserPickedSubject(false);
     setAutoFillApplied(false);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -147,6 +154,13 @@ export default function AddSlotSlideOver({
     enabled:  lookupReady,
   });
   const assignment = lookupData?.data?.[0] ?? null;
+  const { data: groupData } = useQuery({
+    queryKey: ['ta-group', classId, subjectId, assignment?.lessonGroupId],
+    queryFn:  () => assignmentsApi.list({ classId, subjectId }),
+    staleTime: 60_000,
+    enabled:  !!assignment?.lessonGroupId,
+  });
+  const groupRows = assignment?.lessonGroupId ? (groupData?.data ?? []).filter(r => r.lessonGroupId === assignment.lessonGroupId) : [];
 
   // Auto-fill teacher + room when an assignment comes back
   useEffect(() => {
@@ -161,6 +175,18 @@ export default function AddSlotSlideOver({
     setAutoFillApplied(true);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assignment?._id]);
+  useEffect(() => {
+    if (!userPickedSubject || !groupRows.length) return;
+    const others = [];
+    const names = [];
+    for (const r of groupRows) {
+      if (r.teacherId && r.teacherId !== assignment.teacherId && !others.includes(r.teacherId)) { others.push(r.teacherId); names.push(r.teacherName ?? ''); }
+    }
+    setFormState(f => ({ ...f, coTeacherIds: others, coTeacherNames: names }));
+    const st = [...new Set(groupRows.map(r => r.streamId).filter(Boolean))];
+    if (st.length > 1) setTogetherStreams(st.filter(x => x !== (streamId || st[0])));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupRows.map(r => r.id).join(',')]);
 
   function handleSubjectSelect(cs) {
     const name = cs.subject?.name ?? cs.subjectId;
@@ -168,7 +194,8 @@ export default function AddSlotSlideOver({
     // deliberately left as-is — it reflects which stream this whole
     // add-slot session is scoped to (see the streamId state's own
     // comment above), not something a subject change should reset.
-    setFormState(f => ({ ...f, subject: name, teacherId: '', teacherName: '', room: '', roomId: '' }));
+    setFormState(f => ({ ...f, subject: name, teacherId: '', teacherName: '', room: '', roomId: '', coTeacherIds: [], coTeacherNames: [] }));
+    setTogetherStreams([]);
     setSubjectId(cs.subjectId);
     setUserPickedSubject(true);
     setAutoFillApplied(false);
@@ -183,11 +210,16 @@ export default function AddSlotSlideOver({
         period:      form.period,
         subject:     form.subject.trim()     || undefined,
         subjectId:   subjectId               || undefined,
-        streamId:    streamId                || undefined,
+        // One stream → streamId; with streams taught together → streamIds (and streamId cleared).
+        ...(togetherStreams.filter(x => x !== streamId).length && streamId
+          ? { streamIds: [streamId, ...togetherStreams.filter(x => x !== streamId)], streamId: isEdit ? '' : undefined }
+          : { streamId: streamId || undefined, ...(isEdit ? { streamIds: [] } : {}) }),
         teacherId:   form.teacherId          || undefined,
         teacherName: form.teacherName.trim() || undefined,
         assistantTeacherId:   form.assistantTeacherId            || undefined,
         assistantTeacherName: form.assistantTeacherName.trim()   || undefined,
+        // Always sent on edit so removing every co-teacher really clears them.
+        ...(isEdit || form.coTeacherIds.length ? { coTeacherIds: form.coTeacherIds.filter(id => id && id !== form.teacherId) } : {}),
         // Always sent explicitly (never `undefined`, which a partial PUT
         // reads as "leave untouched") — this is the one field whose empty
         // state must always be able to reach the server, since clearing
@@ -343,6 +375,23 @@ export default function AddSlotSlideOver({
                   This subject is compulsory for this class — each stream has its own lesson and teacher.
                 </p>
               )}
+              {streamId && streamList.length > 1 && (
+                <div className="mt-1.5">
+                  <p className="text-[11px] text-slate-500">Taught together with (optional):</p>
+                  <div className="flex flex-wrap gap-1.5 mt-1">
+                    {streamList.filter(s => (s.id ?? s._id) !== streamId).map(s => {
+                      const id = s.id ?? s._id;
+                      const on = togetherStreams.includes(id);
+                      return (
+                        <label key={id} className={`flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] cursor-pointer ${on ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-slate-600 border-slate-300'}`}>
+                          <input type="checkbox" className="sr-only" checked={on} onChange={() => setTogetherStreams(cur => (on ? cur.filter(x => x !== id) : [...cur, id]))} />
+                          {s.name}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </FField>
           )}
 
@@ -406,6 +455,41 @@ export default function AddSlotSlideOver({
             </select>
           </FField>
 
+          {/* ── Co-teachers (v5.270.0) ───────────────────────── */}
+          <FField label="Also teaching (optional)" error={errors.coTeacherIds}>
+            {form.coTeacherIds.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-1.5">
+                {form.coTeacherIds.map((id, i) => (
+                  <span key={id} className="inline-flex items-center gap-1 text-[11px] bg-violet-50 text-violet-800 border border-violet-200 rounded-full pl-2 pr-1 py-0.5">
+                    {form.coTeacherNames[i] || teachers.find(t => teacherKey(t) === id)?.firstName || 'Teacher'}
+                    <button type="button" aria-label="Remove co-teacher" className="p-0.5 rounded-full hover:bg-violet-100"
+                      onClick={() => setFormState(f => ({ ...f, coTeacherIds: f.coTeacherIds.filter((_, j) => j !== i), coTeacherNames: f.coTeacherNames.filter((_, j) => j !== i) }))}>
+                      <X size={10} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <select
+              value=""
+              onChange={e => {
+                const id = e.target.value;
+                if (!id || id === form.teacherId || form.coTeacherIds.includes(id)) return;
+                const t = teachers.find(x => teacherKey(x) === id);
+                setFormState(f => ({ ...f, coTeacherIds: [...f.coTeacherIds, id], coTeacherNames: [...f.coTeacherNames, t ? `${t.title ?? ''} ${t.firstName ?? ''} ${t.lastName ?? ''}`.trim() : ''] }));
+              }}
+              className={iCls(errors.coTeacherIds)}
+            >
+              <option value="">Add a co-teacher…</option>
+              {teachers.filter(t => teacherKey(t) !== form.teacherId && !form.coTeacherIds.includes(teacherKey(t))).map(t => (
+                <option key={teacherKey(t)} value={teacherKey(t)}>{t.firstName} {t.lastName}</option>
+              ))}
+            </select>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Teaches this lesson too: shown on their timetable and checked for clashes like the main teacher.
+            </p>
+          </FField>
+
           {/* ── Assistant teacher ─────────────────────────────── */}
           <FField label="Assistant teacher (optional)" error={errors.assistantTeacherId}>
             <select
@@ -426,7 +510,7 @@ export default function AddSlotSlideOver({
               ))}
             </select>
             <p className="text-[11px] text-slate-400 mt-0.5">
-              Shown alongside the primary teacher on this slot — for a teaching assistant or co-teacher. Doesn't affect attendance, grading, or scheduling conflict checks.
+              Shown alongside the primary teacher on this slot — for a teaching assistant. Doesn't affect attendance, grading, or scheduling conflict checks (use Also teaching for a co-teacher).
             </p>
           </FField>
 

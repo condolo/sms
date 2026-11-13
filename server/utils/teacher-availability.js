@@ -16,7 +16,8 @@
    ============================================================ */
 'use strict';
 
-const { ALL_DAYS, dayLabel } = require('./timetable-settings');
+const { ALL_DAYS, dayLabel, subjectTimeBlock } = require('./timetable-settings');
+const { lessonTeacherIds } = require('./lesson-audience');
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const MAX_BLOCKS = 100;
@@ -70,8 +71,10 @@ function unavailableWarnings(slots, availabilityDocs, teachers) {
   const blocksBy = new Map(availabilityDocs.map(a => [String(a.teacherId), a.blocks || []]));
   const out = [];
   for (const s of slots) {
-    if (!isLesson(s) || !s.teacherId) continue;
-    const key = keyOf.get(String(s.teacherId)) || String(s.teacherId);
+    if (!isLesson(s)) continue;
+    // Every teacher of the lesson, co-teachers too (v5.270.0).
+    for (const [i, tid] of lessonTeacherIds(s).entries()) {
+    const key = keyOf.get(String(tid)) || String(tid);
     const timed = !!(s.startTime && s.endTime);
     // A lesson saved without clock times (old data) can only be judged against a whole-day block.
     const hit = (blocksBy.get(key) || []).find(b => b.day === s.day && (timed
@@ -80,7 +83,8 @@ function unavailableWarnings(slots, availabilityDocs, teachers) {
     if (hit) {
       const when = isWholeDay(hit) ? 'all day' : `${hit.start}–${hit.end}`;
       const at = timed ? `${s.startTime}–${s.endTime}` : `period ${s.period}`;
-      out.push(`${names.get(key) || s.teacherName || 'A teacher'} is unavailable ${dayLabel(s.day)} ${when} but has ${s.subject || 'a lesson'} at ${at}`);
+      out.push(`${names.get(key) || (i === 0 ? s.teacherName : (s.coTeacherNames || [])[i - 1]) || 'A teacher'} is unavailable ${dayLabel(s.day)} ${when} but has ${s.subject || 'a lesson'} at ${at}`);
+    }
     }
   }
   return out;
@@ -96,10 +100,12 @@ function overloadWarnings(slots, teachers, max) {
   const names = teacherNameMap(teachers);
   const count = new Map();
   for (const s of slots) {
-    if (!isLesson(s) || !s.teacherId) continue;
-    const key = keyOf.get(String(s.teacherId)) || String(s.teacherId);
-    const k = `${key}|${s.day}`;
-    count.set(k, (count.get(k) || 0) + 1);
+    if (!isLesson(s)) continue;
+    for (const tid of lessonTeacherIds(s)) {   // co-teachers count too (v5.270.0)
+      const key = keyOf.get(String(tid)) || String(tid);
+      const k = `${key}|${s.day}`;
+      count.set(k, (count.get(k) || 0) + 1);
+    }
   }
   const out = [];
   for (const [k, n] of count) {
@@ -110,4 +116,21 @@ function overloadWarnings(slots, teachers, max) {
   return out.sort();
 }
 
-module.exports = { normaliseBlocks, unavailableWarnings, overloadWarnings, teacherKeyMap, MAX_BLOCKS };
+/**
+ * Lessons placed by hand where a subject time rule (Days & rules) bars them
+ * (v5.270.0). positionOf(slot) → the lesson's position in its class's day
+ * (1 = first lesson), or null if unknown.
+ * @returns {string[]}
+ */
+function subjectTimeWarnings(slots, rules, positionOf, subjectNames = new Map()) {
+  if (!rules?.subjectTimes?.on || !(rules.subjectTimes.items || []).length) return [];
+  const out = [];
+  for (const s of slots) {
+    if (!isLesson(s) || !s.subjectId) continue;
+    const why = subjectTimeBlock(rules, s.subjectId, s.day, positionOf(s));
+    if (why) out.push(`${subjectNames.get(s.subjectId) || s.subject || 'A subject'} is set ${why}, but has a lesson ${dayLabel(s.day)} ${s.startTime ? `${s.startTime}–${s.endTime}` : `period ${s.period}`}`);
+  }
+  return out;
+}
+
+module.exports = { normaliseBlocks, unavailableWarnings, overloadWarnings, subjectTimeWarnings, teacherKeyMap, MAX_BLOCKS };

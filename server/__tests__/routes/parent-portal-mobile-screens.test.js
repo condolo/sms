@@ -92,6 +92,7 @@ function valueMatches(docVal, cond) {
     }
     if ('$ne' in cond) return docVal !== cond.$ne;
     if ('$exists' in cond) return cond.$exists ? docVal !== undefined : docVal === undefined;
+    if ('$size' in cond) return Array.isArray(docVal) && docVal.length === cond.$size;
     if ('$gte' in cond || '$lte' in cond) {
       const cmp = (x) => {
         if ('$gte' in cond && !(x >= cond.$gte)) return false;
@@ -103,6 +104,7 @@ function valueMatches(docVal, cond) {
     return false;
   }
   if (Array.isArray(docVal)) return docVal.includes(cond);
+  if (cond === null) return docVal === null || docVal === undefined;   // Mongo: null also matches a missing field
   return docVal === cond;
 }
 

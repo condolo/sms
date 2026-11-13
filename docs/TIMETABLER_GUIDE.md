@@ -21,6 +21,7 @@
 13. [Teacher Availability](#13-teacher-availability)
 14. [Lessons per Week, Double Lessons and Room Types](#14-lessons-per-week-double-lessons-and-room-types)
 15. [Generating a Timetable Automatically](#15-generating-a-timetable-automatically)
+16. [Teaching Together and Subject Time Rules](#16-teaching-together-and-subject-time-rules)
 
 ---
 
@@ -113,7 +114,7 @@ Click **Days & rules**.
 
 Removing a day doesn't delete anything: lessons already on that day stay visible so you can move or remove them, and you're told how many there are.
 
-**Rules.** How a good timetable looks. The automatic timetable (coming next) follows them; editing by hand is never blocked. Each rule can be switched off.
+**Rules.** How a good timetable looks. The automatic timetable follows them; editing by hand is never blocked. Each rule can be switched off.
 
 | Rule | Default |
 |---|---|
@@ -124,19 +125,23 @@ Removing a day doesn't delete anything: lessons already on that day stay visible
 | Put chosen subjects in the morning where possible | Off (pick the subjects) |
 | Use each teacher's preferred room when it's free | On |
 
-A teacher over the lessons-a-day limit shows as a **rule warning** in the publish bar and the Publish window (with teachers marked unavailable, §13). Publishing still goes ahead.
+A teacher over the lessons-a-day limit shows as a **rule warning** in the publish bar and the Publish window (with teachers marked unavailable, §13, and lessons placed against a subject time rule, §16). Publishing still goes ahead.
+
+**Subject time rules** are set at the bottom of this window — see §16.
 
 ---
 
 ## 11. Locking a Lesson
 
-Open a lesson and tick **Lock this lesson** to pin it (assembly, games, a shared lab session). A locked lesson shows a padlock, and it can't be edited, moved or removed until you untick the box. Replacing a class's timetable in one go, or importing over it, leaves it alone. The automatic timetable generator planned for later will also plan around locked lessons.
+Open a lesson and tick **Lock this lesson** to pin it (assembly, games, a shared lab session). A locked lesson shows a padlock, and it can't be edited, moved or removed until you untick the box. Replacing a class's timetable in one go, or importing over it, leaves it alone. The automatic timetable (§15) plans around locked lessons.
 
 ---
 
 ## 12. Importing a Timetable
 
 Click **Import** to load lessons from a spreadsheet (template provided, up to 500 rows). Each row goes through the same checks as adding a lesson by hand. A row is skipped, with the reason shown, if it would put a class, teacher or room in two places at once, is on a day that isn't a working day, or would overwrite a locked lesson. The other rows are still imported.
+
+Two optional columns: **streamName** with streams joined by **+** (e.g. `7i + 7ii`) for streams taught together, and **alsoTeaching** for co-teachers, separated by **;** (each must be a teacher at the school). **Export** writes the same columns, so an exported timetable imports back unchanged.
 
 ---
 
@@ -216,4 +221,28 @@ For now, place those by hand and lock them before generating.
 
 ---
 
-*Last reviewed: 2026-11-12 (v5.269.2) — checked directly against `client/src/pages/timetable/`, `server/routes/timetable.js`, `server/routes/timetable-generate.js`, `server/routes/rooms.js` and `server/utils/elective-groups.js`.*
+## 16. Teaching Together and Subject Time Rules
+
+**Two teachers in the same lessons (co-teaching).** Give each teacher their own assignment for the class, stream and subject (Teachers → a teacher → **Assignments**). Then hover one of them and click the **people icon** (Teach together), and choose **Teach together** next to the other teacher.
+- From then on, every lesson of that subject has both teachers.
+- It appears on both teachers' timetables.
+- Neither teacher can be put anywhere else at that time, and both must be free for the automatic timetable to place it.
+- Each teacher keeps their own assignment, so attendance, marks and lesson plans work for both as before.
+
+**Streams taught together.** For example, 7i and 7ii have PE at the same time. Do the same with the assignments for each stream, using the same subject in the same class. The lessons are then for both streams: they appear on both streams' timetables and block both, while other streams (7iii) can have their own lessons at that time. Each stream still takes its own register. You can combine streams and teachers too, e.g. 7i (Ann) and 7ii (Ben) taught together by both.
+
+- **One set of lessons:** linked assignments share one Periods/Week; it follows the assignment you link from, and changing it on one changes all. **Lessons to place** counts the set once.
+- **Undoing a link:** to stop teaching together, open Teach together again and click **unlink** (or **Take this row out of the set**).
+- **By hand:** when adding or editing a lesson, use **Also teaching** for co-teachers and **Taught together with** (under Stream) for extra streams. Picking a subject whose assignments are linked fills both in for you.
+- **Assistant teacher** is different: it's shown on the lesson but isn't checked for clashes. Use **Also teaching** for a real co-teacher.
+
+**Subject time rules** (Days & rules, at the bottom). Say when a subject must not be taught. Click **Add a subject…**, choose the subject and click **Add**, then tick the lessons it can't go in (1 = the class's first lesson of the day; breaks aren't counted) and/or the days. Save.
+- Examples: PE not in lesson 1; Chemistry not on Friday.
+- The automatic timetable never breaks these: Check warns when a subject needs more lessons than its rules leave room for, and a lesson that can't fit says so.
+- A lesson you place by hand in a barred time is allowed, but shows as a rule warning until you move it.
+
+**Cover.** If one teacher of a co-taught lesson is away, no cover is needed, because the other teacher is there. Cover only lists lessons the absent teacher teaches alone. Cover now works on every working day, including Saturdays if your school has them.
+
+---
+
+*Last reviewed: 2026-11-13 (v5.270.0) — checked directly against `client/src/pages/timetable/`, `client/src/pages/teachers/TeacherList.jsx`, `server/routes/timetable.js`, `server/routes/timetable-generate.js`, `server/routes/teaching-assignments.js`, `server/routes/rooms.js`, `server/utils/lesson-audience.js` and `server/utils/elective-groups.js`.*

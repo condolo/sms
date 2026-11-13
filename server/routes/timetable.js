@@ -49,6 +49,7 @@ const { isYearArchived } = require('../utils/archival');
 const ScopeEngine = require('../utils/scopeEngine');
 const { timesOverlap, checkConflicts, batchConflicts } = require('../utils/timetable-conflicts');
 const { loadElectiveInfo } = require('../utils/elective-groups');
+const { studentStreamOr, teacherLessonClause, lessonTeacherIds, audiencesOverlap, filterElectivesForStudent } = require('../utils/lesson-audience');
 const { getTimetableSettings, setWorkingDays, setRules, notWorkingDayMsg, ALL_DAYS } = require('../utils/timetable-settings');
 const teacherAvailability = require('../utils/teacher-availability');
 const { computePlacement } = require('../utils/timetable-placement');
@@ -149,6 +150,44 @@ function _roomQuery(schoolId, roomId) {
        room; roomId is cleared.
      - key present and truthy: must resolve to a real, active room, or this
        returns 'Room not found' for the caller to surface as a 404. */
+/* Taught together (v5.270.0): validate and normalise coTeacherIds / streamIds
+   on a lesson being written. streamIds must be ≥ 2 streams of the lesson's
+   class (one stream → plain streamId); coTeacherIds are this school's
+   users, never the main teacher, with their display names stored in
+   coTeacherNames. `current` is the saved lesson on an edit. Returns an
+   error message or null. */
+async function _applyTogether(schoolId, ctx, data, current = null) {
+  const classId = data.classId ?? current?.classId;
+  if (data.streamIds !== undefined) {
+    const ids = [...new Set((data.streamIds || []).map(String))].sort();
+    if (ids.length <= 1) {
+      data.streamIds = [];
+      if (ids.length === 1) data.streamId = ids[0];
+    } else {
+      if (data.streamId) return 'Choose one stream, or several streams taught together — not both.';
+      const cls = await tenantModel('classes', ctx).findOne({ schoolId, $or: [{ id: classId }, ...(/^[a-f\d]{24}$/i.test(classId) ? [{ _id: classId }] : [])] }).select('id').lean();
+      const forms = [classId, cls?.id, cls?._id && String(cls._id)].filter(Boolean).map(String);
+      const found = await tenantModel('streams', ctx).find({ schoolId, id: { $in: ids } }).select('id classId').lean();
+      if (found.length !== ids.length || found.some(s => !forms.includes(String(s.classId)))) return 'Streams taught together must all be streams of this class.';
+      data.streamIds = ids;
+      data.streamId = null;
+    }
+  }
+  if (data.coTeacherIds !== undefined) {
+    const main = data.teacherId ?? current?.teacherId;
+    const ids = [...new Set((data.coTeacherIds || []).map(String))].filter(id => id !== String(main));
+    if (ids.length && !main) return 'Choose the main teacher before adding co-teachers.';
+    const users = ids.length
+      ? await tenantModel('users', ctx).find({ schoolId, $or: [{ id: { $in: ids } }, { _id: { $in: ids.filter(i => /^[a-f\d]{24}$/i.test(i)) } }] }).select('id name').lean()
+      : [];
+    const nameOf = new Map(users.map(u => [u.id || String(u._id), u.name]));
+    if (ids.some(id => !nameOf.has(id))) return 'A co-teacher is not a member of staff at this school.';
+    data.coTeacherIds = ids;
+    data.coTeacherNames = ids.map(id => nameOf.get(id) || '');
+  }
+  return null;
+}
+
 async function _applyRoomLink(schoolId, tenantCtx, data) {
   if (data.roomId === undefined) return null;
   if (!data.roomId) { data.roomId = null; return null; }
@@ -195,6 +234,12 @@ const SlotSchema = z.object({
   // teaching_assignments, same as before this field existed.
   assistantTeacherId:   z.string().optional(),
   assistantTeacherName: z.string().max(100).optional(),
+  // Taught together (v5.270.0). Unlike the assistant above, these ARE
+  // scheduling: every co-teacher is in the lesson and is clash-checked like
+  // the main teacher; streamIds are streams of this class taught together
+  // (use instead of streamId). Names are filled in server-side.
+  coTeacherIds:   z.array(z.string().min(1).max(100)).max(5).optional(),
+  streamIds:      z.array(z.string().min(1).max(100)).max(10).optional(),
   room:           z.string().max(100).optional(),
   // FK into the rooms registry (server/routes/rooms.js). When set, `room`
   // (the display name) is always overwritten server-side from the live
@@ -317,13 +362,17 @@ router.get('/workload', authMiddleware, PLAN, MODGATE, timetableManageAccess('re
 
     const slots = await tenantModel('timetable', tenantContext(req))
       .find(filter)
-      .select('teacherId teacherName day classId section')
+      .select('teacherId teacherName coTeacherIds coTeacherNames day classId section')
       .limit(10000)
       .lean();
 
     const wMap = {};
-    slots.forEach(s => {
-      if (!s.teacherId) return;
+    // Every teacher of a lesson counts it — co-teachers too (v5.270.0).
+    const teacherEntries = s => [
+      ...(s.teacherId ? [{ id: s.teacherId, name: s.teacherName || '' }] : []),
+      ...(s.coTeacherIds || []).map((id, i) => ({ id, name: (s.coTeacherNames || [])[i] || '' })),
+    ];
+    slots.forEach(slot => teacherEntries(slot).forEach(t => { const s = { ...slot, teacherId: t.id, teacherName: t.name };
       if (!wMap[s.teacherId]) {
         wMap[s.teacherId] = {
           teacherId:   s.teacherId,
@@ -339,7 +388,7 @@ router.get('/workload', authMiddleware, PLAN, MODGATE, timetableManageAccess('re
       if (wMap[s.teacherId].byDay[d] !== undefined) wMap[s.teacherId].byDay[d]++;
       if (s.classId) wMap[s.teacherId].classes.add(s.classId);
       if (s.section) wMap[s.teacherId].sections.add(s.section);
-    });
+    }));
 
     const result = Object.values(wMap)
       .map(w => ({
@@ -365,7 +414,7 @@ router.get('/conflicts', authMiddleware, PLAN, MODGATE, timetableManageAccess('r
 
     const slots = await tenantModel('timetable', tenantContext(req))
       .find(filter)
-      .select('id classId teacherId teacherName room roomId day period subject startTime endTime section')
+      .select('id classId teacherId teacherName coTeacherIds coTeacherNames room roomId day period subject startTime endTime section')
       .limit(10000)
       .lean();
 
@@ -382,11 +431,12 @@ router.get('/conflicts', authMiddleware, PLAN, MODGATE, timetableManageAccess('r
     slots.forEach(slot => {
       const id = slot.id || String(slot._id);
 
-      if (slot.teacherId) {
-        const k = `${slot.teacherId}|${slot.day}`;
+      // Each teacher of the lesson, co-teachers included (v5.270.0).
+      lessonTeacherIds(slot).forEach((tid, i) => {
+        const k = `${tid}|${slot.day}`;
         if (!teacherDay[k]) teacherDay[k] = [];
-        teacherDay[k].push({ ...slot, _slotId: id });
-      }
+        teacherDay[k].push({ ...slot, teacherId: tid, teacherName: i === 0 ? slot.teacherName : ((slot.coTeacherNames || [])[i - 1] || ''), _slotId: id });
+      });
       // Grouped by roomId when linked — a rename can never split what's
       // really the same physical room into two groups this scan misses.
       // An unlinked/free-text room still groups by its normalised name.
@@ -609,9 +659,7 @@ router.get('/student/:studentId', authMiddleware, PLAN, MODGATE, rbac('students'
     // rule as every other student-facing timetable read in this codebase
     // (see parent-portal.js's dashboard route) — without it, every
     // stream's lessons for the class would merge onto this one student.
-    const streamOr = student.streamId
-      ? [{ streamId: student.streamId }, { streamId: { $exists: false } }]
-      : [{ streamId: { $exists: false } }];
+    const streamOr = studentStreamOr(student.streamId);
 
     const docs = await tenantModel('timetable', tenantContext(req))
       .find({ schoolId, classId: student.classId, isActive: true, $or: streamOr })
@@ -619,11 +667,12 @@ router.get('/student/:studentId', authMiddleware, PLAN, MODGATE, rbac('students'
       .limit(200)
       .select('-__v')
       .lean();
+    const slots = await filterElectivesForStudent(tenantContext(req), schoolId, student, docs);
 
     return ok(res, {
       classId: student.classId, className: student.className ?? null,
       streamId: student.streamId ?? null, streamName: student.streamName ?? null,
-      slots: docs,
+      slots,
     });
   } catch (err) { console.error('[timetable GET /student/:studentId]', err); return E.serverError(res); }
 });
@@ -636,7 +685,8 @@ router.get('/teacher/:teacherId', authMiddleware, PLAN, MODGATE, timetableManage
     // teacherDoc not found (e.g. a stale id) — fall back to the literal
     // param rather than silently returning everything.
     const forms  = teacherDoc ? _teacherSlotForms(teacherDoc) : [req.params.teacherId];
-    const filter = { schoolId, teacherId: { $in: forms }, isActive: true };
+    // Lessons they teach as main teacher or co-teacher (v5.270.0).
+    const filter = { schoolId, ...teacherLessonClause(forms), isActive: true };
     if (req.query.academicYearId) filter.academicYearId = req.query.academicYearId;
     if (req.query.termId)         filter.termId         = req.query.termId;
 
@@ -664,7 +714,7 @@ function _overlapWarnings(slots) {
   const byDay = {};
   for (const sl of slots) (byDay[(sl.day || '').toLowerCase()] = byDay[(sl.day || '').toLowerCase()] || []).push(sl);
   const room = sl => (sl.room || '').trim().toLowerCase();
-  const sameStream = (a, b) => !a.streamId || !b.streamId || a.streamId === b.streamId;
+  const sameStream = (a, b) => audiencesOverlap(a, b);   // streams taught together count (v5.270.0)
   const out = [];
   for (const day of Object.keys(byDay)) {
     const list = byDay[day];
@@ -673,7 +723,8 @@ function _overlapWarnings(slots) {
         const a = list[i], b = list[j];
         if (!(a.startTime < b.endTime && b.startTime < a.endTime)) continue;
         let why = null;
-        if (a.teacherId && a.teacherId === b.teacherId) why = 'the same teacher';
+        const tb = lessonTeacherIds(b);
+        if (lessonTeacherIds(a).some(t => tb.includes(t))) why = 'the same teacher';
         else if (room(a) && room(a) === room(b)) why = 'the same room';
         else if (a.classId === b.classId && sameStream(a, b)) why = 'the same class';
         if (why) out.push(`${day} ${a.startTime}–${a.endTime}: ${why} is in two lessons (${a.subject || 'lesson'} and ${b.subject || 'lesson'})`);
@@ -689,7 +740,7 @@ async function _draftProblems(req) {
   const ctx = tenantContext(req);
   const all = await tenantModel('timetable', ctx)
     .find({ schoolId, isActive: true })
-    .select('day period startTime endTime teacherId teacherName classId streamId room subject type scheduleStale academicYearId')
+    .select('day period startTime endTime teacherId teacherName coTeacherIds coTeacherNames classId streamId streamIds room subject subjectId type scheduleStale academicYearId')
     .lean();
   const untimed = all.filter(sl => !sl.startTime || !sl.endTime);
   const warnings = _overlapWarnings(all.filter(sl => sl.startTime && sl.endTime));
@@ -706,9 +757,26 @@ async function _draftProblems(req) {
       tenantModel('teacher_availability', ctx).find({ schoolId }).select('teacherId blocks').lean(),
       tenantModel('teachers', ctx).find({ schoolId }).select('id userId title firstName lastName').lean(),
     ]);
+    // Subject time rules (v5.270.0): a lesson's position = its period's place
+    // among the lesson periods (breaks not counted) of its class's bell.
+    let positionOf = () => null;
+    let subjectNames = new Map();
+    if (rules.subjectTimes?.on && (rules.subjectTimes.items || []).length) {
+      const ruled = new Set(rules.subjectTimes.items.map(i => i.subjectId));
+      const classIds = [...new Set(thisYear.filter(sl => ruled.has(sl.subjectId)).map(sl => sl.classId))];
+      const order = new Map();
+      for (const cid of classIds) {
+        const bell = await resolveBellSchedule(schoolId, await _sectionForClass(schoolId, cid), cid).catch(() => null);
+        order.set(cid, (bell?.periods || []).filter(p => !p.isBreak).map(p => String(p.p)));
+      }
+      positionOf = sl => { const i = (order.get(sl.classId) || []).indexOf(String(sl.period)); return i === -1 ? null : i + 1; };
+      const subs = await tenantModel('subjects', ctx).find({ schoolId, id: { $in: [...ruled] } }).select('id name').lean();
+      subjectNames = new Map(subs.map(x => [x.id, x.name]));
+    }
     ruleWarnings = [
       ...teacherAvailability.unavailableWarnings(thisYear, availability, teachers),
       ...(rules.maxTeacherLessonsPerDay.on ? teacherAvailability.overloadWarnings(thisYear, teachers, rules.maxTeacherLessonsPerDay.value) : []),
+      ...teacherAvailability.subjectTimeWarnings(thisYear, rules, positionOf, subjectNames),
     ];
   } catch (err) {
     console.error('[timetable] rule warnings failed (non-fatal):', err.message);
@@ -743,6 +811,14 @@ const SettingsSchema = z.object({
     spreadAcrossWeek:        RuleOnOff.optional(),
     coreSubjectsMorning:     z.object({ on: z.boolean().optional(), subjectIds: z.array(z.string().max(100)).max(50).optional() }).strict().optional(),
     usePreferredRooms:       RuleOnOff.optional(),
+    subjectTimes:            z.object({
+      on: z.boolean().optional(),
+      items: z.array(z.object({
+        subjectId:    z.string().min(1).max(100),
+        notPositions: z.array(z.number().int().min(1).max(15)).max(15).optional(),
+        notDays:      z.array(z.enum(ALL_DAYS)).max(7).optional(),
+      }).strict()).max(100).optional(),
+    }).strict().optional(),
   }).strict().optional(),
 }).refine(d => d.workingDays || d.rules, { message: 'Send workingDays or rules.' });
 
@@ -767,6 +843,13 @@ router.put('/settings', authMiddleware, PLAN, MODGATE, timetableManageAccess('up
       if (ids?.length) {
         const found = await tenantModel('subjects', tenantContext(req)).find({ schoolId, id: { $in: ids } }).select('id').lean();
         data.rules.coreSubjectsMorning.subjectIds = found.map(x => x.id);
+      }
+      // Subject time rules: likewise only this school's subjects.
+      const stItems = data.rules.subjectTimes?.items;
+      if (stItems?.length) {
+        const found = await tenantModel('subjects', tenantContext(req)).find({ schoolId, id: { $in: stItems.map(i => i.subjectId) } }).select('id').lean();
+        const ok2 = new Set(found.map(x => x.id));
+        data.rules.subjectTimes.items = stItems.filter(i => ok2.has(i.subjectId));
       }
       await setRules(schoolId, data.rules);
     }
@@ -818,9 +901,9 @@ router.get('/placement', authMiddleware, PLAN, MODGATE, timetableManageAccess('r
     const yearId = period.error ? null : (period.academicYearId ?? null);
     const [assignments, slots, classes, subjects, teachers] = await Promise.all([
       tenantModel('teaching_assignments', ctx).find({ schoolId })
-        .select('classId className streamId streamName subjectId subjectName teacherId teacherName periodsPerWeek doubleLessons').limit(20000).lean(),
+        .select('classId className streamId streamName subjectId subjectName teacherId teacherName periodsPerWeek doubleLessons lessonGroupId').limit(20000).lean(),
       tenantModel('timetable', ctx).find({ schoolId, isActive: true, academicYearId: yearId })
-        .select('classId streamId subject subjectId teacherId teacherName type isActive').limit(20000).lean(),
+        .select('classId streamId streamIds subject subjectId teacherId teacherName coTeacherIds coTeacherNames type isActive').limit(20000).lean(),
       tenantModel('classes', ctx).find({ schoolId }).select('id name').lean(),
       tenantModel('subjects', ctx).find({ schoolId }).select('id name').lean(),
       tenantModel('teachers', ctx).find({ schoolId }).select('id userId title firstName lastName').lean(),
@@ -978,7 +1061,7 @@ router.get('/my', authMiddleware, async (req, res) => {
     }
 
     const slots = await (await timetableReaderFor(req))
-      .find({ schoolId, teacherId: { $in: _teacherSlotForms(teacher) }, isActive: true })
+      .find({ schoolId, ...teacherLessonClause(_teacherSlotForms(teacher)), isActive: true })
       .sort({ day: 1, startTime: 1, periodNumber: 1, period: 1 })
       .limit(500).lean();
     return ok(res, {
@@ -1012,13 +1095,12 @@ router.get('/my-children', authMiddleware, async (req, res) => {
       // one stream saw EVERY stream's lessons for their class merged
       // together — the same class of bug fixed in student-portal.js's and
       // parent-portal.js's own "Today's Timetable" widgets.
-      const streamOr = student.streamId
-        ? [{ streamId: student.streamId }, { streamId: { $exists: false } }]
-        : [{ streamId: { $exists: false } }];
+      const streamOr = studentStreamOr(student.streamId);
       const slots = student.classId
         ? await (await timetableReaderFor(req))
           .find({ schoolId, classId: student.classId, isActive: true, $or: streamOr })
           .sort({ day: 1, startTime: 1, period: 1 }).limit(300).lean()
+          .then(rows => filterElectivesForStudent(tenantContext(req), schoolId, student, rows))
         : [];
       return {
         student: {
@@ -1287,8 +1369,10 @@ router.post('/substitutions/absent', authMiddleware, PLAN, MODGATE, timetableMan
 
     const DAY_NAMES = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
     const dayOfWeek = DAY_NAMES[new Date(date + 'T00:00:00').getDay()];
-    if (!['monday','tuesday','wednesday','thursday','friday'].includes(dayOfWeek)) {
-      return res.status(400).json({ success: false, error: { code: 'VALIDATION', message: 'Substitutions only apply on school days (Mon–Fri)' } });
+    // The school's own working days (Days & rules), not a fixed Mon–Fri (v5.270.0).
+    const { workingDays } = await getTimetableSettings(schoolId);
+    if (!workingDays.includes(dayOfWeek)) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION', message: `Substitutions only apply on the school's working days (${workingDays.map(d => d.slice(0, 3)).join(', ')}).` } });
     }
 
     // Resolve teacher profile — accept either teacher profile id (tch_demo_2) OR user id (u_demo_t2)
@@ -1300,11 +1384,13 @@ router.post('/substitutions/absent', authMiddleware, PLAN, MODGATE, timetableMan
     // Timetable slots may store teacher by userId OR by profile id — search both
     const slotIds = [...new Set([teacherId, teacher?.userId, teacher?.id].filter(Boolean))];
 
-    // All slots for this teacher on that weekday
-    const slots = await (await publishedReader(schoolId, tenantContext(req))).find({
-      schoolId, teacherId: { $in: slotIds }, day: dayOfWeek, isActive: true,
+    // All slots this teacher teaches that weekday — as main teacher or co-teacher (v5.270.0).
+    // A co-taught lesson still has another teacher in the room, so it needs no cover;
+    // only lessons where this teacher is the only teacher do.
+    const slots = (await (await publishedReader(schoolId, tenantContext(req))).find({
+      schoolId, ...teacherLessonClause(slotIds), day: dayOfWeek, isActive: true,
       type: { $in: ['lesson', 'assembly', 'registration'] },
-    }).lean();
+    }).lean()).filter(s => lessonTeacherIds(s).every(t => slotIds.includes(t)));
 
     if (!slots.length) {
       return ok(res, { substitutions: [], message: 'No lessons found for this teacher on that day.' });
@@ -1377,17 +1463,14 @@ router.post('/substitutions/auto-assign', authMiddleware, PLAN, MODGATE, timetab
     const [uncovered, allTeachers, weeklySlots] = await Promise.all([
       Sub.find({ schoolId, date, status: 'uncovered' }).lean(),
       tenantModel('teachers', tenantContext(req)).find({ schoolId, status: 'active' }).lean(),
-      (await publishedReader(schoolId, tenantContext(req))).find({ schoolId, isActive: true }).select('teacherId').lean(),
+      (await publishedReader(schoolId, tenantContext(req))).find({ schoolId, isActive: true }).select('teacherId coTeacherIds').lean(),
     ]);
 
     if (!uncovered.length) return ok(res, { assigned: 0, message: 'No uncovered lessons to assign.' });
 
     const weeklyLoad = {};
     weeklySlots.forEach(s => {
-      if (s.teacherId) {
-        const k = String(s.teacherId);
-        weeklyLoad[k] = (weeklyLoad[k] || 0) + 1;
-      }
+      for (const k of lessonTeacherIds(s)) weeklyLoad[k] = (weeklyLoad[k] || 0) + 1;
     });
 
     // All absent teacher IDs — they cannot be assigned as substitutes
@@ -1560,7 +1643,7 @@ router.get('/available-teachers', authMiddleware, PLAN, MODGATE, timetableManage
     const [busySlots, absentSubs, coveredSubs, allTeachers, weeklySlots] = await Promise.all([
       // Teachers scheduled at this period on this weekday (master timetable)
       (await publishedReader(schoolId, tenantContext(req))).find({ schoolId, day, period: String(period), isActive: true })
-        .select('teacherId').lean(),
+        .select('teacherId coTeacherIds').lean(),
       // Teachers already marked absent today
       tenantModel('substitutions', tenantContext(req)).find({ schoolId, date })
         .select('originalTeacherId').lean(),
@@ -1575,7 +1658,8 @@ router.get('/available-teachers', authMiddleware, PLAN, MODGATE, timetableManage
       (await publishedReader(schoolId, tenantContext(req))).find({ schoolId, isActive: true }).select('teacherId').lean(),
     ]);
 
-    const busyIds    = new Set(busySlots.map(s => String(s.teacherId)).filter(Boolean));
+    // Co-teachers are busy too (v5.270.0).
+    const busyIds    = new Set(busySlots.flatMap(s => lessonTeacherIds(s)));
     const absentIds  = new Set(absentSubs.map(s => String(s.originalTeacherId)).filter(Boolean));
     const coveredIds = new Set(coveredSubs.map(s => String(s.substituteTeacherId)).filter(Boolean));
 
@@ -1666,6 +1750,8 @@ router.post('/', authMiddleware, PLAN, MODGATE, timetableManageAccess('create'),
 
     const roomErr = await _applyRoomLink(schoolId, tenantContext(req), data);
     if (roomErr) return E.notFound(res, roomErr);
+    const togetherErr = await _applyTogether(schoolId, tenantContext(req), data);
+    if (togetherErr) return E.badRequest(res, togetherErr);
 
     // Resolve + stamp the real academic year/term — Academic Year & Term
     // Dependency Map, finding #6. No client sends this today, so this
@@ -1731,6 +1817,8 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, timetableManageAccess('creat
     for (const s of data.slots) {
       const period = await _resolvedPeriod(s.academicYearId, s.termId);
       if (period.error) return E.badRequest(res, period.error);
+      const togetherErr = await _applyTogether(schoolId, tenantContext(req), s);
+      if (togetherErr) return E.badRequest(res, togetherErr);
     }
 
     // Resolve section + times for each slot; cache by classId to avoid N+1
@@ -1833,6 +1921,8 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, timetableManageAccess('update'
     if (current.locked && data.locked !== false) {
       return E.badRequest(res, 'This lesson is locked. Unlock it first to change it.');
     }
+    const togetherErr = await _applyTogether(schoolId, tenantContext(req), data, current);
+    if (togetherErr) return E.badRequest(res, togetherErr);
     if (data.day !== undefined && data.day !== current.day) {
       const { workingDays } = await getTimetableSettings(schoolId);
       if (!workingDays.includes(data.day)) return E.badRequest(res, notWorkingDayMsg(data.day));
@@ -1869,8 +1959,10 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, timetableManageAccess('update'
     // re-sends every field on save, so "sent" isn't "changed": before v5.265.0, locking a lesson
     // (or editing its notes) that already sat in an old clash was refused with that clash.
     const _norm = v => (v === undefined || v === null ? '' : String(v));
+    const _normList = v => (Array.isArray(v) ? [...v].map(String).sort().join(',') : _norm(v));
     const schedulingChanged = ['classId', 'streamId', 'day', 'period', 'teacherId', 'room', 'roomId']
-      .some(f => data[f] !== undefined && _norm(data[f]) !== _norm(current[f]));
+      .some(f => data[f] !== undefined && _norm(data[f]) !== _norm(current[f]))
+      || ['coTeacherIds', 'streamIds'].some(f => data[f] !== undefined && _normList(data[f]) !== _normList(current[f]));
     if (schedulingChanged) {
       const conflictMsg = await _checkConflicts(schoolId, merged, req.params.id);
       if (conflictMsg) return E.conflict(res, conflictMsg);

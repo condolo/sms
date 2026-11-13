@@ -344,6 +344,13 @@ Ticking **Attendance → Mark Attendance** lets a role *use* Attendance, but on 
 
 Admin, Principal and Deputy Principal always see every class. To let any other role or person mark **every** class (for example a Senior Teacher who covers registers), tick **Attendance → All Classes (not just assigned)**: View lets them see every class's register, Edit lets them mark it too. It is off by default for every role. The timetable does not need to be set up for any of this.
 
+### Co-teaching, streams taught together, and option subjects on timetables *(2026-11)*
+
+- **Two teachers in the same lessons.** Give each teacher their own teaching assignment, then link them under Teachers → Assignments → **Teach together** (people icon). Each keeps the same access as before: attendance, Markbook and lesson plans follow their own assignment. On the timetable, both are named on every lesson and both are checked for clashes.
+- **Streams taught together** (e.g. 7i + 7ii PE) are linked the same way. Each stream keeps its own register.
+- **Option subjects** appear on a student's (and their parents') timetable only if the student is enrolled in that option under Students → Subjects. Enrol students in their options so their timetables are complete, and so the automatic timetable can run options side by side.
+- Full steps: [Timetabler Guide](TIMETABLER_GUIDE.md) §16.
+
 ### Parent replies on behaviour entries — who receives them *(2026-11)*
 
 Parents now see the name of the staff member who logged each behaviour entry (display name only, never email or phone) and the subject, and can reply on the entry. A reply goes to:

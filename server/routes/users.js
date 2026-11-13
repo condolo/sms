@@ -369,6 +369,13 @@ router.put('/me', authMiddleware, async (req, res) => {
 
       // Cascade to every collection that denormalises teacherName. A renamed teacher on the draft timetable is a change to publish.
       await markTimetableChanged(schoolId);
+      // Lessons they co-teach (v5.270.0) keep names in coTeacherNames, parallel to coTeacherIds.
+      const coTaught = await tenantModel('timetable', tenantContext(req))
+        .find({ schoolId, coTeacherIds: userId }).select('id coTeacherIds coTeacherNames').lean().catch(() => []);
+      await Promise.all(coTaught.filter(l => l.id).map(l => tenantModel('timetable', tenantContext(req)).updateOne(
+        { schoolId, id: l.id },
+        { $set: { coTeacherNames: (l.coTeacherIds || []).map((id, i) => (id === userId ? newFullName : (l.coTeacherNames || [])[i] || '')) } },
+      )));
       await Promise.all([
         tenantModel('timetable', tenantContext(req)).updateMany(
           { schoolId, teacherId: userId },

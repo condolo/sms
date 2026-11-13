@@ -18,6 +18,7 @@ const { planGate }       = require('../middleware/plan');
 const PLAN = planGate('student_portal');
 const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
+const { studentStreamOr, filterElectivesForStudent } = require('../utils/lesson-audience');
 const { isTimetablePublished, publishedReader } = require('../utils/timetable-publish');
 const { resolveCurrentPeriod } = require('./academic-config');
 const { audienceClause }        = require('../utils/announcement-audience');
@@ -94,7 +95,7 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
 
     // ── Student record ───────────────────────────────────────
     const student = await Students.findOne({ id: studentId, schoolId })
-      .select('firstName lastName admissionNumber classId className streamId photo status dateOfBirth gender')
+      .select('id firstName lastName admissionNumber classId className streamId photo status dateOfBirth gender')
       .lean();
     if (!student) return E.notFound(res, 'Student record not found.');
 
@@ -224,16 +225,15 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
     // EVERY stream's lessons for their class merged together — not just a
     // display quirk, a real case of showing a student the wrong stream's
     // subject/teacher/room for today.
-    const timetableStreamOr = student.streamId
-      ? [{ streamId: student.streamId }, { streamId: { $exists: false } }]
-      : [{ streamId: { $exists: false } }];
+    const timetableStreamOr = studentStreamOr(student.streamId);
 
     // Unpublished timetables are not shown to students (see utils/timetable-publish.js).
     let rawSlots = student.classId && (await isTimetablePublished(schoolId))
       ? (await Timetable.find({ schoolId, classId: student.classId, day: today, isActive: true, $or: timetableStreamOr })
           .sort({ startTime: 1 })
-          .select('subjectId subject teacherName teacherId startTime endTime room day')
+          .select('subjectId subject teacherName teacherId coTeacherNames startTime endTime room day')
           .lean()
+          .then(rows => filterElectivesForStudent(tenantContext(req), schoolId, student, rows))   // options they take only (v5.270.0)
         // 'timetable' stores the display name as `subject`, not
         // `subjectName` — alias it so this widget's existing contract
         // (StudentDashboard.jsx reads slot.subjectName) is unchanged.
@@ -783,7 +783,7 @@ router.get('/timetable', authMiddleware, PLAN, async (req, res) => {
 
     const student = await tenantModel('students', tenantContext(req))
       .findOne({ id: studentId, schoolId })
-      .select('classId streamId')
+      .select('id classId streamId')
       .lean();
     if (!student) return E.notFound(res, 'Student record not found.');
 
@@ -816,16 +816,15 @@ router.get('/timetable', authMiddleware, PLAN, async (req, res) => {
     }
 
     const Timetable = await publishedReader(schoolId, tenantContext(req));
-    const streamOr = student.streamId
-      ? [{ streamId: student.streamId }, { streamId: { $exists: false } }]
-      : [{ streamId: { $exists: false } }];
+    const streamOr = studentStreamOr(student.streamId);
 
     const slots = await Timetable
       .find({ schoolId, classId: student.classId, isActive: true, $or: streamOr })
       .sort({ day: 1, periodNumber: 1, startTime: 1 })
       .limit(300)
-      .select('subjectId subject teacherId teacherName room day period periodNumber startTime endTime type')
-      .lean();
+      .select('subjectId subject teacherId teacherName coTeacherNames room day period periodNumber startTime endTime type')
+      .lean()
+      .then(rows => filterElectivesForStudent(tenantContext(req), schoolId, student, rows));   // options they take only (v5.270.0)
 
     /* The timetable document carries `teacherId` but its denormalised
        `teacherName` is often blank (the seed writes ids only). A student

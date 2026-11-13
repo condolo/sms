@@ -95,7 +95,7 @@ async function pruneRuns(req, schoolId) {
 }
 
 /* The fields that say where/what a lesson is — compared at undo to spot hand edits. */
-const SNAP_FIELDS = ['classId', 'streamId', 'day', 'period', 'startTime', 'endTime', 'subjectId', 'subject', 'teacherId', 'roomId', 'room', 'locked'];
+const SNAP_FIELDS = ['classId', 'streamId', 'day', 'period', 'startTime', 'endTime', 'subjectId', 'subject', 'teacherId', 'coTeacherIds', 'streamIds', 'roomId', 'room', 'locked'];
 const snap = l => Object.fromEntries(SNAP_FIELDS.map(f => [f, l[f] ?? null]));
 
 /* Turn solver placements into draft lesson documents (one per period). */
@@ -110,9 +110,12 @@ function lessonsFrom(result, meta, problem) {
     for (const seg of pl.segments) {
       out.push({
         classId: u.classId, streamId: u.streamId || null,
+        // Taught together (v5.270.0): combined streams and co-teachers.
+        ...(info.streamIds && info.streamIds.length ? { streamIds: info.streamIds } : {}),
         day: pl.day, period: seg.periodKey, startTime: seg.start, endTime: seg.end,
         subject: info.subject, subjectId: info.subjectId,
         teacherId: info.teacherId, teacherName: info.teacherName,
+        ...(info.coTeacherIds && info.coTeacherIds.length ? { coTeacherIds: info.coTeacherIds, coTeacherNames: info.coTeacherNames } : {}),
         room: pl.roomName || undefined, roomId: pl.roomId || undefined,
         section: cls.section || 'all', bellScheduleId: cls.bellScheduleId ?? null,
         type: 'lesson', isActive: true,

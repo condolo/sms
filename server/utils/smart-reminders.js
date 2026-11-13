@@ -29,6 +29,7 @@
 
 const { v4: uuidv4 } = require('uuid');
 const { _model } = require('./model');
+const { lessonTeacherIds } = require('./lesson-audience');
 const { dispatchNotification } = require('./notify-dispatch');
 const email = require('./email');
 
@@ -215,14 +216,14 @@ const registerMissing = {
     const day = _weekday(today);
 
     const slots = await _model('timetable').find({ schoolId, day })
-      .select('id classId streamId subjectId teacherId period day').lean();
+      .select('id classId streamId subjectId teacherId coTeacherIds period day').lean();
     if (!slots.length) return { today, day, slots: [], marked: new Set(), teachers: [], office: [] };
 
     const markedDocs = await _model('attendance').find({ schoolId, date: today })
       .select('classId streamId').lean();
     const marked = new Set(markedDocs.map(a => a.classId).filter(Boolean));
 
-    const teacherIds = [...new Set(slots.map(s => s.teacherId).filter(Boolean))];
+    const teacherIds = [...new Set(slots.flatMap(s => lessonTeacherIds(s)))];   // co-teachers too (v5.270.0)
     const teachers = teacherIds.length
       ? await _model('users').find({ schoolId, id: { $in: teacherIds }, isActive: { $ne: false } })
           .select('id name email').lean()
@@ -241,9 +242,10 @@ const registerMissing = {
     const classIds = [...new Set(unmarked.map(s => s.classId))];
     const byTeacher = new Map();
     for (const slot of unmarked) {
-      if (!slot.teacherId) continue;
-      if (!byTeacher.has(slot.teacherId)) byTeacher.set(slot.teacherId, []);
-      byTeacher.get(slot.teacherId).push(slot);
+      for (const tid of lessonTeacherIds(slot)) {
+        if (!byTeacher.has(tid)) byTeacher.set(tid, []);
+        byTeacher.get(tid).push(slot);
+      }
     }
 
     const entries = [];

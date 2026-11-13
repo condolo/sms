@@ -31,6 +31,7 @@ import useAuthStore from '@/store/auth.js';
 import { useToast } from '@/hooks/useToast.jsx';
 import { useCurrentAcademicPeriod } from '@/hooks/useCurrentAcademicPeriod.js';
 import { studentStage, studentMilestone, demeritTotal, meritTotal, STAGES, MILESTONES } from '@/pages/behaviour/bpsConstants.js';
+import { lessonTeachers, lessonIsForStream, isCombined } from '@/utils/lessonLabels.js';
 
 /* ── Tab config ─────────────────────────────────────────────── */
 const TABS = [
@@ -1384,7 +1385,7 @@ function TimetableTab({ data, loading }) {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-slate-800 truncate">{slot.subject || '—'}</p>
                     <p className="text-xs text-slate-400 truncate">
-                      {slot.teacherName || ''}{slot.room ? `${slot.teacherName ? ' · ' : ''}${slot.room}` : ''}
+                      {lessonTeachers(slot)}{slot.room ? `${lessonTeachers(slot) ? ' · ' : ''}${slot.room}` : ''}
                     </p>
                   </div>
                 </div>

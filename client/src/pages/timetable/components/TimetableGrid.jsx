@@ -14,6 +14,7 @@ import { motion } from 'framer-motion';
 import { Plus, Trash2, Play, Lock } from 'lucide-react';
 import { DAYS, DAY_FULL, DAY_SHORT, DEFAULT_BELL, buildSlotMap, slotColor, daysToShow } from '../constants.js';
 import TimeBandGrid from './TimeBandGrid.jsx';
+import { lessonTeachers, lessonIsForStream, isCombined } from '@/utils/lessonLabels.js';
 
 /* ── Slot card ───────────────────────────────────────────────── */
 function SlotCard({ slot, onDelete, onEdit, canEdit, emergencyMode, teacherMap }) {
@@ -51,8 +52,8 @@ function SlotCard({ slot, onDelete, onEdit, canEdit, emergencyMode, teacherMap }
       <p className={`text-[11px] font-semibold leading-tight truncate pr-4 ${col.text}`}>
         {slot.subject || '—'}
       </p>
-      {slot.teacherName && (
-        <p className={`text-[10px] mt-0.5 truncate ${col.sub} opacity-80`}>{slot.teacherName}</p>
+      {lessonTeachers(slot) && (
+        <p className={`text-[10px] mt-0.5 truncate ${col.sub} opacity-80`}>{lessonTeachers(slot)}</p>
       )}
       {slot.scheduleStale && (
         <p className="text-[9px] font-semibold text-amber-700 mt-0.5">⚠ Period not in schedule — review</p>

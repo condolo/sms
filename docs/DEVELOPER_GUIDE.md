@@ -7714,3 +7714,49 @@ Tests: `server/__tests__/timetable-elective-clashes.test.js`; option and apply-f
 **Pruning:** after each new run, keep the newest `KEEP_RUNS` (30) per school, plus any run with status `applying` and the latest applied-not-undone run.
 
 **Scale:** `server/__tests__/fixtures/big-school.js` builds 24 or 36 classes × 36 lessons (doubles, labs, teachers at ≤30 or 36 of 40 periods, Friday-afternoon unavailability). The solver test asserts every lesson placed with `maxRuns: 5` (not a time budget, so it doesn't depend on CI speed), every hard rule held (independent checker), and the daily-limit rule bent exactly as often as the numbers force. Measured locally: one pass places all 864 lessons in about 60 ms; 36 classes in under a second.
+
+## Timetable: Co-teaching, Streams Taught Together, Subject Time Rules (v5.270.0, 2026-11-13)
+
+**Data model:**
+- **Assignments.** `teaching_assignments.lessonGroupId` marks rows that are one set of lessons. Each row stays an ordinary assignment, so every assignment-based scope (scopeMiddleware, attendance, marks, lesson plans, comment-scope, report layouts…) is unchanged for each teacher and stream; only the timetable side reads the group.
+  - `POST /api/teaching-assignments/:id/link {withId}` requires the same subject, the same class (any id form), and both rows whole-class or both per-stream. It merges groups and copies `periodsPerWeek`/`doubleLessons` from `:id` to the set.
+  - `POST /:id/unlink` removes a row; a group of one is cleared (`_tidyGroup`, also run on DELETE).
+  - `PUT` propagates periods/doubles across the group.
+  - `GET` now fills a missing `teacherName` from `teachers` (best-effort).
+- **Lessons.** `timetable.coTeacherIds[]` + `coTeacherNames[]` (parallel arrays; clash-checked, unlike the display-only `assistantTeacherId`), and `streamIds[]` (≥ 2 streams of the class, sorted; `streamId` null).
+  - `routes/timetable.js` `_applyTogether` validates both on POST, PUT and bulk: streams must be this class's, there can't be both `streamId` and `streamIds`, one stream collapses to `streamId`, co-teachers must be this school's users, the main teacher is removed from co-teachers, and names come from `users`.
+  - PUT re-checks clashes when either array changes.
+- **Rules.** `schools.timetableSettings.rules.subjectTimes = { on, items: [{ subjectId, notPositions: [1..15], notDays: [day] }] }`, normalised by `normaliseSubjectTimes` (one item per subject, empty items dropped, this school's subjects only on PUT). `subjectTimeBlock(rules, subjectId, day, position)` returns a reason or null. A position is the lesson's index among its class bell's non-break periods, plus 1.
+
+**One audience/teacher rule — `server/utils/lesson-audience.js`:**
+- `lessonStreams` (`streamIds` → `[streamId]` → null for whole class);
+- `lessonTeacherIds`, `audiencesOverlap`;
+- `studentStreamOr(streamId)` — whole class = `streamId` null or `''` (or missing) **and** no `streamIds`; also own stream and `streamIds` containing it;
+- `teacherLessonClause(ids)` — `$or` over `teacherId` and `coTeacherIds`;
+- `filterElectivesForStudent` — keeps an option-subject lesson only if the student is enrolled in it.
+
+The client mirrors these in `client/src/utils/lessonLabels.js` (`lessonTeachers`, `lessonIsForStream`, `isCombined`).
+
+**Aligned (every lesson reader and writer):**
+
+| Where | What changed |
+|---|---|
+| `timetable-conflicts.js` | Class rule via `audiencesOverlap`; teacher rule checks every teacher against `teacherId` or `coTeacherIds`; `batchConflicts` likewise |
+| `routes/timetable.js` | `/student/:id`, `/my-children` use `studentStreamOr` plus the option filter; `/teacher/:id` and `/my` use `teacherLessonClause`; `/workload` and `/conflicts` count co-teachers; `_overlapWarnings` uses both helpers; cover (`/substitutions/absent`) includes co-taught lessons but creates cover only when every teacher of the lesson is absent, and follows the school's working days (was a fixed Mon–Fri); `/available-teachers` treats co-teachers as busy; `/placement` selects the new fields; `_draftProblems` adds `subjectTimeWarnings` |
+| `student-portal.js`, `parent-portal.js` | Timetable reads use `studentStreamOr` and the option filter (the dashboard and `/timetable` for both); student lookups select `id` |
+| `teacher-portal.js` | Audience, classes and today's lessons use `teacherLessonClause`; attendance status has one entry per stream of a combined lesson; whole-class submitted = any register for the class (from origin's fix, folded in) |
+| `change-alerts.js` | Teachers looked up by `id` or `userId` (before: `id` only, `userId` never selected, so the incoming teacher was never told); families of the lesson's own stream(s) only, and option students only (before: the whole class); incoming co-teachers notified; `coTeacherIds` is a tracked field |
+| `teacher-availability.js` | Unavailable and overload warnings cover co-teachers; new `subjectTimeWarnings` |
+| `timetable-placement.js` | A `lessonGroupId` counts once per class/stream/subject group; a lesson counts for each stream in `streamIds`; teacher totals include co-teachers |
+| `smart-reminders.js`, `lesson-reminders.js` | Co-teachers included |
+| `users.js` | Renaming a teacher updates their entry in `coTeacherNames` |
+| `import-export.js` | Export adds `streamName` (`A + B` when combined) and `alsoTeaching` (`;`-separated). There was no stream column before, so a re-imported export turned stream lessons into whole-class ones. Import reads both (an unknown co-teacher skips the row); the upsert cell includes the audience (`streamIds`, or "no `streamIds`") |
+| Generator | `prepare.js` builds "unit groups" (a `lessonGroupId` set, an option group per class + subject + teacher, or one row): `teacherKey` + `coTeacherKeys`, combined audiences (`audienceForStreams`, key `<class>\|s1+s2`), locks keyed by unit group, fixed lessons carry `streamIds`/`coTeacherKeys`; `class_overfull` counts combined lessons per stream; `teacher_overfull` per teacher incl. co-teachers; new `subject_time_overfull`. `solver.js`: `teachersOf`, set-based `audienceClash`, `subjectBarred` (hard; every period of a double), reasons `subject_time`/`subject_time_full`. Generated lessons carry `coTeacherIds`/`coTeacherNames`/`streamIds`; the undo snapshot includes them |
+
+**Bugs found while aligning:**
+- Portals matched whole-class lessons only when `streamId` was missing, so any lesson stored with `streamId: null` (including every generated one) was invisible to students and parents in classes with streams.
+- Option lessons were shown to every student of the class.
+- Teacher change notifications never reached the incoming teacher.
+- Cover refused Saturday on a Saturday-school.
+
+Tests: `server/__tests__/routes/timetable-taught-together.test.js` (24) and solver tests (+5). Import/export round trip in `import-timetable-fields.test.js`. Seven older test files used hand-written query matchers without `$and`/null/`$size`; they now use (or follow) the shared `fixtures/fake-tenant-db.js` `matches`, which gained `$nin`, `$regex`, `$gt`, `$lt`, `$size`, RegExp values, null-matches-missing and exact-array equality.

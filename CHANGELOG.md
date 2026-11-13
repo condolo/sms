@@ -6,6 +6,52 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.270.0] - 2026-11-13 - feat(timetable): co-teaching, streams taught together, subject time rules — and every module that reads lessons aligned
+
+The three features the timetable didn't support, plus an audit of every place that reads lessons or teaching assignments.
+
+### Added
+- **Co-teaching.** Two (or more) teachers in the same lessons. Each keeps their own assignment, linked "taught together" (Teachers → Assignments → the people icon). Every lesson then has both teachers: it's on both timetables, both are clash-checked and must be free, and each keeps their own attendance, marks and lesson-plan access.
+- **Streams taught together**, e.g. 7i + 7ii PE. Link the streams' assignments; the lessons are for both streams, block both, and leave other streams free. Registers stay per stream.
+- **When adding or editing a lesson by hand**: **Also teaching** and **Taught together with**, filled in automatically when the subject's assignments are linked.
+- **Subject time rules** (Days & rules): when a subject must not be taught, by lesson number (breaks not counted) and/or day, e.g. no PE in lesson 1. The automatic timetable never breaks them; the precheck warns when a subject can't fit; a hand-placed lesson in a barred time shows as a rule warning.
+- **Import/export**: `streamName` accepts `7i + 7ii`; a new `alsoTeaching` column holds co-teachers.
+
+### Fixed (found aligning the modules that read lessons)
+- **Students and parents couldn't see whole-class lessons stored with an empty stream** (every generated lesson) in classes with streams: the portals only matched a missing `streamId`.
+- **Option subjects were shown to every student in the class**; now only to students enrolled in them (student and parent timetables and dashboards).
+- **Timetable change alerts went to every family in the class** for a change to one stream's lesson, and **never reached the incoming teacher** (teacher looked up by the wrong id; their login id was never read). Now: only the lesson's own students' families, and every new teacher, co-teachers included.
+- **Timetable export had no stream column**, so re-importing an exported file turned every stream lesson into a whole-class lesson. Export now writes `streamName` and `alsoTeaching`.
+- **Cover/Substitutions refused Saturdays** at schools that teach on Saturdays; it now follows the school's working days. A co-taught lesson with one teacher away no longer needs cover.
+- **Assignment lists showed a blank or "Teacher"** where the row had no stored teacher name; the name now comes from the staff record.
+- **The generator's message for a subject that can't fit** now says when its time rules are part of the reason.
+
+### Aligned
+Shared rules in `server/utils/lesson-audience.js` (who a lesson is for, who teaches it), now used by every lesson reader and writer:
+- clash checks (add, edit, bulk save, import);
+- teacher and class views, workload, the conflicts report and rule warnings;
+- cover and available teachers;
+- Lessons to place (a linked set counts once; a combined lesson counts for each stream);
+- the teacher, student and parent portals;
+- attendance and lesson-plan reminders;
+- teacher renames;
+- import/export and the generator.
+
+### Tests / verified
+- **Tests:**
+  - new `timetable-taught-together.test.js` (24: link/unlink, generator, clash checks, portal filters, cover, Lessons to place, alerts, by-hand validation, subject time settings and warnings);
+  - solver +5 (co-teacher availability, over-committed co-teacher, combined streams, hard time rules, doubles never in a barred position);
+  - import/export +4.
+  - Seven older test files' hand-written query matchers didn't model `$and`/null/`$size`/arrays the way MongoDB does; they now use the shared fixture matcher.
+  - Taking out the empty-stream fix makes the portal test fail.
+- **Checks:** the full server suite passes, RBAC and tenant scanners are unchanged, and the client production build compiles with no undefined names.
+- **Local demo school:**
+  - linked Standard 5A Maths (Peter Kamau, Lilian Wairimu) through the Teachers screen, then set 4 periods/week on one row, which carried to both;
+  - added "Mathematics not in lesson 1" through Days & rules;
+  - generated Standard 5A: all 4 Maths lessons co-taught, none in lesson 1;
+  - applied it: Lilian's own timetable shows the 4 lessons, and the class grid reads "Mr. Peter Kamau & Ms. Lilian Wairimu";
+  - the 11 Maths lessons already in lesson 1 elsewhere show as exactly 11 rule warnings.
+
 ## [v5.269.2] - 2026-11-12 - fix(timetable): home rooms for generated lessons, safer undo, consistent Generate permission, exact teacher precheck, run cleanup, measured on a full school
 
 The remaining gaps from the post-Phase-3 review.

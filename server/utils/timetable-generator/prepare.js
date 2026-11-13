@@ -21,6 +21,8 @@ const { resolveAcademicPeriod } = require('../academic-period');
 const { getTimetableSettings, dayLabel } = require('../timetable-settings');
 const { resolveBellSchedule } = require('../../routes/bell-schedule');
 const { loadElectiveInfo, isElectiveFor, enrolledIn, canShareSlot, streamsOfElective } = require('../elective-groups');
+const { lessonStreams } = require('../lesson-audience');
+const { subjectTimeBlock } = require('../timetable-settings');
 
 /* Same inference as routes/timetable.js's _inferSection, for classes saved before sectionKey existed. */
 function inferSection(className = '') {
@@ -92,13 +94,13 @@ async function buildProblem(schoolId, ctx, scope = {}) {
   const [streams, assignments, subjects, rooms, teachers, availability, lessons, students] = await Promise.all([
     tenantModel('streams', ctx).find({ schoolId, classId: { $in: scopeIdForms } }).select('id classId name status').lean(),
     tenantModel('teaching_assignments', ctx).find({ schoolId, classId: { $in: scopeIdForms } })
-      .select('id teacherId teacherName subjectId subjectName classId className streamId streamName preferredRoomId periodsPerWeek doubleLessons').lean(),
+      .select('id teacherId teacherName subjectId subjectName classId className streamId streamName preferredRoomId periodsPerWeek doubleLessons lessonGroupId').lean(),
     tenantModel('subjects', ctx).find({ schoolId }).select('id name requiredRoomType').lean(),
     tenantModel('rooms', ctx).find({ schoolId, isActive: { $ne: false } }).select('id name type capacity homeFor').lean(),
     tenantModel('teachers', ctx).find({ schoolId }).select('id userId title firstName lastName').lean(),
     tenantModel('teacher_availability', ctx).find({ schoolId }).select('teacherId blocks').lean(),
     tenantModel('timetable', ctx).find({ schoolId, isActive: true, academicYearId })
-      .select('id classId streamId day period startTime endTime teacherId roomId room subject subjectId type locked section').lean(),
+      .select('id classId streamId streamIds day period startTime endTime teacherId coTeacherIds roomId room subject subjectId type locked section').lean(),
     tenantModel('students', ctx).find({ schoolId, status: 'active', classId: { $in: scopeIdForms } }).select('classId streamId').lean(),
   ]);
 
@@ -169,13 +171,21 @@ async function buildProblem(schoolId, ctx, scope = {}) {
     classSlots.set(classKeyOf(c), { slots, doubleStarts, bellScheduleId: bell.id ?? null });
     if (!slots.length) add('error', 'no_periods', `${c.name} has no lesson periods on the working days (check its bell schedule).`);
   }
-  const audienceFor = (classK, streamId) => {
-    const key = `${classK}|${streamId || ''}`;
+  const streamNameOf = sid => streams.find(s => (s.id || String(s._id)) === sid)?.name || sid;
+  // Audience: the whole class (no streams), one stream, or streams taught together (v5.270.0).
+  const audienceForStreams = (classK, st) => {
+    const list = st && st.length ? [...st].map(String).sort() : null;
+    const key = `${classK}|${list ? list.join('+') : ''}`;
     if (!audiences[key]) {
       const cs = classSlots.get(classK);
       const c = classByKey.get(classK);
-      const st = streamId ? streams.find(s => (s.id || String(s._id)) === streamId) : null;
-      audiences[key] = { classId: classK, streamId: streamId || null, label: `${c?.name || classK}${st ? ` ${st.name}` : ''}`, slots: cs.slots, doubleStarts: cs.doubleStarts };
+      audiences[key] = {
+        classId: classK,
+        streamId: list && list.length === 1 ? list[0] : null,
+        streamIds: list && list.length > 1 ? list : null,
+        label: `${c?.name || classK}${list ? ` ${list.map(streamNameOf).join(' + ')}` : ''}`,
+        slots: cs.slots, doubleStarts: cs.doubleStarts,
+      };
     }
     return key;
   };
@@ -197,32 +207,61 @@ async function buildProblem(schoolId, ctx, scope = {}) {
     if (s.streamId) size.set(`${k}|${s.streamId}`, (size.get(`${k}|${s.streamId}`) || 0) + 1);
   }
 
-  // ── What the generator places: class|stream|subject groups with a periods-per-week target ──
-  // An elective's group is the class's students who take it, whatever stream
-  // a row names, so electives are keyed with '*' instead of a stream.
-  const targetKey = (k, streamId, subjectId) => (isElec(k, subjectId) ? `${k}|*|${subjectId}` : `${k}|${streamId || ''}|${subjectId}`);
-  const targetGroups = new Set();
+  // ── Unit groups: what is placed as ONE set of lessons (v5.270.0) ──
+  //   - rows linked "taught together" (teaching_assignments.lessonGroupId):
+  //     all their teachers teach every lesson (co-teaching) and all their
+  //     streams attend it (combined streams);
+  //   - an elective's rows for one teacher (one row per stream is common):
+  //     one option group;
+  //   - otherwise one row.
+  // Rows of a group share periods/week; if they differ, the largest is used (warned).
+  const unitGroups = new Map();   // key → { k, subjectId, elective, rows: [] }
+  const missing = [];
+  const rowLabel = (a, k) => {
+    const who = a.teacherName || (a.teacherId ? teacherName.get(tk(a.teacherId)) : '') || (a.teacherId ? 'teacher not found' : 'no teacher');
+    return isElec(k, a.subjectId)
+      ? `${a.className || classByKey.get(k)?.name || k} ${a.subjectName || ''} option (${who})`
+      : `${a.className || classByKey.get(k)?.name || k}${a.streamName ? ` ${a.streamName}` : ''} ${a.subjectName || ''} (${who})`;
+  };
   for (const a of assignments) {
-    if (a.periodsPerWeek > 0 && a.subjectId && scopeKeys.has(ck(a.classId))) targetGroups.add(targetKey(ck(a.classId), a.streamId, a.subjectId));
+    const k = ck(a.classId);
+    if (!classSlots.has(k)) continue;
+    if (!a.periodsPerWeek) { missing.push(rowLabel(a, k)); continue; }
+    const elective = isElec(k, a.subjectId);
+    const key = a.lessonGroupId ? `L:${a.lessonGroupId}` : elective ? `E:${groupIdFor(k, a.subjectId, tk(a.teacherId))}` : `A:${a.id || a._id}`;
+    if (!unitGroups.has(key)) unitGroups.set(key, { key, k, subjectId: a.subjectId, elective, rows: [] });
+    unitGroups.get(key).rows.push(a);
   }
+
+  // Which target key(s) each lesson belongs to, and which unit group a target key is placed by.
+  // An elective's students come from any stream, so electives are keyed with '*'.
+  const rowTargetKey = (k, streamId, subjectId) => (isElec(k, subjectId) ? `${k}|*|${subjectId}` : `${k}|${streamId || ''}|${subjectId}`);
+  const lessonTargetKeys = (k, l, subjectId) => {
+    if (isElec(k, subjectId)) return [`${k}|*|${subjectId}`];
+    const st = lessonStreams(l);
+    return st ? st.map(s => `${k}|${s}|${subjectId}`) : [`${k}||${subjectId}`];
+  };
+  const targetToUnit = new Map();
+  for (const g of unitGroups.values()) for (const a of g.rows) targetToUnit.set(rowTargetKey(g.k, a.streamId, a.subjectId), g.key);
   const subjectOf = l => (l.subjectId ? subjectById.get(l.subjectId) : null) || (l.subject ? subjectByName.get(l.subject.trim().toLowerCase()) : null);
 
   // ── Fixed lessons: everything outside the scope, locked lessons in it, and
   //    in-scope lessons the generator is NOT placing (a subject with no
   //    periods-per-week target, an assembly…). Only unlocked lessons of a
-  //    target group are replaced — a half-filled set of assignments must
-  //    never wipe the rest of the timetable. ──
+  //    target are replaced — a half-filled set of assignments must never
+  //    wipe the rest of the timetable. ──
   const fixed = [];
   const replaceable = [];
   let untimedIgnored = 0;
   let keptInScope = 0;
-  const lockedBy = new Map();   // `${classK}|${streamId}|${subjectId}` → count of locked lesson periods
+  const lockedBy = new Map();   // unit group key → locked lesson periods already covering it
   for (const l of lessons) {
     const k = ck(l.classId);
     const inScope = scopeKeys.has(k);
-    const groupSubj = inScope && isLesson(l) ? subjectOf(l) : null;
-    const inTarget = !!groupSubj && targetGroups.has(targetKey(k, l.streamId, groupSubj.id));
-    if (inScope && !l.locked && inTarget) { replaceable.push(l); continue; }
+    const subj = isLesson(l) ? subjectOf(l) : null;
+    const tKeys = inScope && subj ? lessonTargetKeys(k, l, subj.id) : [];
+    const unitKey = tKeys.map(t => targetToUnit.get(t)).find(Boolean) || null;
+    if (inScope && !l.locked && unitKey) { replaceable.push(l); continue; }
     if (inScope && !l.locked) keptInScope += 1;
     let { startTime, endTime } = l;
     if (!startTime || !endTime) {
@@ -231,90 +270,85 @@ async function buildProblem(schoolId, ctx, scope = {}) {
       const p = c ? ((await bellFor(c)).periods || []).find(x => String(x.p) === String(l.period) && !x.isBreak) : null;
       if (p) { startTime = p.start; endTime = p.end; } else { untimedIgnored += 1; continue; }
     }
-    const subj = subjectOf(l);
     // An in-scope elective lesson belongs to its option group, whatever stream it names.
-    const gid = inScope && isLesson(l) && subj && isElec(k, subj.id) ? ensureGroup(k, subj.id, tk(l.teacherId)) : null;
-    const audKey = gid || (inScope ? `${k}|${l.streamId || ''}` : null);
+    const gid = inScope && subj && isElec(k, subj.id) ? ensureGroup(k, subj.id, tk(l.teacherId)) : null;
+    const st = gid ? null : lessonStreams(l);
+    const audKey = gid || (inScope ? audienceForStreams(k, st) : null);
     fixed.push({
-      day: l.day, start: startTime, end: endTime, classId: k, streamId: gid ? null : (l.streamId || null), groupId: gid,
-      teacherKey: tk(l.teacherId), roomId: l.roomId || roomIdByName.get(String(l.room || '').trim().toLowerCase()) || null,
+      day: l.day, start: startTime, end: endTime, classId: k,
+      streamId: st && st.length === 1 ? st[0] : null, streamIds: st && st.length > 1 ? st : null, groupId: gid,
+      teacherKey: tk(l.teacherId), coTeacherKeys: (l.coTeacherIds || []).map(tk).filter(Boolean),
+      roomId: l.roomId || roomIdByName.get(String(l.room || '').trim().toLowerCase()) || null,
       audKey, subjectId: subj?.id || null,
     });
-    if (inScope && l.locked && isLesson(l) && subj) {
-      const lk = targetKey(k, l.streamId, subj.id);
-      lockedBy.set(lk, (lockedBy.get(lk) || 0) + 1);
-    }
+    if (inScope && l.locked && unitKey) lockedBy.set(unitKey, (lockedBy.get(unitKey) || 0) + 1);
   }
   if (keptInScope) add('warning', 'kept_lessons', `${keptInScope} unlocked lesson${keptInScope === 1 ? '' : 's'} in this scope ${keptInScope === 1 ? 'is for a subject' : 'are for subjects'} with no periods per week set, so ${keptInScope === 1 ? 'it stays' : 'they stay'} where ${keptInScope === 1 ? 'it is' : 'they are'} and the generator works around ${keptInScope === 1 ? 'it' : 'them'}.`);
   if (untimedIgnored) add('warning', 'untimed', `${untimedIgnored} lesson${untimedIgnored === 1 ? '' : 's'} ha${untimedIgnored === 1 ? 's' : 've'} a period that isn't in its class's bell schedule, so ${untimedIgnored === 1 ? 'it was' : 'they were'} ignored when checking for clashes.`);
 
-  // ── Units: from teaching assignments ────────────────────────
+  // ── Units: one per period to place, from each unit group ────
   const units = [];
   const unitInfo = {};
-  const missing = [];
   let n = 0;
-  // Elective rows for the same class + subject + teacher are ONE group (a
-  // school may have entered one row per stream): placed once, with the
-  // largest periods/week and doubles among the rows.
-  const electiveRows = new Map();
-  for (const a of assignments) {
-    const k = ck(a.classId);
-    if (!classSlots.has(k) || !a.periodsPerWeek || !isElec(k, a.subjectId)) continue;
-    const gid = groupIdFor(k, a.subjectId, tk(a.teacherId));
-    if (!electiveRows.has(gid)) electiveRows.set(gid, []);
-    electiveRows.get(gid).push(a);
-  }
-  const doneGroups = new Set();
-  for (const a of assignments) {
-    const k = ck(a.classId);
-    if (!classSlots.has(k)) continue;
-    const elective = isElec(k, a.subjectId);
-    // Many assignments store only teacherId — look the name up before saying "no teacher".
-    const who = a.teacherName || (a.teacherId ? teacherName.get(tk(a.teacherId)) : '') || (a.teacherId ? 'teacher not found' : 'no teacher');
-    const label = elective
-      ? `${a.className || classByKey.get(k)?.name || k} ${a.subjectName || ''} option (${who})`
-      : `${a.className || classByKey.get(k)?.name || k}${a.streamName ? ` ${a.streamName}` : ''} ${a.subjectName || ''} (${who})`;
-    if (!a.periodsPerWeek) { missing.push(label); continue; }
-    let periodsPerWeek = a.periodsPerWeek;
-    let doubleLessons = a.doubleLessons || 0;
+  for (const g of unitGroups.values()) {
+    const { k, rows, elective } = g;
+    const first = rows[0];
+    const subj = subjectById.get(g.subjectId);
+    const subjectName = first.subjectName || subj?.name || '';
+    // Teachers: every row's teacher, main teacher first (by staff record, so two id forms of one person count once).
+    const teacherRows = [];
+    const seenT = new Set();
+    for (const a of rows) { const key = tk(a.teacherId); if (key && !seenT.has(key)) { seenT.add(key); teacherRows.push(a); } }
+    const teacherKeys = teacherRows.map(a => tk(a.teacherId));
+    const names = teacherRows.map(a => a.teacherName || teacherName.get(tk(a.teacherId)) || '').filter(Boolean);
+    // Streams (non-elective): every row's stream; a row with no stream means the whole class.
+    const rowStreams = [...new Set(rows.map(a => a.streamId).filter(Boolean))].sort();
+    const streams = elective || rows.some(a => !a.streamId) ? null : rowStreams;
+    const together = rows.length > 1 && !!first.lessonGroupId;
+    const label = together
+      ? `${first.className || classByKey.get(k)?.name || k}${streams && streams.length ? ` ${streams.map(s => streamNameOf(s)).join(' + ')}` : ''} ${subjectName}${elective ? ' option' : ''} (${names.join(' & ') || 'no teacher'})`
+      : rowLabel(first, k);
+    const periodsPerWeek = Math.max(...rows.map(r => r.periodsPerWeek || 0));
+    const doubleLessons = Math.max(...rows.map(r => r.doubleLessons || 0));
+    if (rows.length > 1 && new Set(rows.map(r => r.periodsPerWeek)).size > 1) {
+      add('warning', elective && !first.lessonGroupId ? 'elective_rows_differ' : 'group_rows_differ', `${label}: its ${rows.length} assignment rows set different periods per week; it is placed once, at ${periodsPerWeek} a week.`);
+    }
     let audKey;
     let gid = null;
     if (elective) {
-      gid = ensureGroup(k, a.subjectId, tk(a.teacherId));
-      if (doneGroups.has(gid)) continue;
-      doneGroups.add(gid);
-      const rows = electiveRows.get(gid) || [a];
-      periodsPerWeek = Math.max(...rows.map(r => r.periodsPerWeek || 0));
-      doubleLessons = Math.max(...rows.map(r => r.doubleLessons || 0));
-      if (rows.length > 1 && new Set(rows.map(r => r.periodsPerWeek)).size > 1) {
-        add('warning', 'elective_rows_differ', `${label}: its ${rows.length} assignment rows set different periods per week; the group is placed once, at ${periodsPerWeek} a week.`);
-      }
-      audKey = groupAudience(gid, a.subjectName || subjectById.get(a.subjectId)?.name);
+      gid = ensureGroup(k, g.subjectId, first.lessonGroupId ? `L:${first.lessonGroupId}` : tk(first.teacherId));
+      audKey = groupAudience(gid, subjectName);
     } else {
-      audKey = audienceFor(k, a.streamId || null);
+      audKey = audienceForStreams(k, streams);
     }
-    const lk = targetKey(k, a.streamId, a.subjectId);
-    const locked = Math.min(lockedBy.get(lk) || 0, periodsPerWeek);
-    if (locked) lockedBy.set(lk, (lockedBy.get(lk) || 0) - locked);
+    const locked = Math.min(lockedBy.get(g.key) || 0, periodsPerWeek);
     const remaining = periodsPerWeek - locked;
     const doubles = Math.min(doubleLessons, Math.floor(remaining / 2));
     const singles = remaining - doubles * 2;
-    const subj = subjectById.get(a.subjectId);
-    const enrolledCount = elective ? enrolledIn(elecInfo, k, a.subjectId).size : 0;
+    const enrolledCount = elective ? enrolledIn(elecInfo, k, g.subjectId).size : 0;
+    const audSize = streams ? streams.reduce((s, sid) => s + (size.get(`${k}|${sid}`) || 0), 0) : (size.get(`${k}|`) || 0);
     const base = {
-      audKey, classId: k, streamId: elective ? null : (a.streamId || null), groupId: gid,
-      subjectId: a.subjectId, subjectName: a.subjectName || subj?.name || '',
-      teacherKey: tk(a.teacherId), requiredRoomType: subj?.requiredRoomType || null,
-      preferredRoomId: a.preferredRoomId || null,
-      // An option group uses the class home room when it is free (rooms are never double-booked,
-      // so of two options side by side one gets it and the other goes roomless, counted).
-      homeRoomId: elective ? (homeRoom.get(`${k}|`) || null) : (homeRoom.get(audKey) || homeRoom.get(`${k}|`) || null),
-      classSize: elective ? (enrolledCount || null) : (size.get(audKey) || null),
-      isCore: coreIds.has(a.subjectId),
+      audKey, classId: k,
+      streamId: streams && streams.length === 1 ? streams[0] : null,
+      streamIds: streams && streams.length > 1 ? streams : null,
+      groupId: gid,
+      subjectId: g.subjectId, subjectName,
+      teacherKey: teacherKeys[0] || null, coTeacherKeys: teacherKeys.slice(1),
+      requiredRoomType: subj?.requiredRoomType || null,
+      preferredRoomId: first.preferredRoomId || null,
+      // Home room: the stream's (one stream), else the class's. An option group or
+      // combined streams use the class's when it is free (rooms are never double-booked).
+      homeRoomId: (streams && streams.length === 1 ? homeRoom.get(`${k}|${streams[0]}`) : null) || homeRoom.get(`${k}|`) || null,
+      classSize: elective ? (enrolledCount || null) : (audSize || null),
+      isCore: coreIds.has(g.subjectId),
     };
     const info = {
-      assignmentId: a.id, classId: k, streamId: base.streamId, subjectId: a.subjectId, subject: base.subjectName,
-      teacherId: a.teacherId, teacherName: a.teacherName || teacherName.get(base.teacherKey) || '', label,
+      assignmentId: first.id, assignmentIds: rows.map(r => r.id), classId: k,
+      streamId: base.streamId, streamIds: base.streamIds,
+      subjectId: g.subjectId, subject: subjectName,
+      teacherId: teacherRows[0]?.teacherId || null, teacherName: names[0] || '',
+      coTeacherIds: teacherRows.slice(1).map(a => a.teacherId), coTeacherNames: names.slice(1),
+      label,
       ...(elective ? { elective: true } : {}),
     };
     for (let d = 0; d < doubles; d++) { const id = `g${++n}`; units.push({ id, ...base, length: 2 }); unitInfo[id] = info; }
@@ -345,11 +379,14 @@ async function buildProblem(schoolId, ctx, scope = {}) {
   for (const a of availability) if (a.blocks?.length) unavailable[String(a.teacherId)] = a.blocks;
 
   // ── Pre-check: things that can't fit ────────────────────────
-  // Per class / stream: periods needed vs periods it has (whole-class lessons count for every stream).
+  // Per class / stream: periods needed vs periods it has. A whole-class lesson
+  // counts for every stream; a combined-streams lesson for each of its streams.
+  const streamsOfX = x => (x.streamIds && x.streamIds.length ? x.streamIds : (x.streamId ? [x.streamId] : null));
   for (const [classK, cs] of classSlots) {
     const c = classByKey.get(classK);
-    const whole = units.filter(u => u.classId === classK && !u.streamId && !u.groupId).reduce((s, u) => s + u.length, 0)
-      + fixed.filter(f => f.classId === classK && !f.streamId && !f.groupId && f.audKey).length;
+    const isWhole = x => !x.groupId && !streamsOfX(x);
+    const whole = units.filter(u => u.classId === classK && isWhole(u)).reduce((s, u) => s + u.length, 0)
+      + fixed.filter(f => f.classId === classK && isWhole(f) && f.audKey).length;
     // Option groups: a lower bound only — the busiest group touching the
     // stream must fit too (groups that share a period can't add up). An
     // error here means it surely can't fit; it never over-reports.
@@ -358,33 +395,34 @@ async function buildProblem(schoolId, ctx, scope = {}) {
       need: units.filter(u => u.groupId === gid).reduce((s, u) => s + u.length, 0) + fixed.filter(f => f.groupId === gid).length,
     }));
     const maxGroup = sid => Math.max(0, ...groupNeed.filter(g => !sid || !g.streams || g.streams.includes(sid)).map(g => g.need));
-    const streamIds = [...new Set(units.filter(u => u.classId === classK && u.streamId).map(u => u.streamId))];
+    const streamIds = [...new Set(units.filter(u => u.classId === classK && !u.groupId).flatMap(u => streamsOfX(u) || []))];
     const check = (label, need) => {
       if (need > cs.slots.length) add('error', 'class_overfull', `${label} needs ${need} lessons a week but has only ${cs.slots.length} periods.`);
     };
     if (!streamIds.length) check(c?.name || classK, whole + maxGroup(null));
     for (const sid of streamIds) {
-      const own = units.filter(u => u.classId === classK && u.streamId === sid).reduce((s, u) => s + u.length, 0)
-        + fixed.filter(f => f.classId === classK && f.streamId === sid && f.audKey).length;
-      check(audiences[`${classK}|${sid}`]?.label || `${c?.name} ${sid}`, whole + own + maxGroup(sid));
+      const has = x => !x.groupId && (streamsOfX(x) || []).includes(sid);
+      const own = units.filter(u => u.classId === classK && has(u)).reduce((s, u) => s + u.length, 0)
+        + fixed.filter(f => f.classId === classK && has(f) && f.audKey).length;
+      check(`${c?.name || classK} ${streamNameOf(sid)}`, whole + own + maxGroup(sid));
     }
     if (units.some(u => u.classId === classK && u.length === 2) && !cs.doubleStarts.length) {
       add('error', 'no_doubles', `${c?.name || classK} has double lessons but no two back-to-back periods without a break between them.`);
     }
   }
-  // Per teacher: lessons needed (here + already elsewhere) vs periods in the week they could teach.
+  // Per teacher (a co-taught lesson needs every one of its teachers): lessons
+  // needed here vs periods in the week they could teach.
+  const teachersOfX = x => [x.teacherKey, ...(x.coTeacherKeys || [])].filter(Boolean);
   const teacherNeed = new Map();
-  for (const u of units) if (u.teacherKey) teacherNeed.set(u.teacherKey, (teacherNeed.get(u.teacherKey) || 0) + u.length);
+  for (const u of units) for (const t of teachersOfX(u)) teacherNeed.set(t, (teacherNeed.get(t) || 0) + u.length);
   for (const [t, need] of teacherNeed) {
     // Exact count (v5.269.2): the distinct periods of the classes they'd
     // teach here, minus times they marked unavailable and minus times they
-    // already teach a lesson that stays (elsewhere, or locked). Before, every
-    // lesson elsewhere was subtracted even if it fell outside these times,
-    // which could report an overload that wasn't there.
-    const busy = fixed.filter(f => f.teacherKey === t);
+    // already teach a lesson that stays (elsewhere, or locked).
+    const busy = fixed.filter(f => teachersOfX(f).includes(t));
     const blocks = unavailable[t] || [];
     const times = new Map();
-    for (const u of units.filter(x => x.teacherKey === t)) for (const s of audiences[u.audKey].slots) times.set(`${s.day}|${s.start}|${s.end}`, s);
+    for (const u of units.filter(x => teachersOfX(x).includes(t))) for (const s of audiences[u.audKey].slots) times.set(`${s.day}|${s.start}|${s.end}`, s);
     let blockedByLessons = 0;
     let free = 0;
     for (const s of times.values()) {
@@ -396,6 +434,22 @@ async function buildProblem(schoolId, ctx, scope = {}) {
       add('error', 'teacher_overfull', `${teacherName.get(t) || 'A teacher'} needs ${need} lessons a week here but is free for only ${free} of these classes' periods${blockedByLessons ? ` (${blockedByLessons} ${blockedByLessons === 1 ? 'is' : 'are'} taken by lessons that stay)` : ''}${blocks.length ? ', after unavailable times' : ''}.`);
     }
   }
+  // Subject time rules (v5.270.0): a subject's lessons must fit in the periods its rules allow.
+  if (rules.subjectTimes?.on && (rules.subjectTimes.items || []).length) {
+    const seen = new Set();
+    for (const u of units) {
+      const key = u.audKey + '|' + u.subjectId;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const mine = units.filter(x => x.audKey === u.audKey && x.subjectId === u.subjectId);
+      const need = mine.reduce((s, x) => s + x.length, 0);
+      const allowed = audiences[u.audKey].slots.filter(s => !subjectTimeBlock(rules, u.subjectId, s.day, s.dayPos + 1)).length;
+      if (allowed < audiences[u.audKey].slots.length && need > allowed) {
+        add('error', 'subject_time_overfull', `${audiences[u.audKey].label} ${u.subjectName}: needs ${need} lessons a week but its time rules (Days & rules) leave only ${allowed} periods.`);
+      }
+    }
+  }
+
   // Classes whose ordinary lessons will have no room (no home room, no preferred room).
   const roomless = [...new Set(units
     .filter(u => !u.requiredRoomType && !u.homeRoomId && !(u.preferredRoomId && rules.usePreferredRooms?.on))

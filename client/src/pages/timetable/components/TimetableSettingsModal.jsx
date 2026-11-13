@@ -33,6 +33,84 @@ function Toggle({ on, onChange, label }) {
   );
 }
 
+/* Subject time rules (v5.270.0): when a subject must NOT be taught, e.g.
+   "no PE in lesson 1", "no Chemistry on Friday". Lesson numbers count a
+   class's lessons in the day (breaks not counted), so one rule works for
+   every section's bell. The generator never breaks these; a lesson placed
+   by hand there shows as a warning. */
+const POSITIONS = Array.from({ length: 10 }, (_, i) => i + 1);
+function SubjectTimeRules({ rule, subjects, days, onChange }) {
+  const [adding, setAdding] = useState('');
+  const items = rule.items || [];
+  const nameOf = id => subjects.find(s => s.id === id)?.name ?? 'Subject';
+  const update = (subjectId, patch) => onChange({ items: items.map(i => (i.subjectId === subjectId ? { ...i, ...patch } : i)) });
+  const toggle = (list, v) => (list.includes(v) ? list.filter(x => x !== v) : [...list, v]);
+  const used = new Set(items.map(i => i.subjectId));
+  return (
+    <section className="space-y-2">
+      <div className="flex items-center gap-3">
+        <Toggle on={rule.on} onChange={on => onChange({ on })} label="Subject time rules" />
+        <h3 className="text-xs font-semibold text-slate-700 uppercase tracking-wide flex-1">Subject time rules</h3>
+      </div>
+      <p className="text-xs text-slate-500">
+        When a subject must not be taught, e.g. no PE in lesson 1. Lesson numbers count the class&apos;s lessons in the day, not breaks.
+        The automatic timetable never breaks these; a lesson you place there by hand shows as a warning.
+      </p>
+      {rule.on && (
+        <div className="space-y-2">
+          {items.map(it => (
+            <div key={it.subjectId} className="border border-slate-200 rounded-xl px-3 py-2 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-slate-800">{nameOf(it.subjectId)}</span>
+                <button type="button" onClick={() => onChange({ items: items.filter(i => i.subjectId !== it.subjectId) })}
+                  className="text-[11px] text-slate-500 hover:text-red-600">Remove</button>
+              </div>
+              <div className="flex flex-wrap items-center gap-1">
+                <span className="text-[11px] text-slate-500 w-20">Not in lesson</span>
+                {POSITIONS.map(p => {
+                  const on = it.notPositions.includes(p);
+                  return (
+                    <button key={p} type="button" onClick={() => update(it.subjectId, { notPositions: toggle(it.notPositions, p).sort((a, b) => a - b) })}
+                      aria-pressed={on} aria-label={`Not in lesson ${p}`}
+                      className={`w-7 h-6 rounded text-[11px] border ${on ? 'bg-rose-600 text-white border-rose-600' : 'bg-white text-slate-600 border-slate-300 hover:border-rose-400'}`}>
+                      {p}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="flex flex-wrap items-center gap-1">
+                <span className="text-[11px] text-slate-500 w-20">Not on</span>
+                {days.map(d => {
+                  const on = it.notDays.includes(d);
+                  return (
+                    <button key={d} type="button" onClick={() => update(it.subjectId, { notDays: toggle(it.notDays, d) })}
+                      aria-pressed={on}
+                      className={`px-2 h-6 rounded text-[11px] border ${on ? 'bg-rose-600 text-white border-rose-600' : 'bg-white text-slate-600 border-slate-300 hover:border-rose-400'}`}>
+                      {DAY_FULL[d].slice(0, 3)}
+                    </button>
+                  );
+                })}
+              </div>
+              {!it.notPositions.length && !it.notDays.length && (
+                <p className="text-[11px] text-amber-600">Pick at least one lesson or day, or remove this rule (an empty rule isn&apos;t saved).</p>
+              )}
+            </div>
+          ))}
+          <div className="flex items-center gap-2">
+            <select value={adding} onChange={e => setAdding(e.target.value)} className="flex-1 text-sm px-2 py-1.5 rounded-lg border border-slate-200">
+              <option value="">Add a subject…</option>
+              {subjects.filter(s => !used.has(s.id)).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+            <button type="button" disabled={!adding}
+              onClick={() => { onChange({ items: [...items, { subjectId: adding, notPositions: [], notDays: [] }] }); setAdding(''); }}
+              className="px-3 py-1.5 text-sm rounded-lg border border-slate-300 text-slate-700 disabled:opacity-50">Add</button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export default function TimetableSettingsModal({ settings, onClose, onSaved }) {
   const [days, setDays]   = useState(settings.workingDays);
   const [rules, setRules] = useState(settings.rules);
@@ -134,6 +212,16 @@ export default function TimetableSettingsModal({ settings, onClose, onSaved }) {
                 })}
               </ul>
             </section>
+
+            {/* Subject time rules (v5.270.0) */}
+            {rules.subjectTimes && (
+              <SubjectTimeRules
+                rule={rules.subjectTimes}
+                subjects={subjectList}
+                days={ALL_DAYS.filter(d => days.includes(d))}
+                onChange={patch => setRule('subjectTimes', patch)}
+              />
+            )}
             {error && <p className="text-xs text-red-600">{error}</p>}
           </div>
 

@@ -53,20 +53,37 @@ function assertValid(p, result) {
           // Independent of the solver's own rule: who is actually in each lesson.
           const who = (x) => {
             if (x.groupId) return new Set(p.__roster.groups[x.groupId] || Object.keys(p.__roster.students));
-            return new Set(Object.entries(p.__roster.students).filter(([, st]) => !x.streamId || st === x.streamId).map(([s]) => s));
+            const xs = x.streamIds && x.streamIds.length ? x.streamIds : (x.streamId ? [x.streamId] : null);
+            return new Set(Object.entries(p.__roster.students).filter(([, st]) => !xs || xs.includes(st)).map(([s]) => s));
           };
           const wa = who(a);
           if ([...who(b)].some(s => wa.has(s))) throw new Error(`student clash ${a.classId} ${a.day} ${a.start}`);
-        } else if (!a.streamId || !b.streamId || a.streamId === b.streamId) throw new Error(`class clash ${a.classId} ${a.day} ${a.start}`);
+        } else {
+          const sa = a.streamIds && a.streamIds.length ? a.streamIds : (a.streamId ? [a.streamId] : null);
+          const sb = b.streamIds && b.streamIds.length ? b.streamIds : (b.streamId ? [b.streamId] : null);
+          if (!sa || !sb || sa.some(x => sb.includes(x))) throw new Error(`class clash ${a.classId} ${a.day} ${a.start}`);
+        }
       }
-      if (a.teacherKey && a.teacherKey === b.teacherKey) throw new Error(`teacher clash ${a.teacherKey} ${a.day} ${a.start}`);
+      const ta = [a.teacherKey, ...(a.coTeacherKeys || [])].filter(Boolean);
+      const tb = [b.teacherKey, ...(b.coTeacherKeys || [])].filter(Boolean);
+      if (ta.some(t => tb.includes(t))) throw new Error(`teacher clash ${ta.join('+')} ${a.day} ${a.start}`);
       if (a.roomId && a.roomId === b.roomId) throw new Error(`room clash ${a.roomId} ${a.day} ${a.start}`);
     }
   }
   for (const pl of result.placements) {
     const u = byId.get(pl.unitId);
-    for (const b of p.unavailable[u.teacherKey] || []) {
-      if (b.day === pl.day && pl.segments[0].start < b.end && pl.segments[pl.segments.length - 1].end > b.start) throw new Error('placed in unavailable time');
+    for (const t of [u.teacherKey, ...(u.coTeacherKeys || [])].filter(Boolean)) {
+      for (const b of p.unavailable[t] || []) {
+        if (b.day === pl.day && pl.segments[0].start < b.end && pl.segments[pl.segments.length - 1].end > b.start) throw new Error('placed in unavailable time');
+      }
+    }
+    // Subject time rules (v5.270.0): independent check from the bell positions.
+    for (const item of (p.rules.subjectTimes?.on ? p.rules.subjectTimes.items : [])) {
+      if (item.subjectId !== u.subjectId) continue;
+      for (const seg of pl.segments) {
+        const pos = BELL.findIndex(([k]) => k === seg.periodKey) + 1;
+        if (item.notDays.includes(pl.day) || item.notPositions.includes(pos)) throw new Error(`subject time rule broken: ${u.subjectId} ${pl.day} lesson ${pos}`);
+      }
     }
     if (u.length === 2) {
       expect(pl.segments).toHaveLength(2);
@@ -352,4 +369,77 @@ test('home room: used when free, never double-booked — two options side by sid
   // 12 core lessons fill 12 of 20 periods, so the 16 option lessons pair up in the other 8:
   // each pair has one room, so exactly 8 option lessons go roomless and 8 get the room.
   expect(roomless).toBe(8);
+});
+
+/* ── Taught together and subject time rules, v5.270.0 ──────────────── */
+
+test('co-teaching: a lesson is only placed when BOTH teachers are free and available', () => {
+  // T2 also teaches class B 10 lessons; T1+T2 co-teach 4 in class A. T2 is away Monday (16 periods left, 14 needed).
+  const p = problem({
+    unavailable: { T2: [{ day: 'monday', start: '00:00', end: '23:59' }] },
+    units: [
+      ...many(4, { audKey: 'A|', classId: 'A', subjectId: 'pe', teacherKey: 'T1', coTeacherKeys: ['T2'] }),
+      ...many(10, { audKey: 'B|', classId: 'B', subjectId: 'x', teacherKey: 'T2' }),
+    ],
+  });
+  const r = solve(p, { budgetMs: 1000 });
+  expect(r.unplaced).toEqual([]);
+  assertValid(p, r);   // the checker treats every teacher of a lesson as busy
+  const pe = r.placements.filter(pl => p.units.find(u => u.id === pl.unitId).subjectId === 'pe');
+  expect(pe.every(pl => pl.day !== 'monday')).toBe(true);
+});
+
+test('co-teaching: an over-committed co-teacher leaves the lesson unplaced rather than double-booked', () => {
+  // T2 teaches class B in every one of the 20 periods: no co-taught lesson can go anywhere.
+  const p = problem({
+    units: [
+      ...many(2, { audKey: 'A|', classId: 'A', subjectId: 'pe', teacherKey: 'T1', coTeacherKeys: ['T2'] }),
+      ...many(20, { audKey: 'B|', classId: 'B', subjectId: 'x', teacherKey: 'T2' }),
+    ],
+  });
+  const r = solve(p, { budgetMs: 800 });
+  expect(r.unplaced.length).toBeGreaterThanOrEqual(2);
+  assertValid(p, r);
+});
+
+test('streams taught together block both streams but not a third', () => {
+  const comb = { ...audience('A'), streamId: null, streamIds: ['s1', 's2'], label: 'A s1+s2' };
+  const p = problem({
+    audiences: { 'A|s1+s2': comb, 'A|s1': audience('A', 's1'), 'A|s2': audience('A', 's2'), 'A|s3': audience('A', 's3') },
+    __roster: { students: { a: 's1', b: 's2', c: 's3' }, groups: {} },
+    units: [
+      ...many(10, { audKey: 'A|s1+s2', classId: 'A', streamId: null, streamIds: ['s1', 's2'], subjectId: 'pe', teacherKey: 'TP' }),
+      ...many(10, { audKey: 'A|s1', classId: 'A', streamId: 's1', subjectId: 'm1', teacherKey: 'T1' }),
+      ...many(10, { audKey: 'A|s2', classId: 'A', streamId: 's2', subjectId: 'm2', teacherKey: 'T2' }),
+      ...many(20, { audKey: 'A|s3', classId: 'A', streamId: 's3', subjectId: 'm3', teacherKey: 'T3' }),   // s3 is full: must run alongside
+    ],
+  });
+  const r = solve(p, { budgetMs: 2000 });
+  expect(r.unplaced).toEqual([]);   // s1 and s2: 10 together + 10 own = 20 each; s3 independent
+  assertValid(p, r);
+});
+
+test('subject time rules are hard: never in a barred lesson or day, and say why when nothing is left', () => {
+  const rules = normaliseRules({ subjectTimes: { on: true, items: [{ subjectId: 'pe', notPositions: [1], notDays: ['friday'] }] } });
+  const p = problem({ rules, units: many(12, { audKey: 'A|', classId: 'A', subjectId: 'pe', teacherKey: 'TP' }) });
+  const r = solve(p, { budgetMs: 800 });
+  // Allowed: 4 days × lessons 2–4 = 12 periods.
+  expect(r.unplaced).toEqual([]);
+  assertValid(p, r);
+
+  const tooMany = problem({ rules, units: many(13, { audKey: 'A|', classId: 'A', subjectId: 'pe', teacherKey: 'TP' }) });
+  const r2 = solve(tooMany, { budgetMs: 800 });
+  expect(r2.unplaced).toHaveLength(1);
+  expect(r2.unplaced[0].reason).toMatch(/time rules \(Days & rules\) allow are all taken/);
+  assertValid(tooMany, r2);
+});
+
+test('a double lesson never has either half in a barred position', () => {
+  const rules = normaliseRules({ subjectTimes: { on: true, items: [{ subjectId: 'sci', notPositions: [2] }] } });
+  // Doubles start at P1 (P1–P2, barred) or P3 (P3–P4): only P3–P4 is allowed.
+  const p = problem({ rules, units: many(5, { audKey: 'A|', classId: 'A', subjectId: 'sci', teacherKey: 'TS', length: 2 }) });
+  const r = solve(p, { budgetMs: 800 });
+  expect(r.unplaced).toEqual([]);
+  assertValid(p, r);
+  expect(r.placements.every(pl => pl.segments[0].periodKey === '3')).toBe(true);
 });

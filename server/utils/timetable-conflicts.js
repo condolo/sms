@@ -21,6 +21,7 @@
 
 const { tenantModel } = require('./tenant-model');
 const { loadElectiveInfo, canShareSlot } = require('./elective-groups');
+const { audiencesOverlap, lessonStreams, lessonTeacherIds, teacherLessonClause } = require('./lesson-audience');
 
 /** True if two HH:MM ranges overlap (touching ends do not overlap). */
 function timesOverlap(start1, end1, start2, end2) {
@@ -30,8 +31,10 @@ function timesOverlap(start1, end1, start2, end2) {
 
 function _slotId(s) { return s.id || String(s._id); }
 
+/* Same students' time? Whole-class vs anything, or any stream in common —
+   including streams taught together (streamIds, v5.270.0). */
 function _sameAudience(a, b) {
-  return !a.streamId || !b.streamId || a.streamId === b.streamId;
+  return audiencesOverlap(a, b);
 }
 
 function _overlaps(a, b) {
@@ -73,12 +76,14 @@ async function checkConflicts(schoolId, data, exclude = null) {
   }
   const classConflict = classCandidates[0];
   if (classConflict) {
-    return `Slot already exists for this ${data.streamId && classConflict.streamId ? 'stream' : 'class'} on ${data.day} period ${data.period}.`;
+    return `Slot already exists for this ${lessonStreams(data) && lessonStreams(classConflict) ? 'stream' : 'class'} on ${data.day} period ${data.period}.`;
   }
 
-  // 2. Teacher
-  if (data.teacherId) {
-    const teacherSlots = (await Timetable.find({ ...base, teacherId: data.teacherId }).lean()).filter(keep);
+  // 2. Teacher — every teacher of this lesson (co-teachers too), against every
+  //    lesson any of them teaches, as main teacher or co-teacher (v5.270.0).
+  const teachers = lessonTeacherIds(data);
+  if (teachers.length) {
+    const teacherSlots = (await Timetable.find({ ...base, ...teacherLessonClause(teachers) }).lean()).filter(keep);
     for (const s of teacherSlots) {
       if (_overlaps(data, s)) {
         const when = (data.startTime && s.startTime)
@@ -127,7 +132,8 @@ function batchConflicts(slots, electiveInfo = null) {
       if (a.classId === b.classId && String(a.period) === String(b.period) && _sameAudience(a, b)
         && !(electiveInfo && canShareSlot(electiveInfo, a.classId, a.subjectId, b.subjectId))) why = 'the same class';
       else if (_overlaps(a, b)) {
-        if (a.teacherId && a.teacherId === b.teacherId) why = 'the same teacher';
+        const tb = lessonTeacherIds(b);
+        if (lessonTeacherIds(a).some(t => tb.includes(t))) why = 'the same teacher';
         else if (_roomKey(a) && _roomKey(a) === _roomKey(b)) why = 'the same room';
       }
       if (why) out.push({ index: i, otherIndex: j, message: `${a.day} period ${a.period}: ${why} is in two lessons in this batch.` });

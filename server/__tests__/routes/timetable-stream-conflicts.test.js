@@ -40,13 +40,9 @@ function mockChainObj(obj) {
   return c;
 }
 function matchesFilter(doc, filter) {
-  return Object.entries(filter || {}).every(([k, v]) => {
-    if (k === '$or') return v.some(sub => matchesFilter(doc, sub));
-    if (v && typeof v === 'object' && !Array.isArray(v)) {
-      if ('$ne' in v) return doc[k] !== v.$ne;
-    }
-    return doc[k] === v;
-  });
+  // Shared MongoDB-like matcher (v5.270.0): lesson filters now use $and,
+  // null-matches-missing and array fields, which this file's own matcher didn't model.
+  return require('../fixtures/fake-tenant-db').matches(doc, filter);
 }
 function makeFakeCollection(seed = []) {
   let docs = [...seed];
