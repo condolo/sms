@@ -84,4 +84,23 @@ const BUILTIN_STAFF_RESPONSIBILITIES = [
 
 const BUILTIN_EXTRA_ROLE_VALUES = new Set(BUILTIN_STAFF_RESPONSIBILITIES.map(r => r.value));
 
-module.exports = { BUILTIN_STAFF_RESPONSIBILITIES, BUILTIN_EXTRA_ROLE_VALUES };
+/* Legacy built-in values that were renamed away from a SYSTEM_ROLES key.
+   Existing school documents can still carry these; teachers tagged with
+   them are migrated by server/scripts/migrate-staff-responsibility-rename.js.
+   Settings saves self-heal a persisted built-in entry (label matches) so a
+   school is not blocked from saving ANY setting — see PUT /school. */
+const BUILTIN_RESPONSIBILITY_LABELS = Object.fromEntries(
+  BUILTIN_STAFF_RESPONSIBILITIES.map(r => [r.value, r.label])
+);
+const LEGACY_RESPONSIBILITY_RENAMES = Object.freeze({
+  deputy: 'acting_deputy',
+  principal: 'head_of_school',
+  timetabler: 'timetable_coordinator',
+});
+
+module.exports = {
+  BUILTIN_STAFF_RESPONSIBILITIES,
+  BUILTIN_EXTRA_ROLE_VALUES,
+  BUILTIN_RESPONSIBILITY_LABELS,
+  LEGACY_RESPONSIBILITY_RENAMES,
+};

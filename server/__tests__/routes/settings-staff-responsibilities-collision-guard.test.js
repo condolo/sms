@@ -168,6 +168,34 @@ describe('PUT /api/settings/school — staffResponsibilities collision guard', (
     expect(res.status).toBe(200);
   });
 
+  test('a persisted legacy built-in ("timetabler") is normalized on save instead of blocking every settings change', async () => {
+    const app = buildApp();
+    const cookie = authCookie({ userId: 'u1', schoolId: SCHOOL_ID, role: 'admin' });
+
+    const res = await supertest(app).put('/api/settings/school').set('Cookie', cookie)
+      .send({ staffResponsibilities: [
+        { value: 'timetabler', label: 'Timetabler' },
+        { value: 'ks3_academic_coordinator', label: 'KS3 Academic Coordinator' },
+      ] });
+    expect(res.status).toBe(200);
+
+    const getRes = await supertest(app).get('/api/settings/school').set('Cookie', cookie);
+    expect(getRes.body.data.staffResponsibilities).toEqual([
+      { value: 'timetable_coordinator', label: 'Timetabler' },
+      { value: 'ks3_academic_coordinator', label: 'KS3 Academic Coordinator' },
+    ]);
+  });
+
+  test('a custom entry reusing the legacy value with a different label is still rejected', async () => {
+    const app = buildApp();
+    const cookie = authCookie({ userId: 'u1', schoolId: SCHOOL_ID, role: 'admin' });
+
+    const res = await supertest(app).put('/api/settings/school').set('Cookie', cookie)
+      .send({ staffResponsibilities: [{ value: 'timetabler', label: 'Custom Timetable Person' }] });
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toMatch(/reserved for a real system role/i);
+  });
+
   test('a non-array payload is rejected with a clear error rather than silently coerced', async () => {
     const app = buildApp();
     const cookie = authCookie({ userId: 'u1', schoolId: SCHOOL_ID, role: 'admin' });

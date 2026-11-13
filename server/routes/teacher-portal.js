@@ -1067,7 +1067,6 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
         }).select('classId streamId').lean().catch(() => [])
       : [];
     const submittedKeys = new Set(todayAttCombos.map(a => _slotKey(a.classId, a.streamId)));
-
     /* A whole-class lesson has no streamId, while every attendance record
        is stamped with the STUDENT'S stream. Keying that slot by
        `classId::''` therefore never matched a real register — the teacher
@@ -1101,14 +1100,16 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     // dashboard already relies on for ordering) rather than overwriting it.
     const slotDetailByKey = {};
     for (const slot of timetableToday) {
-      const k = _slotKey(slot.classId, slot.streamId);
-      if (!slotDetailByKey[k]) {
-        slotDetailByKey[k] = {
-          period:       slot.periodNumber ? String(slot.periodNumber) : (slot.period ?? ''),
-          subjectName:  slot.subject ?? null,
-          subjectId:    slot.subjectId ?? null,
-          startTime:    slot.startTime ?? null,
-        };
+      for (const sid of (slot.streamIds && slot.streamIds.length ? slot.streamIds : [slot.streamId ?? null])) {
+        const k = _slotKey(slot.classId, sid);
+        if (!slotDetailByKey[k]) {
+          slotDetailByKey[k] = {
+            period:       slot.periodNumber ? String(slot.periodNumber) : (slot.period ?? ''),
+            subjectName:  slot.subject ?? null,
+            subjectId:    slot.subjectId ?? null,
+            startTime:    slot.startTime ?? null,
+          };
+        }
       }
     }
 

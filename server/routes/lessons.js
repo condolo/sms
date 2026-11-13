@@ -969,11 +969,34 @@ router.get('/my-classes', authMiddleware, PLAN, MODGATE, async (req, res) => {
       // stream-scoped assignment's coverage never merges with a sibling
       // stream's or the whole-class total, matching how it's written
       // (see POST /coverage's identical identity filter).
-      const coveredCount = await tenantModel('lesson_coverage', tenantContext(req)).countDocuments({
-        schoolId, classId: a.classId, subjectId: a.subjectId, academicYear, ..._streamFilterPart(a.streamId),
+      //
+      // Count LEAF items, not raw coverage rows. A topic with subtopics is
+      // covered through those subtopics; a legacy whole-topic mark on such a
+      // topic must not count (it used to inflate 2-of-3 subtopics to 100%),
+      // and two records for the same subtopic are still one item.
+      const coverageRows = await tenantModel('lesson_coverage', tenantContext(req))
+        .find({
+          schoolId, classId: a.classId, subjectId: a.subjectId, academicYear, ..._streamFilterPart(a.streamId),
+        })
+        .select('topicId subtopicId')
+        .lean();
+
+      const coveredSubtopicKeys = new Set(
+        coverageRows.filter(r => r.subtopicId).map(r => `${r.topicId}__${r.subtopicId}`),
+      );
+      const coveredTopicIds = new Set(
+        coverageRows.filter(r => !r.subtopicId).map(r => r.topicId),
+      );
+      let coveredItems = 0;
+      topics.forEach(t => {
+        if (t.subtopics?.length) {
+          coveredItems += t.subtopics.filter(st => coveredSubtopicKeys.has(`${t.id}__${st.id}`)).length;
+        } else if (coveredTopicIds.has(t.id)) {
+          coveredItems += 1;
+        }
       });
 
-      const pct = totalItems > 0 ? Math.round((Math.min(coveredCount, totalItems) / totalItems) * 100) : 0;
+      const pct = totalItems > 0 ? Math.round((coveredItems / totalItems) * 100) : 0;
 
       return {
         classId:     a.classId,
@@ -984,7 +1007,7 @@ router.get('/my-classes', authMiddleware, PLAN, MODGATE, async (req, res) => {
         subjectName: a.subjectName,
         totalTopics: topics.length,
         totalItems,
-        coveredItems: Math.min(coveredCount, totalItems),
+        coveredItems,
         pct,
         academicYear,
       };
@@ -1838,7 +1861,7 @@ router.get('/class-summary/:classId', authMiddleware, PLAN, MODGATE, async (req,
       });
 
       const pct = totalItems > 0
-        ? Math.round((Math.min(coveredKeys.size, totalItems) / totalItems) * 100)
+        ? Math.round((enrichedTopics.reduce((n, t) => n + t.covered, 0) / totalItems) * 100)
         : 0;
 
       return {
@@ -1846,7 +1869,7 @@ router.get('/class-summary/:classId', authMiddleware, PLAN, MODGATE, async (req,
         subjectName: a.subjectName,
         teacherName: a.teacherName,
         totalItems,
-        coveredItems: Math.min(coveredKeys.size, totalItems),
+        coveredItems: enrichedTopics.reduce((n, t) => n + t.covered, 0),
         pct,
         topics:      enrichedTopics,
         academicYear,

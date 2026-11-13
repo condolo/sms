@@ -302,3 +302,34 @@ describe('GET /api/lessons/my-classes — distinct cards per stream (no more dup
     expect(sapphire.pct).toBe(0);    // untouched by Diamond's mark
   });
 });
+
+describe('GET /api/lessons/my-classes — coverage percentage counts leaf items only', () => {
+  test('2 of 3 subtopics covered reads 67%, and a stale topic-level mark cannot inflate it to 100%', async () => {
+    asStreamTeacherOf({ classId: 'cls_yr2', streamId: 'strm_diamond', streamName: 'Diamond' });
+    mockSyllabusTopics = mockMakeFakeCollection([
+      {
+        id: 'topic_subs', schoolId: SCHOOL_A, subjectId: 'subj_eng', subjectName: 'English',
+        title: 'Sentences', academicYear: '2026',
+        subtopics: [
+          { id: 'sub_a', title: 'Nouns', order: 0 },
+          { id: 'sub_b', title: 'Verbs', order: 1 },
+          { id: 'sub_c', title: 'Adjectives', order: 2 },
+        ],
+      },
+    ]);
+    mockLessonCoverage = mockMakeFakeCollection([
+      { id: 'cov_1', schoolId: SCHOOL_A, classId: 'cls_yr2', streamId: 'strm_diamond', subjectId: 'subj_eng', topicId: 'topic_subs', subtopicId: 'sub_a', academicYear: '2026' },
+      { id: 'cov_2', schoolId: SCHOOL_A, classId: 'cls_yr2', streamId: 'strm_diamond', subjectId: 'subj_eng', topicId: 'topic_subs', subtopicId: 'sub_b', academicYear: '2026' },
+      // A legacy whole-topic mark on a topic that is covered through its
+      // subtopics — the row that used to push 2/3 to 3/3.
+      { id: 'cov_stale', schoolId: SCHOOL_A, classId: 'cls_yr2', streamId: 'strm_diamond', subjectId: 'subj_eng', topicId: 'topic_subs', academicYear: '2026' },
+    ]);
+
+    const res = await supertest(buildApp()).get('/api/lessons/my-classes');
+    expect(res.status).toBe(200);
+    expect(res.body.data[0].totalItems).toBe(3);
+    expect(res.body.data[0].coveredItems).toBe(2);
+    expect(res.body.data[0].pct).toBe(67);
+  });
+});
+

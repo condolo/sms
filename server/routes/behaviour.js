@@ -504,7 +504,12 @@ router.get('/incidents/summary', authMiddleware, PLAN, MODGATE, behaviourAccess(
     const summary = await Incidents.aggregate([
       { $match: filter },
       { $group: {
-        _id:      '$studentId',
+        _id:         '$studentId',
+        /* Denormalised display name — the log already stores it, and without
+           it every roll-up row on the phone reads "Student". The web console
+           joins against the full student list instead; the phone should not
+           have to download the school roll just to print a name. */
+        studentName: { $first: '$studentName' },
         merits:   { $sum: { $cond: [{ $eq: ['$type', 'merit'] }, 1, 0] } },
         demerits: { $sum: { $cond: [{ $eq: ['$type', 'demerit'] }, 1, 0] } },
         points:   { $sum: '$points' },

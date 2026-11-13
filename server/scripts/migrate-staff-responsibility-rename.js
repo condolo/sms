@@ -68,7 +68,7 @@ require('dotenv').config();
 const mongoose = require('mongoose');
 const { _model } = require('../utils/model');
 
-const RENAME = { deputy: 'acting_deputy', principal: 'head_of_school', timetabler: 'timetable_coordinator' };
+const RENAME = require('../config/staffResponsibilities').LEGACY_RESPONSIBILITY_RENAMES;
 
 /* ── Pure decision logic — exported for unit testing without a DB ── */
 
