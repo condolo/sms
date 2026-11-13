@@ -23,6 +23,36 @@ import StudentReportCard from './StudentReportCard.jsx';
 import KgStudentReportCard from './KgStudentReportCard.jsx';
 import { useCurrentAcademicPeriod } from '@/hooks/useCurrentAcademicPeriod.js';
 
+/* What a cycle report (e.g. Mid-Term) covers, as the server worked it out
+   from the assessment schedule. */
+function CoverageNote({ coverage, cycleName }) {
+  const fmt = (d) => (d ? new Date(`${d}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '');
+  if (coverage.mode === 'cycle_unscheduled') {
+    return (
+      <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+        <span>{cycleName} has no dates in the assessment schedule for this term, so this report includes every mark in the term. Add its dates under Exams → Configuration to limit it to the assessments up to {cycleName}.</span>
+      </div>
+    );
+  }
+  if (coverage.mode !== 'by_schedule') return null;
+  return (
+    <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900 space-y-0.5">
+      <p>
+        <span className="font-semibold">This {cycleName} report covers:</span>{' '}
+        {coverage.included.length ? coverage.included.join(', ') : 'nothing scheduled yet'}
+        {coverage.cutoff ? <span className="text-sky-700"> — assessments scheduled up to {fmt(coverage.cutoff)}.</span> : null}
+      </p>
+      {coverage.excluded.length > 0 && (
+        <p className="text-sky-700">Not included (scheduled later): {coverage.excluded.join(', ')}. Publishing locks only the marks this report covers.</p>
+      )}
+      {coverage.unscheduled.length > 0 && (
+        <p className="text-amber-700">No schedule dates, so left out until the term&apos;s last report: {coverage.unscheduled.join(', ')}.</p>
+      )}
+    </div>
+  );
+}
+
 export default function ReportCardsTab() {
   const [classId, setClassId] = useState('');
   const [streamId, setStreamId] = useState('');
@@ -790,6 +820,12 @@ ${docs.map(h => `<div>${_bodyOf(h)}</div>`).join('\n')}
             </div>
           )}
         </div>
+        {/* Which assessments this report covers (v5.271.0) — worked out from
+            the assessment schedule: a Mid-Term cycle takes what is scheduled
+            up to the end of the Mid-Term window (server/utils/report-coverage.js). */}
+        {canQuery && !isKgClass && cycle && config.coverage && (
+          <CoverageNote coverage={config.coverage} cycleName={schoolCustomTypes.find(t => t.key === cycle)?.label || cycle} />
+        )}
         {/* "Just a label" — the Mid-Term/End-of-Term tag shown in place of
             "Term X" on the report card header (report-cards.js's
             _loadCycleLabel). Per {class, term, year}, survives a republish
@@ -856,8 +892,9 @@ ${docs.map(h => `<div>${_bodyOf(h)}</div>`).join('\n')}
                   <AlertTriangle size={13} /> Not published
                 </span>
                 <span>
-                  Marks and comments are still editable. Publishing locks the Markbook for this
-                  class and term and releases the cards to students and parents.
+                  Marks and comments are still editable. Publishing locks
+                  {config.coverage?.mode === 'by_schedule' ? ' the marks this report covers' : ' the Markbook for this class and term'}
+                  {' '}and releases the cards to students and parents.
                 </span>
               </>
             )}
@@ -977,6 +1014,7 @@ ${docs.map(h => `<div>${_bodyOf(h)}</div>`).join('\n')}
               customTypes={customTypes}
               gradeScale={gradeScale}
               instanceMarks={instanceMarksAll?.index?.[student.studentId]}
+              coveredKeys={config.coverage?.mode === 'by_schedule' ? config.coverage.includedKeys : null}
               draftComment={commentsMap?.[student.studentId]}
               onSaveComment={(data) => saveComment({ studentId: student.studentId, data })}
               onSaveSubjectComment={(subjectId, comment) => saveSubjectComment({ studentId: student.studentId, subjectId, comment })}

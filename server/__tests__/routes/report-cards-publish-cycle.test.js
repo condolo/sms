@@ -56,17 +56,19 @@ jest.mock('../../routes/assessment', () => ({ getConfig: jest.fn().mockResolvedV
 jest.mock('../../routes/report-card-templates', () => ({ resolveTemplate: jest.fn().mockResolvedValue({ templateId: null, templateVersion: null, layoutKey: 'subject_paired' }) }));
 
 let mockStudents, mockStreams, mockTeachers, mockGradeBoundaries, mockRcTemplates;
-let mockSnapshots, mockDraftComments, mockPublishBatches, mockCycleLabels;
+let mockSnapshots, mockDraftComments, mockPublishBatches, mockCycleLabels, mockMarks, mockSchedule, mockSubmissions;
 let mockSchool = { id: SCHOOL_A, name: 'Test School', houses: [] };
 
 function mockMatches(doc, filter) {
   for (const [key, cond] of Object.entries(filter)) {
     if (key === '$or') { if (!cond.some(sub => mockMatches(doc, sub))) return false; continue; }
+    if (key === '$and') { if (!cond.every(sub => mockMatches(doc, sub))) return false; continue; }
     const val = doc[key];
     if (cond === null) { if (val !== null && val !== undefined) return false; continue; }
     if (cond && typeof cond === 'object' && !Array.isArray(cond)) {
       if ('$in' in cond && !cond.$in.includes(val)) return false;
       if ('$ne' in cond && val === cond.$ne) return false;
+      if ('$exists' in cond && (cond.$exists ? val === undefined : val !== undefined)) return false;
     } else if (Array.isArray(val)) {
       if (!val.includes(cond)) return false;
     } else if (val !== cond) {
@@ -94,6 +96,10 @@ function mockCollFor(store) {
       return Promise.resolve({});
     },
     distinct: () => Promise.resolve([]),
+    updateMany: (filter, update) => {
+      for (const d of store.filter(x => mockMatches(x, filter))) Object.assign(d, update.$set);
+      return Promise.resolve({});
+    },
     create: (doc) => { store.push({ ...doc }); return Promise.resolve({ ...doc }); },
     bulkWrite: (ops) => {
       for (const op of ops) {
@@ -121,7 +127,8 @@ jest.mock('../../utils/tenant-model', () => ({
       grade_boundaries: mockGradeBoundaries, rc_templates: mockRcTemplates,
       report_card_snapshots: mockSnapshots, report_card_draft_comments: mockDraftComments,
       publish_batches: mockPublishBatches, report_card_cycle_labels: mockCycleLabels,
-      invoices: [], academic_years: [], academic_config: [], assessment_marks: [], mark_submissions: [],
+      invoices: [], academic_years: [], academic_config: [], assessment_marks: mockMarks, mark_submissions: mockSubmissions,
+      assessment_schedule: mockSchedule,
       sections: [{ id: 'sec_pri', schoolId: SCHOOL_A, key: 'primary' }],
       classes: [{ id: 'cls1', schoolId: SCHOOL_A, sectionKey: 'primary' }],
     };
@@ -158,6 +165,9 @@ beforeEach(() => {
   mockDraftComments = [];
   mockPublishBatches = [];
   mockCycleLabels = [];
+  mockMarks = [];
+  mockSchedule = [];
+  mockSubmissions = [];
   mockSchool = { id: SCHOOL_A, name: 'Test School', houses: [] };
 });
 
@@ -232,5 +242,65 @@ describe('POST /publish — cycle (2026-11): independently-visible reports per t
     const secondEt = mockSnapshots.find(s => s.id !== firstEtId);
     expect(secondEt.version).toBe(2);
     expect(secondEt.supersedesId).toBe(firstEtId);
+  });
+});
+
+/* v5.271.0 — a cycle report covers only the assessments scheduled up to
+   the end of its own window (utils/report-coverage.js). Asked for by a
+   school that sets HW/CA twice a term: "Mid-Term fetches only from the
+   start of the term to the mid-term assessment; End-Term fetches all." */
+describe('POST /publish — which assessments a cycle report covers (v5.271.0)', () => {
+  const { aggregateAssessmentMarks } = require('../../utils/academic-calc');
+  const { getConfig } = require('../../routes/assessment');
+  const TYPES = { customTypes: [
+    { key: 'HW', label: 'Homework', weight: 20, instances: 2 },
+    { key: 'MT', label: 'Mid-Term', weight: 30, instances: 1 },
+    { key: 'ET', label: 'End of Term', weight: 50, instances: 1 },
+  ] };
+  const sched = (assessmentType, instance, dateFrom, dateTo) =>
+    ({ schoolId: SCHOOL_A, termNumber: 2, academicYearId: 'year1', assessmentType, instance, dateFrom, dateTo });
+  const mark = (assessmentType, instance) => ({
+    schoolId: SCHOOL_A, classId: 'cls1', termNumber: 2, academicYearId: 'year1', studentId: 's1', subjectId: 'sub_eng',
+    assessmentType, ...(instance ? { instance } : {}), rawScore: 70, isPublished: true,
+  });
+
+  beforeEach(() => {
+    aggregateAssessmentMarks.mockClear();
+    getConfig.mockResolvedValue(TYPES);
+    mockSchedule = [
+      sched('HW', 1, '2026-05-04', '2026-05-15'),
+      sched('MT', 1, '2026-06-15', '2026-06-19'),
+      sched('HW', 2, '2026-06-29', '2026-07-10'),
+      sched('ET', 1, '2026-07-27', '2026-08-07'),
+    ];
+    // HW 1 saved before instances existed (no `instance` field); HW 2 and ET entered early.
+    mockMarks = [mark('HW'), mark('MT', 1), mark('HW', 2), mark('ET', 1)];
+  });
+
+  test('a Mid-Term publish uses only HW 1 and MT, and locks only those — HW 2 and ET stay open', async () => {
+    const res = await supertest(buildApp(ADMIN)).post('/api/report-cards/publish').send(publishBody({ cycle: 'MT' }));
+    expect(res.status).toBe(201);
+    const include = aggregateAssessmentMarks.mock.calls[0][5].include;
+    expect([...include].sort()).toEqual(['HW|1', 'MT|1']);
+    const locked = mockMarks.filter(m => m.isLocked).map(m => `${m.assessmentType}${m.instance || 1}`).sort();
+    expect(locked).toEqual(['HW1', 'MT1']);
+    expect(mockSubmissions.map(s => `${s.assessmentType}${s.instance}`).sort()).toEqual(['HW1', 'MT1']);
+    expect(mockSnapshots[0].coverage).toMatchObject({ mode: 'by_schedule', cutoff: '2026-06-19', included: ['HW 1', 'MT'] });
+    expect(mockSnapshots[0].coverage.excluded.sort()).toEqual(['ET', 'HW 2']);
+  });
+
+  test('the End-Term publish covers and locks the whole term', async () => {
+    await supertest(buildApp(ADMIN)).post('/api/report-cards/publish').send(publishBody({ cycle: 'MT' }));
+    aggregateAssessmentMarks.mockClear();
+    await supertest(buildApp(ADMIN)).post('/api/report-cards/publish').send(publishBody({ cycle: 'ET' }));
+    expect([...aggregateAssessmentMarks.mock.calls[0][5].include].sort()).toEqual(['ET|1', 'HW|1', 'HW|2', 'MT|1']);
+    expect(mockMarks.every(m => m.isLocked)).toBe(true);
+  });
+
+  test('no cycle: the whole term, exactly as before', async () => {
+    await supertest(buildApp(ADMIN)).post('/api/report-cards/publish').send(publishBody());
+    expect(aggregateAssessmentMarks.mock.calls[0][5].include).toBeNull();
+    expect(mockMarks.every(m => m.isLocked)).toBe(true);
+    expect(mockSnapshots[0].coverage.mode).toBe('whole_term');
   });
 });

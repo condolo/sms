@@ -7760,3 +7760,22 @@ The client mirrors these in `client/src/utils/lessonLabels.js` (`lessonTeachers`
 - Cover refused Saturday on a Saturday-school.
 
 Tests: `server/__tests__/routes/timetable-taught-together.test.js` (24) and solver tests (+5). Import/export round trip in `import-timetable-fields.test.js`. Seven older test files used hand-written query matchers without `$and`/null/`$size`; they now use (or follow) the shared `fixtures/fake-tenant-db.js` `matches`, which gained `$nin`, `$regex`, `$gt`, `$lt`, `$size`, RegExp values, null-matches-missing and exact-array equality.
+
+## Report coverage — which assessments a cycle report includes (v5.271.0, 2026-11-13)
+
+A report published with a `cycle` (see the `cycle` section above) now covers only the assessment instances scheduled up to that cycle. `server/utils/report-coverage.js` → `reportCoverage(ctx, schoolId, { termNumber, academicYearId, cycle, customTypes })`:
+
+- Reads `assessment_schedule` for the term (one window per type + instance; a year-tagged window wins over a legacy null-year one).
+- `cutoff` = the latest `dateTo` of the cycle type's windows. An instance is covered when its `dateFrom <= cutoff`.
+- No cycle → `mode: 'whole_term'`, `include: null` (unchanged). Cycle type has no window → `mode: 'cycle_unscheduled'`, `include: null` (the preview warns).
+- An instance without a window is covered only when the cycle is the term's last-ending window; otherwise it is listed in `unscheduled`.
+
+| Where | What |
+|---|---|
+| `academic-calc.js` `aggregateAssessmentMarks(..., { include })` | skips marks whose `TYPE|instance` is not covered (a missing `instance` counts as 1) |
+| `report-cards.js` `/generate`, `/publish` | same coverage for preview and publish; `config.coverage` in the preview, `coverage` on each snapshot (outside `_hashSnapshot`'s allowlist) |
+| `report-cards.js` Step 9b lock | `coverageMarkClause(coverage)` ANDed with the year filter: only covered marks and their `mark_submissions` combos are locked; combo `instance` normalised to 1 |
+| `_computeReportSections` | columns limited to covered types when `snap.coverage.mode === 'by_schedule'` |
+| `ReportCardsTab.jsx` / `StudentReportCard.jsx` | `CoverageNote`; `coveredKeys` limits per-instance columns |
+
+Kindergarten (`/kg/generate`, `/kg/publish`) is not affected.

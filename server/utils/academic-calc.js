@@ -92,8 +92,13 @@ async function aggregateUnmoderatedMarks(schoolId, classId, termNumber = null, a
  * @param {number|null} termNumber     — 1, 2, or 3; pass null to include all terms
  * @param {string|null} academicYearId
  * @param {string|null} studentId      — pass to scope to one student
+ * @param {{include?: Set<string>}} options — include: 'TYPE|instance' keys a report covers
  */
-async function aggregateAssessmentMarks(schoolId, classId, termNumber = null, academicYearId = null, studentId = null) {
+async function aggregateAssessmentMarks(schoolId, classId, termNumber = null, academicYearId = null, studentId = null, options = {}) {
+  // options.include (v5.271.0): a Set of 'TYPE|instance' a report covers (see
+  // utils/report-coverage.js) — a Mid-Term report leaves out HW 2/CA 2/ET.
+  // Omitted = every mark in the term, as before.
+  const include = options.include || null;
   const filter = { schoolId, classId, isPublished: true, ..._yearFilterPart(academicYearId) };
   if (termNumber != null) filter.termNumber = termNumber;
   if (studentId)          filter.studentId  = studentId;
@@ -105,6 +110,7 @@ async function aggregateAssessmentMarks(schoolId, classId, termNumber = null, ac
   for (const m of marks) {
     const { studentId: sid, subjectId, assessmentType, rawScore } = m;
     if (rawScore == null || !subjectId || !assessmentType) continue;
+    if (include && !include.has(`${assessmentType}|${m.instance || 1}`)) continue;
 
     grouped[sid]                            ??= {};
     grouped[sid][subjectId]                 ??= {};

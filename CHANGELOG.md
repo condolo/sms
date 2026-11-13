@@ -6,6 +6,51 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.271.0] - 2026-11-13 - feat(report-cards): a Mid-Term report covers only the assessments up to mid-term; End-Term covers the term
+
+Asked for by a school that sets HW and CA more than once a term: "the Mid-Term report card fetches only assessments from the start of the term to the mid-term assessment; the End-Term report fetches all of them for that term." Modelled on how reporting periods work in other school systems, using the assessment schedule schools already set up at the start of the term.
+
+### Added
+- **A report published for a cycle covers only the assessments up to that cycle.** Every assessment instance already has its own schedule window (Exams → Configuration → Assessment Schedule). A Mid-Term report (Report Cycle = MT) covers every instance whose window starts on or before the last day of the MT window, for example HW 1, CA 1 and MT. The End-Term report covers everything up to the end of ET, which is the whole term.
+- **Publishing locks only what the report covered.** HW 2, CA 2 or ET marks entered before the Mid-Term publish stay open and stay off the Mid-Term report.
+- **The preview says what the report covers**, e.g. "This Mid-Term report covers: CA 1, HW 1, MT, assessments scheduled up to 6 Mar 2026. Not included: CA 2, HW 2, ET." The card shows only the covered columns, on screen and when printed.
+- **Each published report records what it covered** (`coverage`: assessments and cut-off date) for audit.
+- A note in Assessment Schedule explains that the dates decide which report each assessment appears on.
+
+### Safe by default
+- **Report Cycle "Whole Term (default)"** behaves exactly as before.
+- **The cycle's own assessment has no dates this term:** every mark is included and the preview warns, so nothing is guessed.
+- **An instance with no dates** is left out of earlier reports and named in the preview. The term's last report includes it.
+- Already-published reports are unchanged and print as before.
+
+### Fixed
+- A mark saved before instances existed (no `instance`) got a lock record with no instance when published, so the Markbook never showed that column as locked. It now counts as instance 1.
+
+Files: new `server/utils/report-coverage.js`; `academic-calc.js` (`aggregateAssessmentMarks` option `include`); `report-cards.js` (generate, publish, lock, printed columns); `ReportCardsTab.jsx`, `StudentReportCard.jsx`, `ConfigTab.jsx`. Tests: `report-coverage.test.js` (8), `academic-calc-coverage.test.js` (2), `report-cards-publish-cycle.test.js` (+3), `report-cards-ir.test.js` (+2). Checked on the local demo: the Mid-Term preview of Form 1A uses CA 1, HW 1 and MT only (Biology 49.5 instead of 50.5); End-Term uses the whole term.
+
+---
+
+## [v5.270.2] - 2026-11-13 - fix(markbook): HW 2 / CA 2 can be entered after the Mid-Term report locks HW 1 / CA 1
+
+Reported by a school that sets homework and CA more than once a term. After the Mid-Term report was published (from MT, HW 1 and CA 1), teachers could not save HW 2 or CA 2: the Markbook said the report card had been published.
+
+### Fixed
+- **Saving HW 2 was refused because of HW 1.** Publishing locks the marks it used, one instance at a time, so HW 2 itself was never locked. But the Markbook grid saves every filled cell of the assessment it shows, so the locked HW 1 values went along with HW 2, and the server refused the **whole** save if any mark in it was locked. Now a locked mark sent back **unchanged** is skipped (`skippedLocked` in the response), and the save is refused only when it tries to **change** a locked mark. The refusal names the locked assessment and says nothing was saved.
+- **The Markbook no longer resends locked columns** when saving.
+- **A locked older mark saved without an academic year** is now recognised when a save carries the year (the old check matched the year exactly and missed it).
+
+### Confirmed (no change needed)
+- The End-Term report averages HW 1 with HW 2 and CA 1 with CA 2, then applies the weights with MT and ET.
+- With **Report Cycle** set (MT, then ET), the Mid-Term report stays published beside the End-Term one.
+- The amber **Deadline passed** badge is a reminder only; it never blocks saving.
+
+### Note
+From v5.271.0 (below), the assessment schedule decides which marks a Mid-Term report includes and locks.
+
+Tests: 4 new in `assessment-marks-submission-lock.test.js` (all fail on the previous code); also checked on the local demo.
+
+---
+
 ## [v5.270.1] - 2026-11-13 - fix(behaviour): older entries also show the subject and class to parents
 
 Who logged an entry, its subject and its class are worked out when the parent opens the list, so entries recorded before v5.266.0 were already meant to show them. Two kinds of older record still came up blank:

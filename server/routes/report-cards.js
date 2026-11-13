@@ -47,6 +47,7 @@ const { sectionIdForClass, resolveGradeScale } = require('../utils/grade-scale')
 const { isYearArchived } = require('../utils/archival');
 const { resolveRcTemplate } = require('../utils/rc-template-scale');
 const { computeKgReport }   = require('../utils/kg-report');
+const { reportCoverage, coverageMarkClause, coverageSummary } = require('../utils/report-coverage');
 const AuditService       = require('../services/audit');
 const { sanitisePdfStr } = require('../utils/sanitisePdf');
 const { notifyGuardiansForStudents } = require('../utils/notify-students');
@@ -729,7 +730,11 @@ router.post('/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
     // new design every not-yet-published class would always show
     // "provisional" (nothing is ever "approved" before publish locks it
     // directly), which is no longer a meaningful signal.
-    const caMarksData = await aggregateAssessmentMarks(schoolId, classId, termNum ?? null, scope.academicYearId, studentId);
+    // Which assessments this report covers (v5.271.0): a Mid-Term cycle
+    // takes only what is scheduled up to the end of the Mid-Term window —
+    // see utils/report-coverage.js. No cycle = the whole term, as before.
+    const coverage = await reportCoverage(ctx, schoolId, { termNumber: termNum, academicYearId: scope.academicYearId, cycle, customTypes: caConfig.customTypes });
+    const caMarksData = await aggregateAssessmentMarks(schoolId, classId, termNum ?? null, scope.academicYearId, studentId, { include: coverage.include });
 
     const activeWeights = _convertCustomTypesToWeights(caConfig.customTypes);
     const reportSectionId = await sectionIdForClass(schoolId, classId);
@@ -815,6 +820,7 @@ router.post('/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
         customTypes: caConfig.customTypes ?? null,
         reportLabel: cycleLabel || null,
         cycle: cycle || null,
+        coverage: coverageSummary(coverage),
         // Always the exact bands used to grade this response's subjects —
         // never null, normalised to one shape regardless of whether they
         // came from grade_boundaries or the academic_config fallback (Audit
@@ -919,7 +925,10 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
     // ── Step 3: Aggregate grades + CA marks, then compute scores ──
     // Markbook is the only mark source. scope.academicYearId — see
     // _resolveTermScope's comment above.
-    const caMarksData = await aggregateAssessmentMarks(schoolId, classId, termNum ?? null, scope.academicYearId);
+    // Same coverage as /generate (v5.271.0) — the published report holds
+    // exactly what its preview showed, and Step 9b locks only those marks.
+    const coverage = await reportCoverage(ctx, schoolId, { termNumber: termNum, academicYearId: scope.academicYearId, cycle, customTypes: caConfig.customTypes });
+    const caMarksData = await aggregateAssessmentMarks(schoolId, classId, termNum ?? null, scope.academicYearId, null, { include: coverage.include });
     const allReports = computeFinalScores(caMarksData, {}, activeWeights, activeSchema);
     attachDeviations(allReports);
 
@@ -1138,6 +1147,10 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
           // we get here; recording it in the hash would retroactively
           // invalidate every report published before this field existed.
           cycle:          cycle || null,
+          // Which assessments this report covered (v5.271.0) — an audit
+          // record of the schedule cut-off used; outside the hash allowlist
+          // for the same reason as cycle above.
+          coverage:       coverageSummary(coverage),
 
           // Immutable config snapshot — use active (CA-system-aware) weights and schema
           gradingSchema:          activeSchema,
@@ -1284,13 +1297,20 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
     try {
       const yearFilter = _lockYearFilterPart(scope.academicYearId);
       const Marks = tenantModel('assessment_marks', ctx);
-      const lockFilter = { schoolId, classId, termNumber: termNum, ...yearFilter };
+      // Only the marks this report covered (v5.271.0): publishing the
+      // Mid-Term report must not lock HW 2/CA 2/ET entered early — they
+      // were not on it, and the End-Term report still needs them open.
+      const lockFilter = { schoolId, classId, termNumber: termNum, $and: [yearFilter, coverageMarkClause(coverage)] };
       const combos = await Marks.find(lockFilter).select('subjectId assessmentType instance streamId').lean();
       // Deduped WITHOUT streamId — matches mark_submissions' real unique
       // index (see _lockSubmissionCombos). Whichever stream's row happens
       // to survive the dedup is only used as display metadata below.
+      // A mark saved before instances existed has no `instance`; it is
+      // instance 1 (the Markbook's own reading), so its lock record must
+      // say 1 too — an `undefined` one never showed the column as locked.
       const distinctCombos = [...new Map(
-        combos.map(c => [`${c.subjectId}::${c.assessmentType}::${c.instance}`, c])
+        combos.map(c => ({ ...c, instance: c.instance ?? 1 }))
+          .map(c => [`${c.subjectId}::${c.assessmentType}::${c.instance}`, c])
       ).values()];
 
       await Marks.updateMany(lockFilter, { $set: { isLocked: true, lockedAt: now } });
@@ -2659,7 +2679,13 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
   // has no snapshot of its own yet.
   const resolvedPrincipalName = snap.comments?.principalName || snap.schoolPrincipalName || school?.principalName || '';
 
-  const weights     = snap.assessmentWeights || [];
+  // A cycle report (v5.271.0) shows only the assessment types it covered —
+  // a Mid-Term report has no End-Term column. Older snapshots carry no
+  // coverage and keep every column.
+  const coveredTypes = snap.coverage?.mode === 'by_schedule' && Array.isArray(snap.coverage.includedKeys)
+    ? new Set(snap.coverage.includedKeys.map(k => String(k).split('|')[0]))
+    : null;
+  const weights     = (snap.assessmentWeights || []).filter(w => !coveredTypes || coveredTypes.has(w.assessmentType));
   const typeEntries = weights.map(w => ({
     key:   w.assessmentType,
     label: (w.label || w.assessmentType).split(/[\s/]+/)[0],

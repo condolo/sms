@@ -122,3 +122,20 @@ describe('_computeReportSections — the IR itself, directly', () => {
     });
   });
 });
+
+/* v5.271.0 — a cycle report shows only the assessment types it covered. */
+describe('_computeReportSections — report coverage columns (v5.271.0)', () => {
+  const base = golden.fixtures[0];
+  test('a Mid-Term report covering CA and MT has no End-Term column', () => {
+    const snap = { ...base.snap, coverage: { mode: 'by_schedule', includedKeys: ['CA|1', 'MT|1'] } };
+    const ir = reportCardsRouter._computeReportSections(snap, base.config, base.attendance);
+    expect(ir.resultsTable.typeEntries.map(t => t.key)).toEqual(['CA', 'MT']);
+    for (const row of ir.resultsTable.rows) expect(row.typeValues).toHaveLength(2);
+  });
+  test('older snapshots and whole-term reports keep every column', () => {
+    const plain = reportCardsRouter._computeReportSections(base.snap, base.config, base.attendance);
+    expect(plain.resultsTable.typeEntries.map(t => t.key)).toEqual(['CA', 'MT', 'ET']);
+    const whole = reportCardsRouter._computeReportSections({ ...base.snap, coverage: { mode: 'whole_term', includedKeys: null } }, base.config, base.attendance);
+    expect(whole.resultsTable.typeEntries.map(t => t.key)).toEqual(['CA', 'MT', 'ET']);
+  });
+});

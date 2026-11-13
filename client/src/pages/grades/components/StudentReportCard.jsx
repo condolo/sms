@@ -35,11 +35,15 @@ import { DEFAULT_CUSTOM_TYPES, _gradeFromScale } from '../constants.js';
 import { reportCards as reportCardsApi } from '@/api/client.js';
 
 /* ── Helpers ─────────────────────────────────────────────── */
-function buildColumns(types) {
+/* coveredKeys (v5.271.0): 'TYPE|instance' a cycle report covers — a
+   Mid-Term preview shows CA 1/HW 1/MT, not CA 2/HW 2/ET. null = all. */
+function buildColumns(types, coveredKeys = null) {
+  const covered = coveredKeys ? new Set(coveredKeys) : null;
   const cols = [];
   for (const t of types) {
     const n = t.instances ?? 1;
     for (let i = 1; i <= n; i++) {
+      if (covered && !covered.has(`${t.key}|${i}`)) continue;
       cols.push({ typeKey: t.key, instance: i, label: n > 1 ? `${t.label || t.key} ${i}` : (t.label || t.key) });
     }
   }
@@ -235,7 +239,7 @@ const StudentReportCard = forwardRef(function StudentReportCard({
   studentDeviations, behaviourSummary, snapshot,
   observationConfig, showRanking,
   attendanceSummary, showAttendance,
-  reportLabel,
+  reportLabel, coveredKeys = null,
 }, ref) {
   const types      = customTypes ?? DEFAULT_CUSTOM_TYPES;
   // No local fallback — the server always returns the exact bands it used
@@ -243,7 +247,7 @@ const StudentReportCard = forwardRef(function StudentReportCard({
   // An empty array here means "fail visibly" (─ / no grade shown), never
   // "silently compute against a different scale than the subject grades did."
   const bands      = [...(gradeScale?.bands ?? [])].sort((a, b) => b.min - a.min);
-  const columns    = buildColumns(types);
+  const columns    = buildColumns(types, coveredKeys);
   const meanGrade  = _gradeFromScale(student.averageScore, bands);
 
   const name  = studentInfo ? `${studentInfo.firstName} ${studentInfo.lastName}` : student.studentId;

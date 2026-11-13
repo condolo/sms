@@ -811,7 +811,12 @@ export default function ConfigTab() {
       {/* ══ Assessment Schedule ══════════════════════════════ */}
       <div className="bg-white border border-slate-200 rounded-xl p-5">
         <h3 className="text-sm font-semibold text-slate-800 mb-1">Assessment Schedule</h3>
-        <p className="text-xs text-slate-400 mb-4">Set date windows — teachers are reminded automatically when an assessment opens.</p>
+        <p className="text-xs text-slate-400 mb-1">Set date windows — teachers are reminded automatically when an assessment opens.</p>
+        <p className="text-xs text-slate-500 mb-4">
+          The dates also decide which report each assessment appears on. A report published for a cycle (for example Mid-Term) covers every assessment
+          that starts on or before the end of that cycle's own window. Give each instance its own dates (HW 1 before mid-term, HW 2 after) so the
+          Mid-Term report takes HW 1, CA 1 and MT, and the End-Term report takes the whole term.
+        </p>
         <div className="flex flex-wrap gap-3 items-end p-4 bg-slate-50 rounded-xl border border-slate-100 mb-4">
           <SelField label="Term" value={String(newSched.termNumber)} placeholder=""
             onChange={v => setNewSched(p => ({ ...p, termNumber: Number(v) }))}
