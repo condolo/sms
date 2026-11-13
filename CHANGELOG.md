@@ -23,9 +23,6 @@ Asked for by a school that sets HW and CA more than once a term: "the Mid-Term r
 - **An instance with no dates** is left out of earlier reports and named in the preview. The term's last report includes it.
 - Already-published reports are unchanged and print as before.
 
-### Fixed
-- A mark saved before instances existed (no `instance`) got a lock record with no instance when published, so the Markbook never showed that column as locked. It now counts as instance 1.
-
 Files: new `server/utils/report-coverage.js`; `academic-calc.js` (`aggregateAssessmentMarks` option `include`); `report-cards.js` (generate, publish, lock, printed columns); `ReportCardsTab.jsx`, `StudentReportCard.jsx`, `ConfigTab.jsx`. Tests: `report-coverage.test.js` (8), `academic-calc-coverage.test.js` (2), `report-cards-publish-cycle.test.js` (+3), `report-cards-ir.test.js` (+2). Checked on the local demo: the Mid-Term preview of Form 1A uses CA 1, HW 1 and MT only (Biology 49.5 instead of 50.5); End-Term uses the whole term.
 
 ---

@@ -7774,7 +7774,7 @@ A report published with a `cycle` (see the `cycle` section above) now covers onl
 |---|---|
 | `academic-calc.js` `aggregateAssessmentMarks(..., { include })` | skips marks whose `TYPE|instance` is not covered (a missing `instance` counts as 1) |
 | `report-cards.js` `/generate`, `/publish` | same coverage for preview and publish; `config.coverage` in the preview, `coverage` on each snapshot (outside `_hashSnapshot`'s allowlist) |
-| `report-cards.js` Step 9b lock | `coverageMarkClause(coverage)` ANDed with the year filter: only covered marks and their `mark_submissions` combos are locked; combo `instance` normalised to 1 |
+| `report-cards.js` Step 9b lock | `coverageMarkClause(coverage)` ANDed with the year filter: only covered marks and their `mark_submissions` combos are locked; combo `instance` kept exactly as stored (the unlock flow matches marks on `instance: sub.instance`) |
 | `_computeReportSections` | columns limited to covered types when `snap.coverage.mode === 'by_schedule'` |
 | `ReportCardsTab.jsx` / `StudentReportCard.jsx` | `CoverageNote`; `coveredKeys` limits per-instance columns |
 

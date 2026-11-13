@@ -284,7 +284,9 @@ describe('POST /publish — which assessments a cycle report covers (v5.271.0)',
     expect([...include].sort()).toEqual(['HW|1', 'MT|1']);
     const locked = mockMarks.filter(m => m.isLocked).map(m => `${m.assessmentType}${m.instance || 1}`).sort();
     expect(locked).toEqual(['HW1', 'MT1']);
-    expect(mockSubmissions.map(s => `${s.assessmentType}${s.instance}`).sort()).toEqual(['HW1', 'MT1']);
+    // Lock records carry the instance exactly as the mark stored it (HW 1 was
+    // saved without one) — the unlock flow matches marks on that value.
+    expect(mockSubmissions.map(s => `${s.assessmentType}${s.instance ?? '(none)'}`).sort()).toEqual(['HW(none)', 'MT1']);
     expect(mockSnapshots[0].coverage).toMatchObject({ mode: 'by_schedule', cutoff: '2026-06-19', included: ['HW 1', 'MT'] });
     expect(mockSnapshots[0].coverage.excluded.sort()).toEqual(['ET', 'HW 2']);
   });

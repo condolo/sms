@@ -1305,12 +1305,12 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
       // Deduped WITHOUT streamId — matches mark_submissions' real unique
       // index (see _lockSubmissionCombos). Whichever stream's row happens
       // to survive the dedup is only used as display metadata below.
-      // A mark saved before instances existed has no `instance`; it is
-      // instance 1 (the Markbook's own reading), so its lock record must
-      // say 1 too — an `undefined` one never showed the column as locked.
+      // The combo's `instance` is passed through exactly as stored. A mark
+      // saved without one gets a lock record without one, which the unlock
+      // flow (mark-submissions.js, filter `instance: sub.instance`) relies
+      // on to find those marks again — normalising it to 1 would break that.
       const distinctCombos = [...new Map(
-        combos.map(c => ({ ...c, instance: c.instance ?? 1 }))
-          .map(c => [`${c.subjectId}::${c.assessmentType}::${c.instance}`, c])
+        combos.map(c => [`${c.subjectId}::${c.assessmentType}::${c.instance}`, c])
       ).values()];
 
       await Marks.updateMany(lockFilter, { $set: { isLocked: true, lockedAt: now } });
