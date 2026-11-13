@@ -387,3 +387,76 @@ describe('staff Incidents list: Recorded By', () => {
     expect(res.body.data.find(d => d.id === 'inc_1').reportedByName).toBe('Mr Otieno');
   });
 });
+
+/* Asked (2026-11-13): does "who logged it / which subject" apply to entries
+   recorded BEFORE the feature? Names and subjects are resolved when the
+   parent reads, so yes — including two older-data shapes: entries saved
+   before 2026-08-03 have no classId, and many schools file a teacher's
+   assignments under the teacher RECORD id rather than the login id. */
+describe('entries recorded before the feature', () => {
+  async function seedOlder() {
+    await mockDb.model('users').insertMany([
+      { id: 'usr_t5', schoolId: S, role: 'teacher', name: 'Mrs Achieng', email: 'Achieng@school.test' },
+      { id: 'usr_t6', schoolId: S, role: 'teacher', name: 'Mr Kiprop', email: 'kiprop@school.test' },
+    ]);
+    await mockDb.model('teachers').insertMany([
+      { id: 'tch_5', schoolId: S, userId: 'usr_t5' },
+      // Never linked to a login — matched by email (case-insensitive).
+      { id: 'tch_6', schoolId: S, email: 'kiprop@school.test' },
+      // Linked to someone else — must not lend its subjects to usr_t5.
+      { id: 'tch_other', schoolId: S, userId: 'usr_t3', email: 'achieng@school.test' },
+    ]);
+    await mockDb.model('teaching_assignments').insertMany([
+      { schoolId: S, teacherId: 'tch_5', classId: 'cls_6', subjectId: 'sub_eng' },
+      { schoolId: S, teacherId: 'tch_6', classId: 'cls_6', subjectId: 'sub_math', subjectName: 'Mathematics' },
+    ]);
+    await mockDb.model('academic_years').insertMany([
+      { id: 'ay_old', schoolId: S, isCurrent: false, startDate: '2025-01-06', endDate: '2025-11-28' },
+      { id: 'ay_now', schoolId: S, isCurrent: true, startDate: '2026-01-05', endDate: '2026-11-27' },
+    ]);
+    await mockDb.model('behaviour_incidents').insertMany([
+      // No classId (pre-2026-08-03), logger's assignment under the teacher record id.
+      { id: 'inc_old1', schoolId: S, studentId: 'stu_1', reportedBy: 'usr_t5', title: 'No homework', points: -1, date: '2026-03-10' },
+      // Only createdBy, unlinked teacher record matched by email.
+      { id: 'inc_old2', schoolId: S, studentId: 'stu_1', createdBy: 'usr_t6', title: 'Talking in class', points: -1, date: '2026-05-04' },
+      // Last academic year: the child's class then is unknown — no guess.
+      { id: 'inc_old3', schoolId: S, studentId: 'stu_1', reportedBy: 'usr_t5', title: 'Late', points: -1, date: '2025-06-02' },
+    ]);
+  }
+
+  test('older entries show who logged them, the class, and the subject when the logger teaches one subject there', async () => {
+    await seedOlder();
+    const res = await as(PARENT).get('/api/parent-portal/behaviour/stu_1');
+    expect(res.status).toBe(200);
+    const byId = Object.fromEntries(res.body.data.map(d => [d.id, d]));
+    expect(byId.inc_old1).toMatchObject({ recordedBy: 'Mrs Achieng', subjectName: 'English', subjectInferred: true, className: 'Year 6' });
+    expect(byId.inc_old2).toMatchObject({ recordedBy: 'Mr Kiprop', subjectName: 'Mathematics', subjectInferred: true, className: 'Year 6' });
+  });
+
+  test('an entry from a previous academic year still names the logger but never guesses the class or subject', async () => {
+    await seedOlder();
+    const res = await as(PARENT).get('/api/parent-portal/behaviour/stu_1');
+    const old = res.body.data.find(d => d.id === 'inc_old3');
+    expect(old).toMatchObject({ recordedBy: 'Mrs Achieng', subjectName: null, subjectInferred: false, className: null });
+  });
+
+  test('no staff or student ids leak while resolving older entries', async () => {
+    await seedOlder();
+    const res = await as(PARENT).get('/api/parent-portal/behaviour/stu_1');
+    for (const d of res.body.data) {
+      expect(d).not.toHaveProperty('reportedBy');
+      expect(d).not.toHaveProperty('createdBy');
+      expect(d).not.toHaveProperty('classId');
+      expect(d).not.toHaveProperty('studentId');
+    }
+    expect(JSON.stringify(res.body)).not.toMatch(/school\.test|tch_|usr_t/);
+  });
+
+  test('with no academic year set up, an entry without a class is left unclassed rather than guessed', async () => {
+    await seedOlder();
+    await mockDb.model('academic_years').deleteMany({ schoolId: S });
+    const res = await as(PARENT).get('/api/parent-portal/behaviour/stu_1');
+    const old = res.body.data.find(d => d.id === 'inc_old1');
+    expect(old).toMatchObject({ recordedBy: 'Mrs Achieng', className: null, subjectName: null });
+  });
+});

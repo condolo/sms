@@ -91,26 +91,89 @@ async function recorderNames(ctx, schoolId, incidents) {
  * with none, the subject is filled in only when the person who logged it
  * teaches exactly one subject in that class — never a guess between two.
  */
+/* The class an incident was recorded in. Entries saved before 2026-08-03
+   carry no classId (behaviour.js now stamps it on create). For those, the
+   child's current class is used only when the entry falls inside the
+   current academic year — a child promoted since must not have last
+   year's entry shown against this year's class. */
+async function _classOfEach(ctx, schoolId, incidents) {
+  const classOf = {};
+  const missing = [];
+  for (const i of incidents) {
+    if (i.classId) classOf[i.id] = i.classId;
+    else if (i.studentId && i.date) missing.push(i);
+  }
+  if (!missing.length) return classOf;
+  const [years, students] = await Promise.all([
+    tenantModel('academic_years', ctx).find({ schoolId }).select('isCurrent startDate endDate').lean(),
+    tenantModel('students', ctx)
+      .find({ schoolId, id: { $in: [...new Set(missing.map(i => i.studentId))] } }).select('id classId').lean(),
+  ]);
+  const today = new Date().toISOString().slice(0, 10);
+  const year = years.find(y => y.isCurrent)
+    || years.find(y => y.startDate && y.endDate && y.startDate <= today && y.endDate >= today);
+  if (!year || !year.startDate || !year.endDate) return classOf;
+  const studentClass = Object.fromEntries(students.map(s => [s.id, s.classId]));
+  for (const i of missing) {
+    const day = String(i.date).slice(0, 10);
+    if (day >= year.startDate && day <= year.endDate && studentClass[i.studentId]) {
+      classOf[i.id] = studentClass[i.studentId];
+    }
+  }
+  return classOf;
+}
+
+/* Every id a logger can appear under in teaching_assignments.teacherId:
+   their user id, Mongo _id, and the id of the teacher record linked to
+   them (by userId, or by email when the record was never linked) — the
+   same forms scopeMiddleware._teacherIdForms accepts. Returns
+   { [formId]: loggerId }. */
+async function _loggerIdForms(ctx, schoolId, loggerIds) {
+  const owner = {};
+  for (const id of loggerIds) owner[id] = id;
+  const users = await tenantModel('users', ctx)
+    .find({ schoolId, ...byUserIds(loggerIds) }).select('id email').lean();
+  const loginOwner = {};
+  const emailOwner = {};
+  for (const u of users) {
+    const logger = loggerIds.find(l => l === u.id || l === String(u._id));
+    if (!logger) continue;
+    for (const f of [u.id, String(u._id)].filter(Boolean)) { owner[f] = logger; loginOwner[f] = logger; }
+    if (u.email) { emailOwner[String(u.email)] = logger; emailOwner[String(u.email).toLowerCase()] = logger; }
+  }
+  const tOr = [{ userId: { $in: Object.keys(loginOwner) } }];
+  if (Object.keys(emailOwner).length) tOr.push({ email: { $in: Object.keys(emailOwner) } });
+  const teachers = await tenantModel('teachers', ctx).find({ schoolId, $or: tOr }).select('id userId email').lean();
+  for (const t of teachers) {
+    if (!t.id) continue;
+    const logger = t.userId ? loginOwner[t.userId] : emailOwner[String(t.email || '')];
+    if (logger) owner[t.id] = logger;   // a record linked to someone else is never borrowed
+  }
+  return owner;
+}
+
 async function whereRecorded(ctx, schoolId, incidents) {
   const out = {};
-  const classIds = [...new Set(incidents.map(i => i.classId).filter(Boolean))];
+  const classOf = await _classOfEach(ctx, schoolId, incidents);
+  const classIds = [...new Set(Object.values(classOf).filter(Boolean))];
   const classDocs = classIds.length
     ? await tenantModel('classes', ctx).find({ schoolId, id: { $in: classIds } }).select('id name').lean()
     : [];
   const classNames = Object.fromEntries(classDocs.map(c => [c.id, c.name]));
 
-  const needInference = incidents.filter(i => !i.subjectName && loggerOf(i) && i.classId);
+  const needInference = incidents.filter(i => !i.subjectName && loggerOf(i) && classOf[i.id]);
   const onlySubject = {};
   if (needInference.length) {
+    const owner = await _loggerIdForms(ctx, schoolId, [...new Set(needInference.map(loggerOf))]);
     const rows = await tenantModel('teaching_assignments', ctx).find({
       schoolId,
-      teacherId: { $in: [...new Set(needInference.map(loggerOf))] },
-      classId: { $in: [...new Set(needInference.map(i => i.classId))] },
+      teacherId: { $in: Object.keys(owner) },
+      classId: { $in: [...new Set(needInference.map(i => classOf[i.id]))] },
     }).select('teacherId classId subjectId subjectName').lean();
     const byPair = new Map();
     for (const r of rows) {
-      if (!r.subjectId) continue;
-      const key = `${r.teacherId}|${r.classId}`;
+      if (!r.subjectId || !owner[r.teacherId]) continue;
+      const key = `${owner[r.teacherId]}|${r.classId}`;
       if (!byPair.has(key)) byPair.set(key, new Map());
       byPair.get(key).set(r.subjectId, r.subjectName || null);
     }
@@ -130,11 +193,11 @@ async function whereRecorded(ctx, schoolId, incidents) {
   }
 
   for (const i of incidents) {
-    const inferred = !i.subjectName ? onlySubject[`${loggerOf(i)}|${i.classId}`] : null;
+    const inferred = !i.subjectName ? onlySubject[`${loggerOf(i)}|${classOf[i.id]}`] : null;
     out[i.id] = {
       subjectName: i.subjectName || inferred?.subjectName || null,
       subjectInferred: !i.subjectName && !!inferred?.subjectName,
-      className: classNames[i.classId] || null,
+      className: classNames[classOf[i.id]] || null,
     };
   }
   return out;

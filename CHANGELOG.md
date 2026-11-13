@@ -6,6 +6,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.270.1] - 2026-11-13 - fix(behaviour): older entries also show the subject and class to parents
+
+Who logged an entry, its subject and its class are worked out when the parent opens the list, so entries recorded before v5.266.0 were already meant to show them. Two kinds of older record still came up blank:
+
+### Fixed
+- **Entries saved before 2026-08-03 have no class stored**, so the parent saw no class and no subject. They now use the child's current class, but only when the entry is dated inside the current academic year: a child promoted since never has last year's entry shown against this year's class, and with no academic year set up nothing is guessed.
+- **The subject was never found when a school files a teacher's assignments under their staff record** instead of their login. The logger is now matched by every id they can appear under (login id, database id, and the staff record linked to them by login or, if never linked, by email; a record linked to someone else is never used). The subject is still filled in only when that teacher teaches exactly one subject in the class.
+
+Parents still see display names only; no staff or student ids reach the response. Tests: 4 new in `behaviour-parent-replies.test.js` (the main one fails on the previous code).
+
+---
+
 ## [v5.270.0] - 2026-11-13 - feat(timetable): co-teaching, streams taught together, subject time rules — and every module that reads lessons aligned
 
 The three features the timetable didn't support, plus an audit of every place that reads lessons or teaching assignments.

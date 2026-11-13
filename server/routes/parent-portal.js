@@ -468,7 +468,7 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
     ] = await Promise.all([
       Behaviour.find({ schoolId, studentId: childId, ...NOT_DELETED_INCIDENT })
         .sort({ date: -1, createdAt: -1 }).limit(50)
-        .select('id points type category description date title reportedBy createdBy classId subjectName').lean()
+        .select('id points type category description date title reportedBy createdBy classId studentId subjectName').lean()
         .catch(() => []),
       student.classId
         ? Exams.find({ schoolId, classId: student.classId, date: { $gte: todayISO } })
@@ -535,7 +535,7 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
     const latestRewardRaw = bRecords.find(r => (Number(r.points) || 0) > 0) || null;
     const summaryPicks = [latestRewardRaw, bRecords[0]].filter(Boolean);
     const summaryOut = await _withRecordedByAndWhere(req, summaryPicks)
-      .catch(() => summaryPicks.map(({ reportedBy, createdBy, classId, ...d }) => d));
+      .catch(() => summaryPicks.map(({ reportedBy, createdBy, classId, studentId, ...d }) => d));
     const summaryById = Object.fromEntries(summaryOut.map(d => [d.id, d]));
     const latestReward  = latestRewardRaw ? summaryById[latestRewardRaw.id] ?? null : null;
     const latestComment = bRecords[0] ? summaryById[bRecords[0].id] ?? null : null;
@@ -925,7 +925,7 @@ router.get('/behaviour/:childId', authMiddleware, PLAN, async (req, res) => {
       .find({ schoolId, studentId: childId, ...NOT_DELETED_INCIDENT })
       .sort({ date: -1, createdAt: -1 })
       .limit(200)
-      .select('id date type category title description severity points location action detention detentionDate reportedBy createdBy classId subjectName')
+      .select('id date type category title description severity points location action detention detentionDate reportedBy createdBy classId studentId subjectName')
       .lean();
 
     return ok(res, await _withRecordedByAndWhere(req, docs));
@@ -950,7 +950,7 @@ async function _withRecordedByAndWhere(req, docs) {
     behaviourReplies.whereRecorded(ctx, schoolId, docs),
     behaviourReplies.replyCounts(ctx, schoolId, docs.map(d => d.id), { viewerId: userId, parentUserId: userId }),
   ]);
-  return docs.map(({ reportedBy, createdBy, classId, ...d }) => ({
+  return docs.map(({ reportedBy, createdBy, classId, studentId, ...d }) => ({
     ...d,
     recordedBy: names[reportedBy || createdBy] || null,
     subjectName: where[d.id]?.subjectName || null,
