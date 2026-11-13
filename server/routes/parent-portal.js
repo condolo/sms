@@ -144,6 +144,21 @@ router.get('/children', authMiddleware, PLAN, async (req, res) => {
       .select('id firstName lastName admissionNumber classId className photo status')
       .lean();
 
+    /* Some real student documents carry `classId` but no denormalised
+       `className` (the admin list resolves it from the class, the portal did
+       not). A parent switching between siblings then saw a blank class line
+       for exactly the children whose document was written by an older import.
+       Resolve the missing names once, from the ids already on the rows. */
+    const classIds = [...new Set(children.map(c => c.classId).filter(Boolean))];
+    const classRows = classIds.length
+      ? await tenantModel('classes', tenantContext(req))
+          .find({ schoolId, id: { $in: classIds } })
+          .select('id name')
+          .lean()
+          .catch(() => [])
+      : [];
+    const classNames = new Map(classRows.map(c => [c.id, c.name]));
+
     return ok(res, children.map(c => ({
       id:              c.id,
       name:            `${c.firstName} ${c.lastName}`,
@@ -154,7 +169,7 @@ router.get('/children', authMiddleware, PLAN, async (req, res) => {
       lastName:        c.lastName,
       admissionNumber: c.admissionNumber,
       classId:         c.classId,
-      className:       c.className,
+      className:       c.className || classNames.get(c.classId) || null,
       photo:           c.photo || null,
       status:          c.status || 'active',
     })));
