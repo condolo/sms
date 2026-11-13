@@ -1723,8 +1723,18 @@ router.get('/profile', authMiddleware, PLAN, async (req, res) => {
       Users.findOne({ id: userId, schoolId }).select('id name email phone createdAt lastLogin').lean(),
       Schools.findOne({ id: schoolId }).select('name logoUrl slug currency systemEmail').lean(),
       Students.find({ id: { $in: _linkedIds(req) }, schoolId })
-        .select('id firstName lastName className admissionNumber photo status').lean(),
+        .select('id firstName lastName classId className admissionNumber photo status').lean(),
     ]);
+
+    const profileClassIds = [...new Set(children.map(c => c.classId).filter(Boolean))];
+    const profileClasses = profileClassIds.length
+      ? await tenantModel('classes', tenantContext(req))
+          .find({ schoolId, id: { $in: profileClassIds } })
+          .select('id name')
+          .lean()
+          .catch(() => [])
+      : [];
+    const profileClassNames = new Map(profileClasses.map(c => [c.id, c.name]));
 
     // Primary vs co-guardian is the board's distinction and it changes what a
     // parent may do (a co-guardian does not manage the child's account). The
@@ -1732,7 +1742,7 @@ router.get('/profile', authMiddleware, PLAN, async (req, res) => {
     const childrenOut = children.map(c => ({
       id: c.id,
       name: `${c.firstName || ''} ${c.lastName || ''}`.trim(),
-      className: c.className || null,
+      className: c.className || profileClassNames.get(c.classId) || null,
       admissionNumber: c.admissionNumber || null,
       photoUrl: c.photo || null,
       relationship: studentIds.includes(c.id) ? 'primary' : 'co-guardian',
