@@ -1121,6 +1121,10 @@ function MarkbookTab({ years }) {
       for (const s of students) {
         const sid = s.id ?? s._id;
         for (const col of cols) {
+          // A column locked by a published report (e.g. HW 1 after the
+          // Mid-Term report) is read-only — never resend it while the
+          // teacher fills in the next instance (HW 2).
+          if (isInstanceReadOnly(col.instance)) continue;
           const v = scores[sid]?.[col.colId];
           const markState = markStates[sid]?.[col.colId] ?? 'present';
           // A truly untouched cell (no score, still the default 'present')

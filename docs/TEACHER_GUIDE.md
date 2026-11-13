@@ -179,6 +179,15 @@ If you already wrote the term's lesson plans in a Word document (a completed ver
 
 The Markbook protects unsaved edits when you change selectors by asking before discarding them. Save first if you want to keep the entries. A published report card locks its marks; ask an authorized administrator about the correction/unlock process if a published mark is wrong.
 
+### After a Mid-Term report: entering HW 2, CA 2 and the End-Term exam
+
+Many schools set homework (HW) and continuous assessment (CA) more than once a term and publish a Mid-Term report before the End-Term one.
+
+- The assessment schedule decides which report each assessment is on. The Mid-Term report covers what is scheduled up to the end of the Mid-Term exam window, for example HW 1, CA 1 and MT. Publishing it locks only those, and their columns show **Locked**.
+- HW 2, CA 2 and ET stay open, even if you entered some marks early. Select the same HW (or CA) assessment, fill in the **HW 2** column, and select **Save All Marks**. The locked HW 1 column is left as it is. Marks are saved even if the assessment window shows **Deadline passed**; that badge is a reminder, not a lock.
+- The End-Term report covers the whole term: it averages HW 1 with HW 2, and CA 1 with CA 2, then applies the school's weights together with MT and ET.
+- If a locked mark is wrong, don't re-enter it under another instance. Ask an authorized administrator for a correction unlock.
+
 ### If a mark or student seems missing
 
 - Confirm the academic year, term, class, stream, subject, assessment, and instance are all the ones used when the mark was entered.

@@ -1427,35 +1427,7 @@ router.post('/marks/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
       );
     }
 
-    // Guard: reject if any target marks are locked (post-approval lock).
-    // academicYearId deliberately included now — found during the Academic
-    // Year dependency-map fix below: an unscoped $or here meant a locked
-    // mark from one year could block writing the *same* student/subject/
-    // term/type/instance key in a completely different, unrelated year.
-    // That was mostly invisible before (every mark shared academicYearId:
-    // null, so year never differentiated anything); it becomes a real,
-    // user-visible false-block the moment marks are correctly year-tagged,
-    // so it has to move together with that fix, not after it.
     const Marks = tenantModel('assessment_marks', tenantContext(req));
-    const lockedSample = await Marks.findOne({
-      schoolId,
-      isLocked: true,
-      $or: marks.map(d => ({
-        studentId:      d.studentId,
-        subjectId:      d.subjectId,
-        termNumber:     d.termNumber,
-        assessmentType: d.assessmentType,
-        instance:       d.instance,
-        academicYearId: d.academicYearId || null,
-      })),
-    }).lean();
-    // Submit-for-review no longer blocks editing (2026-10-13 workflow
-    // redesign) — see the single-mark route's identical comment.
-    // isLocked (checked just above) is now set automatically AT PUBLISH
-    // time, not by a review step; it remains the only pre-publish gate.
-    if (lockedSample) {
-      return _err(res, 'Some marks in this batch are locked — the report card for this term has been published. Ask an admin to unlock it for a correction.', 403);
-    }
 
     // Optimistic concurrency (mirrors exams.js's POST /:id/results — same
     // pattern, applied here because this endpoint, not exam_results, is
@@ -1499,9 +1471,42 @@ router.post('/marks/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
       existingMarkMap[_markKey(d)]
       ?? (d.academicYearId ? existingMarkMap[_markKey({ ...d, academicYearId: null })] : undefined);
 
+    /* Locked marks (set automatically when a report card is published).
+       The Markbook grid saves every filled cell of the assessment it shows,
+       so after a Mid-Term publish locked HW 1, a teacher entering HW 2 sent
+       HW 1's unchanged values too — and the whole save was refused with
+       "the report card has been published" (reported by a school running
+       HW/CA more than once a term, 2026-11-13). A locked mark sent back
+       UNCHANGED is now skipped; only an attempt to CHANGE one is refused.
+       Uses the same existing-mark lookup as below, so a locked legacy row
+       saved without an academicYearId is caught too (the old check matched
+       the incoming year exactly and missed it). */
+    const _sameValue = (d, m) => {
+      const state = d.markState || 'present';
+      if (state !== (m.markState || 'present')) return false;
+      if (state !== 'present') return true;
+      return m.rawScore != null && Math.abs(Number(m.rawScore) - Number(d.rawScore)) < 1e-9;
+    };
+    const lockedChanged = [];
+    const toWrite = [];
+    let skippedLocked = 0;
+    for (const d of marks) {
+      const existing = _findExisting(d);
+      if (existing?.isLocked) {
+        if (_sameValue(d, existing)) { skippedLocked++; continue; }
+        lockedChanged.push(d);
+        continue;
+      }
+      toWrite.push(d);
+    }
+    if (lockedChanged.length) {
+      const labels = [...new Set(lockedChanged.map(d => _label(d.assessmentType, d.instance)))].join(', ');
+      return _err(res, `${labels} ${lockedChanged.length === 1 ? 'is' : 'are'} locked — the report card for this term has been published. Nothing was saved. Ask an admin to unlock it for a correction; other assessments can still be entered.`, 403);
+    }
+
     const conflicts = [];
     const writableMarks = [];
-    for (const d of marks) {
+    for (const d of toWrite) {
       const existing = _findExisting(d);
       if (existing && d._v != null && Number(d._v) !== (existing._v ?? 0)) {
         conflicts.push({
@@ -1567,6 +1572,7 @@ router.post('/marks/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
       upserted:  result.upsertedCount,
       modified:  result.modifiedCount,
       total:     marks.length,
+      skippedLocked,
       conflicts,
     }, null, 201);
   } catch (err) {

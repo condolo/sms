@@ -131,6 +131,22 @@ The same publish-time lock principle applies to Kindergarten indicator marks and
 
 Publication creates a versioned snapshot. If corrections require republishing, use the supported correction workflow so the earlier snapshot remains part of the history. Do not assume later grading/template changes automatically rewrite an already-published report.
 
+### Mid-Term and End-Term reports in the same term
+
+For a school that sets HW and CA more than once a term (HW 1 and CA 1 before mid-term, HW 2 and CA 2 after), the **assessment schedule** decides which report each assessment appears on.
+
+1. **At the start of the term:** in **Exams → Configuration → Assessment Schedule**, give every instance its own dates, for example HW 1 in January, CA 1 in February, MT in early March, then HW 2, CA 2 and ET after it.
+2. **Mid-Term:** in **Generate & Publish**, set **Report Cycle** to the Mid-Term assessment (for example MT). The preview says what the report covers: every assessment that **starts on or before the last day of the Mid-Term window** (here HW 1, CA 1 and MT), and what it leaves out (HW 2, CA 2, ET). Only those columns appear on the card. Publishing locks only the marks the report covers, so HW 2, CA 2 or ET marks entered early stay open and stay off this report.
+3. **After mid-term:** teachers enter HW 2, CA 2 and later ET in the Markbook as normal. Locked HW 1/CA 1 columns stay read-only beside them and don't block saving.
+4. **End-Term:** set **Report Cycle** to the End-Term assessment (for example ET), then publish. ET is the term's last window, so the report covers the whole term: it averages HW 1 with HW 2 and CA 1 with CA 2, then applies the weights with MT and ET. The Mid-Term report stays published as its own report.
+
+Things to know:
+
+- **No dates for the cycle's own assessment** (for example MT has no window this term): the preview warns, and the report includes every mark in the term, as before.
+- **An instance with no dates** is left out of earlier reports and named in the preview. The term's last report includes it.
+- **Report Cycle left on "Whole Term (default)"** works exactly as before: every mark in the term, with everything locked on publish. If you publish both reports this way, the End-Term report replaces the Mid-Term one as a new version instead of sitting beside it.
+- Each published report records what it covered and its cut-off date, for later checks.
+
 ## 10. Reminders and troubleshooting
 
 Use **Reminders** to review upcoming sittings and marking tasks available to your role. A reminder is not proof that a teacher's mark has or has not saved; verify the Markbook selection and record.

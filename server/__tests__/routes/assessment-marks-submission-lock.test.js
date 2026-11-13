@@ -146,10 +146,44 @@ describe('POST /api/assessment/marks/bulk — submitted/approved no longer block
     expect(mockBulkWrite).toHaveBeenCalledTimes(1);
   });
 
-  test('a locked mark (assessment_marks.isLocked, set automatically at publish) still blocks the batch', async () => {
+  test('CHANGING a locked mark (assessment_marks.isLocked, set automatically at publish) still blocks the batch', async () => {
     mockSubmissionDocs = [{ ...SUB, id: 'sub_1', status: 'locked' }];
-    mockMarksFindOne.mockReturnValue(mockChain(() => ({ isLocked: true })));
+    mockMarksFind.mockReturnValue(mockChain(() => [{ ...MARK, schoolId: 'school_test_001', academicYearId: null, rawScore: 60, markState: 'present', isLocked: true, _v: 1 }]));
     const res = await supertest(buildApp()).post('/api/assessment/marks/bulk').send({ marks: [MARK] });
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/CA is locked/);
+    expect(mockBulkWrite).not.toHaveBeenCalled();
+  });
+
+  /* Reported 2026-11-13 (a school running HW/CA twice a term): the Mid-Term
+     report locked HW 1; entering HW 2 then failed because the Markbook grid
+     saves every filled cell, HW 1's unchanged values included. */
+  test('after a Mid-Term publish locks HW 1, saving HW 2 alongside the UNCHANGED HW 1 values succeeds and writes only HW 2', async () => {
+    const HW1 = { ...MARK, assessmentType: 'HW', instance: 1, rawScore: 70 };
+    const HW2 = { ...MARK, assessmentType: 'HW', instance: 2, rawScore: 82 };
+    mockMarksFind.mockReturnValue(mockChain(() => [{ ...HW1, schoolId: 'school_test_001', academicYearId: null, markState: 'present', isLocked: true, _v: 1 }]));
+    const res = await supertest(buildApp()).post('/api/assessment/marks/bulk').send({ marks: [{ ...HW1, _v: 1 }, HW2] });
+    expect(res.status).toBe(200);
+    expect(res.body.data.skippedLocked).toBe(1);
+    expect(mockBulkWrite).toHaveBeenCalledTimes(1);
+    const ops = mockBulkWrite.mock.calls[0][0];
+    expect(ops).toHaveLength(1);
+    expect(ops[0].updateOne.filter).toMatchObject({ assessmentType: 'HW', instance: 2 });
+  });
+
+  test('an unchanged locked non-present state (e.g. Absent) is skipped too', async () => {
+    const HW1 = { ...MARK, assessmentType: 'HW', instance: 1, markState: 'ABS', rawScore: undefined };
+    mockMarksFind.mockReturnValue(mockChain(() => [{ ...HW1, schoolId: 'school_test_001', academicYearId: null, rawScore: null, isLocked: true }]));
+    const res = await supertest(buildApp()).post('/api/assessment/marks/bulk').send({ marks: [HW1] });
+    expect(res.status).toBe(200);
+    expect(res.body.data.skippedLocked).toBe(1);
+    expect(mockBulkWrite).not.toHaveBeenCalled();
+  });
+
+  test('a locked LEGACY mark saved without an academic year is caught when the save carries a year', async () => {
+    const withYear = { ...MARK, academicYearId: 'ay_2026', rawScore: 90 };
+    mockMarksFind.mockReturnValue(mockChain(() => [{ ...MARK, schoolId: 'school_test_001', academicYearId: null, rawScore: 60, markState: 'present', isLocked: true }]));
+    const res = await supertest(buildApp()).post('/api/assessment/marks/bulk').send({ marks: [withYear] });
     expect(res.status).toBe(403);
     expect(mockBulkWrite).not.toHaveBeenCalled();
   });
