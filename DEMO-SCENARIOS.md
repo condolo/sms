@@ -58,6 +58,17 @@ Weeks are computed at seed time: the **three most recently completed Mon–Fri
 weeks** (the ones Saturday's snapshot cron would already have written). At the
 time of writing that was `2026-10-05`, `2026-10-12`, `2026-10-19`.
 
+A snapshot is frozen once written: correcting a lesson-coverage row afterwards
+does **not** change the week already stored. Rebuild it with
+
+```powershell
+POST /api/weekly-snapshots/regenerate   { "weekStart": "2026-11-09" }
+```
+
+(admin; `weekly_snapshot:create`). It replaces exactly that week's rows for the
+whole school and deliberately sends no guardian notifications. Pass a
+`classId` to rebuild one class only.
+
 Every figure quoted below was read back from the running API, not from the file.
 
 ## Students — log in with the admission number
