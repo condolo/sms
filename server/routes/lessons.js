@@ -1137,10 +1137,15 @@ router.post('/coverage', authMiddleware, PLAN, MODGATE, rbac('lessons', 'create'
       .findOne({ id: data.topicId, schoolId, subjectId: data.subjectId, ..._topicClassFilterPart(data.classId) }).lean();
     if (!topic) return E.notFound(res, 'Topic not found');
 
-    // If subtopicId provided, validate it belongs to the topic
+    // If subtopicId provided, validate it belongs to the topic. Keep the
+    // matched subtopic: its TITLE is denormalized onto the coverage row below,
+    // exactly like the topic's. Without it every subtopic-based row (and so
+    // every Weekly Snapshot line) rendered the topic name and nothing else —
+    // three leaves of one topic read as three identical "Cell biology" rows.
+    let subtopic = null;
     if (data.subtopicId) {
-      const stExists = (topic.subtopics || []).some(st => st.id === data.subtopicId);
-      if (!stExists) return E.notFound(res, 'Subtopic not found on this topic');
+      subtopic = (topic.subtopics || []).find(st => st.id === data.subtopicId) || null;
+      if (!subtopic) return E.notFound(res, 'Subtopic not found on this topic');
     }
 
     const teacherName = await _teacherNameFor(req, effectiveTeacherId);
@@ -1167,6 +1172,7 @@ router.post('/coverage', authMiddleware, PLAN, MODGATE, rbac('lessons', 'create'
         className:   data.classId,   // will be enriched below
         subjectName: topic.subjectName || '',
         topicTitle:  topic.title,
+        subtopicTitle: subtopic?.title || '',
         coveredAt:   data.coveredAt || new Date().toISOString(),
         notes:       data.notes || '',
         updatedBy:   userId,
