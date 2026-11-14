@@ -1,6 +1,40 @@
 # Demo personas — what each login is there to prove
 
-`demo` / `demo` school, `sch_demo`. Password for **every** account below is `Demo2025!`.
+`demo` / `demo` school, `sch_demo`.
+
+## Two different schools share this sheet
+
+The **local seed** (`npm run seed:scenarios`) creates every persona below.
+The **live demo** at `demo.msingi.io` is a production deployment: `seedDemo()`
+returns early when `NODE_ENV=production` unless `ALLOW_DEMO_SEED=1`, so its
+database keeps whatever it was originally seeded with plus every QA edit
+since. A row below is not a promise that the login exists there.
+
+**Guaranteed on the live demo** — the six base accounts, password
+`Demo2025!`: `admin@demo.msingi.io`, `principal@demo.msingi.io`,
+`teacher@demo.msingi.io`, `finance@demo.msingi.io`,
+`parent@demo.msingi.io`, `demo-student`.
+
+Verified against the live API on **14 Nov 2026**:
+
+- `parent@demo.msingi.io` has **three** children — Amara Osei (Form 1A),
+  Brian Onyango (Form 1A), Faith Mwangi (Std 4A) — so the live child
+  switcher is this account, not `john.mwangi@gmail.com`.
+- `john.mwangi@gmail.com` and `hassan.omar@gmail.com` exist as users, but
+  their live passwords are **not** `Demo2025!` (provisioned by an earlier
+  seed and never reset). Locally John has James + Faith; live he has James.
+- `otieno.onyango@yahoo.com` (Brian) and `abena.osei@gmail.com` (Amara) also
+  exist live with unknown passwords; they are not in the local persona sheet.
+- The live roll is **32 students / 31 active**: the base 26, the two QA
+  enrolments below (`ADM-2026-00007`, `ADM-2026-00008`) and the other
+  QA-created records — not a second actor.
+- QA-issued logins that still work: teacher
+  `qa.teacher.2026@demo.msingi.io` / `RZ!y3epPFT5`, finance
+  `qa.staff.2026@demo.msingi.io` / `!N5N9PQRxwY`, student
+  `ADM-2026-00008` / `Student2026!`.
+
+The tables below describe the **local** seed. Run them on a local server, or
+after `npm run seed:scenarios` against the target database.
 
 The base seed (`server/scripts/seed-demo-data.js`) gives the school its records:
 26 students, 10 teachers, a full term of marks, invoices, timetable, behaviour.
@@ -13,7 +47,8 @@ this sheet documents.
 npm run seed:scenarios    # the whole demo school + every persona below
 ```
 
-It runs last inside `seedDemo()`, so it also re-applies on every server start.
+It runs last inside `seedDemo()`, so it also re-applies on every server start
+**in development** (production skips the whole seed unless `ALLOW_DEMO_SEED=1`).
 Re-runnable: each row is forced by a fixed id or natural key, so a second run
 restores this sheet instead of drifting. (Note: `npm run seed` on its own prints
 nothing and does nothing — `seed-demo.js` has no standalone bootstrap. Use
@@ -47,7 +82,11 @@ Attendance profiles are 15 seeded school days per student: `perfect` 15 present;
 `steady` 13/1/1; `late` 10 present + 5 late; `weak` 6 present + 6 absent + 2 late
 + 1 authorised absence.
 
-## Parents — log in with the email
+## Parents — log in with the email (local seed)
+
+> Live, only `parent@demo.msingi.io` is usable; it has Amara, Brian and Faith.
+> The other emails in this table are local personas — see
+> "Two different schools share this sheet" above.
 
 | Login                     | Children                        | What it proves                          |
 | ------------------------- | ------------------------------- | --------------------------------------- |
@@ -67,10 +106,12 @@ eight are, so the web and the phone describe the same families.
 ## Teachers — unchanged by this file, named here for completeness
 
 `teacher@demo.msingi.io` (Mr. Demo Teacher, Mathematics in Form 1A and
-Standard 4A, no form class) is the general one — the account to use when you
-want a teacher home with classes, today's lessons, a routine and a marks
-sheet. The others show the difference between a class teacher and a subject
-teacher:
+Standard 4A locally, no form class) is the general one — the account to use
+when you want a teacher home with classes, today's lessons, a routine and a
+marks sheet. Live, QA has also moved a Form 1A Period 2 English slot onto
+this teacher, which is why Form 1A appears there too; a published timetable
+slot now authorises its own roster and marks (see the scope fix). The others
+show the difference between a class teacher and a subject teacher:
 
 | Login                  | Teacher             | Form class | Subjects                    |
 | ---------------------- | ------------------- | ---------- | --------------------------- |

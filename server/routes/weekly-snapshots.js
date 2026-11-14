@@ -2,15 +2,16 @@
    Msingi — /api/weekly-snapshots  (staff-facing)
 
    Read-only surface over the `weekly_snapshots` collection written by
-   weekly-snapshot-cron.js. Nothing here ever generates or edits a
-   snapshot — this file only serves what the cron already wrote.
+   weekly-snapshot-cron.js — plus one deliberate admin write to rebuild a
+   week after a data correction (POST /regenerate, see its own comment).
 
-     GET /my-classes                     — roster picker (teacher: own
-                                            class(es) via formTeacherId;
-                                            other staff: every active class)
-     GET /:studentId/weeks               — list of generated weeks for a student
-     GET /:studentId/:weekStart          — one week's full snapshot
-     GET /:studentId/:weekStart/pdf      — the same snapshot, rendered to PDF
+     GET  /my-classes                     — roster picker (teacher: own
+                                             class(es) via formTeacherId;
+                                             other staff: every active class)
+     GET  /:studentId/weeks               — list of generated weeks for a student
+     GET  /:studentId/:weekStart          — one week's full snapshot
+     GET  /:studentId/:weekStart/pdf      — the same snapshot, rendered to PDF
+     POST /regenerate                     — rebuild one week (admin, no notifications)
 
    Parent/student self-service access does NOT go through this file —
    per the confirmed architecture, that's parent-portal.js/student-portal.js
@@ -22,6 +23,7 @@
 'use strict';
 
 const express = require('express');
+const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware }   = require('../middleware/auth');
 const { rbac, hasPermission } = require('../middleware/rbac');
@@ -31,6 +33,8 @@ const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, E }             = require('../utils/response');
 const { forbiddenForSelfServiceRole } = require('../utils/self-service-scope');
 const { resolveHomeroomStreamIds } = require('../utils/scopeEngine');
+const { buildSnapshotsForSchool, fetchActiveRoster } = require('../utils/weekly-snapshot-aggregate');
+const { _model } = require('../utils/model');
 
 const router  = express.Router();
 const PLAN    = planGate('weekly_snapshot');
@@ -278,12 +282,99 @@ function _buildSnapshotPDF(doc, snapshot, student, sections) {
     .text(`Generated ${snapshot.generatedAt} · Timezone: ${snapshot.schoolTimezone}`, { align: 'center' });
 }
 
+/* ══════════════════════════════════════════════════════════════
+   POST /api/weekly-snapshots/regenerate
+   Rebuild one week's frozen snapshots after a data correction (a
+   mis-grouped lesson-coverage row, a mark filed late, a class change).
+
+   The cron only fills students with no snapshot yet (`already-generated`
+   otherwise), so a frozen week can never pick up corrected source data.
+   This is the one write on an otherwise read-only surface: gated by
+   weekly_snapshot:create (admin/management), deleting only the rows it is
+   about to rebuild. It deliberately does NOT re-send guardian
+   notifications — a correction, not a new week.
+
+   Body/query: { weekStart?: 'YYYY-MM-DD', classId?: string }
+   ══════════════════════════════════════════════════════════════ */
+router.post('/regenerate', authMiddleware, PLAN, MODGATE, rbac('weekly_snapshot', 'create'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const classId = String(req.body?.classId ?? req.query.classId ?? '').trim() || null;
+
+    const asked = String(req.body?.weekStart ?? req.query.weekStart ?? '').trim();
+    if (asked && !/^\d{4}-\d{2}-\d{2}$/.test(asked)) {
+      return E.validation(res, [{ field: 'weekStart', message: 'weekStart must be YYYY-MM-DD.' }]);
+    }
+
+    const school = await _model('schools').findOne({ id: schoolId }).select('id timezone').lean();
+    if (!school) return E.notFound(res, 'School not found.');
+
+    const timezone = school.timezone || 'Africa/Nairobi';
+    const todayLocal = new Date().toLocaleDateString('en-CA', { timeZone: timezone });
+    const weekStart = asked || _mondayOf(todayLocal);
+    const weekEnd = _addDaysToDateStr(weekStart, 6);
+
+    const ctx = { schoolId };
+    const all = await fetchActiveRoster(ctx);
+    const roster = classId ? all.filter(s => s.classId === classId) : all;
+    if (!roster.length) {
+      return ok(res, { weekStart, weekEnd, generated: 0, replaced: 0, message: 'No active students to snapshot.' });
+    }
+
+    const sectionsByStudent = await buildSnapshotsForSchool(ctx, weekStart, weekEnd, timezone, roster);
+    const Snapshots = tenantModel('weekly_snapshots', ctx);
+    const filter = { schoolId, weekStart, ...(classId ? { classId } : {}) };
+    const { deletedCount } = await Snapshots.deleteMany(filter);
+
+    const generatedAt = new Date().toISOString();
+    let generated = 0;
+    for (const s of roster) {
+      try {
+        await Snapshots.create({
+          id: uuidv4(), schoolId, studentId: s.id,
+          classId: s.classId ?? null, className: s.className ?? null,
+          weekStart, weekEnd, generatedAt, schoolTimezone: timezone,
+          sections: sectionsByStudent.get(s.id) ?? _emptySnapshotSections(),
+          notified: { emailSentAt: null, inAppSentAt: null, emailError: null },
+        });
+        generated++;
+      } catch (err) {
+        console.error(`[weekly-snapshots regenerate] student ${s.id}:`, err.message);
+      }
+    }
+    return ok(res, { weekStart, weekEnd, generated, replaced: deletedCount ?? 0 });
+  } catch (err) {
+    console.error('[weekly-snapshots POST /regenerate]', err);
+    return E.serverError(res);
+  }
+});
+
+function _mondayOf(dateStr) {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  const delta = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - delta);
+  return d.toISOString().slice(0, 10);
+}
+
+function _addDaysToDateStr(dateStr, days) {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function _emptySnapshotSections() {
+  return {
+    topics: [], assignments: [],
+    attendance: { present: 0, absent: 0, late: 0, authorisedAbsence: 0, excluded: 0, holiday: 0, total: 0, records: [] },
+    behaviour: [], medical: [], library: [], growth: [],
+  };
+}
+
 // Exposed for parent-portal.js / student-portal.js's self-service routes
 // (M6) — see the header comment on _findAuthorizedStudent above for why
 // this is a shared implementation rather than two independent copies.
 // Same convention as onboard.js's router._defaultPerms attachment.
 router._helpers = { getWeeksForStudent, getSnapshotDetail, streamSnapshotPdf };
-
 module.exports = router;
 // test-only access — Role Architecture Audit 2026-08.
 module.exports._effectiveRoles = _effectiveRoles;

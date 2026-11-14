@@ -1374,6 +1374,11 @@ async function seedDemoData() {
     const term  = 'Term 2';
     const yearS = String(YEAR);
     const due   = `${YEAR}-04-30`;
+    /* Term 2 opens 28 April. A bill raised on 20 April and due on the 30th is
+       the only internally consistent story for this fixture; createdAt used to
+       be "whenever the seed last ran", so the detail screen read "Raised
+       22 Oct 2026 · Due 30 Apr 2026". */
+    const billedAt = new Date(`${YEAR}-04-20T08:00:00.000Z`).toISOString();
 
     await Promise.all(STUDENTS.map(async (s, idx) => {
       const invId    = `inv_demo_${s.id}`;
@@ -1400,6 +1405,8 @@ async function seedDemoData() {
         status,
         invoiceNumber: invNum,
         dueDate:       due,
+        issuedAt:      billedAt,
+        createdAt:     billedAt,
         academicYearId: AY_ID,
         termId:        T2_ID,
         createdBy:     ADMIN_ID,
@@ -1428,6 +1435,20 @@ async function seedDemoData() {
         });
       }
     }));
+
+    /* The upsert above is insert-only, so every invoice seeded before the
+       `billedAt` change still carries the seed-run date as createdAt. Repair
+       those rows in place: an invoice due before it was raised is impossible,
+       and it made the finance detail screen read "Raised 22 Oct · Due 30 Apr". */
+    await _model('invoices').updateMany(
+      {
+        schoolId: SCHOOL_ID,
+        id: { $regex: /^inv_demo_/ },
+        dueDate: due,
+        createdAt: { $gt: new Date(billedAt) },
+      },
+      { $set: { issuedAt: billedAt, createdAt: billedAt } }
+    );
 
     /* 9. Admissions */
     await Promise.all(ADMISSIONS.map(a =>

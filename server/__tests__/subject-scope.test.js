@@ -18,10 +18,15 @@ function mockChain(result) {
 
 let mockAcademicConfig;
 let mockAssignmentDocs;
+let mockTimetableDocs;
 let mockSchoolWideGrant;
 
 jest.mock('../middleware/rbac', () => ({
   hasExplicitSubGrant: jest.fn(() => Promise.resolve(mockSchoolWideGrant)),
+}));
+
+jest.mock('../utils/teacher-id-forms', () => ({
+  teacherIdForms: jest.fn((userId) => Promise.resolve([userId])),
 }));
 
 jest.mock('../utils/tenant-model', () => ({
@@ -34,6 +39,9 @@ jest.mock('../utils/tenant-model', () => ({
         findOne: jest.fn(() => mockChain(mockAssignmentDocs[0] ?? null)),
         find:    jest.fn(() => mockChain(mockAssignmentDocs)),
       };
+    }
+    if (col === 'timetable') {
+      return { find: jest.fn(() => mockChain(mockTimetableDocs)) };
     }
     return { findOne: jest.fn(() => mockChain(null)), find: jest.fn(() => mockChain([])) };
   }),
@@ -50,6 +58,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockAcademicConfig = { subjectAssignmentEnforced: true };
   mockAssignmentDocs = [];
+  mockTimetableDocs = [];
   mockSchoolWideGrant = false;
 });
 
@@ -110,6 +119,36 @@ describe('canWriteSubject', () => {
     mockSchoolWideGrant = false;
     expect(await canWriteSubject(reqAs('exams_officer'), 'cls_1', 'subj_math')).toBe(false);
   });
+
+  /* Live case (Demo School, Form 1A): an admin moved Period 2 English to
+     this teacher in the Scheduling Engine. The dashboard already unions
+     timetable slots, so the class showed with "Log today", but the mark
+     write only looked at teaching_assignments and 403'd. */
+  test('a published timetable slot for this class+subject grants the write when no assignment row exists', async () => {
+    mockAssignmentDocs = [];
+    mockTimetableDocs = [{ classId: 'cls_1', subjectId: 'subj_eng', streamId: null }];
+    expect(await canWriteSubject(reqAs('teacher'), 'cls_1', 'subj_eng')).toBe(true);
+  });
+
+  test('a timetable slot for a different subject or class grants nothing', async () => {
+    mockAssignmentDocs = [];
+    mockTimetableDocs = [{ classId: 'cls_1', subjectId: 'subj_eng', streamId: null }];
+    expect(await canWriteSubject(reqAs('teacher'), 'cls_1', 'subj_math')).toBe(false);
+    expect(await canWriteSubject(reqAs('teacher'), 'cls_2', 'subj_eng')).toBe(false);
+  });
+
+  test('a stream-scoped slot only covers that stream', async () => {
+    mockAssignmentDocs = [];
+    mockTimetableDocs = [{ classId: 'cls_1', subjectId: 'subj_eng', streamId: 'str_7i' }];
+    expect(await canWriteSubject(reqAs('teacher'), 'cls_1', 'subj_eng', 'str_7i')).toBe(true);
+    expect(await canWriteSubject(reqAs('teacher'), 'cls_1', 'subj_eng', 'str_7ii')).toBe(false);
+  });
+
+  test('a whole-class slot (no streamId) covers every stream of that class', async () => {
+    mockAssignmentDocs = [];
+    mockTimetableDocs = [{ classId: 'cls_1', subjectId: 'subj_eng', streamId: null }];
+    expect(await canWriteSubject(reqAs('teacher'), 'cls_1', 'subj_eng', 'str_7ii')).toBe(true);
+  });
 });
 
 describe('unassignedPairs', () => {
@@ -153,5 +192,27 @@ describe('unassignedPairs', () => {
     mockSchoolWideGrant = true;
     const pairs = [{ classId: 'cls_1', subjectId: 'subj_math' }, { classId: 'cls_2', subjectId: 'subj_english' }];
     expect(await unassignedPairs(reqAs('exams_officer'), pairs)).toEqual([]);
+  });
+
+  test('timetable slots clear their pairs in bulk, leaving only genuinely untaught ones', async () => {
+    mockAssignmentDocs = [];
+    mockTimetableDocs = [{ classId: 'cls_1', subjectId: 'subj_eng', streamId: null }];
+    const pairs = [
+      { classId: 'cls_1', subjectId: 'subj_eng' },  // timetabled
+      { classId: 'cls_1', subjectId: 'subj_math' }, // not taught
+    ];
+    expect(await unassignedPairs(reqAs('teacher'), pairs))
+      .toEqual([{ classId: 'cls_1', subjectId: 'subj_math' }]);
+  });
+
+  test('a stream-scoped timetable slot does not clear another stream in the bulk check', async () => {
+    mockAssignmentDocs = [];
+    mockTimetableDocs = [{ classId: 'cls_1', subjectId: 'subj_eng', streamId: 'str_7i' }];
+    const pairs = [
+      { classId: 'cls_1', subjectId: 'subj_eng', streamId: 'str_7i' },
+      { classId: 'cls_1', subjectId: 'subj_eng', streamId: 'str_7ii' },
+    ];
+    expect(await unassignedPairs(reqAs('teacher'), pairs))
+      .toEqual([{ classId: 'cls_1', subjectId: 'subj_eng', streamId: 'str_7ii' }]);
   });
 });
