@@ -160,6 +160,12 @@ function createFakeDb(seed = {}) {
         for (const d of docs) rows().push({ createdAt: new Date(Date.now() + (seq++)).toISOString(), ...JSON.parse(JSON.stringify(d)) });
         return docs;
       },
+      deleteOne: async (filter) => {
+        const i = rows().findIndex(r => matches(r, filter));
+        if (i < 0) return { deletedCount: 0 };
+        rows().splice(i, 1);
+        return { deletedCount: 1 };
+      },
       deleteMany: async (filter) => {
         const before = rows().length;
         data[name] = rows().filter(r => !matches(r, filter));

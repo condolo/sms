@@ -6,6 +6,29 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.273.0] - 2026-11-15 - feat(timetable): Subject allocation — see and enter who teaches what in one place
+
+Asked for directly: a central place in the Timetable to see subject allocations and whether a teacher has classes, instead of opening each teacher, with lessons per week set there too, "without corrupting the existing data, assignment and attendance or any other dependent modules". The timetabler has full control of the timetable module and enters the allocation the school decides.
+
+### Added
+- **Timetable → Subject allocation.** One row per subject in each class's curriculum (one per stream where the subject is compulsory and the class has streams), with teachers, lessons per week, doubles, lessons placed and a status (No teacher, No lessons/wk, To place, Too many, Done). Counts at the top, filters by status, section and department, and search. A **Teachers** panel lists every active teacher, including those with **no classes**.
+  - Assign or add a teacher (teachers of that subject listed first), set lessons per week and doubles inline, and remove.
+  - **Change teacher** updates the assignment in place (`PUT /api/teaching-assignments/:id/teacher`), keeping its id, lessons per week, doubles and "taught together" link. **Also move the lessons** hands that subject's draft lessons to the new teacher, all or nothing: any clash with the new teacher's lessons refuses the whole change and lists the clashes.
+  - Assignments outside the curriculum (and whole-class rows left over for a streamed subject) are shown and flagged, never hidden.
+- `GET /api/timetable/allocation` (`server/utils/allocation.js`, read-only); lessons placed are counted exactly as in Lessons to place.
+
+### Changed
+- **The timetabler can enter assignments** (create, edit, change, remove, link) everywhere, as can any role granted "Manage Whole-School Timetable". This uses the same rule as the rest of the timetable module: the real account role, never a responsibility tag.
+
+### Safety (what was checked)
+- Every change goes through the existing `/api/teaching-assignments` routes and rules: login-id keying, the stream rule, the curriculum check, duplicates, and refreshing scope.
+- Attendance, marks, lesson plans and coverage hold no reference to an assignment record (they're keyed by class, subject, stream and teacher), so allocation changes never touch them. The tests snapshot those collections before and after a change.
+- Access follows the allocation **and** the teacher's draft lessons (`scopeMiddleware._loadAssigned`): the new teacher gains access at once, and the old one loses it for that subject once its lessons are moved. Tests check this with the real loader, and so did the demo.
+
+Tests: `allocation.test.js` (7), `timetable-allocation.test.js` (10); `fake-tenant-db` gained `deleteOne`; `teaching-assignments-permission-grant.test.js` mock gained `hasExplicitSubGrant`. Checked on the demo: 97 class subjects shown (24 with no teacher); assign, lessons per week and doubles, a refused move with 5 clashes listed, then a change without moving; attendance, marks and coverage unchanged after the change.
+
+---
+
 ## [v5.272.0] - 2026-11-15 - feat(timetable): see exactly what a publish includes, and restore an earlier version
 
 Raised in a school admin's review of the timetable guide: "the term label doesn't limit what gets published" and "publishing history isn't a full restore point". Both were accurate.

@@ -22,14 +22,15 @@
 14. [Lessons per Week, Double Lessons and Room Types](#14-lessons-per-week-double-lessons-and-room-types)
 15. [Generating a Timetable Automatically](#15-generating-a-timetable-automatically)
 16. [Teaching Together and Subject Time Rules](#16-teaching-together-and-subject-time-rules)
+17. [Subject Allocation](#17-subject-allocation)
 
 ---
 
 ## 1. What You Can Access
 
-The **Timetabler** role has full access (view, create, update, delete) to **Timetable**, plus read/create/update on **Classes**, view-only on **Teachers**, full create/update/delete on **Events**, and messaging access. You do not have access to Grades, Exams, Finance, or HR by default.
+The **Timetabler** role has full access (view, create, update, delete) to **Timetable**, including entering the **subject allocation** (who teaches what, lessons per week; see §17), plus read/create/update on **Classes**, view-only on **Teachers** (profiles), full create/update/delete on **Events**, and messaging access. You do not have access to Grades, Exams, Finance, or HR by default.
 
-The Timetable module has six views: **Class Grid, Lessons to place, Teacher View, Institution, Rooms, Cover/Subs** (Rooms and Cover/Subs are shown to Timetabler and Admin roles only).
+The Timetable module has these views: **Class Grid, Subject allocation, Lessons to place, Generate, Teacher View, Institution, Rooms, Cover/Subs** (Rooms and Cover/Subs are shown to Timetabler and Admin roles only).
 
 ---
 
@@ -253,4 +254,27 @@ For now, place those by hand and lock them before generating.
 
 ---
 
-*Last reviewed: 2026-11-15 (v5.272.0) — checked directly against `client/src/pages/timetable/` (incl. `components/PublishModal.jsx`, `components/CoverTab.jsx`), `server/utils/timetable-versions.js`, `client/src/pages/teachers/TeacherList.jsx`, `server/routes/timetable.js`, `server/routes/timetable-generate.js`, `server/routes/teaching-assignments.js`, `server/routes/rooms.js`, `server/utils/lesson-audience.js` and `server/utils/elective-groups.js`.*
+## 17. Subject Allocation
+
+**Timetable → Subject allocation** is the one place to see and enter who teaches what. The school decides the allocation; the timetabler enters it here. It uses the same records as **Teachers → Assignments**, so a change in either place shows in both.
+
+**What you see.** One row for every subject in each class's curriculum (Classes → Curriculum). A subject that is compulsory for a class with streams has one row per stream. Each row shows its teacher (or teachers), lessons per week, double lessons, how many lessons are on the draft timetable, and a status:
+- **No teacher**: nobody is assigned yet.
+- **No lessons/wk**: a teacher is assigned but lessons per week isn't set, so Lessons to place and the automatic timetable can't use it.
+- **To place / Too many / Done**: lessons on the timetable against lessons per week.
+
+The summary at the top counts each of these, and the teachers with no classes. Filter by status, section or department, or search. The **Teachers** panel lists every active teacher, including those with **no classes**; click a teacher to see only their rows. A row marked "not in this class's curriculum" is an assignment for a subject the class no longer has; remove it or add the subject back to the curriculum.
+
+**Entering the allocation.**
+- **Assign teacher / Add teacher**: pick a teacher (those who teach that subject are listed first). Add a second teacher for co-teaching, then link them in Teachers → Assignments (§16).
+- **Lessons/wk** and **Doubles**: type the number and click away or press Enter. Doubles count two periods each, so they must fit in lessons per week.
+- **Change**: choose the new teacher, then confirm. The allocation keeps its lessons per week, doubles and "taught together" link. **Also move the lessons** (ticked by default) hands that teacher's draft lessons for this subject in this class to the new teacher. It is checked first: if the new teacher is busy at any of those times, nothing changes and the clashes are listed, so you can move those lessons first or change the teacher without moving lessons. Moved lessons go live only when you publish.
+- **Remove** (×): takes the teacher off that class and subject.
+
+**What it affects, and what it never touches.** Who teaches a class decides who can take its register, enter its marks and see its lesson plans **from then on**. A teacher also has access through lessons under their name on the timetable, so after a change the old teacher keeps access until their lessons for that subject are moved or removed. Registers, marks, lesson plans and coverage already recorded are never changed or deleted.
+
+**Who can use it.** Admin, principal, deputy, timetabler, and any role granted "Manage Whole-School Timetable". A staff member who is only *tagged* "Timetabler" as a responsibility can't. Heads of department can still manage their own department's assignments in Teachers → Assignments.
+
+---
+
+*Last reviewed: 2026-11-15 (v5.273.0) — checked directly against `client/src/pages/timetable/` (incl. `components/AllocationView.jsx`, `components/PublishModal.jsx`, `components/CoverTab.jsx`), `server/utils/allocation.js`, `server/utils/timetable-versions.js`, `client/src/pages/teachers/TeacherList.jsx`, `server/routes/timetable.js`, `server/routes/timetable-generate.js`, `server/routes/teaching-assignments.js`, `server/routes/rooms.js`, `server/utils/lesson-audience.js` and `server/utils/elective-groups.js`.*

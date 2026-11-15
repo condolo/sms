@@ -54,6 +54,7 @@ const { getTimetableSettings, setWorkingDays, setRules, notWorkingDayMsg, ALL_DA
 const teacherAvailability = require('../utils/teacher-availability');
 const { computePlacement } = require('../utils/timetable-placement');
 const ttVersions = require('../utils/timetable-versions');
+const { computeAllocation } = require('../utils/allocation');
 
 const router = express.Router();
 
@@ -934,6 +935,33 @@ async function _publishScopeInfo(req) {
     return { publishScope: null };
   }
 }
+
+/* ── GET /api/timetable/allocation ─ Subject allocation (utils/allocation.js, v5.273.0) ──
+   Every class × subject in the curriculum with its teachers, lessons per week and lessons
+   placed; every active teacher, including those with no classes. Read-only; changes go
+   through /api/teaching-assignments so every existing rule still applies. */
+router.get('/allocation', authMiddleware, PLAN, MODGATE, timetableManageAccess('read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const ctx = tenantContext(req);
+    const period = await resolveAcademicPeriod(schoolId, ctx, {});
+    const yearId = period.error ? null : (period.academicYearId ?? null);
+    const [classes, streams, classSubjects, subjects, teachers, assignments, slots, departments] = await Promise.all([
+      tenantModel('classes', ctx).find({ schoolId, status: { $ne: 'inactive' } }).select('id name sectionKey section order').lean(),
+      tenantModel('streams', ctx).find({ schoolId, status: 'active' }).select('id classId name status').lean(),
+      tenantModel('class_subjects', ctx).find({ schoolId, isActive: { $ne: false } }).select('classId subjectId isCompulsoryForClass isActive').limit(20000).lean(),
+      tenantModel('subjects', ctx).find({ schoolId, isActive: { $ne: false } }).select('id name departmentId').lean(),
+      tenantModel('teachers', ctx).find({ schoolId }).select('id userId title firstName lastName status departmentId subjects').lean(),
+      tenantModel('teaching_assignments', ctx).find({ schoolId })
+        .select('id classId className streamId streamName subjectId subjectName teacherId teacherName periodsPerWeek doubleLessons lessonGroupId preferredRoomName').limit(20000).lean(),
+      tenantModel('timetable', ctx).find({ schoolId, isActive: true, academicYearId: yearId })
+        .select('classId streamId streamIds subject subjectId teacherId teacherName coTeacherIds coTeacherNames type isActive').limit(20000).lean(),
+      tenantModel('departments', ctx).find({ schoolId }).select('id name').lean(),
+    ]);
+    const result = computeAllocation({ classes, streams, classSubjects, subjects, teachers, assignments, slots });
+    return ok(res, { ...result, departments: departments.map(d => ({ id: d.id, name: d.name })) });
+  } catch (err) { console.error('[timetable GET /allocation]', err); return E.serverError(res); }
+});
 
 /* ── GET /api/timetable/status ─ Publish state (utils/timetable-publish.js) ── */
 router.get('/status', authMiddleware, PLAN, MODGATE, timetableManageAccess('read'), async (req, res) => {

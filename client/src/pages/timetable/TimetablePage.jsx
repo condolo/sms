@@ -9,7 +9,7 @@ import { AnimatePresence } from 'framer-motion';
 import {
   CalendarDays, Plus, AlertCircle, CheckCircle2, BarChart3,
   Clock, User, LayoutGrid, Globe, UserX, Zap, Download, Printer,
-  DoorOpen, Upload, MonitorPlay, ListChecks, CalendarCheck, Wand2,
+  DoorOpen, Upload, MonitorPlay, ListChecks, CalendarCheck, Wand2, Users,
 } from 'lucide-react';
 import {
   timetable    as ttApi,
@@ -37,6 +37,7 @@ import PublishModal           from './components/PublishModal.jsx';
 import RoomsTab               from './components/RoomsTab.jsx';
 import RoomView               from './components/RoomView.jsx';
 import PlacementView          from './components/PlacementView.jsx';
+import AllocationView         from './components/AllocationView.jsx';
 import GenerateView           from './components/GenerateView.jsx';
 import TimetableSettingsModal from './components/TimetableSettingsModal.jsx';
 import AvailabilityModal      from './components/AvailabilityModal.jsx';
@@ -45,6 +46,7 @@ import { lessonTeachers, lessonIsForStream, isCombined } from '@/utils/lessonLab
 
 const VIEWS = [
   { id: 'class',    label: 'Class Grid',   Icon: LayoutGrid                    },
+  { id: 'allocation', label: 'Subject allocation', Icon: Users              },
   { id: 'placement', label: 'Lessons to place', Icon: ListChecks              },
   { id: 'generate', label: 'Generate',     Icon: Wand2,   generateOnly: true   },
   { id: 'teacher',  label: 'Teacher View', Icon: User                          },
@@ -741,6 +743,10 @@ export default function TimetablePage() {
             <span className="text-xs text-slate-500">Daily cover arrangements · substitution management</span>
           )}
 
+          {activeView === 'allocation' && (
+            <span className="text-xs text-slate-500">Who teaches each subject in each class, and lessons per week · the same records as Teachers → Assignments</span>
+          )}
+
           {activeView === 'placement' && (
             <span className="text-xs text-slate-500">
               Lessons per week each class needs (from teaching assignments) against what's on the draft timetable · click a row to open that class
@@ -865,6 +871,12 @@ export default function TimetablePage() {
         )}
 
         {activeView === 'overview' && <OverviewView classList={classList} days={workingDays} />}
+        {activeView === 'allocation' && (
+          <AllocationView
+            canEdit={canEdit}
+            onOpenClass={(cid, sid) => { setSection('all'); setClassId(cid); setStreamId(sid || ''); setActiveView('class'); }}
+          />
+        )}
         {activeView === 'placement' && (
           <PlacementView
             onOpenClass={(cid, sid) => { setSection('all'); setClassId(cid); setStreamId(sid || ''); setActiveView('class'); }}

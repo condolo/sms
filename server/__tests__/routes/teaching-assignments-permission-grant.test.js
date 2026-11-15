@@ -61,6 +61,9 @@ jest.mock('../../middleware/auth', () => ({
 }));
 jest.mock('../../middleware/rbac', () => ({
   hasPermission: (...args) => mockHasPermission(...args),
+  // v5.273.0: canManage() also accepts a "Manage Whole-School Timetable" grant;
+  // not granted here, so this file still tests the teachers:update path alone.
+  hasExplicitSubGrant: async () => false,
 }));
 jest.mock('../../middleware/scopeMiddleware', () => ({ invalidateScopeCache: jest.fn() }));
 

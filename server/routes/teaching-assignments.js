@@ -33,7 +33,8 @@
      - READ:   any authenticated user (teachers see only own)
      - WRITE:  admin, superadmin, principal, deputy (any subject/class)
                hod (only subjects in their department)
-               timetabler (read only, cannot create/delete)
+               timetabler, and any role granted "Manage Whole-School Timetable"
+               (full control, v5.273.0 — they enter the allocation the school decides)
                any other role explicitly granted 'teachers' update access
                in Settings → Roles & Permissions (2026-09-29, Priority per
                user request — see canManage()'s own comment)
@@ -45,10 +46,13 @@ const { z }         = require('zod');
 const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware }      = require('../middleware/auth');
-const { hasPermission }       = require('../middleware/rbac');
+const { hasPermission, hasExplicitSubGrant } = require('../middleware/rbac');
+const { TIMETABLE_FLOOR_ROLES } = require('../utils/scopeEngine');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, E }      = require('../utils/response');
 const { invalidateScopeCache } = require('../middleware/scopeMiddleware');
+const { checkConflicts } = require('../utils/timetable-conflicts');
+const { markTimetableChanged } = require('../utils/timetable-publish');
 
 const router = express.Router();
 
@@ -99,6 +103,16 @@ async function canManage(req, subjectDepartmentId = null) {
   const eff = _effectiveRoles(req);
   if ([...FULL_MANAGE].some(r => eff.has(r))) return true;
 
+  // Timetable module owners (v5.273.0, direct instruction 2026-11-15: "the
+  // timetabler should have full control of the timetable module … he doesn't
+  // decide who teaches what but he is given that data to update in the
+  // system"). Same rule as timetable.js's timetableManageAccess: the REAL
+  // account role (jwtUser.role — never extraRoles, so a staff member merely
+  // tagged with a responsibility gains nothing), or an explicit "Manage
+  // Whole-School Timetable" grant.
+  if (TIMETABLE_FLOOR_ROLES.has(req.jwtUser?.role)) return true;
+  if (await hasExplicitSubGrant(req, 'timetable', 'manage', 'update')) return true;
+
   // HOD: only within their own department
   if (eff.has('hod')) {
     if (!subjectDepartmentId) return true; // no dept info yet, validate later
@@ -106,6 +120,33 @@ async function canManage(req, subjectDepartmentId = null) {
   }
 
   return hasPermission(req, 'teachers', 'update');
+}
+
+/* The id an assignment is keyed by: the teacher's LOGIN id when linked (every scope
+   check matches teaching_assignments.teacherId against jwtUser.userId), self-healing a
+   missing link by email; else teachers.id. Shared by POST / and PUT /:id/teacher. */
+async function _canonicalTeacherId(req, teacher) {
+  const { schoolId } = req.jwtUser;
+  let canonicalTeacherId = teacher.userId;
+  if (!canonicalTeacherId && teacher.email) {
+    const matchingUser = await tenantModel('users', tenantContext(req))
+      .findOne({ schoolId, email: teacher.email.toLowerCase(), isActive: { $ne: false } }).select('id').lean();
+    if (matchingUser) {
+      // A user doc with no `id` field (irregularly onboarded school) has a
+      // JWT userId of String(_id) — auth.js's `user.id || user._id` — so
+      // use that same form here. Plain `matchingUser.id` was undefined for
+      // them, which fell through to teacher.id below and saved a row the
+      // teacher could never see (2026-11-12, Mascit Lab Academy).
+      const loginId = matchingUser.id || (matchingUser._id ? String(matchingUser._id) : null);
+      if (loginId) {
+        canonicalTeacherId = loginId;
+        tenantModel('teachers', tenantContext(req))
+          .updateOne({ schoolId, id: teacher.id }, { $set: { userId: loginId } })
+          .catch(() => {});
+      }
+    }
+  }
+  return canonicalTeacherId || teacher.id;
 }
 
 /* ── Helper: find a class by either custom id (UUID) or _id (ObjectId string) ─
@@ -307,26 +348,7 @@ router.post('/', authMiddleware, async (req, res) => { // rbac: canManage() belo
     // it here too — same by-email match timetable.js's GET /my already does
     // lazily, just exercised at the one place that can't wait for the
     // teacher to visit Timetable first.
-    let canonicalTeacherId = teacher.userId;
-    if (!canonicalTeacherId && teacher.email) {
-      const matchingUser = await tenantModel('users', tenantContext(req))
-        .findOne({ schoolId, email: teacher.email.toLowerCase(), isActive: { $ne: false } }).select('id').lean();
-      if (matchingUser) {
-        // A user doc with no `id` field (irregularly onboarded school) has a
-        // JWT userId of String(_id) — auth.js's `user.id || user._id` — so
-        // use that same form here. Plain `matchingUser.id` was undefined for
-        // them, which fell through to teacher.id below and saved a row the
-        // teacher could never see (2026-11-12, Mascit Lab Academy).
-        const loginId = matchingUser.id || (matchingUser._id ? String(matchingUser._id) : null);
-        if (loginId) {
-          canonicalTeacherId = loginId;
-          tenantModel('teachers', tenantContext(req))
-            .updateOne({ schoolId, id: teacher.id }, { $set: { userId: loginId } })
-            .catch(() => {});
-        }
-      }
-    }
-    canonicalTeacherId = canonicalTeacherId || teacher.id;
+    const canonicalTeacherId = await _canonicalTeacherId(req, teacher);
 
     // Same normalization GET /classes already applies for its own dropdowns
     // (see that route's "Normalize" comment) — a legacy class matched only
@@ -489,6 +511,116 @@ router.put('/:id', authMiddleware, async (req, res) => { // rbac: canManage() be
     return ok(res, doc);
   } catch (err) {
     console.error('[teaching-assignments PUT /:id]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ── PUT /api/teaching-assignments/:id/teacher — change who teaches it (v5.273.0) ──
+   Body: { teacherId, moveLessons?: boolean }
+   Used by Timetable → Subject allocation. The row is updated IN PLACE, so its id,
+   periods/week, doubles, room and "taught together" link stay. Records already taken
+   (attendance, marks, lesson plans, coverage) are keyed by class/subject/stream, never
+   by this row, so none of them change; only who may open that class from now on does.
+   Scope (scopeMiddleware._loadAssigned) comes from assignments AND the teacher's draft
+   lessons: the new teacher gains access at once; the old one loses it for this subject
+   once their lessons for it are moved too (moveLessons). Both scope caches are refreshed.
+   moveLessons: also hand this subject's draft lessons (this class, and this stream for a
+   stream row) from the old teacher to the new one. All or nothing: if any lesson would
+   clash with the new teacher's other lessons, nothing changes and the clashes are listed
+   (409 LESSON_CLASH). Draft only — nothing goes live until the timetable is published. */
+router.put('/:id/teacher', authMiddleware, async (req, res) => { // rbac: canManage() below — real-role + HOD department-scope check
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const newTeacherInput = typeof req.body?.teacherId === 'string' ? req.body.teacherId.trim() : '';
+    const moveLessons = req.body?.moveLessons === true;
+    if (!newTeacherInput) return E.badRequest(res, 'Choose the teacher who will teach it.');
+
+    const TA = tenantModel('teaching_assignments', tenantContext(req));
+    const existing = await TA.findOne({ id: req.params.id, schoolId }).lean();
+    if (!existing) return E.notFound(res, 'Assignment not found');
+    if (!(await canManage(req, existing.departmentId))) return E.forbidden(res);
+
+    const Teachers = tenantModel('teachers', tenantContext(req));
+    const teacher = await Teachers.findOne({ schoolId, $or: [{ userId: newTeacherInput }, { id: newTeacherInput }] }).lean();
+    if (!teacher) return E.notFound(res, 'Teacher not found');
+    if (teacher.status && teacher.status !== 'active') return E.badRequest(res, 'That teacher is not active.');
+    const newTeacherId = await _canonicalTeacherId(req, teacher);
+
+    const oldTeacher = await Teachers.findOne({ schoolId, $or: [{ userId: existing.teacherId }, { id: existing.teacherId }] }).lean();
+    const oldForms = [...new Set([existing.teacherId, oldTeacher?.userId, oldTeacher?.id].filter(Boolean).map(String))];
+    if (oldForms.includes(String(newTeacherId)) || (oldTeacher && oldTeacher.id === teacher.id)) {
+      return E.badRequest(res, 'That teacher already teaches it.');
+    }
+    const duplicate = await TA.findOne({
+      schoolId, id: { $ne: existing.id }, subjectId: existing.subjectId, classId: existing.classId,
+      streamId: existing.streamId ?? null, teacherId: { $in: [...new Set([newTeacherId, teacher.userId, teacher.id].filter(Boolean))] },
+    }).lean();
+    if (duplicate) return E.conflict(res, 'That teacher already has this subject for this class.');
+
+    const teacherName = [teacher.title, teacher.firstName, teacher.lastName].filter(Boolean).join(' ');
+
+    // Lessons to hand over, checked before anything is written.
+    let lessons = [];
+    if (moveLessons) {
+      const cls = await tenantModel('classes', tenantContext(req)).findOne(_classQuery(schoolId, existing.classId)).select('id').lean();
+      const classForms = [...new Set([existing.classId, cls?.id, cls?._id && String(cls._id)].filter(Boolean))];
+      const streamClause = existing.streamId ? [{ streamId: existing.streamId }, { streamIds: existing.streamId }] : null;
+      lessons = await tenantModel('timetable', tenantContext(req)).find({
+        schoolId, isActive: true, classId: { $in: classForms },
+        $and: [
+          { $or: [{ subjectId: existing.subjectId }, ...(existing.subjectName ? [{ subjectId: { $in: [null, ''] }, subject: existing.subjectName }] : [])] },
+          { $or: [{ teacherId: { $in: oldForms } }, { coTeacherIds: { $in: oldForms } }] },
+          ...(streamClause ? [{ $or: streamClause }] : []),
+        ],
+      }).lean();
+      const clashes = [];
+      for (const l of lessons) {
+        if (!l.day || !l.startTime || !l.endTime) continue;
+        const candidate = oldForms.includes(String(l.teacherId))
+          ? { ...l, teacherId: newTeacherId }
+          : { ...l, coTeacherIds: (l.coTeacherIds || []).map(id => (oldForms.includes(String(id)) ? newTeacherId : id)) };
+        const clash = await checkConflicts(schoolId, candidate, [l.id || String(l._id)]);
+        if (clash) clashes.push(`${l.day} ${l.startTime}–${l.endTime}: ${clash}`);
+      }
+      if (clashes.length) {
+        return res.status(409).json({ success: false, error: {
+          code: 'LESSON_CLASH',
+          message: `${teacherName || 'That teacher'} is already busy for ${clashes.length} of these lessons. Nothing was changed. Move those lessons first, or change the teacher without moving lessons.`,
+          clashes: clashes.slice(0, 20),
+        } });
+      }
+    }
+
+    const now = new Date().toISOString();
+    const updated = await TA.findOneAndUpdate(
+      { id: existing.id, schoolId },
+      { $set: { teacherId: newTeacherId, teacherName, updatedBy: userId, updatedAt: now, reassignedFrom: existing.teacherId, reassignedAt: now } },
+      { new: true },
+    ).lean();
+
+    let moved = 0;
+    if (lessons.length) {
+      const Timetable = tenantModel('timetable', tenantContext(req));
+      for (const l of lessons) {
+        const filter = l.id ? { schoolId, id: l.id } : { schoolId, _id: l._id };
+        const set = oldForms.includes(String(l.teacherId))
+          ? { teacherId: newTeacherId, teacherName, updatedBy: userId, updatedAt: now }
+          : {
+            coTeacherIds: (l.coTeacherIds || []).map(id => (oldForms.includes(String(id)) ? newTeacherId : id)),
+            coTeacherNames: (l.coTeacherIds || []).map((id, i) => (oldForms.includes(String(id)) ? teacherName : (l.coTeacherNames || [])[i])),
+            updatedBy: userId, updatedAt: now,
+          };
+        await Timetable.updateOne(filter, { $set: set });
+        moved++;
+      }
+      if (moved) await markTimetableChanged(schoolId);
+    }
+
+    invalidateScopeCache(existing.teacherId, schoolId);
+    invalidateScopeCache(newTeacherId, schoolId);
+    return ok(res, { assignment: updated, movedLessons: moved });
+  } catch (err) {
+    console.error('[teaching-assignments PUT /:id/teacher]', err);
     return E.serverError(res);
   }
 });

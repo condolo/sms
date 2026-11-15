@@ -638,6 +638,7 @@ export const timetable = {
   settings:     ()          => _get('/timetable/settings'),
   saveSettings: (data)      => _put('/timetable/settings', data),
   placement:    ()          => _get('/timetable/placement'),
+  allocation:   ()          => _get('/timetable/allocation'),
   // Teacher availability (v5.268.0)
   availability:     ()                 => _get('/timetable/availability'),
   saveAvailability: (teacherId, data)  => _put(`/timetable/availability/${encodeURIComponent(teacherId)}`, data),
@@ -1073,6 +1074,8 @@ export const teachingAssignments = {
   /** Taught together (v5.270.0): make two rows of the same class + subject one set of lessons
       (co-teaching and/or combined streams), or take a row out of its set. */
   link:   (id, withId) => _post(`/teaching-assignments/${id}/link`, { withId }),
+  /** Change who teaches it, in place (v5.273.0); moveLessons also hands over the draft lessons. */
+  changeTeacher: (id, teacherId, moveLessons = false) => _put(`/teaching-assignments/${id}/teacher`, { teacherId, moveLessons }),
   unlink: (id)         => _post(`/teaching-assignments/${id}/unlink`),
   /** Convenience: find the teacher assigned to a subject in a class (and,
       for compulsory subjects with separate per-stream teachers, the stream) */
