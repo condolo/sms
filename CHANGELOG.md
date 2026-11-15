@@ -6,6 +6,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.272.0] - 2026-11-15 - feat(timetable): see exactly what a publish includes, and restore an earlier version
+
+Raised in a school admin's review of the timetable guide: "the term label doesn't limit what gets published" and "publishing history isn't a full restore point". Both were accurate.
+
+### Added
+- **The Publish dialog says what will be published:** "This publishes N lessons", per academic year. Moving to a new year doesn't remove last year's lessons, so a draft can hold lessons from another academic year. The dialog lists them and, by default, leaves them out (the server's `scope: 'current_year'`); unticking includes them. Lessons saved before they carried a year are always included. The old behaviour (`scope: 'all'`) is still the API default. The published scope is recorded on the version and in the school's publish state.
+- **Restore points.** Publishing no longer deletes every older published copy. The last 10 versions keep all their lessons, and older ones keep their history line only. **Cover/Subs → Publish History → Restore to draft** replaces the draft with a kept version (`POST /api/timetable/versions/:id/restore`); for a "this year only" version only that year's lessons are replaced and other years stay. The current draft is saved first as its own history entry ("Draft saved before restoring …"), so a restore can be undone the same way. A failed write rolls the draft back. Nothing goes live until the draft is published.
+- Publish History marks the **Live** version (it used to mark the newest row as "Current"), saved drafts, and "this year only" publishes.
+
+### Changed
+- The term label is filled in with the current term and explains that it is a label only. It never selected lessons and still doesn't. Lessons are deliberately not split by term: a lesson keeps the term it was added in and a timetable carries on across terms, so a per-term publish would drop lessons that are still taught.
+
+### Safety
+- Everyone who is not an editor still reads only the live version (`publishedReader` is scoped to `publishedVersionId`). The kept copies are never shown to them; tests check this.
+
+Files: new `server/utils/timetable-versions.js`; `server/routes/timetable.js` (`/status` adds `publishScope`, `/publish` takes `scope`, `/versions` adds `liveVersionId`/`canRestore`, new restore route); `server/utils/timetable-publish.js`; `PublishModal.jsx`, `CoverTab.jsx`, `TimetablePage.jsx`, `api/client.js`. - **Lessons with no time block publishing only when they are being published.** An untimed lesson from another year that is left out no longer blocks.
+
+Tests: `timetable-publish.test.js` (+11, one updated: older copies are now kept).
+
+---
+
 ## [v5.271.1] - 2026-11-15 - chore(website): Family Portal is the "Most popular" plan
 
 ### Changed

@@ -7779,3 +7779,14 @@ A report published with a `cycle` (see the `cycle` section above) now covers onl
 | `ReportCardsTab.jsx` / `StudentReportCard.jsx` | `CoverageNote`; `coveredKeys` limits per-instance columns |
 
 Kindergarten (`/kg/generate`, `/kg/publish`) is not affected.
+
+## Timetable publish scope and restore points (v5.272.0, 2026-11-15)
+
+`server/utils/timetable-versions.js`:
+
+- `draftScope(ctx, schoolId, currentYearId)` — active draft lessons per `academicYearId` → `{ total, thisYearScope (current + untagged), otherYears, byYear[], currentYearId }`. Returned by `GET /api/timetable/status` as `publishScope` (plus `suggestedLabel` from the current term).
+- `publishFilter(schoolId, scope, currentYearId)` — `POST /publish` body `scope`: `'all'` (default, unchanged) or `'current_year'` (`academicYearId` = current, null or missing). Refused when no current year resolves or the scope is empty. The untimed-lesson block counts only the lessons in scope. Stored as `timetableStatus.publishedScope/publishedYearId` and on the `timetable_versions` row (`kind: 'published'`, `scope`, `academicYearId`).
+- `pruneCopies(ctx, schoolId, liveVersionId)` — replaces the old "delete every other copy": keeps `timetable_published` rows for the newest `KEEP_COPIES` (10) versions plus the live one, deletes the rest, sets `copyKept: false` on their history rows.
+- `restoreVersion(ctx, schoolId, versionId, userId)` — for a `scope: 'current_year'` version replaces only `publishFilter(…, 'current_year', version.academicYearId)` lessons (other years untouched), otherwise the whole active draft. It first saves the whole current active draft as a `kind: 'draft_backup'` version (its copy in `timetable_published` under a new versionId, never live), then deletes the lessons in scope and inserts the version's copy (`restoredFromVersionId`); ids reused unless still taken by an inactive draft row (`tt_id` is unique). On a write failure it removes inserted rows and reinserts the previous draft. Route: `POST /api/timetable/versions/:id/restore` (`timetableManageAccess('update')`), then `markTimetableChanged` + `pruneCopies`.
+
+Readers: non-editors read `timetable_published` only via `publishedReader()` → `scopedReader(model, publishedVersionId)`, so kept copies and draft backups never reach portals. `timetable_published` has no unique index on `id` (only `ttp_class_day`, `ttp_teacher_day`), so several versions can hold the same lesson ids.

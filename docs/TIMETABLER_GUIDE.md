@@ -85,6 +85,14 @@ Go to **Cover/Subs** for the substitution sheet — when a teacher is away, assi
 
 Once the timetable for a term is finalized, click **Publish Now** from the Publish Timetable dialog. Publishing makes the current version visible to teachers, students, and parents on their own dashboards — draft changes made after publishing don't show up for them until you publish again.
 
+**What gets published.** The draft is one timetable for the whole school, and the dialog says how many lessons it will publish. Lessons are tagged with the academic year they were added in, and moving to a new year doesn't remove last year's lessons. If the draft still has lessons from another academic year, the dialog shows them and, by default, leaves them out (untick the box to include them). Lessons saved before they carried a year are always included. Lessons are **not** split by term: a lesson keeps the term it was added in, and a timetable usually carries on from one term to the next, so publishing "one term" would drop lessons that are still taught.
+
+**The term label is a label.** It shows on portal headers and print pages and in Publish History. It is filled in with the current term, and it does not choose which lessons are published.
+
+Publishing is refused while a lesson has no time, or when nothing has changed since the last publish. Double bookings and rule warnings are listed for you to review, but they don't block publishing.
+
+**Restore an earlier version.** Open **Cover/Subs → Publish History**. The last 10 versions keep all their lessons; older ones keep only their history line ("History only"). Click **Restore to draft** on a version to replace the draft with it, locked lessons included. For a version published "this year only", only that year's lessons are replaced and lessons from other years stay as they are. Your current draft is saved in Publish History first ("Draft saved before restoring …"), so you can restore that entry to undo. A restore changes only the draft: staff, students and parents keep the live version until you publish again. The entry marked **Live** is the version people see now.
+
 ---
 
 ## 9. Lessons to Place
@@ -245,4 +253,4 @@ For now, place those by hand and lock them before generating.
 
 ---
 
-*Last reviewed: 2026-11-13 (v5.270.0) — checked directly against `client/src/pages/timetable/`, `client/src/pages/teachers/TeacherList.jsx`, `server/routes/timetable.js`, `server/routes/timetable-generate.js`, `server/routes/teaching-assignments.js`, `server/routes/rooms.js`, `server/utils/lesson-audience.js` and `server/utils/elective-groups.js`.*
+*Last reviewed: 2026-11-15 (v5.272.0) — checked directly against `client/src/pages/timetable/` (incl. `components/PublishModal.jsx`, `components/CoverTab.jsx`), `server/utils/timetable-versions.js`, `client/src/pages/teachers/TeacherList.jsx`, `server/routes/timetable.js`, `server/routes/timetable-generate.js`, `server/routes/teaching-assignments.js`, `server/routes/rooms.js`, `server/utils/lesson-audience.js` and `server/utils/elective-groups.js`.*

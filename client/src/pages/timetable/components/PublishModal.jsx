@@ -2,15 +2,26 @@
    PublishModal — confirm timetable publish with optional term label
    Props:
      publishing   bool
-     onPublish    fn(termLabel)
+     onPublish    fn(termLabel, scope)  scope: 'all' | 'current_year'
+     publishScope { total, thisYearScope, otherYears, byYear, currentYearId, suggestedLabel } from /status
      onClose      fn
    ============================================================ */
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Loader2, Zap } from 'lucide-react';
 
-export default function PublishModal({ publishing, alreadyPublished = false, warnings = [], ruleWarnings = [], ruleWarningCount = 0, onPublish, onClose }) {
-  const [termLabel, setTermLabel] = useState('');
+export default function PublishModal({ publishing, alreadyPublished = false, warnings = [], ruleWarnings = [], ruleWarningCount = 0, publishScope = null, onPublish, onClose }) {
+  const [termLabel, setTermLabel] = useState(publishScope?.suggestedLabel || '');
+  // v5.272.0 — what gets published. The draft can hold lessons from another
+  // academic year (moving to a new year doesn't retire last year's lessons).
+  // Leaving them out is the default when this year has lessons of its own.
+  const otherYears = publishScope?.otherYears || 0;
+  const canLimit = otherYears > 0 && (publishScope?.thisYearScope || 0) > 0 && !!publishScope?.currentYearId;
+  const [onlyThisYear, setOnlyThisYear] = useState(canLimit);
+  const scope = canLimit && onlyThisYear ? 'current_year' : 'all';
+  const publishCount = publishScope ? (scope === 'current_year' ? publishScope.thisYearScope : publishScope.total) : null;
+  const currentYearName = publishScope?.byYear?.find(y => y.isCurrent)?.name;
+  const otherYearNames = (publishScope?.byYear || []).filter(y => !y.isCurrent && y.academicYearId).map(y => `${y.name} (${y.count})`);
 
   return (
     <motion.div
@@ -31,6 +42,31 @@ export default function PublishModal({ publishing, alreadyPublished = false, war
             Staff, students and parents see the version you publish, and nothing else. Edits you make after this stay in the draft until you publish again.
           </p>
         </div>
+
+        {publishCount != null && (
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 space-y-1.5">
+            <p className="text-[11px] font-semibold text-slate-800">
+              This publishes {publishCount} lesson{publishCount === 1 ? '' : 's'}
+              {scope === 'current_year' && currentYearName ? ` — ${currentYearName} only` : ' — the whole draft for the school'}.
+            </p>
+            {otherYears > 0 && (
+              canLimit ? (
+                <label className="flex items-start gap-2 text-[11px] text-slate-700 cursor-pointer">
+                  <input type="checkbox" className="mt-0.5" checked={onlyThisYear} onChange={e => setOnlyThisYear(e.target.checked)} />
+                  <span>
+                    Leave out {otherYears} lesson{otherYears === 1 ? '' : 's'} from other academic years
+                    {otherYearNames.length ? ` (${otherYearNames.join(', ')})` : ''}.
+                  </span>
+                </label>
+              ) : (
+                <p className="text-[11px] text-amber-700">
+                  The draft includes {otherYears} lesson{otherYears === 1 ? '' : 's'} from other academic years
+                  {otherYearNames.length ? ` (${otherYearNames.join(', ')})` : ''}, and none for the current year, so all of them are published.
+                </p>
+              )
+            )}
+          </div>
+        )}
 
         {warnings.length > 0 && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 space-y-1">
@@ -66,7 +102,7 @@ export default function PublishModal({ publishing, alreadyPublished = false, war
             className="w-full text-sm px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900/10 text-slate-800"
             autoFocus
           />
-          <p className="text-[11px] text-slate-400">Shown on the portal header and print pages.</p>
+          <p className="text-[11px] text-slate-400">Shown on the portal header and print pages. It is a label only: it does not choose which lessons are published.</p>
         </div>
 
         <div className="flex items-center justify-end gap-3 pt-1">
@@ -77,7 +113,7 @@ export default function PublishModal({ publishing, alreadyPublished = false, war
             Cancel
           </button>
           <button
-            onClick={() => onPublish(termLabel)}
+            onClick={() => onPublish(termLabel, scope)}
             disabled={publishing}
             className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-sm font-medium px-5 py-2 rounded-lg transition"
           >

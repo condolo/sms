@@ -633,6 +633,7 @@ export const timetable = {
   publish:     (data)       => _post('/timetable/publish', data),
   unpublish:   ()           => _post('/timetable/unpublish'),
   versions:    ()           => _get('/timetable/versions'),
+  restoreVersion: (id)      => _post(`/timetable/versions/${id}/restore`, {}),
   // Working days + lessons to place (v5.265.0)
   settings:     ()          => _get('/timetable/settings'),
   saveSettings: (data)      => _put('/timetable/settings', data),

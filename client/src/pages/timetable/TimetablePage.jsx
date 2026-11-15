@@ -284,7 +284,7 @@ export default function TimetablePage() {
   });
 
   const { mutate: doPublish, isPending: publishing } = useMutation({
-    mutationFn: (termLabel) => ttApi.publish({ termLabel }),
+    mutationFn: ({ termLabel, scope }) => ttApi.publish({ termLabel, scope }),
     onSuccess:  () => {
       refetchStatus();
       qc.invalidateQueries({ queryKey: ['timetable'] });
@@ -962,7 +962,8 @@ export default function TimetablePage() {
             warnings={publishStatus.warnings ?? []}
             ruleWarnings={publishStatus.ruleWarnings ?? []}
             ruleWarningCount={publishStatus.ruleWarningCount ?? 0}
-            onPublish={(termLabel) => doPublish(termLabel)}
+            publishScope={publishStatus.publishScope ?? null}
+            onPublish={(termLabel, scope) => doPublish({ termLabel, scope })}
             onClose={() => setShowPublishModal(false)}
           />
         )}

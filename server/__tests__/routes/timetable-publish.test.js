@@ -6,8 +6,10 @@
      • Editors read the draft. Everyone else reads the published version only.
      • A draft edit changes nothing for non-editors until it is published.
      • After a change, Publish is available again. With no change, it is refused.
-     • Publishing copies the whole draft under a new version, then points the
-       school at it. The previous copy is removed. The version record stays.
+     • Publishing copies the draft under a new version, then points the school
+       at it. Copies of the last 10 versions are kept so one can be restored
+       into the draft (v5.272.0); older copies go, their history rows stay.
+     • The admin can leave out lessons from other academic years (v5.272.0).
      • Unpublish hides the live version from everyone. Editors still see the draft.
    ============================================================ */
 'use strict';
@@ -18,6 +20,7 @@ let mockSchool;
 let mockDraft;      // the timetable: the editors' draft
 let mockPublished;  // timetable_published: copies, one set per version
 let mockVersions;   // timetable_versions: history
+let mockYears;      // academic_years
 let mockUser;
 
 function matches(doc, filter) {
@@ -25,6 +28,7 @@ function matches(doc, filter) {
     if (k === '$or') return v.some(sub => matches(doc, sub));
     if (v && typeof v === 'object' && !Array.isArray(v)) {
       if ('$in' in v) return v.$in.includes(doc[k]);
+      if ('$nin' in v) return !v.$nin.includes(doc[k]);
       if ('$ne' in v) return doc[k] !== v.$ne;
       if ('$exists' in v) return (doc[k] !== undefined) === v.$exists;
     }
@@ -44,8 +48,11 @@ function mockStore(rowsRef) {
     find: (f) => mockChain(rowsRef().filter(d => matches(d, f))),
     findOne: (f) => mockChain(rowsRef().find(d => matches(d, f)) ?? null),
     countDocuments: (f) => Promise.resolve(rowsRef().filter(d => matches(d, f)).length),
+    distinct: (field, f) => Promise.resolve([...new Set(rowsRef().filter(d => matches(d, f)).map(d => d[field]))]),
     insertMany: (docs) => { rowsRef().push(...docs); return Promise.resolve(docs); },
     create: (doc) => { rowsRef().push(doc); return Promise.resolve(doc); },
+    updateOne: (f, u) => { const d = rowsRef().find(x => matches(x, f)); if (d) Object.assign(d, u.$set || {}); return Promise.resolve({ modifiedCount: d ? 1 : 0 }); },
+    updateMany: (f, u) => { let n = 0; for (const d of rowsRef()) if (matches(d, f)) { Object.assign(d, u.$set || {}); n++; } return Promise.resolve({ modifiedCount: n }); },
     findOneAndDelete: (f) => {
       const i = rowsRef().findIndex(d => matches(d, f));
       if (i < 0) return Promise.resolve(null);
@@ -92,6 +99,7 @@ jest.mock('../../utils/model', () => ({
     if (col === 'timetable') return global.__store('timetable');
     if (col === 'timetable_published') return global.__store('timetable_published');
     if (col === 'timetable_versions') return global.__store('timetable_versions');
+    if (col === 'academic_years') return global.__store('academic_years');
     return { find: jest.fn(() => mockChain([])), findOne: jest.fn(() => mockChain(null)) };
   }),
 }));
@@ -100,7 +108,7 @@ jest.mock('../../utils/model', () => ({
 beforeAll(() => {
   global.__mockUser = null;
   global.__mockSchool = () => mockSchool;
-  global.__store = (name) => mockStore(() => (name === 'timetable' ? mockDraft : name === 'timetable_published' ? mockPublished : mockVersions));
+  global.__store = (name) => mockStore(() => (name === 'timetable' ? mockDraft : name === 'timetable_published' ? mockPublished : name === 'academic_years' ? mockYears : mockVersions));
 });
 
 const express = require('express');
@@ -126,6 +134,7 @@ beforeEach(() => {
   mockDraft = [slot('s1', 'Maths'), slot('s2', 'English')];
   mockPublished = [];
   mockVersions = [];
+  mockYears = [];
   global.__mockUser = { ...ADMIN };
 });
 
@@ -193,14 +202,17 @@ describe('a draft edit is invisible to teachers until it is published', () => {
   });
 });
 
-describe('a new version replaces the copy, and history is kept', () => {
-  test('publishing again removes the old copy and keeps a version record for each publish', async () => {
+describe('a new version goes live, and recent copies are kept as restore points', () => {
+  test('publishing again keeps both copies and a version record for each; teachers read only the live one', async () => {
     await supertest(buildApp()).post('/api/timetable/publish').send({});
     await markTimetableChanged(SCHOOL);
-    await supertest(buildApp()).post('/api/timetable/publish').send({});
-    expect(mockPublished).toHaveLength(2);                              // only the live version's two lessons
-    expect(new Set(mockPublished.map(s => s.versionId)).size).toBe(1);
+    const second = await supertest(buildApp()).post('/api/timetable/publish').send({});
+    expect(mockPublished).toHaveLength(4);
+    expect(new Set(mockPublished.map(s => s.versionId)).size).toBe(2);
     expect(mockVersions).toHaveLength(2);
+    const seen = await readAs(TEACHER);
+    expect(seen).toHaveLength(2);
+    expect(new Set(seen.map(s => s.versionId))).toEqual(new Set([second.body.data.versionId]));
   });
 });
 
@@ -300,5 +312,173 @@ describe('status reports what the timetabler needs to know', () => {
     expect(res.body.data.published).toBe(true);
     expect(res.body.data.hasChanges).toBe(true);
     expect(res.body.data.canPublish).toBe(true);
+  });
+});
+
+/* v5.272.0 — raised in a school admin's review of the timetable guide:
+   "the term label doesn't limit what gets published" and "publishing
+   history isn't a full restore point". */
+describe('what gets published (v5.272.0)', () => {
+  const Y_NOW = 'ay_2026', Y_OLD = 'ay_2025';
+  beforeEach(() => {
+    mockYears = [
+      { id: Y_OLD, schoolId: SCHOOL, name: '2025', isCurrent: false, startDate: '2025-01-01', endDate: '2025-12-31', terms: [] },
+      { id: Y_NOW, schoolId: SCHOOL, name: '2026', isCurrent: true, startDate: '2026-01-01', endDate: '2026-12-31', terms: [{ id: 't2', name: 'Term 2', startDate: '2026-01-01', endDate: '2026-12-31' }] },
+    ];
+    mockDraft = [
+      { ...slot('n1', 'Maths'), academicYearId: Y_NOW, termId: 't2' },
+      { ...slot('n2', 'English'), academicYearId: Y_NOW, termId: 't2' },
+      { ...slot('o1', 'Old Maths'), academicYearId: Y_OLD },
+      { ...slot('u1', 'Untagged PE') },                       // saved before lessons carried a year
+    ];
+  });
+
+  test('status says how many lessons the draft holds per academic year, and suggests a label', async () => {
+    const res = await supertest(buildApp()).get('/api/timetable/status');
+    const sc = res.body.data.publishScope;
+    expect(sc).toMatchObject({ total: 4, thisYearScope: 3, otherYears: 1, currentYearId: Y_NOW, suggestedLabel: 'Term 2 2026' });
+    expect(sc.byYear.find(y => y.isCurrent)).toMatchObject({ name: '2026', count: 2 });
+  });
+
+  test('"this year only" leaves out other years\x27 lessons but keeps untagged ones', async () => {
+    const res = await supertest(buildApp()).post('/api/timetable/publish').send({ termLabel: 'Term 2', scope: 'current_year' });
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ scope: 'current_year', slotCount: 3 });
+    expect(mockPublished.map(s => s.id).sort()).toEqual(['n1', 'n2', 'u1']);
+    expect(mockSchool.timetableStatus).toMatchObject({ publishedScope: 'current_year', publishedYearId: Y_NOW });
+    expect(mockVersions[0]).toMatchObject({ scope: 'current_year', academicYearId: Y_NOW, slotCount: 3 });
+  });
+
+  test('without a scope the whole draft is published, as before', async () => {
+    const res = await supertest(buildApp()).post('/api/timetable/publish').send({ termLabel: 'Term 2' });
+    expect(res.body.data).toMatchObject({ scope: 'all', slotCount: 4 });
+  });
+
+  test('the term label never selects lessons', async () => {
+    await supertest(buildApp()).post('/api/timetable/publish').send({ termLabel: 'Term 1 2025' });
+    expect(mockPublished).toHaveLength(4);
+  });
+
+  test('"this year only" is refused when no current academic year is set', async () => {
+    mockYears = [];
+    const res = await supertest(buildApp()).post('/api/timetable/publish').send({ scope: 'current_year' });
+    expect(res.status).toBe(400);
+    expect(mockPublished).toHaveLength(0);
+  });
+});
+
+describe('restore points (v5.272.0)', () => {
+  async function publish(label) {
+    await markTimetableChanged(SCHOOL);
+    return (await supertest(buildApp()).post('/api/timetable/publish').send({ termLabel: label })).body.data;
+  }
+
+  test('only the last 10 versions keep their lessons; older ones stay as history', async () => {
+    const ids = [];
+    for (let i = 1; i <= 12; i++) {
+      mockDraft[0].subject = `Maths v${i}`;
+      ids.push((await publish(`v${i}`)).versionId);
+      await new Promise(r => setTimeout(r, 2));             // distinct publishedAt
+    }
+    expect(new Set(mockPublished.map(s => s.versionId)).size).toBe(10);
+    expect(mockVersions.filter(v => v.copyKept === false).map(v => v.termLabel).sort()).toEqual(['v1', 'v2']);
+    const list = await supertest(buildApp()).get('/api/timetable/versions');
+    expect(list.body.data.liveVersionId).toBe(ids[11]);
+    expect(list.body.data.versions.find(v => v.termLabel === 'v1').canRestore).toBe(false);
+    expect((await readAs(TEACHER)).map(s => s.subject)).toContain('Maths v12');
+  });
+
+  test('restoring copies a version into the draft, saves the current draft first, and changes nothing for teachers until published', async () => {
+    const v1 = await publish('Term 1');                      // Maths, English
+    mockDraft = [slot('s1', 'Physics'), slot('s3', 'Art')];  // big edit
+    const v2 = await publish('Term 2');
+    mockDraft.push(slot('s4', 'Music'));                     // unpublished edit
+
+    global.__mockUser = { ...ADMIN };
+    const res = await supertest(buildApp()).post(`/api/timetable/versions/${v1.versionId}/restore`).send({});
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ restored: 2, replaced: 3 });
+    expect(mockDraft.map(s => s.subject).sort()).toEqual(['English', 'Maths']);
+
+    // The draft before the restore is in the history and can be restored back.
+    const backup = mockVersions.find(v => v.kind === 'draft_backup');
+    expect(backup).toMatchObject({ slotCount: 3, restoredFrom: v1.versionId });
+    expect(backup.termLabel).toMatch(/Draft saved before restoring Term 1/);
+
+    // Teachers still see Term 2 until the restored draft is published.
+    expect((await readAs(TEACHER)).map(s => s.subject).sort()).toEqual(['Art', 'Physics']);
+    global.__mockUser = { ...ADMIN };
+    expect((await supertest(buildApp()).get('/api/timetable/status')).body.data.hasChanges).toBe(true);
+
+    const back = await supertest(buildApp()).post(`/api/timetable/versions/${backup.id}/restore`).send({});
+    expect(back.status).toBe(200);
+    expect(mockDraft.map(s => s.subject).sort()).toEqual(['Art', 'Music', 'Physics']);
+    expect(v2.versionId).toBeTruthy();
+  });
+
+  test('a version whose lessons are no longer kept, or another school\x27s, cannot be restored', async () => {
+    const v1 = await publish('Old');
+    mockVersions.find(v => v.id === v1.versionId).copyKept = false;
+    const old = await supertest(buildApp()).post(`/api/timetable/versions/${v1.versionId}/restore`).send({});
+    expect(old.status).toBe(409);
+    mockVersions.push({ id: 'v_other', schoolId: 'school_B', termLabel: 'Other', slotCount: 1 });
+    const other = await supertest(buildApp()).post('/api/timetable/versions/v_other/restore').send({});
+    expect(other.status).toBe(404);
+    expect(mockDraft.map(s => s.id).sort()).toEqual(['s1', 's2']);
+  });
+});
+
+describe('untimed lessons block only when they are being published (v5.272.0)', () => {
+  beforeEach(() => {
+    mockYears = [{ id: 'ay_2026', schoolId: SCHOOL, name: '2026', isCurrent: true, startDate: '2026-01-01', endDate: '2026-12-31', terms: [] }];
+    mockDraft = [
+      { ...slot('n1', 'Maths'), academicYearId: 'ay_2026' },
+      { ...slot('o1', 'Old untimed'), academicYearId: 'ay_2025', startTime: null, endTime: null },
+    ];
+  });
+  test('an untimed lesson from another year that is left out does not block "this year only"', async () => {
+    const res = await supertest(buildApp()).post('/api/timetable/publish').send({ scope: 'current_year' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.slotCount).toBe(1);
+  });
+  test('the same lesson blocks a whole-draft publish', async () => {
+    const res = await supertest(buildApp()).post('/api/timetable/publish').send({ scope: 'all' });
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toMatch(/1 lesson has no time/);
+  });
+});
+
+describe('restoring a "this year only" version leaves other years alone (v5.272.0)', () => {
+  test('only that year\x27s lessons are replaced; the whole draft is saved first', async () => {
+    mockYears = [{ id: 'ay_2026', schoolId: SCHOOL, name: '2026', isCurrent: true, startDate: '2026-01-01', endDate: '2026-12-31', terms: [] }];
+    mockDraft = [
+      { ...slot('n1', 'Maths'), academicYearId: 'ay_2026' },
+      { ...slot('o1', 'Old year'), academicYearId: 'ay_2025' },
+    ];
+    const v1 = (await supertest(buildApp()).post('/api/timetable/publish').send({ scope: 'current_year', termLabel: 'T1' })).body.data;
+    mockDraft = [
+      { ...slot('n2', 'Physics'), academicYearId: 'ay_2026' },
+      { ...slot('o1', 'Old year'), academicYearId: 'ay_2025' },
+    ];
+    const res = await supertest(buildApp()).post(`/api/timetable/versions/${v1.versionId}/restore`).send({});
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ restored: 1, replaced: 1 });
+    expect(mockDraft.map(s => s.subject).sort()).toEqual(['Maths', 'Old year']);
+    expect(mockVersions.find(v => v.kind === 'draft_backup').slotCount).toBe(2);
+  });
+});
+
+describe('history only offers a restore that can work (v5.272.0)', () => {
+  test('a version whose stored lessons were removed is not offered for restore', async () => {
+    await supertest(buildApp()).post('/api/timetable/publish').send({ termLabel: 'A' });
+    await markTimetableChanged(SCHOOL);
+    const b = (await supertest(buildApp()).post('/api/timetable/publish').send({ termLabel: 'B' })).body.data;
+    // Something outside the publish flow removed version A's copy (e.g. the demo seed).
+    mockPublished.splice(0, mockPublished.length, ...mockPublished.filter(r => r.versionId === b.versionId));
+    const list = await supertest(buildApp()).get('/api/timetable/versions');
+    const byLabel = Object.fromEntries(list.body.data.versions.map(v => [v.termLabel, v]));
+    expect(byLabel.A.canRestore).toBe(false);
+    expect(byLabel.B.canRestore).toBe(true);
+    expect(list.body.data.liveVersionId).toBe(b.versionId);
   });
 });

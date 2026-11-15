@@ -33,6 +33,10 @@ async function getPublishState(schoolId) {
     publishedAt:        t.publishedAt ?? null,
     publishedBy:        t.publishedBy ?? null,
     termLabel:          t.termLabel ?? '',
+    // v5.272.0: which lessons the live version holds — 'all' (the whole
+    // draft) or 'current_year' (publishedYearId's lessons + untagged ones).
+    publishedScope:     t.publishedScope ?? 'all',
+    publishedYearId:    t.publishedYearId ?? null,
     draftRevision,
     publishedRevision,
     hasChanges,

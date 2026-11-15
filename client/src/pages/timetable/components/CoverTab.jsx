@@ -109,6 +109,22 @@ export default function CoverTab({ teachers }) {
     staleTime: 60_000,
   });
   const versions = versionsData?.data?.versions ?? [];
+  const liveVersionId = versionsData?.data?.liveVersionId ?? null;
+  const keepCopies = versionsData?.data?.keepCopies ?? 10;
+
+  /* Restore a kept version into the draft (v5.272.0). The current draft is
+     saved in this history first; nothing goes live until it is published. */
+  const [restoreTarget, setRestoreTarget] = useState(null);
+  const restoreVersion = useMutation({
+    mutationFn: (id) => ttApi.restoreVersion(id),
+    onSuccess: (res) => {
+      setRestoreTarget(null);
+      qc.invalidateQueries({ queryKey: ['timetable'] });
+      const d = res?.data ?? {};
+      showT(`Draft replaced with ${d.restored ?? 0} lessons. Your previous draft (${d.replaced ?? 0} lessons) is saved in Publish History. Publish to make it live.`);
+    },
+    onError: err => { setRestoreTarget(null); showT(err?.message ?? 'Restore failed.', 'error'); },
+  });
 
   const markAbsent = useMutation({
     mutationFn: () => ttApi.substitutions.markAbsent({ teacherId: absentId, date, reason }),
@@ -402,6 +418,33 @@ export default function CoverTab({ teachers }) {
         </div>
       )}
 
+      {/* Restore confirmation (v5.272.0) */}
+      {restoreTarget && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-4 space-y-2">
+          <p className="text-sm font-semibold text-amber-900">
+            Restore “{restoreTarget.termLabel || 'Untitled version'}” to the draft?
+          </p>
+          <p className="text-xs text-amber-800">
+            {restoreTarget.scope === 'current_year'
+              ? <>This year&apos;s lessons in the draft are replaced with this version&apos;s {restoreTarget.slotCount} lessons, including any locked lessons. Lessons from other academic years stay as they are.</>
+              : <>The whole draft is replaced with this version&apos;s {restoreTarget.slotCount} lessons, including any locked lessons.</>}
+            {' '}
+            Your current draft is saved in Publish History first, so you can restore it again.
+            Nothing changes for staff, students or parents until you publish.
+          </p>
+          <div className="flex items-center gap-3 pt-1">
+            <button
+              onClick={() => restoreVersion.mutate(restoreTarget.id)}
+              disabled={restoreVersion.isPending}
+              className="text-xs font-medium bg-slate-900 text-white rounded-lg px-3 py-1.5 disabled:opacity-50"
+            >
+              {restoreVersion.isPending ? 'Restoring…' : 'Restore to draft'}
+            </button>
+            <button onClick={() => setRestoreTarget(null)} className="text-xs font-medium text-slate-600 hover:text-slate-800">Cancel</button>
+          </div>
+        </div>
+      )}
+
       {/* Publish History */}
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
         <button
@@ -424,19 +467,32 @@ export default function CoverTab({ teachers }) {
                 <p className="text-xs text-slate-400 text-center py-6">No publish history yet.</p>
               ) : (
                 <div className="divide-y divide-slate-50">
-                  {versions.map((v, i) => (
+                  {versions.map((v) => (
                     <div key={v.id} className="px-5 py-3 flex items-center gap-4">
-                      <div className={`w-2 h-2 rounded-full shrink-0 ${i === 0 ? 'bg-emerald-400' : 'bg-slate-200'}`} />
+                      <div className={`w-2 h-2 rounded-full shrink-0 ${v.id === liveVersionId ? 'bg-emerald-400' : 'bg-slate-200'}`} />
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-medium text-slate-800">
                           {v.termLabel || 'Untitled version'}
-                          {i === 0 && <span className="ml-2 text-[10px] text-emerald-600 font-semibold">Current</span>}
+                          {v.id === liveVersionId && <span className="ml-2 text-[10px] text-emerald-600 font-semibold">Live</span>}
+                          {v.kind === 'draft_backup' && <span className="ml-2 text-[10px] text-slate-500 font-semibold">Saved draft</span>}
+                          {v.scope === 'current_year' && <span className="ml-2 text-[10px] text-slate-500">This year only</span>}
                         </p>
                         <p className="text-[10px] text-slate-400">
                           {new Date(v.publishedAt).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })}
-                          {' · '}{v.slotCount} slots
+                          {' · '}{v.slotCount} lessons
                         </p>
                       </div>
+                      {v.canRestore ? (
+                        <button
+                          onClick={() => setRestoreTarget(v)}
+                          disabled={restoreVersion.isPending}
+                          className="text-[11px] font-medium text-slate-600 hover:text-slate-900 border border-slate-200 rounded-md px-2 py-1 disabled:opacity-50 shrink-0"
+                        >
+                          Restore to draft
+                        </button>
+                      ) : (
+                        <span className="text-[10px] text-slate-400 shrink-0" title={`Only the last ${keepCopies} versions are kept in full.`}>History only</span>
+                      )}
                     </div>
                   ))}
                 </div>

@@ -53,6 +53,7 @@ const { studentStreamOr, teacherLessonClause, lessonTeacherIds, audiencesOverlap
 const { getTimetableSettings, setWorkingDays, setRules, notWorkingDayMsg, ALL_DAYS } = require('../utils/timetable-settings');
 const teacherAvailability = require('../utils/teacher-availability');
 const { computePlacement } = require('../utils/timetable-placement');
+const ttVersions = require('../utils/timetable-versions');
 
 const router = express.Router();
 
@@ -912,10 +913,32 @@ router.get('/placement', authMiddleware, PLAN, MODGATE, timetableManageAccess('r
   } catch (err) { console.error('[timetable GET /placement]', err); return E.serverError(res); }
 });
 
+/* What the next publish would include (v5.272.0): the draft per academic year, and a
+   suggested label from the current term. */
+async function _publishScopeInfo(req) {
+  try {
+    const { schoolId } = req.jwtUser;
+    const ctx = tenantContext(req);
+    const period = await resolveAcademicPeriod(schoolId, ctx, {});
+    const currentYearId = period.error ? null : (period.academicYearId ?? null);
+    const scope = await ttVersions.draftScope(ctx, schoolId, currentYearId);
+    let suggestedLabel = '';
+    if (currentYearId) {
+      const year = await tenantModel('academic_years', ctx).findOne({ schoolId, id: currentYearId }).select('name terms').lean();
+      const term = (year?.terms || []).find(t => t.id === period.termId);
+      suggestedLabel = [term?.name, year?.name].filter(Boolean).join(' ');
+    }
+    return { publishScope: { ...scope, suggestedLabel } };
+  } catch (err) {
+    console.error('[timetable publish scope]', err.message);
+    return { publishScope: null };
+  }
+}
+
 /* ── GET /api/timetable/status ─ Publish state (utils/timetable-publish.js) ── */
 router.get('/status', authMiddleware, PLAN, MODGATE, timetableManageAccess('read'), async (req, res) => {
   try {
-    return ok(res, { ...(await getPublishState(req.jwtUser.schoolId)), ...(await _draftProblems(req)) });
+    return ok(res, { ...(await getPublishState(req.jwtUser.schoolId)), ...(await _draftProblems(req)), ...(await _publishScopeInfo(req)) });
   } catch (err) { console.error('[timetable GET /status]', err); return E.serverError(res); }
 });
 
@@ -926,17 +949,30 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, timetableManageAccess('up
   try {
     const { schoolId, userId } = req.jwtUser;
     const termLabel = String(req.body?.termLabel ?? '').trim().slice(0, 60);
+    // Which lessons to publish (v5.272.0): 'all' (the whole draft, the
+    // default and the old behaviour) or 'current_year' (this academic
+    // year's lessons plus untagged ones). The term label never selects lessons.
+    const scope = req.body?.scope === 'current_year' ? 'current_year' : 'all';
     const before = await getPublishState(schoolId);
     if (before.published && !before.hasChanges) {
       return E.badRequest(res, 'Nothing has changed since the last publish.');
     }
     const problems = await _draftProblems(req);
-    if (problems.untimedLessons > 0) {
-      return E.badRequest(res, `${problems.untimedLessons} lesson${problems.untimedLessons === 1 ? ' has' : 's have'} no time. Fix ${problems.untimedLessons === 1 ? 'it' : 'them'} before publishing.`);
-    }
     // The revision is read before the draft, so an edit made during publishing still shows as unpublished.
     const draftRevision = before.draftRevision;
-    const drafts = await tenantModel('timetable', tenantContext(req)).find({ schoolId, isActive: true }).lean();
+    const period = await resolveAcademicPeriod(schoolId, tenantContext(req), {});
+    const currentYearId = period.error ? null : (period.academicYearId ?? null);
+    if (scope === 'current_year' && !currentYearId) {
+      return E.badRequest(res, 'No current academic year is set, so the draft cannot be limited to it. Publish the whole draft, or set the current year first.');
+    }
+    const drafts = await tenantModel('timetable', tenantContext(req)).find(ttVersions.publishFilter(schoolId, scope, currentYearId)).lean();
+    if (!drafts.length) return E.badRequest(res, 'There are no lessons to publish in that scope.');
+    // Lessons with no time block publishing — only those being published (v5.272.0):
+    // an untimed lesson from another academic year that is left out doesn't block.
+    const untimed = drafts.filter(sl => !sl.startTime || !sl.endTime).length;
+    if (untimed > 0) {
+      return E.badRequest(res, `${untimed} lesson${untimed === 1 ? ' has' : 's have'} no time. Fix ${untimed === 1 ? 'it' : 'them'} before publishing.`);
+    }
     const versionId = uuidv4();
     const now = new Date().toISOString();
     const copies = drafts.map(({ _id, __v, ...slot }) => ({ ...slot, versionId, schoolId }));
@@ -951,16 +987,19 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, timetableManageAccess('up
         'timetableStatus.termLabel':          termLabel,
         'timetableStatus.publishedVersionId': versionId,
         'timetableStatus.publishedRevision':  draftRevision,
+        'timetableStatus.publishedScope':     scope,
+        'timetableStatus.publishedYearId':    scope === 'current_year' ? currentYearId : null,
       },
     });
     await tenantModel('timetable_versions', tenantContext(req)).create({
       id: versionId, schoolId, termLabel, publishedAt: now, publishedBy: userId,
-      slotCount: copies.length, draftRevision,
+      slotCount: copies.length, draftRevision, kind: 'published', scope, academicYearId: scope === 'current_year' ? currentYearId : null,
     });
-    // Only the live version's copy is kept. The version record above stays as history.
-    await Published.deleteMany({ schoolId, versionId: { $ne: versionId } });
+    // Keep the copies of the last few versions so any of them can be restored
+    // (v5.272.0); older copies go, their history rows stay (copyKept: false).
+    await ttVersions.pruneCopies(tenantContext(req), schoolId, versionId);
 
-    return ok(res, { published: true, publishedAt: now, termLabel, versionId, slotCount: copies.length, warnings: problems.warnings });
+    return ok(res, { published: true, publishedAt: now, termLabel, versionId, scope, slotCount: copies.length, warnings: problems.warnings });
   } catch (err) { console.error('[timetable POST /publish]', err); return E.serverError(res); }
 });
 
@@ -1617,10 +1656,42 @@ router.delete('/substitutions/:id', authMiddleware, PLAN, MODGATE, timetableMana
 router.get('/versions', authMiddleware, PLAN, MODGATE, timetableManageAccess('read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const versions = await tenantModel('timetable_versions', tenantContext(req))
-      .find({ schoolId }).sort({ publishedAt: -1 }).limit(20).lean();
-    return ok(res, { versions });
+    const [versions, state] = await Promise.all([
+      tenantModel('timetable_versions', tenantContext(req)).find({ schoolId }).sort({ publishedAt: -1 }).limit(30).lean(),
+      getPublishState(schoolId),
+    ]);
+    // liveVersionId: the version people see now (not simply the newest row —
+    // a saved draft backup is newer but never live). canRestore checks that
+    // the version's lessons are really still stored, not just the copyKept
+    // flag, so the button is never offered for a restore that would fail.
+    const stored = new Set(await tenantModel('timetable_published', tenantContext(req))
+      .distinct('versionId', { schoolId, versionId: { $in: versions.map(v => v.id) } }));
+    return ok(res, {
+      versions: versions.map(v => ({
+        ...v, kind: v.kind || 'published',
+        canRestore: v.copyKept !== false && (stored.has(v.id) || (v.slotCount || 0) === 0),
+      })),
+      liveVersionId: state.published ? state.publishedVersionId : null,
+      keepCopies: ttVersions.KEEP_COPIES,
+    });
   } catch (err) { console.error('[timetable GET /versions]', err); return E.serverError(res); }
+});
+
+/* ── POST /api/timetable/versions/:id/restore — copy a kept version into the draft (v5.272.0) ──
+   Replaces the draft with that version (for a "this year only" version, only that year's
+   lessons — other years stay). The whole current draft is saved first as its own
+   history entry, so this can be reversed by restoring that entry. Nothing goes live until
+   the draft is published. */
+router.post('/versions/:id/restore', authMiddleware, PLAN, MODGATE, timetableManageAccess('update'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const ctx = tenantContext(req);
+    const result = await ttVersions.restoreVersion(ctx, schoolId, String(req.params.id), userId);
+    if (result.error) return fail(res, result.status === 404 ? 'NOT_FOUND' : 'RESTORE_FAILED', result.error, result.status);
+    await markTimetableChanged(schoolId);
+    await ttVersions.pruneCopies(ctx, schoolId, (await getPublishState(schoolId)).publishedVersionId);
+    return ok(res, result);
+  } catch (err) { console.error('[timetable POST /versions/:id/restore]', err); return E.serverError(res); }
 });
 
 /* GET /api/timetable/available-teachers?date=YYYY-MM-DD&period=5&subject=MAT
