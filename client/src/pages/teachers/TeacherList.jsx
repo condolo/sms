@@ -3,21 +3,19 @@
    /platform-audit: RBAC-gated, lucide icons, correct API shape
    ============================================================ */
 import { useState, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, X, Trash2, Eye, Loader2,
   AlertTriangle, Phone, Mail,
   Briefcase, Users, Edit2, Save, Calendar,
-  MapPin, Award, Download, ClipboardList, Plus, Filter, Pencil,
+  MapPin, Award, Download, ClipboardList, Filter,
 } from 'lucide-react';
 import {
   teachers as teachersApi,
   teachingAssignments as assignmentsApi,
-  rooms as roomsApi,
   classes as classesApi,
-  classSubjects,
-  streams as streamsApi,
   importExport,
   departments as deptsApi,
   subjects as subjectsApi,
@@ -575,7 +573,7 @@ function TeacherDetailSlideOver({ teacher: initialTeacher, canEdit, canDelete, o
         {/* Body */}
         <div className="flex-1 overflow-y-auto">
           {activeTab === 'assignments' ? (
-            <TeacherAssignmentsTab teacher={teacher} canEdit={canEdit} />
+            <TeacherAssignmentsTab teacher={teacher} />
           ) : !editing ? (
             /* View mode */
             <div className="px-6 py-5 space-y-6">
@@ -850,460 +848,89 @@ function TeacherDetailSlideOver({ teacher: initialTeacher, canEdit, canDelete, o
   );
 }
 
-/* ── Teaching Assignments Tab ────────────────────────────── */
-/* Taught together (v5.270.0): the other teachers/streams with the same class +
-   subject, and whether each is in this row's set. Linking makes them ONE set
-   of lessons — two teachers in every lesson (co-teaching) and/or two streams
-   taught together. Periods per week follow this row. */
-function TogetherPanel({ a, onClose, onChanged }) {
-  const { toast } = useToast();
-  const { data, isLoading } = useQuery({
-    queryKey: ['teaching-assignments', 'together', a.classId, a.subjectId],
-    queryFn: () => assignmentsApi.list({ classId: a.classId, subjectId: a.subjectId }),
-  });
-  const myId = a.id ?? a._id;
-  const others = (data?.data ?? []).filter(x => (x.id ?? x._id) !== myId);
-  const inSet = x => !!a.lessonGroupId && x.lessonGroupId === a.lessonGroupId;
-  const linkMut = useMutation({
-    mutationFn: other => assignmentsApi.link(myId, other.id ?? other._id),
-    onSuccess: () => { toast.success('Now taught together.'); onChanged(); },
-    onError: err => toast.error(err?.message ?? 'Could not link.'),
-  });
-  const unlinkMut = useMutation({
-    mutationFn: row => assignmentsApi.unlink(row.id ?? row._id),
-    onSuccess: () => { toast.success('Taught separately again.'); onChanged(); },
-    onError: err => toast.error(err?.message ?? 'Could not unlink.'),
-  });
-  const who = x => `${x.teacherName ?? 'Teacher'}${x.streamName ? ` · ${x.streamName}` : ' · whole class'}`;
-  return (
-    <div className="mt-2 rounded-lg border border-violet-200 bg-violet-50/50 p-2.5 space-y-2">
-      <p className="text-[11px] text-slate-600">
-        Teach <span className="font-semibold">{a.subjectName}</span> in <span className="font-semibold">{a.className}</span> together with:
-      </p>
-      {isLoading ? <p className="text-[11px] text-slate-400">Loading…</p> : !others.length ? (
-        <p className="text-[11px] text-slate-500">No other teacher or stream has this subject in this class yet. Add the other assignment first (on that teacher&apos;s page), then link it here.</p>
-      ) : (
-        <ul className="space-y-1">
-          {others.map(x => (
-            <li key={x.id ?? x._id} className="flex items-center justify-between gap-2 text-[11px]">
-              <span className="text-slate-700">{who(x)}</span>
-              {inSet(x) ? (
-                <button onClick={() => unlinkMut.mutate(x)} disabled={unlinkMut.isPending} className="px-2 py-0.5 rounded border border-slate-300 text-slate-600 hover:bg-white disabled:opacity-50">Taught together · unlink</button>
-              ) : (
-                <button onClick={() => linkMut.mutate(x)} disabled={linkMut.isPending} className="px-2 py-0.5 rounded bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">Teach together</button>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-      <p className="text-[10px] text-slate-500">Same stream, another teacher = both teach every lesson. Another stream = the streams have the lesson together. The set uses this row&apos;s periods per week.</p>
-      <div className="flex gap-2">
-        {a.lessonGroupId && (
-          <button onClick={() => unlinkMut.mutate(a)} disabled={unlinkMut.isPending} className="text-[11px] text-slate-600 underline">Take this row out of the set</button>
-        )}
-        <button onClick={onClose} className="text-[11px] text-slate-500 ml-auto">Close</button>
-      </div>
-    </div>
-  );
-}
-
-function TeacherAssignmentsTab({ teacher, canEdit }) {
-  const qc = useQueryClient();
-  const { toast } = useToast();
+/* ── Teaching Assignments Tab (view-only since v5.274.0) ─────
+   Direct instruction (2026-11-15): one place for entering who teaches
+   what, to avoid confusing data entry. Assignments are entered and
+   updated in Timetable → Subject allocation (by the timetabler, admin,
+   principal or deputy, with HODs consulted); this tab shows them. */
+function TeacherAssignmentsTab({ teacher }) {
+  const navigate = useNavigate();
+  const can  = useAuthStore(st => st.can.bind(st));
+  const role = useAuthStore(st => st.session?.user?.role ?? '');
   const teacherId = teacher.userId ?? teacher.id ?? teacher._id;
+  // Same gate as the Timetable admin console (TimetablePage.jsx / timetableManageAccess).
+  const canOpenAllocation = ['admin', 'superadmin', 'principal', 'deputy_principal', 'deputy', 'timetabler'].includes(role) || can('timetable__manage', 'update');
 
-  const [showAdd, setShowAdd] = useState(false);
-  const [af, setAf]           = useState({ classId: '', subjectId: '', streamId: '', preferredRoomId: '', periodsPerWeek: '', doubleLessons: '' });
-  // Inline edit of an existing assignment's lessons per week / double lessons (v5.268.0).
-  const [editId, setEditId]   = useState(null);
-  const [ef, setEf]           = useState({ periodsPerWeek: '', doubleLessons: '' });
-  const [efErr, setEfErr]     = useState('');
-  const [afErr, setAfErr]     = useState({});
-  const [togetherId, setTogetherId] = useState(null);   // row whose "Teach together" panel is open
-
-  /* ── Fetch assignments for this teacher ─── */
   const { data: aData, isLoading: loadingA } = useQuery({
     queryKey: ['teaching-assignments', { teacherId }],
     queryFn:  () => assignmentsApi.list({ teacherId }),
     staleTime: 60_000,
   });
   const assignments = aData?.data ?? [];
-
-  /* ── Fetch class list (only when add form is open) ─── */
-  const { data: clsData } = useQuery({
-    queryKey: ['classes', 'all'],
-    queryFn:  () => classesApi.list({ limit: 200 }),
-    staleTime: 5 * 60_000,
-    enabled: showAdd,
-  });
-  const classList = clsData?.data ?? [];
-
-  /* ── Fetch subjects for the selected class ─── */
-  const { data: sData } = useQuery({
-    queryKey: ['class-subjects', af.classId],
-    queryFn:  () => classSubjects.list({ classId: af.classId }),
-    staleTime: 60_000,
-    enabled: showAdd && !!af.classId,
-  });
-  const subjectList = sData?.data ?? [];
-
-  /* ── Fetch streams for the selected class ─── */
-  const { data: strData } = useQuery({
-    queryKey: ['streams', af.classId],
-    queryFn:  () => streamsApi.list({ classId: af.classId, status: 'active' }),
-    staleTime: 60_000,
-    enabled: showAdd && !!af.classId,
-  });
-  const streamList = strData?.data ?? [];
-
-  // Stream rule (mirrors teaching-assignments.js's own server-side check):
-  // a subject compulsory for this class, in a class that actually has
-  // streams, needs a specific stream picked — a plain class-wide assignment
-  // can't express "different teacher per stream". Electives, or a class
-  // with no streams, leave it optional.
-  const selectedSubject = subjectList.find(cs => cs.subjectId === af.subjectId);
-  const streamRequired  = !!selectedSubject?.isCompulsoryForClass && streamList.length > 0;
-
-  /* ── Fetch rooms (only when add form is open) ─── */
-  const { data: rData } = useQuery({
-    queryKey: ['rooms'],
-    queryFn:  () => roomsApi.list(),
-    staleTime: 5 * 60_000,
-    enabled: showAdd,
-  });
-  const roomList = rData?.data ?? [];
-
-  const invalidate = () => qc.invalidateQueries({ queryKey: ['teaching-assignments', { teacherId }] });
-
-  const createMut = useMutation({
-    mutationFn: data => assignmentsApi.create(data),
-    onSuccess:  () => {
-      invalidate();
-      setShowAdd(false);
-      setAf({ classId: '', subjectId: '', streamId: '', preferredRoomId: '', periodsPerWeek: '', doubleLessons: '' });
-      setAfErr({});
-      toast.success('Assignment added.');
-    },
-    onError: err => setAfErr({ _s: err?.message ?? 'Failed to add assignment' }),
-  });
-
-  const updateMut = useMutation({
-    mutationFn: ({ id, data }) => assignmentsApi.update(id, data),
-    onSuccess:  () => { invalidate(); setEditId(null); setEfErr(''); toast.success('Assignment updated.'); },
-    onError:    err => setEfErr(err?.message ?? 'Failed to update assignment.'),
-  });
-
-  function startEdit(a) {
-    setEditId(a.id ?? a._id);
-    setEf({ periodsPerWeek: a.periodsPerWeek ? String(a.periodsPerWeek) : '', doubleLessons: a.doubleLessons ? String(a.doubleLessons) : '' });
-    setEfErr('');
-  }
-  function saveEdit() {
-    const ppw = ef.periodsPerWeek ? Number(ef.periodsPerWeek) : null;
-    const dbl = ef.doubleLessons ? Number(ef.doubleLessons) : 0;
-    if (dbl && !ppw) { setEfErr('Set periods per week first.'); return; }
-    if (dbl * 2 > (ppw || 0)) { setEfErr(`${dbl} double${dbl === 1 ? '' : 's'} need${dbl === 1 ? 's' : ''} ${dbl * 2} periods.`); return; }
-    updateMut.mutate({ id: editId, data: { periodsPerWeek: ppw, doubleLessons: dbl } });
-  }
-
-  const removeMut = useMutation({
-    mutationFn: id => assignmentsApi.remove(id),
-    onSuccess:  () => { invalidate(); toast.success('Assignment removed.'); },
-    onError:    err => toast.error(err?.message ?? 'Failed to remove assignment.'),
-  });
-
-  function setField(k, v) {
-    setAf(f => {
-      const n = { ...f, [k]: v };
-      if (k === 'classId') { n.subjectId = ''; n.streamId = ''; } // reset downstream selections when class changes
-      if (k === 'subjectId') n.streamId = ''; // a different subject may have a different stream requirement
-      return n;
-    });
-    setAfErr(e => { const n = { ...e }; delete n[k]; delete n._s; return n; });
-  }
-
-  function submitAdd() {
-    const e = {};
-    if (!af.classId)   e.classId   = 'Select a class';
-    if (!af.subjectId) e.subjectId = 'Select a subject';
-    if (streamRequired && !af.streamId) e.streamId = 'This subject is compulsory here — select the stream this teacher covers';
-    if (af.doubleLessons && Number(af.doubleLessons) * 2 > Number(af.periodsPerWeek || 0)) {
-      e.doubleLessons = af.periodsPerWeek ? `${af.doubleLessons} double(s) need ${Number(af.doubleLessons) * 2} periods` : 'Set periods per week first';
-    }
-    if (Object.keys(e).length) { setAfErr(e); return; }
-    createMut.mutate({
-      teacherId,
-      classId:   af.classId,
-      subjectId: af.subjectId,
-      ...(af.streamId          ? { streamId:         af.streamId }                : {}),
-      ...(af.preferredRoomId  ? { preferredRoomId:  af.preferredRoomId }          : {}),
-      ...(af.periodsPerWeek   ? { periodsPerWeek:   Number(af.periodsPerWeek) }   : {}),
-      ...(af.doubleLessons    ? { doubleLessons:    Number(af.doubleLessons) }    : {}),
-    });
-  }
-
-  const fCls = (err) =>
-    `w-full text-sm px-3 py-2 rounded-lg border ${err ? 'border-red-300' : 'border-slate-200'} bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10`;
+  const openAllocation = () => navigate(`/timetable?view=allocation&teacher=${encodeURIComponent(teacher.id ?? teacher._id ?? teacherId)}`);
 
   return (
     <div className="px-6 py-5 space-y-4">
-      {/* Header row */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <p className="text-xs text-slate-500">
-          {loadingA ? '…' : `${assignments.length} assignment${assignments.length !== 1 ? 's' : ''}`} configured
+          {loadingA ? '…' : `${assignments.length} assignment${assignments.length !== 1 ? 's' : ''}`}
         </p>
-        {canEdit && !showAdd && (
+        {canOpenAllocation && (
           <button
-            onClick={() => setShowAdd(true)}
+            onClick={openAllocation}
             className="flex items-center gap-1 text-xs font-medium bg-slate-900 hover:bg-slate-800 text-white px-3 py-1.5 rounded-lg transition"
           >
-            <Plus size={11} /> Add assignment
+            <ClipboardList size={11} /> Edit in Subject allocation
           </button>
         )}
       </div>
 
-      {/* Add form */}
-      <AnimatePresence>
-        {showAdd && (
-          <motion.div
-            initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
-            className="space-y-3 p-4 bg-slate-50 border border-slate-200 rounded-xl"
-          >
-            {afErr._s && (
-              <div className="flex items-center gap-2 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-                <AlertTriangle size={11} className="shrink-0" />{afErr._s}
-              </div>
-            )}
+      {teacher.status === 'on_leave' && assignments.length > 0 && (
+        <div className="flex items-start gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+          <span>{teacher.firstName ?? 'This teacher'} is on leave but still allocated to the classes below. Reallocate them, or plan cover, in Timetable → Subject allocation.</span>
+        </div>
+      )}
 
-            <div className="grid grid-cols-2 gap-3">
-              {/* Class picker */}
-              <div>
-                <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Class *</label>
-                <select value={af.classId} onChange={e => setField('classId', e.target.value)} className={`mt-1 ${fCls(afErr.classId)}`}>
-                  <option value="">Select class…</option>
-                  {classList.map(c => (
-                    <option key={c.id ?? c._id} value={c.id ?? c._id}>{c.name}</option>
-                  ))}
-                </select>
-                {afErr.classId && <p className="text-[10px] text-red-500 mt-0.5">{afErr.classId}</p>}
-              </div>
-
-              {/* Subject picker — populated from class curriculum */}
-              <div>
-                <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Subject *</label>
-                <select
-                  value={af.subjectId}
-                  onChange={e => setField('subjectId', e.target.value)}
-                  disabled={!af.classId}
-                  className={`mt-1 ${fCls(afErr.subjectId)} disabled:opacity-50 disabled:cursor-not-allowed`}
-                >
-                  <option value="">{af.classId ? 'Select subject…' : 'Choose class first'}</option>
-                  {subjectList.map(cs => (
-                    <option key={cs.subjectId} value={cs.subjectId}>
-                      {cs.subject?.name ?? cs.subjectId}{cs.isCompulsoryForClass ? ' ★' : ''}
-                    </option>
-                  ))}
-                </select>
-                {afErr.subjectId && <p className="text-[10px] text-red-500 mt-0.5">{afErr.subjectId}</p>}
-              </div>
-            </div>
-
-            {/* Stream picker — required for a compulsory subject in a class
-                that has streams (different teacher per stream, e.g. 7i vs
-                7ii's Maths); optional otherwise, so an elective can still be
-                narrowed to one stream if a school genuinely wants that. */}
-            {af.subjectId && streamList.length > 0 && (
-              <div>
-                <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
-                  Stream{streamRequired ? ' *' : ' (optional — leave blank for the whole class)'}
-                </label>
-                <select
-                  value={af.streamId}
-                  onChange={e => setField('streamId', e.target.value)}
-                  className={`mt-1 ${fCls(afErr.streamId)}`}
-                >
-                  <option value="">{streamRequired ? 'Select stream…' : 'Whole class (every stream)'}</option>
-                  {streamList.map(s => (
-                    <option key={s.id ?? s._id} value={s.id ?? s._id}>{s.name}</option>
-                  ))}
-                </select>
-                {afErr.streamId && <p className="text-[10px] text-red-500 mt-0.5">{afErr.streamId}</p>}
-                {streamRequired && !afErr.streamId && (
-                  <p className="text-[10px] text-slate-400 mt-0.5">
-                    This subject is compulsory for this class — each stream needs its own assignment.
-                  </p>
-                )}
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-3">
-              {/* Room picker */}
-              <div>
-                <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Preferred Room</label>
-                <select value={af.preferredRoomId} onChange={e => setField('preferredRoomId', e.target.value)} className={`mt-1 ${fCls()}`}>
-                  <option value="">None</option>
-                  {roomList.map(r => (
-                    <option key={r.id ?? r._id} value={r.id ?? r._id}>{r.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Periods per week */}
-              <div>
-                <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Periods / Week</label>
-                <input
-                  type="number" min="1" max="40"
-                  value={af.periodsPerWeek}
-                  onChange={e => setField('periodsPerWeek', e.target.value)}
-                  placeholder="e.g. 5"
-                  className={`mt-1 ${fCls()}`}
-                />
-              </div>
-            </div>
-
-            {/* Double lessons — two back-to-back periods each, counted in Periods / Week */}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Double lessons / Week</label>
-                <input
-                  type="number" min="0" max="20"
-                  value={af.doubleLessons}
-                  onChange={e => setField('doubleLessons', e.target.value)}
-                  placeholder="e.g. 1"
-                  className={`mt-1 ${fCls(afErr.doubleLessons)}`}
-                />
-                {afErr.doubleLessons
-                  ? <p className="text-[10px] text-red-500 mt-0.5">{afErr.doubleLessons}</p>
-                  : <p className="text-[10px] text-slate-400 mt-0.5">Each double uses 2 of the periods above.</p>}
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-2 pt-1">
-              <button
-                onClick={() => { setShowAdd(false); setAfErr({}); }}
-                className="text-xs font-medium text-slate-600 hover:text-slate-800 px-3 py-1.5 transition"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={submitAdd}
-                disabled={createMut.isPending}
-                className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-xs font-medium px-4 py-1.5 rounded-lg transition"
-              >
-                {createMut.isPending ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
-                {createMut.isPending ? 'Saving…' : 'Save'}
-              </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Assignments list */}
       {loadingA ? (
         <div className="space-y-2">
-          {[...Array(3)].map((_, i) => (
-            <div key={i} className="h-12 bg-slate-100 rounded-xl animate-pulse" />
-          ))}
+          {[...Array(3)].map((_, i) => <div key={i} className="h-12 bg-slate-100 rounded-xl animate-pulse" />)}
         </div>
       ) : assignments.length === 0 ? (
         <div className="flex flex-col items-center gap-2 py-10 text-center">
           <ClipboardList size={28} className="text-slate-200" />
-          <p className="text-sm font-medium text-slate-400">No assignments configured</p>
-          <p className="text-xs text-slate-400 max-w-[220px] leading-relaxed">
-            Assignments link this teacher to a subject and class so the timetable can auto-fill their details
+          <p className="text-sm font-medium text-slate-400">No classes allocated</p>
+          <p className="text-xs text-slate-400 max-w-[240px] leading-relaxed">
+            Classes and subjects are allocated in Timetable → Subject allocation.
           </p>
         </div>
       ) : (
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-50">
           {assignments.map(a => (
-            <div key={a._id ?? a.id} className="flex items-center gap-3 px-4 py-3 group hover:bg-slate-50 transition">
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-slate-800 truncate">{a.subjectName ?? a.subjectId}</p>
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
-                  <span className="text-[10px] text-slate-500">
-                    <span className="font-medium">Class:</span> {a.className ?? a.classId}
-                    {a.streamName ? ` (${a.streamName})` : ''}
+            <div key={a._id ?? a.id} className="px-4 py-3">
+              <p className="text-sm font-medium text-slate-800 truncate">{a.subjectName ?? a.subjectId}</p>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
+                <span className="text-[10px] text-slate-500">
+                  <span className="font-medium">Class:</span> {a.className ?? a.classId}{a.streamName ? ` (${a.streamName})` : ''}
+                </span>
+                {a.preferredRoomName && <span className="text-[10px] text-slate-400">· Room: {a.preferredRoomName}</span>}
+                {a.periodsPerWeek ? (
+                  <span className="text-[10px] text-slate-400">
+                    · {a.periodsPerWeek} lessons/wk{a.doubleLessons ? ` (incl. ${a.doubleLessons} double${a.doubleLessons === 1 ? '' : 's'})` : ''}
                   </span>
-                  {a.preferredRoomName && (
-                    <span className="text-[10px] text-slate-400">· Room: {a.preferredRoomName}</span>
-                  )}
-                  {a.periodsPerWeek ? (
-                    <span className="text-[10px] text-slate-400">
-                      · {a.periodsPerWeek} periods/wk{a.doubleLessons ? ` (incl. ${a.doubleLessons} double${a.doubleLessons === 1 ? '' : 's'})` : ''}
-                    </span>
-                  ) : (
-                    <span className="text-[10px] text-amber-600">· periods/wk not set</span>
-                  )}
-                  {a.lessonGroupId && (
-                    <span className="text-[10px] font-medium text-violet-700 bg-violet-50 px-1.5 rounded">Taught together</span>
-                  )}
-                </div>
-                {togetherId === (a.id ?? a._id) && (
-                  <TogetherPanel
-                    a={a}
-                    onClose={() => setTogetherId(null)}
-                    onChanged={() => { qc.invalidateQueries({ queryKey: ['teaching-assignments'] }); setTogetherId(null); }}
-                  />
+                ) : (
+                  <span className="text-[10px] text-amber-600">· lessons/wk not set</span>
                 )}
-                {editId === (a.id ?? a._id) && (
-                  <div className="mt-2 flex flex-wrap items-end gap-2">
-                    <label className="text-[10px] text-slate-500">
-                      Periods / wk
-                      <input type="number" min="1" max="40" value={ef.periodsPerWeek}
-                        onChange={e => setEf(f => ({ ...f, periodsPerWeek: e.target.value }))}
-                        className="block mt-0.5 w-20 text-xs px-2 py-1 rounded-md border border-slate-200" />
-                    </label>
-                    <label className="text-[10px] text-slate-500">
-                      Doubles / wk
-                      <input type="number" min="0" max="20" value={ef.doubleLessons}
-                        onChange={e => setEf(f => ({ ...f, doubleLessons: e.target.value }))}
-                        className="block mt-0.5 w-20 text-xs px-2 py-1 rounded-md border border-slate-200" />
-                    </label>
-                    <button onClick={saveEdit} disabled={updateMut.isPending}
-                      className="text-xs font-medium bg-slate-900 text-white px-3 py-1 rounded-md disabled:opacity-50">
-                      {updateMut.isPending ? 'Saving…' : 'Save'}
-                    </button>
-                    <button onClick={() => setEditId(null)} className="text-xs text-slate-500 px-2 py-1">Cancel</button>
-                    {efErr && <p className="w-full text-[10px] text-red-500">{efErr}</p>}
-                  </div>
-                )}
+                {a.lessonGroupId && <span className="text-[10px] font-medium text-violet-700 bg-violet-50 px-1.5 rounded">Taught together</span>}
               </div>
-              {canEdit && (
-                <button
-                  onClick={() => setTogetherId(togetherId === (a.id ?? a._id) ? null : (a.id ?? a._id))}
-                  className={`${a.lessonGroupId ? '' : 'opacity-0 group-hover:opacity-100'} p-1.5 text-slate-400 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition`}
-                  title="Teach together (another teacher in the same lessons, or streams taught together)"
-                  aria-label="Teach together"
-                >
-                  <Users size={12} />
-                </button>
-              )}
-              {canEdit && editId !== (a.id ?? a._id) && (
-                <button
-                  onClick={() => startEdit(a)}
-                  className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition"
-                  title="Edit periods per week / double lessons"
-                >
-                  <Pencil size={12} />
-                </button>
-              )}
-              {canEdit && (
-                <button
-                  onClick={() => removeMut.mutate(a.id ?? a._id)}
-                  disabled={removeMut.isPending}
-                  className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition disabled:opacity-30"
-                  title="Remove assignment"
-                >
-                  <Trash2 size={12} />
-                </button>
-              )}
             </div>
           ))}
         </div>
       )}
 
       <p className="text-[11px] text-slate-400 leading-relaxed">
-        Assignments tell the timetable who teaches what. When you create a slot for this class + subject, the teacher and preferred room are auto-filled.
+        Who teaches what is entered in one place, Timetable → Subject allocation, so it can&apos;t be updated two ways.
+        Heads of department give the allocation to the timetabler, who enters and updates it.
       </p>
     </div>
   );

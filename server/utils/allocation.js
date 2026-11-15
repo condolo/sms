@@ -17,7 +17,9 @@
    from the curriculum) still gets a row, flagged.
 
    Teachers: EVERY active teacher, including those with no assignments,
-   with their classes, lessons per week asked for and placed.
+   with their classes, lessons per week asked for and placed. Teachers on
+   leave are listed too (staffStatus), and every row allocated to someone on
+   leave, inactive or no longer at the school is flagged (v5.274.0).
 
    Pure function; routes/timetable.js loads the data.
    ============================================================ */
@@ -61,7 +63,7 @@ function computeAllocation({ classes = [], streams = [], classSubjects = [], sub
     teacherInfo.set(key, {
       teacherId: key, userId: t.userId || null, name: nameOf(t), departmentId: t.departmentId || null,
       canTeach: Array.isArray(t.subjects) ? t.subjects : [],
-      active: !t.status || t.status === 'active',
+      staffStatus: t.status || 'active',   // active | on_leave | inactive | terminated
     });
   }
   const tk = (id) => (id ? teacherKey.get(String(id)) || String(id) : null);
@@ -112,6 +114,9 @@ function computeAllocation({ classes = [], streams = [], classSubjects = [], sub
     row.assignments.push({
       id: a.id, teacherId: a.teacherId, teacherKey: tKey,
       teacherName: a.teacherName || teacherInfo.get(tKey)?.name || 'Teacher',
+      // v5.274.0: a class still allocated to someone on leave or no longer current
+      // must be visible, so the timetabler can reallocate or plan cover.
+      teacherStatus: teacherInfo.get(tKey)?.staffStatus || 'unknown',
       periodsPerWeek: a.periodsPerWeek ?? null, doubleLessons: a.doubleLessons ?? null,
       lessonGroupId: a.lessonGroupId || null, preferredRoomName: a.preferredRoomName || null,
     });
@@ -140,7 +145,12 @@ function computeAllocation({ classes = [], streams = [], classSubjects = [], sub
         : placed < needed ? 'short'
           : placed > needed ? 'over'
             : missing ? 'no_target' : 'done';
-    return { ...r, needed, doubles, placed, status, taughtTogether: linkedOnce.size > 0 };
+    const away = r.assignments.filter(a => a.teacherStatus !== 'active');
+    return {
+      ...r, needed, doubles, placed, status, taughtTogether: linkedOnce.size > 0,
+      teacherOnLeave: away.some(a => a.teacherStatus === 'on_leave'),
+      teacherNotCurrent: away.some(a => ['inactive', 'terminated', 'unknown'].includes(a.teacherStatus)),
+    };
   }).sort((x, y) =>
     (x.classOrder ?? 9999) - (y.classOrder ?? 9999) || byText(x.className, y.className)
     || byText(x.streamName, y.streamName) || byText(x.subjectName, y.subjectName));
@@ -148,7 +158,7 @@ function computeAllocation({ classes = [], streams = [], classSubjects = [], sub
   // ── Teachers, including those with nothing assigned ─────────
   const tRows = new Map();
   for (const [key, t] of teacherInfo) {
-    if (!t.active) continue;
+    if (!['active', 'on_leave'].includes(t.staffStatus)) continue;   // on leave still listed, flagged
     tRows.set(key, { ...t, classes: new Set(), subjects: new Set(), assignments: 0, needed: 0, missingTarget: false, placed: 0 });
   }
   for (const r of out) for (const a of r.assignments) {
@@ -161,7 +171,7 @@ function computeAllocation({ classes = [], streams = [], classSubjects = [], sub
   }
   for (const pt of placement.teachers) { const t = tRows.get(pt.teacherId); if (t) t.placed = pt.placed; }
   const teacherRows = [...tRows.values()].map(t => ({
-    teacherId: t.teacherId, userId: t.userId, name: t.name, departmentId: t.departmentId, canTeach: t.canTeach,
+    teacherId: t.teacherId, userId: t.userId, name: t.name, departmentId: t.departmentId, canTeach: t.canTeach, staffStatus: t.staffStatus,
     assignments: t.assignments, classes: [...t.classes].sort(byText), subjects: [...t.subjects].sort(byText),
     needed: t.needed, missingTarget: t.missingTarget, placed: t.placed,
     status: t.assignments === 0 ? 'no_classes' : 'ok',
@@ -176,7 +186,9 @@ function computeAllocation({ classes = [], streams = [], classSubjects = [], sub
     done: out.filter(r => r.status === 'done').length,
     outsideCurriculum: out.filter(r => !r.inCurriculum).length,
     teachers: teacherRows.length,
-    teachersWithNoClasses: teacherRows.filter(t => t.status === 'no_classes').length,
+    teachersWithNoClasses: teacherRows.filter(t => t.status === 'no_classes' && t.staffStatus === 'active').length,
+    rowsTeacherOnLeave: out.filter(r => r.teacherOnLeave).length,
+    rowsTeacherNotCurrent: out.filter(r => r.teacherNotCurrent).length,
   };
   return { summary, rows: out, teachers: teacherRows };
 }

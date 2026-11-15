@@ -312,9 +312,9 @@ Navigate to **Timetable** to build the weekly schedule.
 - **Lessons to place** shows, for each class and subject, how many lessons a week are needed (from teaching assignments), how many are placed, and how many are left.
 - **Days & rules** sets the working days (add Saturday if your school teaches then) and the timetable rules (e.g. most lessons a teacher teaches in a day).
 - In **Teacher View**, **Availability** marks the periods or days a teacher can't teach.
-- Set **Periods / Week** and **Double lessons** on each teacher's assignments (Teachers → Assignments), and **Room needed** on subjects that need a lab or hall.
+- Set **Lessons/wk** and **Doubles** for each class and subject in **Timetable → Subject allocation** (the one place who-teaches-what is entered; teacher profiles show it read-only), and **Room needed** on subjects that need a lab or hall.
 - Tick **Lock this lesson** to pin a lesson so it can't be changed or removed until unlocked.
-- **Teaching together** (*2026-11*): two teachers can share the same lessons (co-teaching), and two streams can have a lesson together (e.g. 7i + 7ii PE). Link their assignments under Teachers → Assignments (people icon), or use **Also teaching** / **Taught together with** when adding a lesson. Co-taught lessons appear on every teacher's timetable as "Teacher A & Teacher B"; combined lessons appear on each stream's timetable.
+- **Teaching together** (*2026-11*): two teachers can share the same lessons (co-teaching), and two streams can have a lesson together (e.g. 7i + 7ii PE). Link their assignments in Timetable → Subject allocation (**Together**), or use **Also teaching** / **Taught together with** when adding a lesson. Co-taught lessons appear on every teacher's timetable as "Teacher A & Teacher B"; combined lessons appear on each stream's timetable.
 - **Subject time rules** in Days & rules say when a subject must not be taught (e.g. no PE in lesson 1).
 - **Generate** builds a timetable automatically from the assignments and rules.
 - Print or export the timetable from the action bar.

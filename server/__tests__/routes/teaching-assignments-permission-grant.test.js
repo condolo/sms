@@ -55,6 +55,7 @@ function makeCollection(seed = []) {
 
 let mockJwtUser;
 const mockHasPermission = jest.fn().mockResolvedValue(false);
+const mockTimetableGrant = jest.fn().mockResolvedValue(false);
 
 jest.mock('../../middleware/auth', () => ({
   authMiddleware: (req, _res, next) => { req.jwtUser = mockJwtUser; next(); },
@@ -63,7 +64,7 @@ jest.mock('../../middleware/rbac', () => ({
   hasPermission: (...args) => mockHasPermission(...args),
   // v5.273.0: canManage() also accepts a "Manage Whole-School Timetable" grant;
   // not granted here, so this file still tests the teachers:update path alone.
-  hasExplicitSubGrant: async () => false,
+  hasExplicitSubGrant: (...args) => mockTimetableGrant(...args),
 }));
 jest.mock('../../middleware/scopeMiddleware', () => ({ invalidateScopeCache: jest.fn() }));
 
@@ -100,6 +101,7 @@ function buildApp() {
 beforeEach(() => {
   jest.clearAllMocks();
   mockHasPermission.mockResolvedValue(false);
+  mockTimetableGrant.mockResolvedValue(false);
   // Admissions Officer — not in FULL_MANAGE, not HOD. The exact scenario
   // raised directly: granted full 'teachers' edit rights in Settings,
   // expected to be able to assign classes/subjects to a teacher.
@@ -117,56 +119,46 @@ beforeEach(() => {
 
 const VALID_BODY = { teacherId: 'usr_teacher1', subjectId: 'subj_art', classId: 'cls_1' };
 
-describe('POST /api/teaching-assignments — canManage() Settings-permission path', () => {
-  test('a non-FULL_MANAGE, non-HOD role without the teachers:update grant is forbidden', async () => {
-    mockHasPermission.mockResolvedValue(false);
+/* v5.274.0 (direct instruction 2026-11-15): one place for entering who teaches what —
+   Timetable → Subject allocation. The "Teachers: update" grant (2026-09-29) no longer
+   opens assignment editing; the "Manage Whole-School Timetable" grant does. */
+describe('POST /api/teaching-assignments — who may enter the allocation (v5.274.0)', () => {
+  test('a role with the Teachers: update grant but no timetable grant is now forbidden', async () => {
+    mockHasPermission.mockImplementation((_req, mod, action) => Promise.resolve(mod === 'teachers' && action === 'update'));
     const res = await supertest(buildApp()).post('/api/teaching-assignments').send(VALID_BODY);
     expect(res.status).toBe(403);
-    expect(mockHasPermission).toHaveBeenCalledWith(expect.anything(), 'teachers', 'update');
+    expect(mockAssignments._docs ?? []).toHaveLength(0);
   });
 
-  test('the same role succeeds once granted the real teachers:update permission (the fix)', async () => {
-    mockHasPermission.mockImplementation((_req, mod, action) => Promise.resolve(mod === 'teachers' && action === 'update'));
+  test('the same role succeeds with the "Manage Whole-School Timetable" grant', async () => {
+    mockTimetableGrant.mockImplementation((_req, mod, sub, action) => Promise.resolve(mod === 'timetable' && sub === 'manage' && action === 'update'));
     const res = await supertest(buildApp()).post('/api/teaching-assignments').send(VALID_BODY);
     expect(res.status).toBe(201);
     expect(res.body.data.teacherId).toBe('usr_teacher1');
   });
 
-  test('FULL_MANAGE roles are unaffected — hasPermission is never even called', async () => {
+  test('FULL_MANAGE roles are unaffected', async () => {
     mockJwtUser = { userId: 'usr_admin', schoolId: SCHOOL, role: 'admin', roles: [] };
     const res = await supertest(buildApp()).post('/api/teaching-assignments').send(VALID_BODY);
     expect(res.status).toBe(201);
-    expect(mockHasPermission).not.toHaveBeenCalled();
   });
 });
 
-describe('PUT/DELETE /api/teaching-assignments/:id — same permission path', () => {
+describe('PUT/DELETE /api/teaching-assignments/:id — same rule', () => {
   async function seedAssignment() {
     mockAssignments = makeCollection([
       { id: 'ta_1', schoolId: SCHOOL, teacherId: 'usr_teacher1', subjectId: 'subj_art', classId: 'cls_1', departmentId: null },
     ]);
   }
 
-  test('PUT is forbidden without the grant, allowed with it', async () => {
+  test('PUT and DELETE are forbidden with only the Teachers: update grant, allowed with the timetable grant', async () => {
     await seedAssignment();
-    mockHasPermission.mockResolvedValue(false);
-    let res = await supertest(buildApp()).put('/api/teaching-assignments/ta_1').send({ periodsPerWeek: 4 });
-    expect(res.status).toBe(403);
-
     mockHasPermission.mockResolvedValue(true);
-    res = await supertest(buildApp()).put('/api/teaching-assignments/ta_1').send({ periodsPerWeek: 4 });
-    expect(res.status).toBe(200);
-  });
-
-  test('DELETE is forbidden without the grant, allowed with it', async () => {
-    await seedAssignment();
-    mockHasPermission.mockResolvedValue(false);
-    let res = await supertest(buildApp()).delete('/api/teaching-assignments/ta_1');
-    expect(res.status).toBe(403);
-
-    mockHasPermission.mockResolvedValue(true);
-    res = await supertest(buildApp()).delete('/api/teaching-assignments/ta_1');
-    expect(res.status).toBe(200);
+    expect((await supertest(buildApp()).put('/api/teaching-assignments/ta_1').send({ periodsPerWeek: 4 })).status).toBe(403);
+    expect((await supertest(buildApp()).delete('/api/teaching-assignments/ta_1')).status).toBe(403);
+    mockTimetableGrant.mockResolvedValue(true);
+    expect((await supertest(buildApp()).put('/api/teaching-assignments/ta_1').send({ periodsPerWeek: 4 })).status).toBe(200);
+    expect((await supertest(buildApp()).delete('/api/teaching-assignments/ta_1')).status).toBe(200);
   });
 });
 

@@ -186,16 +186,15 @@ describe('A7. extraRoles', () => {
     expect(await hasPermission({ jwtUser: carl }, 'hr', 'read')).toBe(false);
   });
 
-  test('DOES elevate on the three routes that intentionally check it', async () => {
+  test('elevates on the routes that intentionally check it (teaching assignments no longer, v5.274.0)', async () => {
     const reqNoExtra = { jwtUser: { role: 'teacher', roles: ['teacher'] } };
     const reqHod      = { jwtUser: { role: 'teacher', roles: ['teacher'], extraRoles: ['hod'] } };
     expect(lessons.isHodOrAdmin(reqNoExtra)).toBe(false);
     expect(lessons.isHodOrAdmin(reqHod)).toBe(true);
-    // canManage is async since v5.159.0 (it now also falls through to a
-    // hasPermission('teachers','update') DB check for non-floor/non-HOD
-    // roles) — reqNoExtra here is a bare 'teacher' with no role_permissions
-    // doc seeded, so that fallback resolves to false, same as before.
-    expect(await teachingAssignments.canManage(reqHod)).toBe(true);      // no dept given yet -> provisionally allowed, validated later
+    // Teaching assignments no longer elevate on the HOD tag (v5.274.0, direct
+    // instruction 2026-11-15): HODs are consulted and the timetabler enters
+    // the allocation, in one place. The other two routes still check extraRoles.
+    expect(await teachingAssignments.canManage(reqHod)).toBe(false);
     expect(await teachingAssignments.canManage(reqNoExtra)).toBe(false);
     const eff = weeklySnapshots._effectiveRoles(reqHod);
     expect(eff.has('hod')).toBe(true);

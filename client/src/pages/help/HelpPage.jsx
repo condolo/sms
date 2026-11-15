@@ -251,7 +251,7 @@ const SECTIONS = [
       },
       {
         q: 'How do I assign a teacher to a class or subject?',
-        a: 'Open the teacher\'s profile and go to the Assignments tab. Add the class, subject and, where the class has streams, the stream they teach. The tab lists all their current assignments, and each one can be removed there. The subject must already be in that class\'s curriculum (Subjects → Curriculum).',
+        a: 'In Timetable → Subject allocation (timetabler, admin, principal or deputy). Find the class and subject, click Assign teacher and pick the teacher; where the class has streams, each stream has its own row. Set lessons per week there too. A teacher\'s profile shows their assignments read-only, with a button that opens Subject allocation for them. The subject must already be in that class\'s curriculum (Subjects → Curriculum).',
       },
       {
         q: 'Can a teacher be assigned to several classes and streams?',

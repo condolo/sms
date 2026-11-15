@@ -93,15 +93,18 @@ function adminCookie() {
 
 const ASSIGNMENT_BODY = { teacherId: 'usr_teach_x', subjectId: 'sub_math', classId: 'cls_1' };
 
-describe('POST /api/teaching-assignments — HOD scoped to their own department', () => {
-  test('HOD of dept_math CAN create an assignment for a dept_math subject', async () => {
+/* v5.274.0 (direct instruction 2026-11-15): "HODs don't need to edit this in the system,
+   they are consulted and give data to the timetabler who enters and updates it". The
+   token still carries extraRoles + departmentId (pinned elsewhere); HODs no longer
+   write assignments, in their own department or any other. */
+describe('POST /api/teaching-assignments — HODs are consulted, the timetabler enters (v5.274.0)', () => {
+  test('HOD of dept_math can no longer create an assignment, even for a dept_math subject', async () => {
     const res = await supertest(buildApp())
       .post('/api/teaching-assignments')
       .set('Cookie', hodCookie('dept_math'))
       .send(ASSIGNMENT_BODY);
 
-    expect(res.status).toBe(201);
-    expect(res.body.data.departmentId).toBe('dept_math');
+    expect(res.status).toBe(403);
   });
 
   test('HOD of dept_science CANNOT create an assignment for a dept_math subject — scoped, not unrestricted', async () => {
@@ -131,17 +134,12 @@ describe('POST /api/teaching-assignments — HOD scoped to their own department'
     expect(res.status).toBe(201);
   });
 
-  test('HOD with no departmentId set at all (edge case: hod extraRole but department never assigned) is treated as scope-unknown, not granted — validated later in-route, not open by default', async () => {
+  test('HOD with no departmentId set at all cannot create assignments either', async () => {
     const res = await supertest(buildApp())
       .post('/api/teaching-assignments')
       .set('Cookie', hodCookie(undefined))
       .send(ASSIGNMENT_BODY);
 
-    // hodDeptId undefined -> the `subject.departmentId && hodDeptId && ...`
-    // guard can't compare, so this specific route allows it through
-    // (documented in-route as "no dept info yet, validate later") — this
-    // test exists to make that documented behaviour explicit and pinned,
-    // not to assert a stricter policy the code doesn't actually implement.
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(403);
   });
 });

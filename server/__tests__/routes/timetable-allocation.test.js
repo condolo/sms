@@ -204,3 +204,27 @@ describe('PUT /api/teaching-assignments/:id/teacher — change who teaches it', 
     expect((await as(TIMETABLER).put('/api/teaching-assignments/b1/teacher').send({ teacherId: 'u2' })).status).toBe(404);
   });
 });
+
+describe('one place for data entry (v5.274.0)', () => {
+  const HOD = { userId: 'u_hod', schoolId: S, role: 'teacher', roles: ['teacher'], extraRoles: ['hod'], departmentId: 'd_math' };
+  test('a head of department reads but cannot create, edit, change or remove', async () => {
+    expect((await as(HOD).get('/api/teaching-assignments')).status).toBe(200);
+    expect((await as(HOD).post('/api/teaching-assignments').send({ teacherId: 'u2', subjectId: 'eng', classId: 'c7' })).status).toBe(403);
+    expect((await as(HOD).put('/api/teaching-assignments/a1').send({ periodsPerWeek: 3 })).status).toBe(403);
+    expect((await as(HOD).put('/api/teaching-assignments/a1/teacher').send({ teacherId: 'u2' })).status).toBe(403);
+    expect((await as(HOD).delete('/api/teaching-assignments/a1')).status).toBe(403);
+    expect(mockDb.data.teaching_assignments).toHaveLength(1);
+  });
+  test('a teacher who has left or is inactive cannot be given an assignment; one on leave can', async () => {
+    mockDb.data.teachers.push(
+      { id: 't_left', schoolId: S, firstName: 'Left', lastName: 'X', status: 'terminated' },
+      { id: 't_off', schoolId: S, firstName: 'Off', lastName: 'Y', status: 'inactive' },
+      { id: 't_leave', schoolId: S, firstName: 'Leave', lastName: 'Z', status: 'on_leave' },
+    );
+    const left = await as(TIMETABLER).post('/api/teaching-assignments').send({ teacherId: 't_left', subjectId: 'eng', classId: 'c7' });
+    expect(left.status).toBe(400);
+    expect(left.body.error.message).toMatch(/left the school/);
+    expect((await as(TIMETABLER).put('/api/teaching-assignments/a1/teacher').send({ teacherId: 't_off' })).status).toBe(400);
+    expect((await as(TIMETABLER).post('/api/teaching-assignments').send({ teacherId: 't_leave', subjectId: 'eng', classId: 'c7' })).status).toBe(201);
+  });
+});

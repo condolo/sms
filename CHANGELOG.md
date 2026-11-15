@@ -6,6 +6,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.274.0] - 2026-11-15 - fix(timetable): one place to enter who teaches what
+
+Raised after v5.273.0: assignments could still be entered and edited on each teacher's profile as well as in Subject allocation, and "taught together" could only be linked from the profile. Two paths make data entry and updates confusing. Decided: HODs are consulted and give the allocation to the timetabler, who enters and updates it.
+
+### Changed
+- **Timetable → Subject allocation is the only place assignments are entered or changed.** The Teachers profile **Assignments** tab is now view-only, with **Edit in Subject allocation** (opens the tab filtered to that teacher, `/timetable?view=allocation&teacher=<id>`).
+- **"Taught together" is linked in Subject allocation** (**Together** next to each teacher: Teach together / Separate). The old panel on the profile is gone.
+- **Who may enter it (server-enforced):** admin, principal, deputy, timetabler, and roles granted "Manage Whole-School Timetable". The HOD department rule and the "Teachers: update" grant no longer open assignment editing. HODs and teachers still read assignments. This also fixes a side effect: a timetabler tagged HOD was limited to one department on create.
+- **Teachers who have left (`terminated`) or are `inactive` can't be given an assignment**, on create or on change. A teacher **on leave** can.
+
+### Added
+- **On-leave and no-longer-current teachers are flagged in Subject allocation:** an **On leave** or **Not current** badge on the row, summary counts, and a **Teacher away** filter. On-leave teachers stay in the Teachers panel with their number of allocations. The profile tab warns when a teacher on leave still has classes.
+
+### Docs
+- Timetabler Guide (§9, §14, §16, §17), User Guide and Help updated to point to Subject allocation. Not changed here, because they hold someone else's uncommitted edits: `docs/SCHOOL_ADMIN_GUIDE.md` (line ~351 still says to link under Teachers → Assignments) and the untracked `docs/ADMIN_TIMETABLE_WORKFLOW.md`.
+
+Tests: `allocation.test.js` (+1), `timetable-allocation.test.js` (+2); `hod-department-scope-e2e.test.js` and `teaching-assignments-permission-grant.test.js` updated to the new rule. Checked on the demo: Ms. Dorothy Chebet (on leave) shows read-only with the warning; the link opens Subject allocation filtered to her, with 8 rows marked On leave.
+
+---
+
 ## [v5.273.0] - 2026-11-15 - feat(timetable): Subject allocation — see and enter who teaches what in one place
 
 Asked for directly: a central place in the Timetable to see subject allocations and whether a teacher has classes, instead of opening each teacher, with lessons per week set there too, "without corrupting the existing data, assignment and attendance or any other dependent modules". The timetabler has full control of the timetable module and enters the allocation the school decides.

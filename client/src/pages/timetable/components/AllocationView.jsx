@@ -6,11 +6,14 @@
    and how many lessons the draft timetable has — plus every active
    teacher, including those with no classes.
    Data:   GET /api/timetable/allocation (server/utils/allocation.js)
-   Writes: /api/teaching-assignments (the same routes and rules as the
-           Teachers page). Changing a teacher updates the row in place.
+   Writes: /api/teaching-assignments. Since v5.274.0 this is the ONE place
+           assignments are entered (the Teachers profile tab is view-only);
+           "taught together" is linked here too. Changing a teacher updates
+           the row in place.
    Props:
      canEdit      bool — show editing controls (the server checks too)
      onOpenClass  fn(classId, streamId) — jump to that class's grid
+     initialTeacher  teacher id to filter to on open (link from the Teachers profile)
    ============================================================ */
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -25,9 +28,10 @@ const STATUS = {
   done:       { label: 'Done',         cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', Icon: CheckCircle2 },
 };
 const FILTERS = [
-  { id: 'open',       label: 'Needs attention', test: r => r.status !== 'done' },
+  { id: 'open',       label: 'Needs attention', test: r => r.status !== 'done' || r.teacherOnLeave || r.teacherNotCurrent },
   { id: 'no_teacher', label: 'No teacher',      test: r => r.status === 'no_teacher' },
   { id: 'no_target',  label: 'No lessons/wk',   test: r => r.status === 'no_target' },
+  { id: 'away',       label: 'Teacher away',    test: r => r.teacherOnLeave || r.teacherNotCurrent },
   { id: 'all',        label: 'All',             test: () => true },
 ];
 
@@ -42,7 +46,7 @@ function TeacherSelect({ teachers, subjectId, exclude = [], value, onChange, aut
   const list = teachers.filter(t => !ex.has(String(t.teacherId)) && !ex.has(String(t.userId)));
   const fits = list.filter(t => t.canTeach?.includes(subjectId));
   const rest = list.filter(t => !t.canTeach?.includes(subjectId));
-  const opt = t => <option key={t.teacherId} value={t.userId || t.teacherId}>{t.name} — {t.needed || 0} lessons/wk{t.assignments === 0 ? ' (no classes)' : ''}</option>;
+  const opt = t => <option key={t.teacherId} value={t.userId || t.teacherId}>{t.name} — {t.needed || 0} lessons/wk{t.staffStatus === 'on_leave' ? ' (on leave)' : t.assignments === 0 ? ' (no classes)' : ''}</option>;
   return (
     <select autoFocus={autoFocus} value={value} onChange={e => onChange(e.target.value)} className="text-xs border border-slate-200 rounded-md px-2 py-1 bg-white max-w-[15rem]">
       <option value="">Choose a teacher…</option>
@@ -67,22 +71,23 @@ function NumberCell({ value, onSave, disabled, max = 40 }) {
   );
 }
 
-export default function AllocationView({ canEdit, onOpenClass }) {
+export default function AllocationView({ canEdit, onOpenClass, initialTeacher = null }) {
   const qc = useQueryClient();
   const { data, isLoading, isError, error } = useQuery({ queryKey: ['timetable', 'allocation'], queryFn: ttApi.allocation, staleTime: 15_000 });
   const res = data?.data ?? { rows: [], teachers: [], summary: {}, departments: [] };
 
-  const [filter, setFilter] = useState('open');
+  const [filter, setFilter] = useState(initialTeacher ? 'all' : 'open');
   const [section, setSection] = useState('');
   const [dept, setDept] = useState('');
   const [search, setSearch] = useState('');
-  const [teacherFilter, setTeacherFilter] = useState(null);
+  const [teacherFilter, setTeacherFilter] = useState(initialTeacher);
   const [onlyNoClasses, setOnlyNoClasses] = useState(false);
   const [adding, setAdding] = useState(null);       // row key
   const [addPick, setAddPick] = useState('');
   const [change, setChange] = useState(null);       // { row, assignment, to, move, clashes }
   const [changing, setChanging] = useState(null);   // assignment id whose picker is open
   const [changePick, setChangePick] = useState('');
+  const [togetherFor, setTogetherFor] = useState(null); // assignment id whose "taught together" panel is open
   const [toast, setToast] = useState(null);
   const say = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 5000); };
 
@@ -108,6 +113,19 @@ export default function AllocationView({ canEdit, onOpenClass }) {
     onSuccess: () => { refresh(); say('Removed. Records already taken stay.'); },
     onError: onErr,
   });
+  // Taught together (v5.270.0 rules, entered here since v5.274.0): same class + subject,
+  // both whole-class rows or both stream rows. The server checks this again.
+  const link = useMutation({
+    mutationFn: ({ id, withId }) => taApi.link(id, withId),
+    onSuccess: () => { refresh(); say('Linked: these are now one set of lessons.'); },
+    onError: onErr,
+  });
+  const unlink = useMutation({
+    mutationFn: (id) => taApi.unlink(id),
+    onSuccess: () => { refresh(); say('Separated: these lessons are no longer taught together.'); },
+    onError: onErr,
+  });
+
   const reassign = useMutation({
     mutationFn: ({ id, to, move }) => taApi.changeTeacher(id, to, move),
     onSuccess: (r) => {
@@ -120,6 +138,12 @@ export default function AllocationView({ canEdit, onOpenClass }) {
       else onErr(err);
     },
   });
+
+  // Every assignment of the same class + subject, for the "taught together" panel.
+  const siblingsOf = (row, a) => res.rows
+    .filter(r => r.classId === row.classId && r.subjectId === row.subjectId && (!!r.streamId === !!row.streamId))
+    .flatMap(r => r.assignments.map(x => ({ ...x, streamName: r.streamName })))
+    .filter(x => x.id !== a.id);
 
   const sections = useMemo(() => [...new Set(res.rows.map(r => r.sectionKey).filter(Boolean))].sort(), [res.rows]);
   const teacherById = useMemo(() => new Map(res.teachers.map(t => [String(t.teacherId), t])), [res.teachers]);
@@ -168,6 +192,8 @@ export default function AllocationView({ canEdit, onOpenClass }) {
           <span className="px-2 py-1 rounded-md bg-slate-100 text-slate-700">{s.short ?? 0} still to place</span>
           <span className={`px-2 py-1 rounded-md ${s.teachersWithNoClasses ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-500'}`}>{s.teachersWithNoClasses ?? 0} of {s.teachers ?? 0} teachers with no classes</span>
           {s.outsideCurriculum > 0 && <span className="px-2 py-1 rounded-md bg-amber-50 text-amber-700">{s.outsideCurriculum} outside the curriculum</span>}
+          {s.rowsTeacherOnLeave > 0 && <span className="px-2 py-1 rounded-md bg-amber-50 text-amber-700">{s.rowsTeacherOnLeave} taught by a teacher on leave</span>}
+          {s.rowsTeacherNotCurrent > 0 && <span className="px-2 py-1 rounded-md bg-red-50 text-red-700">{s.rowsTeacherNotCurrent} with a teacher no longer current</span>}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {FILTERS.map(f => (
@@ -254,6 +280,9 @@ export default function AllocationView({ canEdit, onOpenClass }) {
                         {r.assignments.map(a => (
                           <div key={a.id} className="flex items-center gap-1.5">
                             <button onClick={() => setTeacherFilter(a.teacherKey)} className="text-slate-800 hover:underline">{a.teacherName}</button>
+                            {a.teacherStatus === 'on_leave' && <span className="text-[9px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-1.5">On leave</span>}
+                            {['inactive', 'terminated', 'unknown'].includes(a.teacherStatus) && <span className="text-[9px] font-semibold text-red-700 bg-red-50 border border-red-200 rounded-full px-1.5" title="This teacher is inactive, has left, or has no staff record. Change or remove.">Not current</span>}
+                            {a.lessonGroupId && <span className="text-[9px] text-violet-700 bg-violet-50 border border-violet-200 rounded-full px-1.5">Together</span>}
                             {canEdit && (changing === a.id ? (
                               <>
                                 <TeacherSelect autoFocus teachers={res.teachers} subjectId={r.subjectId} exclude={r.assignments.map(x => x.teacherKey)} value={changePick} onChange={setChangePick} />
@@ -269,6 +298,9 @@ export default function AllocationView({ canEdit, onOpenClass }) {
                                 <button title="Change teacher" onClick={() => { setChanging(a.id); setChangePick(''); }} className="text-[10px] text-slate-500 hover:text-slate-900 inline-flex items-center gap-0.5 ml-1">
                                   <Repeat size={10} /> Change
                                 </button>
+                                <button title="Co-teaching or streams taught together" onClick={() => setTogetherFor(togetherFor === a.id ? null : a.id)} className="text-[10px] text-slate-500 hover:text-slate-900 inline-flex items-center gap-0.5 ml-1">
+                                  <Users size={10} /> Together
+                                </button>
                                 <button
                                   title="Remove this teacher"
                                   onClick={() => window.confirm(`Remove ${a.teacherName} from ${r.subjectName}, ${r.className}${r.streamName ? ' ' + r.streamName : ''}? Records already taken stay. They stop seeing this class for this subject once they have no lessons for it on the timetable.`) && remove.mutate(a.id)}
@@ -278,6 +310,30 @@ export default function AllocationView({ canEdit, onOpenClass }) {
                             ))}
                           </div>
                         ))}
+                        {canEdit && togetherFor && r.assignments.some(a => a.id === togetherFor) && (() => {
+                          const a = r.assignments.find(x => x.id === togetherFor);
+                          const sib = siblingsOf(r, a);
+                          return (
+                            <div className="mt-1 rounded-md border border-violet-200 bg-violet-50 px-2 py-1.5 space-y-1">
+                              <p className="text-[10px] text-violet-900">
+                                Taught together = one set of lessons: {r.streamId ? 'two teachers and/or two streams in the same lessons' : 'two teachers in the same lessons'}. Each keeps their own register and marks.
+                              </p>
+                              {sib.length === 0 && <p className="text-[10px] text-violet-800">Nothing to link with: add another teacher{r.streamId ? ' or another stream' : ''} for {r.subjectName} in {r.className} first.</p>}
+                              {sib.map(x => {
+                                const linked = a.lessonGroupId && x.lessonGroupId === a.lessonGroupId;
+                                return (
+                                  <div key={x.id} className="flex items-center justify-between gap-2 text-[11px]">
+                                    <span className="text-violet-950">{x.teacherName}{x.streamName ? ` · ${x.streamName}` : ''}</span>
+                                    {linked
+                                      ? <button onClick={() => unlink.mutate(a.id)} disabled={unlink.isPending} className="text-[10px] text-red-700 hover:underline disabled:opacity-50">Separate</button>
+                                      : <button onClick={() => link.mutate({ id: a.id, withId: x.id })} disabled={link.isPending} className="text-[10px] font-medium text-violet-800 hover:underline disabled:opacity-50">Teach together</button>}
+                                  </div>
+                                );
+                              })}
+                              <button onClick={() => setTogetherFor(null)} className="text-[10px] text-violet-700">Close</button>
+                            </div>
+                          );
+                        })()}
                         {canEdit && (adding === r.key ? (
                           <div className="flex items-center gap-1.5">
                             <TeacherSelect autoFocus teachers={res.teachers} subjectId={r.subjectId} exclude={r.assignments.map(a => a.teacherKey)} value={addPick} onChange={setAddPick} />
@@ -318,7 +374,9 @@ export default function AllocationView({ canEdit, onOpenClass }) {
               <button key={t.teacherId} onClick={() => { setTeacherFilter(t.teacherId); setFilter('all'); }} className="w-full text-left px-4 py-2 hover:bg-slate-50">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-xs font-medium text-slate-800">{t.name}</span>
-                  {t.status === 'no_classes'
+                  {t.staffStatus === 'on_leave'
+                    ? <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">On leave · {t.assignments} allocation{t.assignments === 1 ? '' : 's'}</span>
+                    : t.status === 'no_classes'
                     ? <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">No classes</span>
                     : <span className="text-[10px] text-slate-500">{t.placed}/{t.needed || 0} lessons{t.missingTarget ? ' · some without lessons/wk' : ''}</span>}
                 </div>

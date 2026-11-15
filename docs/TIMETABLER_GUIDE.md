@@ -102,7 +102,7 @@ The **Lessons to place** tab is your checklist. For every class (or stream) and 
 
 | Column | Meaning |
 |---|---|
-| **Needed** | Lessons per week, from the teacher's assignment (Teachers → a teacher → Assignments → **Periods/wk**). Two teachers sharing a class and subject are added together. |
+| **Needed** | Lessons per week, from the assignment (**Subject allocation → Lessons/wk**, §17). Two teachers sharing a class and subject are added together. |
 | **Placed** | Lessons for that subject on the draft timetable this academic year. A whole-class lesson counts for every stream. |
 | **To place** | What's left. |
 | **Status** | **To place**, **Too many**, **Done**, or **No target** (no Periods/wk set, so it can't tell). |
@@ -166,7 +166,7 @@ Times are saved as clock times, so one entry works for every section's bell sche
 
 These are set outside the Timetable module, and both the **Lessons to place** list and the automatic timetable read them:
 
-- **Periods / Week and Double lessons** — Teachers → a teacher → **Assignments**. Set them when adding an assignment, or hover an existing one and click the pencil to change them. Each double lesson uses two of the week's periods, so 5 periods with 1 double means one double and three singles. Assignments with no periods set show "periods/wk not set".
+- **Lessons per week and Double lessons** — **Subject allocation** (§17): type them in the row's **Lessons/wk** and **Doubles** boxes. Each double lesson uses two of the week's periods, so 5 periods with 1 double means one double and three singles. Assignments with no lessons per week show **No lessons/wk**.
 - **Room needed** — Subjects → edit a subject → **Room needed** (Lab, Hall, Sports ground, Library, Classroom, Other, or Any room). For example, set Chemistry to Lab. Make sure the rooms themselves have the right type under **Rooms**.
 
 ---
@@ -232,16 +232,16 @@ For now, place those by hand and lock them before generating.
 
 ## 16. Teaching Together and Subject Time Rules
 
-**Two teachers in the same lessons (co-teaching).** Give each teacher their own assignment for the class, stream and subject (Teachers → a teacher → **Assignments**). Then hover one of them and click the **people icon** (Teach together), and choose **Teach together** next to the other teacher.
+**Two teachers in the same lessons (co-teaching).** In **Subject allocation** (§17), add the second teacher to the row, click **Together** next to one teacher, and choose **Teach together** next to the other.
 - From then on, every lesson of that subject has both teachers.
 - It appears on both teachers' timetables.
 - Neither teacher can be put anywhere else at that time, and both must be free for the automatic timetable to place it.
 - Each teacher keeps their own assignment, so attendance, marks and lesson plans work for both as before.
 
-**Streams taught together.** For example, 7i and 7ii have PE at the same time. Do the same with the assignments for each stream, using the same subject in the same class. The lessons are then for both streams: they appear on both streams' timetables and block both, while other streams (7iii) can have their own lessons at that time. Each stream still takes its own register. You can combine streams and teachers too, e.g. 7i (Ann) and 7ii (Ben) taught together by both.
+**Streams taught together.** For example, 7i and 7ii have PE at the same time. Do the same from either stream's row in Subject allocation: **Together** lists the other streams' teachers of that subject in the class. The lessons are then for both streams: they appear on both streams' timetables and block both, while other streams (7iii) can have their own lessons at that time. Each stream still takes its own register. You can combine streams and teachers too, e.g. 7i (Ann) and 7ii (Ben) taught together by both.
 
 - **One set of lessons:** linked assignments share one Periods/Week; it follows the assignment you link from, and changing it on one changes all. **Lessons to place** counts the set once.
-- **Undoing a link:** to stop teaching together, open Teach together again and click **unlink** (or **Take this row out of the set**).
+- **Undoing a link:** click **Together** again and choose **Separate**.
 - **By hand:** when adding or editing a lesson, use **Also teaching** for co-teachers and **Taught together with** (under Stream) for extra streams. Picking a subject whose assignments are linked fills both in for you.
 - **Assistant teacher** is different: it's shown on the lesson but isn't checked for clashes. Use **Also teaching** for a real co-teacher.
 
@@ -256,7 +256,7 @@ For now, place those by hand and lock them before generating.
 
 ## 17. Subject Allocation
 
-**Timetable → Subject allocation** is the one place to see and enter who teaches what. The school decides the allocation; the timetabler enters it here. It uses the same records as **Teachers → Assignments**, so a change in either place shows in both.
+**Timetable → Subject allocation** is the one place to see and enter who teaches what. The school decides the allocation; the timetabler enters it here. It is the only place they are entered: a teacher's profile (**Teachers → a teacher → Assignments**) shows the same records read-only, with **Edit in Subject allocation** to jump here filtered to that teacher. One place means the allocation can't be updated two different ways.
 
 **What you see.** One row for every subject in each class's curriculum (Classes → Curriculum). A subject that is compulsory for a class with streams has one row per stream. Each row shows its teacher (or teachers), lessons per week, double lessons, how many lessons are on the draft timetable, and a status:
 - **No teacher**: nobody is assigned yet.
@@ -266,14 +266,14 @@ For now, place those by hand and lock them before generating.
 The summary at the top counts each of these, and the teachers with no classes. Filter by status, section or department, or search. The **Teachers** panel lists every active teacher, including those with **no classes**; click a teacher to see only their rows. A row marked "not in this class's curriculum" is an assignment for a subject the class no longer has; remove it or add the subject back to the curriculum.
 
 **Entering the allocation.**
-- **Assign teacher / Add teacher**: pick a teacher (those who teach that subject are listed first). Add a second teacher for co-teaching, then link them in Teachers → Assignments (§16).
+- **Assign teacher / Add teacher**: pick a teacher (those who teach that subject are listed first). Add a second teacher for co-teaching, then click **Together** to link them (§16).
 - **Lessons/wk** and **Doubles**: type the number and click away or press Enter. Doubles count two periods each, so they must fit in lessons per week.
 - **Change**: choose the new teacher, then confirm. The allocation keeps its lessons per week, doubles and "taught together" link. **Also move the lessons** (ticked by default) hands that teacher's draft lessons for this subject in this class to the new teacher. It is checked first: if the new teacher is busy at any of those times, nothing changes and the clashes are listed, so you can move those lessons first or change the teacher without moving lessons. Moved lessons go live only when you publish.
 - **Remove** (×): takes the teacher off that class and subject.
 
 **What it affects, and what it never touches.** Who teaches a class decides who can take its register, enter its marks and see its lesson plans **from then on**. A teacher also has access through lessons under their name on the timetable, so after a change the old teacher keeps access until their lessons for that subject are moved or removed. Registers, marks, lesson plans and coverage already recorded are never changed or deleted.
 
-**Who can use it.** Admin, principal, deputy, timetabler, and any role granted "Manage Whole-School Timetable". A staff member who is only *tagged* "Timetabler" as a responsibility can't. Heads of department can still manage their own department's assignments in Teachers → Assignments.
+**Who can use it.** Admin, principal, deputy, timetabler, and any role granted "Manage Whole-School Timetable". A staff member who is only *tagged* "Timetabler" as a responsibility can't. Heads of department are consulted and give the allocation to the timetabler; they see it but don't enter it. Teachers who have left or are inactive can't be given an assignment.
 
 ---
 

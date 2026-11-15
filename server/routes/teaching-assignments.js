@@ -31,13 +31,14 @@
 
    RBAC:
      - READ:   any authenticated user (teachers see only own)
-     - WRITE:  admin, superadmin, principal, deputy (any subject/class)
-               hod (only subjects in their department)
-               timetabler, and any role granted "Manage Whole-School Timetable"
-               (full control, v5.273.0 — they enter the allocation the school decides)
-               any other role explicitly granted 'teachers' update access
-               in Settings → Roles & Permissions (2026-09-29, Priority per
-               user request — see canManage()'s own comment)
+     - WRITE:  admin, superadmin, principal, deputy, timetabler, and any role
+               granted "Manage Whole-School Timetable" (v5.273.0/v5.274.0).
+               Data entry happens in ONE place, Timetable → Subject
+               allocation; HODs are consulted and pass the data to the
+               timetabler, so they read but don't write (v5.274.0). The
+               Teachers profile Assignments tab is view-only.
+               Teachers who have left or are inactive can't be given an
+               assignment; on-leave teachers can (flagged in the allocation).
    ============================================================ */
 'use strict';
 
@@ -46,7 +47,7 @@ const { z }         = require('zod');
 const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware }      = require('../middleware/auth');
-const { hasPermission, hasExplicitSubGrant } = require('../middleware/rbac');
+const { hasExplicitSubGrant } = require('../middleware/rbac');
 const { TIMETABLE_FLOOR_ROLES } = require('../utils/scopeEngine');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, E }      = require('../utils/response');
@@ -85,8 +86,12 @@ function _effectiveRoles(req) {
   return new Set([role, ...roles, ...extraRoles]);
 }
 
-/* Returns true if user may create/delete assignments.
-   departmentId is the subject's department — used to scope HODs.
+/* Returns true if user may create/edit/delete assignments.
+   (subjectDepartmentId is kept for callers; it no longer changes the answer.)
+
+   History: a HOD department rule and a "Teachers: update" grant used to open
+   this too (the note below). Both were removed in v5.274.0 so there is one
+   place and one rule for data entry.
 
    2026-09-29 (direct user request, following the identical v5.158.0 fix
    for the Teacher Edit button): this floor was entirely closed to
@@ -113,13 +118,20 @@ async function canManage(req, subjectDepartmentId = null) {
   if (TIMETABLE_FLOOR_ROLES.has(req.jwtUser?.role)) return true;
   if (await hasExplicitSubGrant(req, 'timetable', 'manage', 'update')) return true;
 
-  // HOD: only within their own department
-  if (eff.has('hod')) {
-    if (!subjectDepartmentId) return true; // no dept info yet, validate later
-    return (req.jwtUser.departmentId ?? req.jwtUser.deptId) === subjectDepartmentId;
-  }
+  // v5.274.0 (direct instruction 2026-11-15): "HODs don't need to edit this in
+  // the system, they are consulted and give data to the timetabler who enters
+  // and updates it". One place for data entry — Timetable → Subject
+  // allocation — so the HOD department rule and the "Teachers: update" grant
+  // no longer open a second way in. HODs and teachers still READ (GET /).
+  return false;
+}
 
-  return hasPermission(req, 'teachers', 'update');
+/* A teacher who has left or is inactive can't be given an assignment (v5.274.0).
+   On leave is allowed — the allocation flags it so the timetabler can plan cover. */
+function _teacherStatusProblem(teacher) {
+  if (teacher.status === 'terminated') return 'That teacher has left the school. Choose a current teacher.';
+  if (teacher.status === 'inactive') return 'That teacher is inactive. Choose a current teacher.';
+  return null;
 }
 
 /* The id an assignment is keyed by: the teacher's LOGIN id when linked (every scope
@@ -320,6 +332,8 @@ router.post('/', authMiddleware, async (req, res) => { // rbac: canManage() belo
     ]);
 
     if (!teacher) return E.notFound(res, 'Teacher not found');
+    const statusErr = _teacherStatusProblem(teacher);
+    if (statusErr) return E.badRequest(res, statusErr);
     if (!subject) return E.notFound(res, 'Subject not found or inactive');
     if (!cls)     return E.notFound(res, 'Class not found');
     if (data.preferredRoomId && !room) return E.notFound(res, 'Room not found');
@@ -357,17 +371,8 @@ router.post('/', authMiddleware, async (req, res) => { // rbac: canManage() belo
     if (!cls.id) cls.id = String(cls._id);
     if (room && !room.id) room.id = String(room._id);
 
-    // HOD scope check: HODs may only assign within their department
-    const eff = _effectiveRoles(req);
-    const isHodOnly = eff.has('hod') && ![...FULL_MANAGE].some(r => eff.has(r));
-    if (isHodOnly) {
-      const hodDeptId = req.jwtUser.departmentId ?? req.jwtUser.deptId;
-      if (subject.departmentId && hodDeptId && subject.departmentId !== hodDeptId) {
-        return E.forbidden(res, 'As HOD you can only create assignments for subjects in your department');
-      }
-    } else if (!(await canManage(req))) {
-      return E.forbidden(res);
-    }
+    // Who may enter the allocation: see canManage() (v5.274.0 — one rule, no HOD branch).
+    if (!(await canManage(req))) return E.forbidden(res);
 
     // ── Stream rule ──────────────────────────────────────────
     // The subject must already be part of this class's curriculum (the
@@ -543,7 +548,8 @@ router.put('/:id/teacher', authMiddleware, async (req, res) => { // rbac: canMan
     const Teachers = tenantModel('teachers', tenantContext(req));
     const teacher = await Teachers.findOne({ schoolId, $or: [{ userId: newTeacherInput }, { id: newTeacherInput }] }).lean();
     if (!teacher) return E.notFound(res, 'Teacher not found');
-    if (teacher.status && teacher.status !== 'active') return E.badRequest(res, 'That teacher is not active.');
+    const statusErr = _teacherStatusProblem(teacher);
+    if (statusErr) return E.badRequest(res, statusErr);
     const newTeacherId = await _canonicalTeacherId(req, teacher);
 
     const oldTeacher = await Teachers.findOne({ schoolId, $or: [{ userId: existing.teacherId }, { id: existing.teacherId }] }).lean();

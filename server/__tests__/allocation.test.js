@@ -86,3 +86,24 @@ describe('teachers: every active teacher, including those with no classes', () =
     expect(r.summary).toMatchObject({ teachers: 3, teachersWithNoClasses: 1 });
   });
 });
+
+describe('teachers on leave or no longer current (v5.274.0)', () => {
+  test('rows allocated to someone on leave or inactive are flagged; on-leave teachers stay in the panel', () => {
+    const r = computeAllocation({
+      classes, streams, classSubjects, subjects,
+      teachers: [...teachers, { id: 't5', userId: 'u5', firstName: 'Dorothy', lastName: 'C', status: 'on_leave' }],
+      assignments: [
+        { id: 'x1', classId: 'c8', subjectId: 'eng', teacherId: 'u5', periodsPerWeek: 4 },
+        { id: 'x2', classId: 'c7', streamId: 's7b', subjectId: 'mat', teacherId: 'u4', periodsPerWeek: 4 },   // Dan: inactive
+      ],
+      slots: [],
+    });
+    const eng = r.rows.find(x => x.className === 'Year 8' && x.subjectName === 'English');
+    expect(eng).toMatchObject({ teacherOnLeave: true, teacherNotCurrent: false });
+    expect(eng.assignments[0].teacherStatus).toBe('on_leave');
+    expect(r.rows.find(x => x.streamName === '7B').teacherNotCurrent).toBe(true);
+    expect(r.teachers.find(t => t.name === 'Dorothy C')).toMatchObject({ staffStatus: 'on_leave', assignments: 1 });
+    expect(r.teachers.map(t => t.name)).not.toContain('Dan L');
+    expect(r.summary).toMatchObject({ rowsTeacherOnLeave: 1, rowsTeacherNotCurrent: 1 });
+  });
+});

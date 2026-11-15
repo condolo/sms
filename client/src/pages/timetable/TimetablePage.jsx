@@ -6,6 +6,7 @@
 import { useState, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence } from 'framer-motion';
+import { useSearchParams } from 'react-router-dom';
 import {
   CalendarDays, Plus, AlertCircle, CheckCircle2, BarChart3,
   Clock, User, LayoutGrid, Globe, UserX, Zap, Download, Printer,
@@ -90,7 +91,9 @@ export default function TimetablePage() {
   /* ── UI state ────────────────────────────────────────────── */
   const { sectionTabs } = useSections();   // dynamic sections from DB
 
-  const [activeView,      setActiveView]      = useState('class');
+  // ?view=allocation&teacher=<id> opens Subject allocation for one teacher (link from the Teachers profile, v5.274.0).
+  const [searchParams] = useSearchParams();
+  const [activeView,      setActiveView]      = useState(searchParams.get('view') === 'allocation' ? 'allocation' : 'class');
   const [classId,         setClassId]         = useState('');
   const [streamId,        setStreamId]        = useState('');
   const [section,         setSection]         = useState('all');
@@ -744,7 +747,7 @@ export default function TimetablePage() {
           )}
 
           {activeView === 'allocation' && (
-            <span className="text-xs text-slate-500">Who teaches each subject in each class, and lessons per week · the same records as Teachers → Assignments</span>
+            <span className="text-xs text-slate-500">Who teaches each subject in each class, and lessons per week · the one place this is entered (teacher profiles show it read-only)</span>
           )}
 
           {activeView === 'placement' && (
@@ -874,6 +877,7 @@ export default function TimetablePage() {
         {activeView === 'allocation' && (
           <AllocationView
             canEdit={canEdit}
+            initialTeacher={searchParams.get('teacher') || null}
             onOpenClass={(cid, sid) => { setSection('all'); setClassId(cid); setStreamId(sid || ''); setActiveView('class'); }}
           />
         )}
