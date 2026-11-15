@@ -99,6 +99,22 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
       .lean();
     if (!student) return E.notFound(res, 'Student record not found.');
 
+    /* `className` is denormalized on the student document, and older imports
+       (and enrollment paths that only set classId) wrote none. The admin list
+       resolves it from the class; the portal did not, so every student screen
+       fell back to "My class" — the class name appeared NOWHERE in the student
+       app even though admin/teacher/parent all named it. Same fix parent-portal
+       applies to /children. */
+    let studentClassName = student.className || null;
+    if (!studentClassName && student.classId) {
+      const cls = await tenantModel('classes', tenantContext(req))
+        .findOne({ schoolId, id: student.classId })
+        .select('name')
+        .lean()
+        .catch(() => null);
+      studentClassName = cls?.name ?? null;
+    }
+
     const school = await Schools.findOne({ id: schoolId })
       .select('termsPerYear name emergencyOnlineMode portalConfig mpesa')
       .lean();
@@ -228,7 +244,11 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
     const timetableStreamOr = studentStreamOr(student.streamId);
 
     // Unpublished timetables are not shown to students (see utils/timetable-publish.js).
-    let rawSlots = student.classId && (await isTimetablePublished(schoolId))
+    // The flag itself is returned too: the home hero used to infer "not
+    // published" from "no lessons today", so every weekend it announced
+    // NOT PUBLISHED YET while the Timetable tab rendered the full week.
+    const timetablePublished = await isTimetablePublished(schoolId);
+    let rawSlots = student.classId && timetablePublished
       ? (await Timetable.find({ schoolId, classId: student.classId, day: today, isActive: true, $or: timetableStreamOr })
           .sort({ startTime: 1 })
           .select('subjectId subject teacherName teacherId coTeacherNames startTime endTime room day')
@@ -430,7 +450,7 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
         firstName:       student.firstName,
         admissionNumber: student.admissionNumber,
         classId:         student.classId,
-        className:       student.className,
+        className:       studentClassName,
         photo:           student.photo || null,
         gender:          student.gender,
         dateOfBirth:     student.dateOfBirth || null,
@@ -478,6 +498,7 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
       lessonsCoverage,
       subjectMarks,
       timetableToday,
+      timetablePublished,
       reportCards: reportCardsOut,
       classTeacher,
       assistantClassTeacher,

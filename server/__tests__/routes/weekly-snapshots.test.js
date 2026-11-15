@@ -30,6 +30,7 @@ function mockChainObj(obj) {
 function mockMatchesFilter(doc, filter) {
   return Object.entries(filter || {}).every(([k, v]) => {
     if (k === '$or') return v.some(sub => mockMatchesFilter(doc, sub));
+    if (v && typeof v === 'object' && '$ne' in v) return doc[k] !== v.$ne;
     if (v && typeof v === 'object' && '$in' in v) return v.$in.includes(doc[k]);
     return doc[k] === v;
   });
@@ -38,6 +39,14 @@ function mockMakeCollection(docs = []) {
   return {
     find:    jest.fn((filter) => mockChainArr(docs.filter(d => mockMatchesFilter(d, filter)))),
     findOne: jest.fn((filter) => mockChainObj(docs.find(d => mockMatchesFilter(d, filter)) ?? null)),
+    deleteMany: jest.fn((filter) => {
+      const before = docs.length;
+      const keep = docs.filter(d => !mockMatchesFilter(d, filter));
+      docs.length = 0;
+      docs.push(...keep);
+      return Promise.resolve({ deletedCount: before - keep.length });
+    }),
+    create: jest.fn((doc) => { docs.push(doc); return Promise.resolve(doc); }),
   };
 }
 
@@ -214,5 +223,50 @@ describe('GET /:studentId/:weekStart/pdf', () => {
     mockJwtUser = { userId: 'usr_teacher_1', schoolId: SCHOOL_A, role: 'teacher' };
     const res = await supertest(buildApp()).get('/api/weekly-snapshots/stu_own/2099-01-01/pdf');
     expect(res.status).toBe(404);
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════
+   POST /regenerate — rebuild one frozen week after a data correction.
+
+   The cron only fills missing students, so a snapshot generated from a
+   wrong/missing lesson-coverage row could never pick up the correction.
+   This is the one write on the surface: it replaces exactly the rows it
+   rebuilds and sends no notifications.
+   ══════════════════════════════════════════════════════════════ */
+describe('POST /regenerate', () => {
+  const WEEK = '2026-11-09';
+
+  test('rebuilds the week: first run replaces nothing, the second replaces the first run', async () => {
+    mockJwtUser = { userId: 'usr_admin', schoolId: SCHOOL_A, role: 'admin' };
+    mockCollections.schools = mockMakeCollection([{ id: SCHOOL_A, timezone: 'Africa/Nairobi' }]);
+    mockCollections.students = mockMakeCollection([
+      { id: 'stu_own', schoolId: SCHOOL_A, firstName: 'Own', lastName: 'Kid', classId: 'cls_1', className: '5A', status: 'active' },
+    ]);
+
+    const first = await supertest(buildApp())
+      .post('/api/weekly-snapshots/regenerate')
+      .send({ weekStart: WEEK });
+    expect(first.status).toBe(200);
+    expect(first.body.data.weekStart).toBe(WEEK);
+    expect(first.body.data.generated).toBe(1);
+    expect(first.body.data.replaced).toBe(0);
+    expect(mockCollections.weekly_snapshots.create).toHaveBeenCalledTimes(1);
+    expect(mockCollections.weekly_snapshots.create.mock.calls[0][0].sections.topics).toEqual([]);
+
+    const second = await supertest(buildApp())
+      .post('/api/weekly-snapshots/regenerate')
+      .send({ weekStart: WEEK });
+    expect(second.status).toBe(200);
+    expect(second.body.data.generated).toBe(1);
+    expect(second.body.data.replaced).toBe(1);
+  });
+
+  test('a malformed weekStart is a 422, not a silent wrong week', async () => {
+    mockJwtUser = { userId: 'usr_admin', schoolId: SCHOOL_A, role: 'admin' };
+    const res = await supertest(buildApp())
+      .post('/api/weekly-snapshots/regenerate')
+      .send({ weekStart: '09-11-2026' });
+    expect(res.status).toBe(422);
   });
 });

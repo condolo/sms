@@ -220,13 +220,28 @@ router.patch('/:id/deliver', authMiddleware, async (req, res) => {
       const Coverage = tenantModel('lesson_coverage', tenantContext(req));
       const existing = await Coverage.findOne({ schoolId, teacherId: plan.teacherId, classId: plan.classId, subjectId: plan.subjectId, topicId: plan.topicId }).lean();
       if (!existing) {
+        /* Denormalize the display fields the same way POST /lessons/coverage
+           does. This route used to write ids only, and every reader that
+           trusts the snapshot (Weekly Snapshot topics, coverage PDFs) then
+           rendered a blank subject/topic beside a real id. */
+        const [topic, subject, klass] = await Promise.all([
+          tenantModel('syllabus_topics', tenantContext(req))
+            .findOne({ id: plan.topicId, schoolId }).select('title subjectName').lean(),
+          tenantModel('subjects', tenantContext(req))
+            .findOne({ id: plan.subjectId, schoolId }).select('name').lean(),
+          tenantModel('classes', tenantContext(req))
+            .findOne({ id: plan.classId, schoolId }).select('name').lean(),
+        ]);
         await Coverage.create({
           id:         `cov_${uuidv4().replace(/-/g, '').slice(0, 16)}`,
           schoolId,
           teacherId:  plan.teacherId,
           classId:    plan.classId,
+          className:  klass?.name || '',
           subjectId:  plan.subjectId,
+          subjectName: topic?.subjectName || subject?.name || '',
           topicId:    plan.topicId,
+          topicTitle: topic?.title || '',
           subtopicId: null,
           coveredAt:  plan.date,
           notes:      plan.notes || '',

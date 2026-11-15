@@ -769,11 +769,26 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('students', 'read'), scopeMi
     }
 
     const Students = tenantModel('students', tenantContext(req));
+    /* `?view=list` is the phone's register: the list row reads at most these
+       fields. Without it the route returns the whole document — guardian
+       arrays, medical notes, import leftovers — for every row. That is the
+       difference between ~1 KB and ~10 KB per student on a 1,000-child roll,
+       on the exact screen a bursar scrolls on a weak connection. The web
+       console does not send `view`, so its payload is unchanged. */
+    const LIST_FIELDS = [
+      'id', 'firstName', 'lastName', 'middleName', 'admissionNumber',
+      'classId', 'className', 'streamId', 'streamName', 'gender',
+      'dateOfBirth', 'status', 'parentName', 'parentEmail', 'parentPhone',
+      'photo', 'photoUrl', 'enrollmentDate',
+      'portalAccountActive', 'parentAccountActive',
+      'hasPortalAccount', 'hasParentAccount',
+    ].join(' ');
+    const wantsListView = strParam(req.query.view) === 'list';
     const [docs, total] = await Promise.all([
       Students.find(filter)
         .sort({ lastName: 1, firstName: 1 })
         .skip(skip).limit(limit)
-        .select('-__v')
+        .select(wantsListView ? LIST_FIELDS : '-__v')
         .lean(),
       Students.countDocuments(filter)
     ]);

@@ -32,6 +32,7 @@
 
 const { tenantModel, tenantContext } = require('./tenant-model');
 const { hasExplicitSubGrant } = require('../middleware/rbac');
+const { teacherIdForms } = require('./teacher-id-forms');
 
 /* Same bypass set as teaching-assignments.js's canManage() FULL_MANAGE,
    plus 'hod' — a HOD may only *create* assignments within their own
@@ -86,6 +87,44 @@ function _streamOr(streamId) {
   return or;
 }
 
+/* A published timetable slot is the school's other statement that this
+   teacher teaches this subject to this class — the seed mirrors timetable
+   slots into teaching_assignments for exactly that reason ("The timetable IS
+   the assignment"), but an admin who reassigns a slot in the Scheduling
+   Engine does not also edit Teaching Assignments. Live case: Demo Teacher's
+   Form 1A Period 2 English slot was moved to them, yet roster/marks still
+   403'd because no assignment row existed. Same stream narrowing as
+   assignments: a slot with no stream covers every stream, one with a
+   streamId covers only that stream. */
+function _slotTeacherOr(forms) {
+  return { $or: [{ teacherId: { $in: forms } }, { coTeacherIds: { $in: forms } }] };
+}
+
+function _slotAssigned(slots, { classId, subjectId, streamId }) {
+  return slots.some(s =>
+    s.classId === classId && s.subjectId === subjectId &&
+    (!s.streamId || (streamId && s.streamId === streamId))
+  );
+}
+
+async function _timetableGrants(req, pairs) {
+  const { schoolId, userId } = req.jwtUser;
+  if (!schoolId || !userId || pairs.length === 0) return [];
+  const forms = await teacherIdForms(userId, schoolId);
+  return tenantModel('timetable', tenantContext(req))
+    .find({
+      schoolId,
+      isActive: { $ne: false },
+      $and: [
+        _slotTeacherOr(forms),
+        { $or: pairs.map(({ classId, subjectId, streamId }) => ({
+          classId, subjectId, $or: _streamOr(streamId),
+        })) },
+      ],
+    })
+    .select('classId subjectId streamId').lean();
+}
+
 /**
  * Single {classId, subjectId[, streamId]} check for one write. Returns true
  * when the write may proceed — the caller is a management-tier role, or a
@@ -103,7 +142,9 @@ async function canWriteSubject(req, classId, subjectId, streamId) {
   const { schoolId, userId } = req.jwtUser;
   const doc = await tenantModel('teaching_assignments', tenantContext(req))
     .findOne({ schoolId, teacherId: userId, classId, subjectId, $or: _streamOr(streamId) }).select('id').lean();
-  return !!doc;
+  if (doc) return true;
+  const slot = { classId, subjectId, streamId };
+  return _slotAssigned(await _timetableGrants(req, [slot]), slot);
 }
 
 /**
@@ -138,7 +179,13 @@ async function unassignedPairs(req, pairs) {
       (!a.streamId || (streamId && a.streamId === streamId))
     );
   }
-  return pairs.filter(p => !isAssigned(p));
+  const missing = pairs.filter(p => !isAssigned(p));
+  if (missing.length === 0) return [];
+
+  /* Same timetable-is-the-assignment rule as canWriteSubject, batched:
+     one query for every still-uncovered pair. */
+  const slots = await _timetableGrants(req, missing);
+  return missing.filter(p => !_slotAssigned(slots, p));
 }
 
 module.exports = { isSubjectAssignmentEnforced, canWriteSubject, unassignedPairs, isManagement: _isManagement };

@@ -122,7 +122,19 @@ const examUpcoming = {
     const classIds = [...new Set(exams.map(e => e.classId).filter(Boolean))];
     const students = await _model('students').find({
       schoolId, classId: { $in: classIds }, status: 'active',
-    }).select('id firstName lastName classId').lean();
+    }).select('id firstName lastName classId className').lean();
+
+    /* Exam rows carry classId; `className` is optional and frequently absent
+       (the create form stores the id). The reminder used to fall back to the
+       raw id, so a student's message literally read "cls_demo_f1a — Mid-Term
+       Mathematics". Resolve the display name once, from the class ids. */
+    const classRows = classIds.length
+      ? await _model('classes').find({ schoolId, id: { $in: classIds } }).select('id name').lean()
+      : [];
+    const classNameOf = new Map(classRows.map(c => [c.id, c.name]));
+    for (const exam of exams) {
+      if (!exam.className) exam.className = classNameOf.get(exam.classId) || null;
+    }
 
     const studentIds = students.map(s => s.id);
     const people = studentIds.length
@@ -172,7 +184,8 @@ const examUpcoming = {
           : `${rows.length} exams ${when}`;
 
         const lines = rows.slice(0, 8).map(({ student, exam }) => {
-          const parts = [exam.className || student.classId];
+          // Never surface a raw class id — find the name, else say "your class".
+          const parts = [exam.className || student.className || 'your class'];
           parts.push(exam.subjectName || exam.title || 'Assessment');
           const time = [_clock(exam.startTime), _clock(exam.endTime)].filter(Boolean).join('–');
           return `${parts.join(' — ')}${time ? ` · ${time}` : ''} · ${_prettyDate(exam.date)}`;

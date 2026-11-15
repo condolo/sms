@@ -358,6 +358,17 @@ describe('GET /dashboard — student & school identity', () => {
     expect(sch.academicYear).toBe('2026');
   });
 
+  /* Older imports wrote classId and no className, so every student screen
+     fell back to "My class" — the class name appeared nowhere in the app.
+     Resolve it from the class, exactly as parent-portal's /children does. */
+  test('className is resolved from the class when the student document lacks it', async () => {
+    mockStudentDoc.className = undefined;
+    mockClassDoc = { id: CLASS_ID, schoolId: SCHOOL_A, name: 'Year 2', formTeacherId: null };
+    const res = await supertest(buildApp()).get('/api/student-portal/dashboard');
+    expect(res.status).toBe(200);
+    expect(res.body.data.student.className).toBe('Year 2');
+  });
+
   test('a student with no student record gets 404', async () => {
     mockStudentDoc = null;
     const res = await supertest(buildApp()).get('/api/student-portal/dashboard');
@@ -564,6 +575,26 @@ describe('GET /dashboard — today\'s timetable', () => {
     jest.mocked(isTimetablePublished).mockResolvedValue(false);
     const res = await supertest(buildApp()).get('/api/student-portal/dashboard');
     expect(res.body.data.timetableToday).toHaveLength(0);
+  });
+
+  /* The home hero used to infer "not published" from "no lessons today", so
+     every Saturday it announced NOT PUBLISHED YET while the Timetable tab
+     rendered the full week. The flag must mean the school's publish state,
+     not the number of slots today. */
+  test('timetablePublished is true even when today has no lessons', async () => {
+    const { isTimetablePublished } = require('../../utils/timetable-publish');
+    jest.mocked(isTimetablePublished).mockResolvedValue(true);
+    mockTimetableDocs = [];
+    const res = await supertest(buildApp()).get('/api/student-portal/dashboard');
+    expect(res.body.data.timetableToday).toHaveLength(0);
+    expect(res.body.data.timetablePublished).toBe(true);
+  });
+
+  test('timetablePublished is false when the school has not published', async () => {
+    const { isTimetablePublished } = require('../../utils/timetable-publish');
+    jest.mocked(isTimetablePublished).mockResolvedValue(false);
+    const res = await supertest(buildApp()).get('/api/student-portal/dashboard');
+    expect(res.body.data.timetablePublished).toBe(false);
   });
 });
 

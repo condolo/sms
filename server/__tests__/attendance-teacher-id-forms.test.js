@@ -29,6 +29,7 @@ function mockMatches(doc, filter) {
   return Object.entries(filter || {}).every(([k, v]) => {
     if (k === '$or') return v.some(sub => mockMatches(doc, sub));
     if (v && typeof v === 'object' && !Array.isArray(v) && '$in' in v) return v.$in.some(x => mockSame(doc[k], x));
+    if (v && typeof v === 'object' && !Array.isArray(v) && '$ne' in v) return !mockSame(doc[k], v.$ne);
     return mockSame(doc[k], v);
   });
 }
@@ -126,6 +127,37 @@ describe('_loadAssigned', () => {
   test('Mascit shape: a stream assignment saved under the staff record id is now visible', async () => {
     const a = await _loadAssigned(OID_HEX, SCHOOL);
     expect(a.streamIds).toEqual(['strm_1']);
+  });
+
+  /* Live case (Demo School, Form 1A): an admin moved Period 2 English to
+     the demo teacher in the Scheduling Engine. `myClasses` already unioned
+     timetable slots, so the class showed with "Log today", but scope only
+     read teaching_assignments — its own roster 403'd "This class is not in
+     your assigned scope". The timetable is a teaching decision too. */
+  test('a timetable slot puts its class+subject in scope even with no assignment row', async () => {
+    mockDb.timetable = [
+      { schoolId: SCHOOL, teacherId: 'usr_ann', classId: 'cls_f1a', subjectId: 'subj_eng', isActive: true },
+    ];
+    const a = await _loadAssigned('usr_ann', SCHOOL);
+    expect(a.classIds).toContain('cls_f1a');
+    expect(a.subjectIds).toContain('subj_eng');
+  });
+
+  test('a stream-scoped timetable slot narrows to streamIds, never the whole class', async () => {
+    mockDb.timetable = [
+      { schoolId: SCHOOL, teacherId: 'usr_ann', classId: 'cls_s7', subjectId: 'subj_math', streamId: 'strm_7i', isActive: true },
+    ];
+    const a = await _loadAssigned('usr_ann', SCHOOL);
+    expect(a.classIds).not.toContain('cls_s7');
+    expect(a.streamIds).toContain('strm_7i');
+  });
+
+  test('an inactive slot grants nothing', async () => {
+    mockDb.timetable = [
+      { schoolId: SCHOOL, teacherId: 'usr_ann', classId: 'cls_old', subjectId: 'subj_eng', isActive: false },
+    ];
+    const a = await _loadAssigned('usr_ann', SCHOOL);
+    expect(a.classIds).not.toContain('cls_old');
   });
 });
 
