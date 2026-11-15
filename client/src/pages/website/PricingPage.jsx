@@ -41,7 +41,7 @@ const TIERS = [
       'Assignment submissions',
       'Digital growth profile',
     ],
-    highlight: true,
+    highlight: false,
     cta: 'Book a Demo',
   },
   {
@@ -56,7 +56,7 @@ const TIERS = [
       'Report card delivery to parents',
       'School notices & announcements',
     ],
-    highlight: false,
+    highlight: true,
     cta: 'Book a Demo',
   },
 ];

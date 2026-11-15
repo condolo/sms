@@ -6,6 +6,13 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.271.1] - 2026-11-15 - chore(website): Family Portal is the "Most popular" plan
+
+### Changed
+- The pricing page shows the **Most popular** badge and highlight on **Family Portal (KES 350)** instead of Student Portal (KES 300). Only `client/src/pages/website/PricingPage.jsx` sets it; prices and plan contents are unchanged.
+
+---
+
 ## [v5.271.0] - 2026-11-13 - feat(report-cards): a Mid-Term report covers only the assessments up to mid-term; End-Term covers the term
 
 Asked for by a school that sets HW and CA more than once a term: "the Mid-Term report card fetches only assessments from the start of the term to the mid-term assessment; the End-Term report fetches all of them for that term." Modelled on how reporting periods work in other school systems, using the assessment schedule schools already set up at the start of the term.
