@@ -534,6 +534,14 @@ app.use('/css', express.static(path.join(ROOT_DIR, 'css'), {
   }
 }));
 
+/* The platform console's analytics view is a separate classic script so the
+   200 KB inline page stays readable. Scope the mount to /js only — never
+   serve the repository root (see the security note above). */
+app.use('/js', express.static(path.join(ROOT_DIR, 'js'), {
+  index: false,
+  maxAge: 0,
+}));
+
 // SPA fallback — serve the appropriate index.html for all non-API routes.
 // Universal wildcard: any new React route works without editing this file.
 app.get('*', (req, res) => {
