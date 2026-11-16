@@ -230,7 +230,8 @@ export const router = createBrowserRouter([
   { path: '/group-dashboard', element: <SuspenseWrapper><GroupDashboard /></SuspenseWrapper> },
 
   // Platform Console — superadmin only, no AppShell (operator tool, not school UI)
-  { path: '/ops', element: <SuspenseWrapper><PlatformConsole /></SuspenseWrapper> },
+  { path: '/platform', element: <SuspenseWrapper><PlatformConsole /></SuspenseWrapper> },
+  { path: '/ops', element: <Navigate to="/platform" replace /> },
 
   // Protected shell — only reachable after authentication
   {
