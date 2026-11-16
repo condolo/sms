@@ -29,9 +29,20 @@ export default function OverviewTab() {
   const allLogs  = incData?.data ?? [];
   const students = stuData?.data ?? [];
 
-  const totalMerits   = allLogs.filter(l => l.type === 'merit').reduce((s, l) => s + (l.points ?? 0), 0);
-  const totalDemerits = Math.abs(allLogs.filter(l => l.type === 'demerit').reduce((s, l) => s + (l.points ?? 0), 0));
-  const totalEvents   = allLogs.length;
+  // Totals come from the server over EVERY incident (v5.276.0). Adding up `allLogs`
+  // here counted only the newest 200 (the list endpoint's page cap), so these cards
+  // and the downloaded report disagreed. Same rules as the report: deleted incidents
+  // excluded, merit points +, demerit points −.
+  const { data: totalsData } = useQuery({
+    queryKey: ['behaviour', 'totals'],
+    queryFn:  behaviourApi.totals,
+    staleTime: 2 * 60_000,
+  });
+  const allTime       = totalsData?.data?.allTime;
+  const totalMerits   = allTime?.meritPoints ?? 0;
+  const totalDemerits = allTime?.demeritPoints ?? 0;
+  const totalEvents   = allTime?.events ?? 0;
+  const netPoints     = allTime?.net ?? 0;
 
   const stageAlerts = useMemo(() => (
     students
@@ -59,7 +70,11 @@ export default function OverviewTab() {
           (a rolling N-day window scoped per class) — labelled so the two
           reading different numbers for the same school is legible as
           intentional, not a bug. */}
-      <p className="text-[11px] text-slate-400 -mb-1">All-time totals across every recorded incident</p>
+      <p className="text-[11px] text-slate-400 -mb-1">
+        All-time totals across every recorded incident (deleted ones excluded) ·{' '}
+        <span className={`font-semibold ${netPoints >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>Net points {netPoints >= 0 ? '+' : ''}{netPoints}</span>
+        {' '}— the same figure as a whole-school incident report with no filters
+      </p>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {/* Merits/demerits keep semantic green/red; neutral cards use school theme */}
         <StatCard icon={<TrendingUp size={18} className="text-emerald-600" />}  label="Total Merits"    value={`+${totalMerits}`}  valueColor="text-emerald-600" bg="bg-emerald-50" />

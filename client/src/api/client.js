@@ -447,6 +447,8 @@ export const finance = {
 };
 
 export const behaviour = {
+  /** Totals over every incident, worked out on the server (v5.276.0): { allTime, sinceReset, resetAt, houses } */
+  totals: () => _get('/behaviour/totals'),
   incidents: {
     ..._resource('behaviour/incidents'),
     summary: (params) => _get('/behaviour/incidents/summary', params),

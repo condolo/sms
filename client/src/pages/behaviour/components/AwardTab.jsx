@@ -111,6 +111,7 @@ export default function AwardTab() {
     mutationFn: data => behaviourApi.incidents.create(data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['behaviour', 'incidents'] });
+      qc.invalidateQueries({ queryKey: ['behaviour', 'totals'] });   // Overview + Houses figures (v5.276.0)
       setToast({ type: 'success', student: sName, pts, msTrigger, newMs, stageTrigger, newStage });
       reset();
       setTimeout(() => setToast(null), 6000);

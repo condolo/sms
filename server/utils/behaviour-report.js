@@ -11,6 +11,14 @@
    ============================================================ */
 'use strict';
 
+const { signedPoints, totalsOf } = require('./behaviour-points');
+
+/* v5.276.0: totals come from the caller, computed over EVERY matching incident (the
+   row list may be capped); points are signed by type (merit +, demerit −); house
+   standings are included; "Recorded by" falls back to createdBy like the rest of the app. */
+const sp = (n) => `${n >= 0 ? '+' : ''}${n}`;
+const loggerOf = (i) => i.reportedBy || i.createdBy || null;
+
 const BRAND = '#1f2d3d';
 const BRAND_WASH = '#eef1f4';
 const FAIL_RED = '#b3261e';
@@ -31,18 +39,32 @@ function esc(str) {
  * @param {Record<string,{name:string, role:string}>} opts.reporterMap - userId -> {name, role}
  * @param {object[]} opts.staffRows - [{name, role, total, merits, demerits, points}], pre-sorted
  * @param {string} opts.generatedByName
+ * @param {object} [opts.totals]   - utils/behaviour-points totalsOf() over every matching incident
+ * @param {object[]} [opts.houseRows] - houseStandings() rows
+ * @param {number} [opts.totalIncidents] - all matching incidents (> incidents.length when capped)
  */
 function renderIncidentsReportHtml({
   school, scopeLabel, dateFrom, dateTo, incidents, classNameMap, reporterMap, staffRows, generatedByName,
+  totals, houseRows = [], totalIncidents,
 }) {
   const schoolName = school?.name || 'School';
   const rangeLabel = dateFrom || dateTo
     ? `${dateFrom ? esc(dateFrom) : 'Start'} – ${dateTo ? esc(dateTo) : 'Today'}`
     : 'All dates';
 
-  const totalMerits   = incidents.filter(i => i.type === 'merit').length;
-  const totalDemerits = incidents.filter(i => i.type === 'demerit').length;
-  const netPoints     = incidents.reduce((s, i) => s + (i.points || 0), 0);
+  const t = totals || totalsOf(incidents);
+  const allCount = totalIncidents ?? t.events;
+  const capped = allCount > incidents.length;
+
+  const houseRowsHtml = houseRows.map(h => `
+    <tr>
+      <td style="${tdS}font-weight:600">${h.color ? `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${esc(h.color)};margin-right:6px"></span>` : ''}${esc(h.name)}</td>
+      <td style="${tdC}">${h.members ?? '—'}</td>
+      <td style="${tdC}">${h.events}</td>
+      <td style="${tdC};color:${PASS_GREEN};font-weight:600">${h.merits} (+${h.meritPoints})</td>
+      <td style="${tdC};color:${FAIL_RED};font-weight:600">${h.demerits} (−${h.demeritPoints})</td>
+      <td style="${tdC};font-weight:700">${sp(h.net)}</td>
+    </tr>`).join('');
 
   const staffRowsHtml = staffRows.map(r => `
     <tr>
@@ -55,10 +77,10 @@ function renderIncidentsReportHtml({
     </tr>`).join('');
 
   const incidentRowsHtml = incidents.map(i => {
-    const reporter = reporterMap[i.reportedBy];
+    const reporter = reporterMap[loggerOf(i)];
     const reporterLabel = reporter
       ? `${esc(reporter.name)}${reporter.role ? ` <span style="color:#94a3b8">(${esc(reporter.role)})</span>` : ''}`
-      : (i.reportedBy ? esc(i.reportedBy) : '<span style="color:#94a3b8;font-style:italic">Unattributed</span>');
+      : (loggerOf(i) ? esc(loggerOf(i)) : '<span style="color:#94a3b8;font-style:italic">Unattributed</span>');
     const typeColor = i.type === 'merit' ? PASS_GREEN : i.type === 'demerit' ? FAIL_RED : '#64748b';
     return `
     <tr>
@@ -67,7 +89,7 @@ function renderIncidentsReportHtml({
       <td style="${tdS}color:#64748b">${esc(classNameMap[i.classId] || '—')}</td>
       <td style="${tdS};color:${typeColor};font-weight:600;text-transform:capitalize">${esc(i.type || '—')}</td>
       <td style="${tdS}color:#64748b">${esc(i.category || i.title || '—')}</td>
-      <td style="${tdC};font-weight:700">${(i.points || 0) >= 0 ? '+' : ''}${i.points ?? 0}</td>
+      <td style="${tdC};font-weight:700">${sp(signedPoints(i))}</td>
       <td style="${tdS}">${reporterLabel}</td>
     </tr>`;
   }).join('');
@@ -96,16 +118,30 @@ function renderIncidentsReportHtml({
 
   <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:14px 0">
     ${[
-      { label: 'Total Incidents', value: incidents.length, color: BRAND },
-      { label: 'Merits', value: totalMerits, color: PASS_GREEN },
-      { label: 'Demerits', value: totalDemerits, color: FAIL_RED },
-      { label: 'Net Points', value: `${netPoints >= 0 ? '+' : ''}${netPoints}`, color: netPoints >= 0 ? PASS_GREEN : FAIL_RED },
+      { label: 'Total Incidents', value: allCount, color: BRAND },
+      { label: 'Merits', value: `${t.merits} · +${t.meritPoints} pts`, color: PASS_GREEN },
+      { label: 'Demerits', value: `${t.demerits} · −${t.demeritPoints} pts`, color: FAIL_RED },
+      { label: 'Net Points', value: sp(t.net), color: t.net >= 0 ? PASS_GREEN : FAIL_RED },
     ].map(k => `
     <div style="border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;text-align:center">
       <p style="margin:0 0 4px;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#94a3b8">${esc(k.label)}</p>
       <p style="margin:0;font-size:20px;font-weight:800;color:${k.color}">${k.value}</p>
     </div>`).join('')}
   </div>
+
+  <p style="font-size:10px;color:#64748b;margin:-4px 0 10px">Net points = merit points − demerit points${t.otherPoints ? ` + ${sp(t.otherPoints)} from other entries` : ''}. Deleted incidents are not counted.</p>
+
+  ${houseRows.length ? `
+  <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:16px 0 6px">House Points — same incidents as this report</p>
+  <table style="margin-bottom:16px;font-size:10.5px">
+    <thead><tr>
+      <th style="${thS}">House</th><th style="${thS}">Students</th><th style="${thS}">Incidents</th>
+      <th style="${thS}">Merits (pts)</th><th style="${thS}">Demerits (pts)</th><th style="${thS}">Net Points</th>
+    </tr></thead>
+    <tbody>${houseRowsHtml}
+      <tr><td style="${tdS}font-weight:700">Total</td><td style="${tdC}"></td><td style="${tdC};font-weight:700">${houseRows.reduce((n, h) => n + h.events, 0)}</td><td style="${tdC}"></td><td style="${tdC}"></td><td style="${tdC};font-weight:800">${sp(houseRows.reduce((n, h) => n + h.net, 0))}</td></tr>
+    </tbody>
+  </table>` : ''}
 
   <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:16px 0 6px">Staff Activity — who logged what</p>
   <table style="margin-bottom:16px;font-size:10.5px">
@@ -117,6 +153,7 @@ function renderIncidentsReportHtml({
   </table>
 
   <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:16px 0 6px">Incident Log</p>
+  ${capped ? `<p style="font-size:10px;color:#b45309;margin:0 0 6px">Listing the latest ${incidents.length} of ${allCount} incidents. The totals, house points and staff activity above include all ${allCount}; narrow the class, stream or dates to list every incident.</p>` : ''}
   <table style="font-size:10px">
     <thead><tr>
       <th style="${thS}">Date</th><th style="${thS}">Student</th><th style="${thS}">Class</th>
@@ -145,6 +182,7 @@ const tdC = `border:1px solid #e2e8f0;padding:5px 8px;text-align:center`;
    the same posture report-cards.js's _pdfKitFallback takes. */
 function renderIncidentsReportPdf({
   school, scopeLabel, dateFrom, dateTo, incidents, classNameMap, reporterMap, staffRows, generatedByName,
+  totals, houseRows = [], totalIncidents,
 }) {
   const PDFDocument = require('pdfkit');
   const doc = new PDFDocument({ margin: 36, size: 'A4', layout: 'landscape' });
@@ -155,9 +193,8 @@ function renderIncidentsReportPdf({
   const PAGE_W = doc.page.width - 72;
   const schoolName = school?.name || 'School';
   const rangeLabel = dateFrom || dateTo ? `${dateFrom || 'Start'} - ${dateTo || 'Today'}` : 'All dates';
-  const totalMerits   = incidents.filter(i => i.type === 'merit').length;
-  const totalDemerits = incidents.filter(i => i.type === 'demerit').length;
-  const netPoints     = incidents.reduce((s, i) => s + (i.points || 0), 0);
+  const t = totals || totalsOf(incidents);
+  const allCount = totalIncidents ?? t.events;
 
   doc.fontSize(16).font('Helvetica-Bold').text(schoolName, 36, 36);
   doc.fontSize(10).font('Helvetica').fillColor('#64748b').text('Behaviour Incidents Report', 36, 56);
@@ -165,7 +202,7 @@ function renderIncidentsReportPdf({
   doc.fillColor('#000');
 
   doc.fontSize(9).font('Helvetica-Bold')
-     .text(`Total Incidents: ${incidents.length}    Merits: ${totalMerits}    Demerits: ${totalDemerits}    Net Points: ${netPoints >= 0 ? '+' : ''}${netPoints}`, 36, 92);
+     .text(`Total Incidents: ${allCount}    Merits: ${t.merits} (+${t.meritPoints} pts)    Demerits: ${t.demerits} (-${t.demeritPoints} pts)    Net Points: ${sp(t.net)}`, 36, 92);
 
   let y = 116;
   function drawTable(headers, colWidths, rows, emptyMsg) {
@@ -216,6 +253,17 @@ function renderIncidentsReportPdf({
     y += 16;
   }
 
+  if (houseRows.length) {
+    sectionHeading('House Points - same incidents as this report');
+    drawTable(
+      ['House', 'Students', 'Incidents', 'Merits (pts)', 'Demerits (pts)', 'Net Points'],
+      [PAGE_W * 0.3, PAGE_W * 0.12, PAGE_W * 0.12, PAGE_W * 0.16, PAGE_W * 0.16, PAGE_W * 0.14],
+      [...houseRows.map(h => [h.name, h.members ?? '-', h.events, `${h.merits} (+${h.meritPoints})`, `${h.demerits} (-${h.demeritPoints})`, sp(h.net)]),
+        ['Total', '', houseRows.reduce((n, h) => n + h.events, 0), '', '', sp(houseRows.reduce((n, h) => n + h.net, 0))]],
+      'No houses.'
+    );
+  }
+
   sectionHeading('Staff Activity - who logged what');
   const staffColW = [PAGE_W * 0.3, PAGE_W * 0.2, PAGE_W * 0.15, PAGE_W * 0.1, PAGE_W * 0.12, PAGE_W * 0.13];
   drawTable(
@@ -226,17 +274,23 @@ function renderIncidentsReportPdf({
   );
 
   sectionHeading('Incident Log');
+  if (allCount > incidents.length) {
+    doc.font('Helvetica').fontSize(8).fillColor('#b45309')
+       .text(`Listing the latest ${incidents.length} of ${allCount} incidents. Totals, house points and staff activity include all ${allCount}.`, 36, y);
+    doc.fillColor('#000');
+    y += 14;
+  }
   const incColW = [PAGE_W * 0.1, PAGE_W * 0.2, PAGE_W * 0.15, PAGE_W * 0.1, PAGE_W * 0.2, PAGE_W * 0.08, PAGE_W * 0.17];
   drawTable(
     ['Date', 'Student', 'Class', 'Type', 'Category / Title', 'Points', 'Recorded By'],
     incColW,
     incidents.map(i => {
-      const reporter = reporterMap[i.reportedBy];
-      const reporterLabel = reporter ? `${reporter.name}${reporter.role ? ` (${reporter.role})` : ''}` : (i.reportedBy || 'Unattributed');
+      const reporter = reporterMap[loggerOf(i)];
+      const reporterLabel = reporter ? `${reporter.name}${reporter.role ? ` (${reporter.role})` : ''}` : (loggerOf(i) || 'Unattributed');
       return [
         i.date ? new Date(i.date).toLocaleDateString('en-GB') : '-',
         i.studentName || i.studentId, classNameMap[i.classId] || '-', i.type || '-',
-        i.category || i.title || '-', `${(i.points || 0) >= 0 ? '+' : ''}${i.points ?? 0}`, reporterLabel,
+        i.category || i.title || '-', sp(signedPoints(i)), reporterLabel,
       ];
     }),
     'No incidents in this scope/period.'

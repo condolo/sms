@@ -1,6 +1,6 @@
 /* ============================================================
    IncidentsTab — paginated incident log with search + type filter,
-   plus (2026-10-29) class/stream/date filters, a "Recorded By" column,
+   plus (2026-10-29) class/stream/date filters (house added v5.276.0), a "Recorded By" column,
    and a management-only "Export PDF" button — requested directly: a
    filterable PDF of the incident log, so leadership can see how each
    staff member is actually using the module, not just browse one
@@ -11,7 +11,7 @@ import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { Scale, Search, Download, MessageCircle } from 'lucide-react';
 import ReplyThreadPanel from './ReplyThreadPanel.jsx';
-import { behaviour as behaviourApi, classes as classesApi, streams as streamsApi } from '@/api/client.js';
+import { behaviour as behaviourApi, classes as classesApi, streams as streamsApi, settings as settingsApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 import { LIMIT, TypeBadge, PaginationBar, EmptyMsg, ErrState } from './BehaviourPrimitives.jsx';
 
@@ -29,6 +29,7 @@ export default function IncidentsTab() {
   const [typeFilter, setType] = useState('');
   const [classId, setClassId]   = useState('');
   const [streamId, setStreamId] = useState('');
+  const [houseId, setHouseId]   = useState('');   // v5.276.0: by the student's house
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo]     = useState('');
   const [exporting, setExporting] = useState(false);
@@ -53,11 +54,19 @@ export default function IncidentsTab() {
   });
   const streamsList = streamsData?.data ?? [];
 
+  const { data: schoolData } = useQuery({
+    queryKey: ['settings', 'school'],
+    queryFn:  () => settingsApi.school.get(),
+    staleTime: 5 * 60_000,
+  });
+  const housesList = Array.isArray((schoolData?.data ?? schoolData)?.houses) ? (schoolData?.data ?? schoolData).houses : [];
+
   const activeFilters = {
     search: search || undefined,
     type:   typeFilter || undefined,
     classId: classId || undefined,
     streamId: streamId || undefined,
+    houseId:  houseId || undefined,
     dateFrom: dateFrom || undefined,
     dateTo:   dateTo || undefined,
   };
@@ -122,6 +131,18 @@ export default function IncidentsTab() {
           <option value="">All streams</option>
           {streamsList.map(s => <option key={s.id ?? s._id} value={s.id ?? s._id}>{s.name}</option>)}
         </select>
+        {housesList.length > 0 && (
+          <select
+            value={houseId}
+            onChange={e => { setHouseId(e.target.value); setPage(1); }}
+            className="text-sm px-3 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none text-slate-700"
+            title="Incidents of students in this house (combines with class and stream)"
+          >
+            <option value="">All houses</option>
+            {housesList.map(h => <option key={h.id ?? h.name} value={h.id ?? h.name}>{h.name}</option>)}
+            <option value="none">No house</option>
+          </select>
+        )}
         <input
           type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setPage(1); }}
           className="text-sm px-3 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none text-slate-700"

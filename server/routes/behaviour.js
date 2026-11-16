@@ -30,6 +30,7 @@ const { isManagement } = require('../utils/subject-scope');
 const { htmlToPdfBufferOrFallback } = require('../utils/html-to-pdf');
 const { renderIncidentsReportHtml, renderIncidentsReportPdf } = require('../utils/behaviour-report');
 const behaviourReplies = require('../utils/behaviour-replies');
+const bp = require('../utils/behaviour-points');
 const { createDirectMessage } = require('./messages');
 
 const router = express.Router();
@@ -395,7 +396,8 @@ router.get('/incidents', authMiddleware, PLAN, MODGATE, behaviourAccess('read'),
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
 
-    const filter = { schoolId };
+    // Deleted incidents (soft delete) are not part of the record (v5.276.0).
+    const filter = { schoolId, $and: [bp.NOT_DELETED] };
     const _sid   = strParam(req.query.studentId);
     const _cid   = strParam(req.query.classId);
     const _strmId = strParam(req.query.streamId);
@@ -430,6 +432,7 @@ router.get('/incidents', authMiddleware, PLAN, MODGATE, behaviourAccess('read'),
       const streamStudentIds = await tenantModel('students', tenantContext(req)).distinct('id', { schoolId, streamId: _strmId });
       filter.studentId = filter.studentId ? filter.studentId : { $in: streamStudentIds };
     }
+    await _applyHouseFilter(filter, tenantContext(req), schoolId, strParam(req.query.houseId));
 
     const Incidents = tenantModel('behaviour_incidents', tenantContext(req));
     const [docs, total] = await Promise.all([
@@ -467,6 +470,27 @@ router.get('/incidents', authMiddleware, PLAN, MODGATE, behaviourAccess('read'),
    it just moves the floor the running total is computed from. Shared
    by /incidents/summary and /points-reset/latest so both surfaces
    (student totals, house totals) agree on the same floor. */
+/* House filter (v5.276.0): incidents have no house of their own — it is the
+   student's (students.houseId, or the legacy `house` field). Narrows
+   `filter.studentId` to that house's students, combining with any student or
+   stream narrowing already applied. houseId 'none' = students with no house.
+   Returns the house's display name for report labels. */
+async function _applyHouseFilter(filter, ctx, schoolId, houseId) {
+  if (!houseId) return null;
+  const houseFilter = houseId === 'none'
+    ? { $and: [{ $or: [{ houseId: null }, { houseId: { $exists: false } }, { houseId: '' }] }, { $or: [{ house: null }, { house: { $exists: false } }, { house: '' }] }] }
+    : { $or: [{ houseId }, { house: houseId }] };
+  const ids = await tenantModel('students', ctx).distinct('id', { schoolId, ...houseFilter });
+  const current = filter.studentId;
+  if (typeof current === 'string') filter.studentId = ids.includes(current) ? current : { $in: [] };
+  else if (current && Array.isArray(current.$in)) filter.studentId = { $in: current.$in.filter(id => ids.includes(id)) };
+  else filter.studentId = { $in: ids };
+  if (houseId === 'none') return 'No house';
+  const school = await _model('schools').findOne({ id: schoolId }, { houses: 1 }).lean().catch(() => null);
+  const h = (school?.houses || []).find(x => (x.id ?? x.name) === houseId);
+  return h?.name || houseId;
+}
+
 async function _lastResetDate(schoolId, ctx) {
   const lastReset = await tenantModel('behaviour_points_resets', ctx)
     .find({ schoolId }).sort({ resetAt: -1 }).limit(1).lean();
@@ -485,10 +509,34 @@ router.get('/points-reset/latest', authMiddleware, PLAN, MODGATE, behaviourAcces
   } catch (err) { console.error('[behaviour/points-reset/latest GET]', err); return E.serverError(res); }
 });
 
+/* GET /api/behaviour/totals (v5.276.0) — the numbers the Overview and Houses tabs show,
+   computed here over EVERY incident (they used to add up only the newest 200 the list
+   endpoint returns). allTime: every incident; sinceReset: since the latest points
+   reset (house standings use this, like student totals). Deleted incidents excluded;
+   merit +, demerit − whatever sign was stored. */
+router.get('/totals', authMiddleware, PLAN, MODGATE, behaviourAccess('read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const ctx = tenantContext(req);
+    const [incidents, resetDay, school] = await Promise.all([
+      tenantModel('behaviour_incidents', ctx).find({ schoolId, $and: [bp.NOT_DELETED] }).select('studentId type points date').lean(),
+      bp.lastResetDay(ctx, schoolId),
+      _model('schools').findOne({ id: schoolId }, { houses: 1 }).lean().catch(() => null),
+    ]);
+    const sinceReset = resetDay ? incidents.filter(i => i.date && String(i.date).slice(0, 10) >= resetDay) : incidents;
+    return ok(res, {
+      allTime: bp.totalsOf(incidents),
+      sinceReset: bp.totalsOf(sinceReset),
+      resetAt: resetDay,
+      houses: await bp.houseStandings(ctx, schoolId, sinceReset, school?.houses || []),
+    });
+  } catch (err) { console.error('[behaviour/totals]', err); return E.serverError(res); }
+});
+
 router.get('/incidents/summary', authMiddleware, PLAN, MODGATE, behaviourAccess('read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const filter = { schoolId };
+    const filter = { schoolId, $and: [bp.NOT_DELETED] };   // deleted incidents don't count (v5.276.0)
     if (req.query.studentId) filter.studentId = req.query.studentId;
     if (req.query.classId)   filter.classId   = req.query.classId;
     if (req.query.dateFrom || req.query.dateTo) {
@@ -512,7 +560,14 @@ router.get('/incidents/summary', authMiddleware, PLAN, MODGATE, behaviourAccess(
         studentName: { $first: '$studentName' },
         merits:   { $sum: { $cond: [{ $eq: ['$type', 'merit'] }, 1, 0] } },
         demerits: { $sum: { $cond: [{ $eq: ['$type', 'demerit'] }, 1, 0] } },
-        points:   { $sum: '$points' },
+        // Signed by type (merit +, demerit −), the same rule as every other total (v5.276.0).
+        points:   { $sum: { $switch: {
+          branches: [
+            { case: { $eq: ['$type', 'merit'] },   then: { $abs: { $ifNull: ['$points', 0] } } },
+            { case: { $eq: ['$type', 'demerit'] }, then: { $multiply: [-1, { $abs: { $ifNull: ['$points', 0] } }] } },
+          ],
+          default: { $ifNull: ['$points', 0] },
+        } } },
         total:    { $sum: 1 },
       }},
       { $sort: { points: -1 } }
@@ -550,7 +605,7 @@ router.get('/incidents/export-pdf', authMiddleware, PLAN, MODGATE, rbac('behavio
     }
 
     const ctx = tenantContext(req);
-    const filter = { schoolId };
+    const filter = { schoolId, $and: [bp.NOT_DELETED] };   // deleted incidents excluded (v5.276.0)
     const _cid = strParam(req.query.classId);
     const _sid = strParam(req.query.streamId);
     const _typ = strParam(req.query.type);
@@ -588,20 +643,26 @@ router.get('/incidents/export-pdf', authMiddleware, PLAN, MODGATE, rbac('behavio
       const classDoc = await tenantModel('classes', ctx).findOne({ schoolId, id: _cid }).select('name').lean();
       className = classDoc?.name || null;
     }
+    const houseName = await _applyHouseFilter(filter, ctx, schoolId, strParam(req.query.houseId));
 
     // Capped, not paginated — this is a single downloadable document, not
     // an infinite-scroll list. 3000 rows comfortably covers a full term
     // for any real school; a request that would exceed it should narrow
     // by class/stream/date instead of silently truncating without notice.
     const EXPORT_LIMIT = 3000;
-    const incidents = await tenantModel('behaviour_incidents', ctx)
-      .find(filter).sort({ date: -1, createdAt: -1 }).limit(EXPORT_LIMIT).select('-__v').lean();
+    // Totals, staff activity and house standings cover EVERY matching incident
+    // (v5.276.0); only the row listing is capped. Before, all of them were worked
+    // out from the capped rows, so an export over 3000 silently lost points.
+    const Incidents = tenantModel('behaviour_incidents', ctx);
+    const everything = await Incidents.find(filter).sort({ date: -1, createdAt: -1 })
+      .select('id studentId type points reportedBy createdBy').lean();
+    const incidents = await Incidents.find(filter).sort({ date: -1, createdAt: -1 }).limit(EXPORT_LIMIT).select('-__v').lean();
 
     const [reporterDocs, classDocs, school, requester] = await Promise.all([
       (() => {
-        const reporterIds = [...new Set(incidents.map(i => i.reportedBy).filter(Boolean))];
+        const reporterIds = [...new Set(everything.map(behaviourReplies.loggerOf).filter(Boolean))];
         return reporterIds.length
-          ? tenantModel('users', ctx).find({ schoolId, id: { $in: reporterIds } }).select('id name role').lean()
+          ? tenantModel('users', ctx).find({ schoolId, ...behaviourReplies.byUserIds(reporterIds) }).select('id name role').lean()
           : [];
       })(),
       (() => {
@@ -610,15 +671,15 @@ router.get('/incidents/export-pdf', authMiddleware, PLAN, MODGATE, rbac('behavio
           ? tenantModel('classes', ctx).find({ schoolId, id: { $in: classIds } }).select('id name').lean()
           : [];
       })(),
-      _model('schools').findOne({ id: schoolId }, { name: 1, logoUrl: 1 }).lean().catch(() => null),
+      _model('schools').findOne({ id: schoolId }, { name: 1, logoUrl: 1, houses: 1 }).lean().catch(() => null),
       tenantModel('users', ctx).findOne({ schoolId, id: userId }).select('name').lean().catch(() => null),
     ]);
-    const reporterMap  = Object.fromEntries(reporterDocs.map(u => [u.id, { name: u.name, role: u.role }]));
+    const reporterMap  = Object.fromEntries(reporterDocs.map(u => [behaviourReplies.userKey(u), { name: u.name, role: u.role }]));
     const classNameMap = Object.fromEntries(classDocs.map(c => [c.id, c.name]));
 
     const staffActivity = {};
-    for (const inc of incidents) {
-      const key = inc.reportedBy || '__unattributed__';
+    for (const inc of everything) {
+      const key = behaviourReplies.loggerOf(inc) || '__unattributed__';
       if (!staffActivity[key]) {
         staffActivity[key] = {
           name: reporterMap[key]?.name || (key === '__unattributed__' ? 'Unattributed' : key),
@@ -630,17 +691,27 @@ router.get('/incidents/export-pdf', authMiddleware, PLAN, MODGATE, rbac('behavio
       row.total += 1;
       if (inc.type === 'merit')   row.merits   += 1;
       if (inc.type === 'demerit') row.demerits += 1;
-      row.points += (inc.points || 0);
+      row.points += bp.signedPoints(inc);
     }
     const staffRows = Object.values(staffActivity).sort((a, b) => b.total - a.total);
+    const totals = bp.totalsOf(everything);
+    const allHouseRows = await bp.houseStandings(ctx, schoolId, everything, school?.houses || []);
+    // With a house filter, the house table shows that house only (not zero rows for the rest).
+    const _hid = strParam(req.query.houseId);
+    const houseRows = _hid
+      ? allHouseRows.filter(r => (_hid === 'none' ? !r.houseId : r.houseId === _hid))
+      : allHouseRows;
 
-    const scopeLabel = _sid ? `${className || 'Class'} · ${streamName || 'Stream'}`
+    const baseScope = _sid ? `${className || 'Class'} · ${streamName || 'Stream'}`
       : _cid ? (className || 'Class')
       : 'Whole School';
+    const scopeLabel = houseName ? `${baseScope} · House: ${houseName}` : baseScope;
 
     const reportData = {
       school, scopeLabel, dateFrom: _df, dateTo: _dt,
       incidents, classNameMap, reporterMap, staffRows,
+      totals, houseRows,
+      totalIncidents: everything.length,   // > incidents.length when the row list was capped
       generatedByName: requester?.name || null,
     };
     const html = renderIncidentsReportHtml(reportData);
@@ -667,6 +738,8 @@ router.post('/incidents', authMiddleware, PLAN, MODGATE, behaviourAccess('create
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(IncidentSchema, req.body);
     if (error) return E.validation(res, error);
+    // A merit always adds and a demerit always subtracts, whatever sign was typed (v5.276.0).
+    data.points = bp.normalisedPoints(data.type, data.points);
 
     const period = await resolveAcademicPeriod(schoolId, tenantContext(req), { academicYearId: data.academicYearId, termId: data.termId });
     if (period.error) return E.badRequest(res, period.error);
@@ -760,6 +833,9 @@ router.put('/incidents/:id', authMiddleware, PLAN, MODGATE, behaviourAccess('upd
     if (!existing) return E.notFound(res, 'Incident not found');
     if (await isYearArchived(schoolId, existing.academicYearId)) {
       return E.badRequest(res, `Academic year is locked — this incident cannot be edited.`);
+    }
+    if (data.points !== undefined || data.type !== undefined) {
+      data.points = bp.normalisedPoints(data.type ?? existing.type, data.points ?? existing.points);
     }
 
     if (data.academicYearId !== undefined || data.termId !== undefined) {

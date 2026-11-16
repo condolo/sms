@@ -12,7 +12,8 @@ The school’s categories, individual behaviour items, merit/demerit values, off
 
 1. Open **Behaviour** and review **Overview** for merits, demerits, intervention alerts, milestone achievers, and serious incidents.
 2. Note the time window displayed on each panel. The module’s Overview totals are all-time, while the Dashboard Behaviour card may use a rolling 30-day window and class grouping; different numbers can be intentional (CHANGELOG v5.39.0).
-3. Open the source incident or student record before acting on an alert. A summary is not the decision record.
+3. The Overview's **Net points** is the same figure as a whole-school incident report with no filters (CHANGELOG v5.276.0). Every behaviour total uses the same rules: deleted incidents never count, a merit always adds and a demerit always subtracts (whatever sign was typed).
+4. Open the source incident or student record before acting on an alert. A summary is not the decision record.
 
 ## 3. Award merit points or record a demerit
 
@@ -29,11 +30,12 @@ Record observed facts promptly and consistently. Use the approved safeguarding o
 
 ## 4. Review the incident register and correct a record
 
-1. Open **Incidents** and search/filter by student, date, merit/demerit, or other available criteria.
+1. Open **Incidents** and search/filter by student, date, merit/demerit, class, stream or **house** (a student's house; "No house" lists students without one). Filters combine.
 2. Open the original record and compare the student, item/category, date, points, and note with the original evidence.
 3. If the record is wrong, use the authorized edit/correction action on that record and preserve an explanation where required. Do not create a second record as a correction.
-4. Use delete only when the record is genuinely erroneous and the school authorizes removal; deletion can affect the student’s current stage/milestone calculation.
-5. Reopen the record and check the updated value/status.
+4. Use delete only when the record is genuinely erroneous and the school authorizes removal; deletion can affect the student’s current stage/milestone calculation. A deleted incident drops out of every total, the incident list and the report.
+5. **Export PDF** downloads the incident report for the current filters (class, stream, house, dates, type). It shows totals (merits, demerits, net points), **House Points** for the same incidents, staff activity, and the incident log. If more than 3000 incidents match, the log lists the newest 3000 and says so; the totals, house points and staff activity still include them all.
+6. Reopen the record and check the updated value/status.
 
 ## 5. Review and resolve an appeal
 
@@ -47,7 +49,7 @@ The student/parent portal may show the appeal state and the staff resolution. Ke
 
 ## 6. Houses, milestones, stages, and resets
 
-- Use **Houses** to review configured house information and the points window shown. House totals can reset with the behaviour cycle; the permanent incident history remains.
+- Use **Houses** to review configured house information and the points window shown. House totals can reset with the behaviour cycle; the permanent incident history remains. Each incident counts for its student's current house, and house standings cover every incident and student since the last reset.
 - Merit milestones and demerit intervention stages are calculated from incidents and school-defined thresholds. Confirm the applicable time window before interpreting a badge or stage.
 - Do not manually delete incidents to simulate a new year. The academic-year transition/reset workflow handles the annual points reset; historical incident records are retained (CHANGELOG v5.31.0).
 - Changes to categories/items, point values, thresholds, houses, detention types, or responsible staff should be approved and communicated before the school starts using the changed policy. Configuration changes do not rewrite old incidents.

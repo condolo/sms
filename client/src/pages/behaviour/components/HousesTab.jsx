@@ -5,7 +5,7 @@ import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { Home, Trophy, Palette, Plus, X, Loader2, AlertTriangle } from 'lucide-react';
-import { behaviour as behaviourApi, students as studentsApi, settings as settingsApi } from '@/api/client.js';
+import { behaviour as behaviourApi, settings as settingsApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 
 const DEFAULT_HOUSE_COLORS = ['#3b82f6','#ef4444','#22c55e','#f59e0b','#8b5cf6','#ec4899','#14b8a6','#f97316'];
@@ -25,49 +25,23 @@ export default function HousesTab() {
   const schoolSettings = settingsData?.data ?? settingsData ?? {};
   const houses         = Array.isArray(schoolSettings.houses) ? schoolSettings.houses : [];
 
-  /* Students for member counts */
-  const { data: stuData } = useQuery({
-    queryKey: ['students', 'list', { limit: 1000 }],
-    queryFn:  () => studentsApi.list({ limit: 1000, status: 'active' }),
-    staleTime: 5 * 60_000,
-  });
-  const allStudents = stuData?.data ?? [];
-
-  /* Incidents for house leaderboard */
-  const { data: incData, isLoading: incLoading } = useQuery({
-    queryKey: ['behaviour', 'incidents', 'all'],
-    queryFn:  () => behaviourApi.incidents.list({ limit: 1000 }),
+  /* House standings — worked out on the server over EVERY incident and student
+     since the latest points reset (v5.276.0). Adding them up here used the newest
+     200 incidents and first 200 students only (the list endpoints' page cap). Same
+     rules as the incident report: deleted incidents excluded, merit +, demerit −. */
+  const { data: totalsData, isLoading: incLoading } = useQuery({
+    queryKey: ['behaviour', 'totals'],
+    queryFn:  behaviourApi.totals,
     staleTime: 2 * 60_000,
   });
-  const allLogs = incData?.data ?? [];
-
-  /* Most recent points-reset — house totals follow the same yearly
-     cycle as individual student totals (Governance Spec §2), so this
-     floors the window the same way /incidents/summary does server-side. */
-  const { data: resetData } = useQuery({
-    queryKey: ['behaviour', 'points-reset', 'latest'],
-    queryFn:  () => behaviourApi.pointsReset.latest(),
-    staleTime: 2 * 60_000,
-  });
-  const lastResetAt = resetData?.data?.resetAt ?? null;
-  const windowedLogs = useMemo(() => (
-    lastResetAt ? allLogs.filter(l => l.date && l.date >= lastResetAt.slice(0, 10)) : allLogs
-  ), [allLogs, lastResetAt]);
-
-  /* House standings */
-  const standings = useMemo(() => (
-    houses.map(h => {
-      // houseId is canonical; house (legacy field name) is a fallback for
-      // records saved before the house field-name cleanup.
-      const members   = allStudents.filter(s => (s.houseId ?? s.house) === (h.id ?? h.name));
-      const memberIds = new Set(members.map(s => s.id ?? s._id));
-      const hLogs     = windowedLogs.filter(l => memberIds.has(l.studentId));
-      const merits    = hLogs.filter(l => l.type === 'merit').reduce((sum, l) => sum + (l.points ?? 0), 0);
-      const demerits  = Math.abs(hLogs.filter(l => l.type === 'demerit').reduce((sum, l) => sum + (l.points ?? 0), 0));
-      const net       = merits - demerits;
-      return { ...h, members: members.length, merits, demerits, net, events: hLogs.length };
-    }).sort((a, b) => b.net - a.net)
-  ), [houses, allStudents, windowedLogs]);
+  const lastResetAt = totalsData?.data?.resetAt ?? null;
+  const standings = useMemo(() => {
+    const byId = new Map((totalsData?.data?.houses ?? []).filter(r => r.houseId).map(r => [r.houseId, r]));
+    return houses.map(h => {
+      const r = byId.get(h.id ?? h.name);
+      return { ...h, members: r?.members ?? 0, merits: r?.meritPoints ?? 0, demerits: r?.demeritPoints ?? 0, net: r?.net ?? 0, events: r?.events ?? 0 };
+    }).sort((a, b) => b.net - a.net);
+  }, [houses, totalsData]);
 
   /* Add / remove house */
   const [newName, setNewName]   = useState('');

@@ -9,15 +9,14 @@ function chain(result, extra = {}) {
   return { select: () => chain(result, extra), sort: () => chain(result, extra), limit: () => chain(result, extra), lean: () => Promise.resolve(result), ...extra };
 }
 
+// v5.276.0: the routes now filter with $and/$or (deleted incidents excluded) and sum
+// points signed by type — use the shared matcher and the same signing rule here.
+const mockShared = require('../fixtures/fake-tenant-db');
+const mockSigned = require('../../utils/behaviour-points').signedPoints;
+
 function makeStore(seed = []) {
   const docs = seed.map(d => ({ ...d }));
-  function matches(doc, filter) {
-    return Object.entries(filter).every(([k, v]) => {
-      if (v && typeof v === 'object' && '$gte' in v) return doc[k] >= v.$gte;
-      if (v && typeof v === 'object' && '$lte' in v) return doc[k] <= v.$lte;
-      return doc[k] === v;
-    });
-  }
+  const matches = (doc, filter) => mockShared.matches(doc, filter);
   return {
     find:    (filter) => chain(docs.filter(d => matches(d, filter)).sort((a, b) => (a.resetAt < b.resetAt ? 1 : -1))),
     create:  async (doc) => { const d = { ...doc, toObject: () => d }; docs.push(d); return d; },
@@ -30,7 +29,7 @@ function makeStore(seed = []) {
       const byStudent = {};
       for (const d of filtered) {
         byStudent[d.studentId] ??= { _id: d.studentId, points: 0, total: 0 };
-        byStudent[d.studentId].points += d.points || 0;
+        byStudent[d.studentId].points += mockSigned(d);
         byStudent[d.studentId].total += 1;
       }
       return Object.values(byStudent);

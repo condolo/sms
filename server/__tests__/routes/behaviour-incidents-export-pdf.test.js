@@ -30,19 +30,11 @@ function mockChainObj(obj) {
   const c = { select: () => c, lean: () => Promise.resolve(obj) };
   return c;
 }
+// v5.276.0: the export filters with $and/$or (deleted incidents excluded) — use the
+// shared matcher, which understands them, instead of a hand-written subset.
+const mockSharedDb = require('../fixtures/fake-tenant-db');
 function matchesFilter(doc, filter) {
-  return Object.entries(filter || {}).every(([k, v]) => {
-    if (v && typeof v === 'object' && !Array.isArray(v)) {
-      if ('$in' in v) return v.$in.includes(doc[k]);
-      if ('$gte' in v || '$lte' in v) {
-        if ('$gte' in v && doc[k] < v.$gte) return false;
-        if ('$lte' in v && doc[k] > v.$lte) return false;
-        return true;
-      }
-      return true;
-    }
-    return doc[k] === v;
-  });
+  return mockSharedDb.matches(doc, filter);
 }
 
 let mockIncidents, mockUsers, mockClasses, mockStreams, mockStudents, mockSchool;

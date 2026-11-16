@@ -6,6 +6,28 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.276.0] - 2026-11-16 - fix(behaviour): dashboard and incident report add up; house points and a House filter
+
+Reported: the Behaviour dashboard and the downloaded incident report "don't add up, particularly in net points … some points were hidden when downloading", and house points were expected in the report. Then asked for: filter incidents by class, stream and house.
+
+### Fixed — why the numbers differed
+- **The dashboard counted only the newest 200 incidents.** Overview and Houses asked the list endpoint for 1000 but it caps pages at 200; Houses also used only the first 200 students. They now read `GET /api/behaviour/totals`, computed on the server over every incident and student.
+- **Deleted incidents were counted.** Soft-deleted incidents (`deletedAt`) counted in the incident list, student totals and the report; only parents skipped them. They're now excluded everywhere in the behaviour module.
+- **"Net points" meant two things.** The dashboard used merit points − |demerit points|; the report summed points as stored, so a demerit saved as "+2" moved them in opposite directions. One rule now (`server/utils/behaviour-points.js`): a merit always adds, a demerit always subtracts. New and edited incidents are also saved with the right sign.
+- **Large reports lost points.** Above 3000 incidents the report dropped the oldest rows and worked its totals out from what was left. Totals, staff activity and house points now cover every matching incident; only the log is capped, and the report says so.
+- "Recorded by" in the report falls back to `createdBy`, as the rest of the app does (those entries showed as Unattributed).
+
+### Added
+- **House points in the incident report:** each house's students, incidents, merits, demerits and net, a "No house" line, and a Total equal to the report's net. It covers the same incidents as the report; with a house filter, only that house.
+- **House filter** on the Incidents tab (All houses, each house, No house), combining with class, stream, type and dates, for both the list and the report. The report's scope line names the house.
+- The Overview shows **Net points**, which matches a whole-school report with no filters.
+
+Tests: new `behaviour-totals-consistency.test.js` (11: the 200 cap, deleted incidents, wrongly signed points, house totals adding up to net, the 3000 cap, dashboard = report, sign on save, the House filter on list and report). `behaviour-incidents-export-pdf` and `behaviour-points-reset` now use the shared test matcher (their hand-written ones couldn't read the deleted filter). Checked on the demo: Overview net +110 = database; with two test houses, Houses showed Simba +56 / Tembo +22 = database, and the House filter listed Simba's 9 incidents.
+
+Not changed here: other modules that add up behaviour points (teacher portal, report-card behaviour summary, analytics, growth profile, student digest, weekly snapshots) still count deleted incidents; they can use the same `behaviour-points.js` rules.
+
+---
+
 ## [v5.275.0] - 2026-11-16 - feat(settings): give people individual Settings sections
 
 Asked for directly: split the Settings module into sections so rights can be given per section. Before, every Settings route checked one coarse `settings` grant, and ticking any Settings row in Roles & Permissions was merged into it, so giving someone "Manage Users" also opened the school profile, modules, notifications, grading changes and more.
