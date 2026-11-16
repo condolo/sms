@@ -106,10 +106,10 @@
     var off = c * (1 - p / 100);
     return '<div class="pa-cmd-gauge">' +
       '<svg viewBox="0 0 40 40" class="pa-cmd-ring">' +
-      '<circle cx="20" cy="20" r="' + r + '" fill="none" stroke="rgba(148,163,184,.16)" stroke-width="3"/>' +
+      '<circle cx="20" cy="20" r="' + r + '" fill="none" stroke="rgba(16,24,40,.10)" stroke-width="3"/>' +
       '<circle cx="20" cy="20" r="' + r + '" fill="none" stroke="' + color + '" stroke-width="3" stroke-linecap="round" ' +
       'stroke-dasharray="' + c.toFixed(1) + '" stroke-dashoffset="' + off.toFixed(1) + '" transform="rotate(-90 20 20)"/>' +
-      '<text x="20" y="21.5" text-anchor="middle" fill="#e2e8f0" font-size="7.5" font-weight="700">' + p + '%</text>' +
+      '<text x="20" y="21.5" text-anchor="middle" fill="#101828" font-size="7.5" font-weight="700">' + p + '%</text>' +
       '</svg>' +
       '<div class="pa-cmd-gauge-body"><div class="pa-cmd-gauge-label">' + esc(label) + '</div>' +
       '<div class="pa-cmd-gauge-value">' + (Number.isFinite(v) ? num(v) + (unit || '') : '—') + '</div>' +
