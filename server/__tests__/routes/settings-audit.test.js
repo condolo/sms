@@ -16,6 +16,8 @@
 const mockActualRbac = jest.requireActual('../../middleware/rbac');
 jest.mock('../../middleware/rbac', () => ({
   rbac: () => (req, _res, next) => next(),
+  // Same "always allowed" posture as rbac above, for PUT /school's per-section check (v5.275.0).
+  hasPermission: jest.fn().mockResolvedValue(true),
   invalidatePermCache: jest.fn(),
   hasExplicitSubGrant: jest.fn().mockResolvedValue(false),
   _mergeUserOverrides: mockActualRbac._mergeUserOverrides,

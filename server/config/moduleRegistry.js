@@ -435,11 +435,25 @@ const MODULE_REGISTRY = [
   ]},
 
   /* ── System ───────────────────────────────────────────── */
+  // One row per Settings section (v5.275.0, direct request 2026-11-16: "have the
+  // settings module into sub modules so that I can assign some sections"). Each
+  // row is checked by its own routes (rbac('settings', action, '<sub>')), so a
+  // role can be given, say, Users or Smart reminders without the rest of
+  // Settings. A role never re-saved since a row existed falls back to its coarse
+  // 'settings' grant (rbac.js), so nothing changes until an admin edits the role.
+  // `permissions` and `audit_log` are strict (hasExplicitSubGrant, no coarse
+  // fallback). Subscription/billing stays admin-only and is not listed.
   { key: 'settings', label: 'Settings', section: 'Administration', subs: [
-    { key: 'school',      label: 'Edit School Settings' },
-    { key: 'users',       label: 'Manage Users / Invites' },
-    { key: 'permissions', label: 'Manage Roles & Permissions' },
-    { key: 'system',      label: 'View System Info' },
+    { key: 'school',            label: 'School (profile, branding, regional, portals, admissions, email/SMTP)' },
+    { key: 'academics',         label: 'Academic setup (grading & report settings, report-card templates)' },
+    { key: 'users',             label: 'Users & invites (and parent link codes)' },
+    { key: 'permissions',       label: 'Manage Roles & Permissions' },
+    { key: 'modules',           label: 'Modules (turn modules on/off)' },
+    { key: 'notifications',     label: 'Notifications (which alerts are sent, and how)' },
+    { key: 'reminders',         label: 'Smart reminders' },
+    { key: 'message_templates', label: 'Message templates' },
+    { key: 'system',            label: 'View System Info' },
+    { key: 'audit_log',         label: 'View Audit Log' },
   ]},
 ];
 

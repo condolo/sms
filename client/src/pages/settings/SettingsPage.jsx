@@ -48,18 +48,21 @@ import AppLockPinCard from './components/AppLockPinCard.jsx';
 import SmartRemindersTab from './components/SmartRemindersTab.jsx';
 
 /* ── Tab config ─────────────────────────────────────────────── */
+// `sub`: the Settings → Roles & Permissions row that opens the tab (v5.275.0).
+// `strict`: only an explicit grant opens it (no fallback to the coarse settings grant),
+// matching the server. `adminOnly` with no sub: admins only (Subscription = the contract).
 const TABS = [
-  { id: 'school',         label: 'School',              Icon: Building2,      adminOnly: true  },
-  { id: 'subscription',   label: 'Subscription',        Icon: CreditCard,     adminOnly: true  },
-  { id: 'users',          label: 'Users',               Icon: Users,          adminOnly: true  },
-  { id: 'roles',          label: 'Roles & Permissions', Icon: ShieldCheck,    adminOnly: true  },
-  { id: 'modules',        label: 'Modules',             Icon: Layers,         adminOnly: true  },
-  { id: 'notifications',  label: 'Notifications',       Icon: Bell,           adminOnly: true  },
-  { id: 'reminders',      label: 'Smart Reminders',     Icon: BellRing,       adminOnly: true  },
-  { id: 'message_templates', label: 'Message Templates', Icon: MessageSquare, adminOnly: true  },
-  { id: 'system',         label: 'System',              Icon: Database,       adminOnly: true  },
-  { id: 'audit_log',      label: 'Audit Log',           Icon: ClipboardList,  adminOnly: true  },
-  { id: 'account',        label: 'Account',             Icon: User,           adminOnly: false },
+  { id: 'school',         label: 'School',              Icon: Building2,      sub: 'school' },
+  { id: 'subscription',   label: 'Subscription',        Icon: CreditCard,     adminOnly: true },
+  { id: 'users',          label: 'Users',               Icon: Users,          sub: 'users' },
+  { id: 'roles',          label: 'Roles & Permissions', Icon: ShieldCheck,    sub: 'permissions', strict: true },
+  { id: 'modules',        label: 'Modules',             Icon: Layers,         sub: 'modules' },
+  { id: 'notifications',  label: 'Notifications',       Icon: Bell,           sub: 'notifications' },
+  { id: 'reminders',      label: 'Smart Reminders',     Icon: BellRing,       sub: 'reminders' },
+  { id: 'message_templates', label: 'Message Templates', Icon: MessageSquare, sub: 'message_templates' },
+  { id: 'system',         label: 'System',              Icon: Database,       sub: 'system' },
+  { id: 'audit_log',      label: 'Audit Log',           Icon: ClipboardList,  sub: 'audit_log', strict: true },
+  { id: 'account',        label: 'Account',             Icon: User },
 ];
 
 /* ── Currency + Timezone options ────────────────────────────── */
@@ -3213,11 +3216,18 @@ const PERM_MODULES = [
   { key: 'analytics',  label: 'Analytics Dashboard', subs: [
     { key: 'view', label: 'View Leadership Analytics' },
   ]},
+  // One row per Settings section (v5.275.0) — mirrors server/config/moduleRegistry.js.
   { key: 'settings',   label: 'Settings', subs: [
-    { key: 'school',      label: 'Edit School Settings' },
-    { key: 'users',       label: 'Manage Users / Invites' },
-    { key: 'permissions', label: 'Manage Roles & Permissions' },
-    { key: 'system',      label: 'View System Info' },
+    { key: 'school',            label: 'School (profile, branding, regional, portals, admissions, email/SMTP)' },
+    { key: 'academics',         label: 'Academic setup (grading & report settings, report-card templates)' },
+    { key: 'users',             label: 'Users & invites (and parent link codes)' },
+    { key: 'permissions',       label: 'Manage Roles & Permissions' },
+    { key: 'modules',           label: 'Modules (turn modules on/off)' },
+    { key: 'notifications',     label: 'Notifications (which alerts are sent, and how)' },
+    { key: 'reminders',         label: 'Smart reminders' },
+    { key: 'message_templates', label: 'Message templates' },
+    { key: 'system',            label: 'View System Info' },
+    { key: 'audit_log',         label: 'View Audit Log' },
   ]},
 ];
 
@@ -3245,6 +3255,8 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       // per-role instead of changing this default.
       if (m==='hr'         && s==='workflow') return N;
       if (m==='settings'   && s==='permissions') return N;
+      // Audit Log was admin-only before it became a row (v5.275.0) — keep it that way by default.
+      if (m==='settings'   && s==='audit_log') return N;
       if (m==='analytics') return V;
       if (['exams','assessment'].includes(m)) return T;   // matches RCUD already seeded server-side
       // resources/messages/events: blanket E below (RCU) previously under-granted
@@ -5212,18 +5224,30 @@ export default function SettingsPage() {
   // action) check (no subKey), so the matching client check is the same
   // coarse grant — RolesTab's own canEditPermissions above stays the
   // stricter, separate check for actually editing permissions.
-  const canSettingsRead = isAdmin || can('settings', 'read');
+  // v5.275.0: each tab follows its own Settings row (TABS[].sub), the same check its
+  // server routes make; Roles & Permissions and Audit Log need the explicit grant.
+  const perms = useAuthStore(st => st.session?.user?.permissions) || {};
+  const tabAllowed = (t) => {
+    if (isAdmin) return true;
+    if (t.adminOnly) return false;
+    if (!t.sub) return true;                          // Account
+    if (t.strict) {
+      const g = perms[`settings__${t.sub}`];
+      return Array.isArray(g) && (g.includes('read') || g.includes('update'));
+    }
+    return can('settings', 'read', t.sub);
+  };
   const [searchParams] = useSearchParams();
   // Deep-linkable tabs (/settings?tab=subscription) — the expiry banner's
   // "Renew" link depends on this landing directly on Subscription.
   const [tab, setTab] = useState(() => {
     const requested = searchParams.get('tab');
     const def = TABS.find(t => t.id === requested);
-    if (def && (canSettingsRead || !def.adminOnly)) return requested;
-    return canSettingsRead ? 'school' : 'account';
+    if (def && tabAllowed(def)) return requested;
+    return (TABS.find(t => t.sub && tabAllowed(t)) ?? TABS.find(t => t.id === 'account')).id;
   });
 
-  const visibleTabs = TABS.filter(t => !t.adminOnly || canSettingsRead);
+  const visibleTabs = TABS.filter(tabAllowed);
 
   return (
     <div className="min-h-screen bg-slate-50">

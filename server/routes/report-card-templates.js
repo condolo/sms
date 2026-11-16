@@ -104,7 +104,7 @@ router.get('/', authMiddleware, rbac('settings', 'read'), async (req, res) => {
 /* ══════════════════════════════════════════════════════════════
    POST /api/report-card-templates  — create
    ══════════════════════════════════════════════════════════════ */
-router.post('/', authMiddleware, rbac('settings', 'update'), async (req, res) => {
+router.post('/', authMiddleware, rbac('settings', 'update', 'academics'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const parsed = TemplateSchema.safeParse(req.body);
@@ -146,7 +146,7 @@ router.post('/', authMiddleware, rbac('settings', 'update'), async (req, res) =>
 /* ══════════════════════════════════════════════════════════════
    PUT /api/report-card-templates/:id  — update
    ══════════════════════════════════════════════════════════════ */
-router.put('/:id', authMiddleware, rbac('settings', 'update'), async (req, res) => {
+router.put('/:id', authMiddleware, rbac('settings', 'update', 'academics'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const Templates = tenantModel('report_card_templates', tenantContext(req));
@@ -193,7 +193,7 @@ router.put('/:id', authMiddleware, rbac('settings', 'update'), async (req, res) 
    a new default first so resolution never silently falls back mid-use
    without the admin choosing that.
    ══════════════════════════════════════════════════════════════ */
-router.delete('/:id', authMiddleware, rbac('settings', 'update'), async (req, res) => {
+router.delete('/:id', authMiddleware, rbac('settings', 'update', 'academics'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const Templates = tenantModel('report_card_templates', tenantContext(req));

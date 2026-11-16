@@ -7805,3 +7805,22 @@ Readers: non-editors read `timetable_published` only via `publishedReader()` →
 - `_teacherStatusProblem(teacher)` refuses `terminated`/`inactive` on POST and on `PUT /:id/teacher`; `on_leave` is allowed.
 - `allocation.js`: teachers carry `staffStatus`; each assignment has `teacherStatus`; rows have `teacherOnLeave` / `teacherNotCurrent`; the panel lists `active` + `on_leave`; summary adds `rowsTeacherOnLeave`, `rowsTeacherNotCurrent` (`teachersWithNoClasses` counts active teachers only).
 - Client: `TeacherList.jsx` `TeacherAssignmentsTab` is view-only (`TogetherPanel` removed) and links to `/timetable?view=allocation&teacher=<teacher.id>`; `TimetablePage.jsx` reads `view`/`teacher` from the query string; `AllocationView.jsx` has `initialTeacher`, a **Together** panel (link/unlink via the existing routes) and the away filter.
+
+## Settings sections (v5.275.0, 2026-11-16)
+
+`moduleRegistry.js` `settings.subs`: `school, academics, users, permissions, modules, notifications, reminders, message_templates, system, audit_log` (client `PERM_MODULES` mirrors it). Route mapping:
+
+| Section | Routes |
+|---|---|
+| `school` | `PUT /settings/school` (fields not listed below), logo/favicon/login-bg, `/settings/school/smtp*`, `/settings/admission-counter`, `sections.js` writes |
+| `academics` | `academic-config` `PUT /`, `POST /reset`, `POST /archive-year`; `report-card-templates` writes |
+| `users` | `/settings/users/*` writes, `/settings/impersonation/:id/revoke`, `/settings/link-codes`, `users.js` invite / bulk-invite / role-change |
+| `permissions` (strict) | `modulePermissions`, `roleLabels`, `hiddenSystemRoles` on `PUT /settings/school` (`_canManagePermissions`); custom-roles create/edit/delete |
+| `modules` | `moduleConfig` on `PUT /settings/school` |
+| `notifications` | `/settings/notifications` |
+| `reminders` | `smart-reminders.js` |
+| `message_templates` | `/settings/notification-templates*` |
+| `system` | System tab (client only, no API) |
+| `audit_log` (strict) | `audit.js` `_adminGuard` → admin/superadmin or `hasExplicitSubGrant(req, 'settings', 'audit_log', 'read')` |
+
+Still coarse `settings` read (reference data used elsewhere): `GET /settings/users`, `GET /settings/custom-roles`, `GET /academic-config`. `PUT /settings/school` keeps a coarse `rbac('settings','update')` floor, then `_schoolSectionsAllowed()` maps fields → sections (`SCHOOL_FIELD_SECTION`) and requires `update` on each. Client: `SettingsPage.jsx` `TABS[].sub`/`strict`, visible via `can('settings','read',sub)` (strict tabs read `perms['settings__<sub>']` directly).

@@ -28,7 +28,7 @@ const { encrypt, smtpEncryptReady } = require('../utils/smtpEncrypt');
 const { DEFAULTS: NOTIF_DEFAULTS, EVENT_REGISTRY, GROUPS: NOTIF_GROUPS } = require('../utils/notif-settings');
 const { listTemplatesForSchool, setTemplateOverride, resetTemplateOverride } = require('../utils/notificationTemplates');
 const { CATEGORIES: MESSAGE_TEMPLATE_CATEGORIES, CATEGORY_ORDER: MESSAGE_TEMPLATE_CATEGORY_ORDER } = require('../config/notificationTemplates');
-const { rbac, invalidatePermCache, hasExplicitSubGrant, _mergeUserOverrides, _loadPerms, _loadUserPerms } = require('../middleware/rbac');
+const { rbac, hasPermission, invalidatePermCache, hasExplicitSubGrant, _mergeUserOverrides, _loadPerms, _loadUserPerms } = require('../middleware/rbac');
 const { EXPLICIT_SUB_KEYS, FINANCE_SUB_GRANTS } = require('../middleware/explicit-sub');
 const { invalidateModuleConfigCache } = require('../middleware/module-gate');
 const { invalidateScopeCache, invalidateScopeCacheForRole } = require('../middleware/scopeMiddleware');
@@ -453,8 +453,32 @@ router.get('/school', authMiddleware, async (req, res) => { // rbac: inline admi
 });
 
 /* PUT /api/settings/school — admin only */
-router.put('/school', authMiddleware, rbac('settings', 'update'), async (req, res) => {
+/* PUT /school saves several Settings sections (v5.275.0): each field belongs to one,
+   and the caller needs Edit on every section the request touches. */
+const SCHOOL_FIELD_SECTION = {
+  modulePermissions: 'permissions', roleLabels: 'permissions', hiddenSystemRoles: 'permissions',
+  moduleConfig: 'modules',
+};
+async function _schoolSectionsAllowed(req) {
+  const fields = SCHOOL_UPDATABLE.filter(k => req.body?.[k] !== undefined);
+  const sections = new Set(fields.map(k => SCHOOL_FIELD_SECTION[k] || 'school'));
+  for (const sec of sections) {
+    // Roles & Permissions is strict: the explicit grant (or admin), never the coarse one.
+    const ok = sec === 'permissions'
+      ? await _canManagePermissions(req)
+      : await hasPermission(req, 'settings', 'update', sec);
+    if (!ok) return sec;
+  }
+  return null;
+}
+const SECTION_LABEL = { school: 'School', permissions: 'Roles & Permissions', modules: 'Modules' };
+
+router.put('/school', authMiddleware, rbac('settings', 'update'), async (req, res) => { // rbac: coarse floor here, then per-section checks below (_schoolSectionsAllowed)
   try {
+    const deniedSection = await _schoolSectionsAllowed(req);
+    if (deniedSection) {
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: `You don't have permission to change the ${SECTION_LABEL[deniedSection] || deniedSection} settings.` } });
+    }
     // roleLabels — a display-name override for a BUILT-IN role only (a
     // custom role already has its own real `label` field, no override
     // mechanism needed for those). Only recognized system role keys and
@@ -736,7 +760,7 @@ function _validateBase64Image(b64, maxKB) {
 }
 
 /* PUT /api/settings/school/logo — upload school logo (admin only) */
-router.put('/school/logo', authMiddleware, rbac('settings', 'update'), async (req, res) => {
+router.put('/school/logo', authMiddleware, rbac('settings', 'update', 'school'), async (req, res) => {
   try {
     const { logoBase64 } = req.body;
     if (!logoBase64) return res.status(400).json({ error: 'logoBase64 is required.' });
@@ -763,7 +787,7 @@ router.put('/school/logo', authMiddleware, rbac('settings', 'update'), async (re
 });
 
 /* DELETE /api/settings/school/logo — clear school logo (admin only) */
-router.delete('/school/logo', authMiddleware, rbac('settings', 'update'), async (req, res) => {
+router.delete('/school/logo', authMiddleware, rbac('settings', 'update', 'school'), async (req, res) => {
   try {
     const Schools = _model('schools');
     await Schools.updateOne(
@@ -783,7 +807,7 @@ router.delete('/school/logo', authMiddleware, rbac('settings', 'update'), async 
 });
 
 /* PUT /api/settings/school/favicon — upload school favicon (admin only) */
-router.put('/school/favicon', authMiddleware, rbac('settings', 'update'), async (req, res) => {
+router.put('/school/favicon', authMiddleware, rbac('settings', 'update', 'school'), async (req, res) => {
   try {
     const { faviconBase64 } = req.body;
     if (!faviconBase64) return res.status(400).json({ error: 'faviconBase64 is required.' });
@@ -809,7 +833,7 @@ router.put('/school/favicon', authMiddleware, rbac('settings', 'update'), async 
 });
 
 /* DELETE /api/settings/school/favicon — clear school favicon (admin only) */
-router.delete('/school/favicon', authMiddleware, rbac('settings', 'update'), async (req, res) => {
+router.delete('/school/favicon', authMiddleware, rbac('settings', 'update', 'school'), async (req, res) => {
   try {
     const Schools = _model('schools');
     await Schools.updateOne(
@@ -828,7 +852,7 @@ router.delete('/school/favicon', authMiddleware, rbac('settings', 'update'), asy
 });
 
 /* PUT /api/settings/school/login-bg — upload login page background image (admin only) */
-router.put('/school/login-bg', authMiddleware, rbac('settings', 'update'), async (req, res) => {
+router.put('/school/login-bg', authMiddleware, rbac('settings', 'update', 'school'), async (req, res) => {
   try {
     const { loginBgBase64 } = req.body;
     if (!loginBgBase64) return res.status(400).json({ error: 'loginBgBase64 is required.' });
@@ -854,7 +878,7 @@ router.put('/school/login-bg', authMiddleware, rbac('settings', 'update'), async
 });
 
 /* DELETE /api/settings/school/login-bg — clear login background (admin only) */
-router.delete('/school/login-bg', authMiddleware, rbac('settings', 'update'), async (req, res) => {
+router.delete('/school/login-bg', authMiddleware, rbac('settings', 'update', 'school'), async (req, res) => {
   try {
     const Schools = _model('schools');
     await Schools.updateOne(
@@ -891,7 +915,8 @@ router.delete('/school/login-bg', authMiddleware, rbac('settings', 'update'), as
    ARE used the response gains a `pagination` block and a `stats` block
    (active/removed totals and a per-role breakdown) — the numbers behind
    the KPI row in Settings → Users. */
-router.get('/users', authMiddleware, rbac('settings', 'read'), async (req, res) => {
+router.get('/users', authMiddleware, rbac('settings', 'read'), // also read by HR and Inventory to pick approvers — the coarse grant on purpose (v5.275.0); changes to users need the Users section
+  async (req, res) => {
   try {
     const wantRemoved = req.query.status === 'removed';
     const Users = tenantModel('users', tenantContext(req));
@@ -969,7 +994,7 @@ router.get('/users', authMiddleware, rbac('settings', 'read'), async (req, res) 
 });
 
 /* POST /api/settings/users/invite — invite a user to this school (admin only) */
-router.post('/users/invite', authMiddleware, rbac('settings', 'create'), async (req, res) => {
+router.post('/users/invite', authMiddleware, rbac('settings', 'create', 'users'), async (req, res) => {
   try {
     const { name, email: userEmail, role = 'teacher', staffId } = req.body;
     if (!userEmail) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Email is required.' } });
@@ -1110,7 +1135,7 @@ router.post('/users/invite', authMiddleware, rbac('settings', 'create'), async (
 });
 
 /* POST /api/settings/users/bulk-invite — create login accounts for multiple staff (admin only) */
-router.post('/users/bulk-invite', authMiddleware, rbac('settings', 'create'), async (req, res) => {
+router.post('/users/bulk-invite', authMiddleware, rbac('settings', 'create', 'users'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { staff } = req.body;
@@ -1204,7 +1229,7 @@ router.post('/users/bulk-invite', authMiddleware, rbac('settings', 'create'), as
 });
 
 /* PUT /api/settings/users/:id — update user role (admin only) */
-router.put('/users/:id', authMiddleware, rbac('settings', 'update'), async (req, res) => {
+router.put('/users/:id', authMiddleware, rbac('settings', 'update', 'users'), async (req, res) => {
   try {
     const { role, name, sectionAssigned, guardianOf } = req.body;
     const update = { updatedAt: new Date().toISOString() };
@@ -1312,7 +1337,7 @@ router.put('/users/:id', authMiddleware, rbac('settings', 'update'), async (req,
 });
 
 /* DELETE /api/settings/users/:id — remove user (admin only) */
-router.delete('/users/:id', authMiddleware, rbac('settings', 'delete'), async (req, res) => {
+router.delete('/users/:id', authMiddleware, rbac('settings', 'delete', 'users'), async (req, res) => {
   try {
     // Prevent self-deletion
     if (req.params.id === req.jwtUser.userId) {
@@ -1379,7 +1404,7 @@ router.delete('/users/:id', authMiddleware, rbac('settings', 'delete'), async (r
    Issues a fresh temp password rather than restoring the old one (we
    don't know how long the account sat deactivated, or who else might
    have seen the old credentials) and forces a change on next login. */
-router.post('/users/:id/reactivate', authMiddleware, rbac('settings', 'update'), async (req, res) => {
+router.post('/users/:id/reactivate', authMiddleware, rbac('settings', 'update', 'users'), async (req, res) => {
   try {
     const Users  = tenantModel('users', tenantContext(req));
     const isOid  = /^[0-9a-f]{24}$/i.test(req.params.id);
@@ -1464,7 +1489,7 @@ router.post('/users/:id/reactivate', authMiddleware, rbac('settings', 'update'),
    password is generated.  No forced change on login; the 90-day platform
    rotation policy handles expiry.
    ══════════════════════════════════════════════════════════════ */
-router.post('/users/:id/reset-password', authMiddleware, rbac('settings', 'update'), async (req, res) => {
+router.post('/users/:id/reset-password', authMiddleware, rbac('settings', 'update', 'users'), async (req, res) => {
   const { id } = req.params;
   const { password: customPwd } = req.body;
   const schoolId = req.jwtUser.schoolId;
@@ -1596,7 +1621,7 @@ router.post('/users/:id/reset-password', authMiddleware, rbac('settings', 'updat
    second, separate token for the same identity — it never locks the
    real admin out of logging in themselves), typically after seeing
    the notification or Audit Log entry it's referenced in. */
-router.post('/impersonation/:sessionId/revoke', authMiddleware, rbac('settings', 'update'), async (req, res) => {
+router.post('/impersonation/:sessionId/revoke', authMiddleware, rbac('settings', 'update', 'users'), async (req, res) => {
   try {
     const { sessionId } = req.params;
     const session = await SessionService.getImpersonationSession(sessionId);
@@ -1642,7 +1667,7 @@ router.post('/impersonation/:sessionId/revoke', authMiddleware, rbac('settings',
    ══════════════════════════════════════════════════════════════ */
 
 /* GET /api/settings/notifications */
-router.get('/notifications', authMiddleware, rbac('settings', 'read'), async (req, res) => {
+router.get('/notifications', authMiddleware, rbac('settings', 'read', 'notifications'), async (req, res) => {
   try {
     const School = _model('schools');
     const school = await School.findOne(
@@ -1671,7 +1696,7 @@ router.get('/notifications', authMiddleware, rbac('settings', 'read'), async (re
 });
 
 /* PUT /api/settings/notifications */
-router.put('/notifications', authMiddleware, rbac('settings', 'update'), async (req, res) => {
+router.put('/notifications', authMiddleware, rbac('settings', 'update', 'notifications'), async (req, res) => {
   try {
     const updates = req.body;
     if (typeof updates !== 'object' || updates === null) {
@@ -1723,7 +1748,7 @@ router.put('/notifications', authMiddleware, rbac('settings', 'update'), async (
    /notifications above, which only toggles whether an event fires at
    all. This is about the WORDING of the ones that do.
    ══════════════════════════════════════════════════════════════ */
-router.get('/notification-templates', authMiddleware, rbac('settings', 'read'), async (req, res) => {
+router.get('/notification-templates', authMiddleware, rbac('settings', 'read', 'message_templates'), async (req, res) => {
   try {
     const templates = await listTemplatesForSchool(req.jwtUser.schoolId);
     res.json({ data: templates, categories: MESSAGE_TEMPLATE_CATEGORIES, categoryOrder: MESSAGE_TEMPLATE_CATEGORY_ORDER });
@@ -1733,7 +1758,7 @@ router.get('/notification-templates', authMiddleware, rbac('settings', 'read'), 
   }
 });
 
-router.put('/notification-templates/:key', authMiddleware, rbac('settings', 'update'), async (req, res) => {
+router.put('/notification-templates/:key', authMiddleware, rbac('settings', 'update', 'message_templates'), async (req, res) => {
   try {
     const { subject, body } = req.body || {};
     await setTemplateOverride(req.jwtUser.schoolId, req.params.key, { subject, body }, req.jwtUser.userId);
@@ -1750,7 +1775,7 @@ router.put('/notification-templates/:key', authMiddleware, rbac('settings', 'upd
   }
 });
 
-router.delete('/notification-templates/:key', authMiddleware, rbac('settings', 'update'), async (req, res) => {
+router.delete('/notification-templates/:key', authMiddleware, rbac('settings', 'update', 'message_templates'), async (req, res) => {
   try {
     await resetTemplateOverride(req.jwtUser.schoolId, req.params.key);
     res.json({ success: true });
@@ -1771,7 +1796,7 @@ router.delete('/notification-templates/:key', authMiddleware, rbac('settings', '
    ══════════════════════════════════════════════════════════════ */
 
 /* POST /api/settings/school/smtp — save custom SMTP credentials */
-router.post('/school/smtp', authMiddleware, rbac('settings', 'update'), async (req, res) => {
+router.post('/school/smtp', authMiddleware, rbac('settings', 'update', 'school'), async (req, res) => {
   if (!smtpEncryptReady()) {
     return res.status(503).json({ success: false, error: { code: 'SMTP_ENCRYPT_NOT_CONFIGURED', message: 'SMTP_ENCRYPTION_KEY is not set on the server. Contact the platform administrator.' } });
   }
@@ -1821,7 +1846,7 @@ router.post('/school/smtp', authMiddleware, rbac('settings', 'update'), async (r
 });
 
 /* POST /api/settings/school/smtp/test — test connection without saving */
-router.post('/school/smtp/test', authMiddleware, rbac('settings', 'update'), async (req, res) => {
+router.post('/school/smtp/test', authMiddleware, rbac('settings', 'update', 'school'), async (req, res) => {
   if (!smtpEncryptReady()) {
     return res.status(503).json({ success: false, error: { code: 'SMTP_ENCRYPT_NOT_CONFIGURED', message: 'SMTP_ENCRYPTION_KEY is not set on the server.' } });
   }
@@ -1894,7 +1919,7 @@ router.post('/school/smtp/test', authMiddleware, rbac('settings', 'update'), asy
 });
 
 /* DELETE /api/settings/school/smtp — remove custom SMTP config entirely */
-router.delete('/school/smtp', authMiddleware, rbac('settings', 'update'), async (req, res) => {
+router.delete('/school/smtp', authMiddleware, rbac('settings', 'update', 'school'), async (req, res) => {
   try {
     await _model('schools').updateOne(
       { id: req.jwtUser.schoolId },
@@ -1929,7 +1954,7 @@ router.delete('/school/smtp', authMiddleware, rbac('settings', 'update'), async 
    password (which they may not remember or be able to retrieve) just to clear
    a stale state. This only clears the in-memory cache — it does NOT touch the
    saved config, so it's always safe. */
-router.post('/school/smtp/retry', authMiddleware, rbac('settings', 'update'), async (req, res) => {
+router.post('/school/smtp/retry', authMiddleware, rbac('settings', 'update', 'school'), async (req, res) => {
   const schoolId = req.jwtUser.schoolId;
   try {
     emailUtil.invalidateSmtpCache(schoolId);
@@ -1950,7 +1975,7 @@ router.post('/school/smtp/retry', authMiddleware, rbac('settings', 'update'), as
    "Falling back to platform" banner so an admin sees WHAT failed and WHEN,
    not just that something did. `smtpLastError` on GET /school already
    carries the latest error; this is the history behind it. */
-router.get('/school/smtp/failures', authMiddleware, rbac('settings', 'read'), async (req, res) => {
+router.get('/school/smtp/failures', authMiddleware, rbac('settings', 'read', 'school'), async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
     const rows = await tenantModel('email_failures', tenantContext(req))
@@ -2007,7 +2032,8 @@ const CUSTOM_ROLE_SCOPE_LEVELS = new Set(['school', 'assigned']);
 // as every other real system role.
 const BUILT_IN_ROLE_KEYS = new Set([...SYSTEM_ROLES, 'superadmin']);
 
-router.get('/custom-roles', authMiddleware, rbac('settings', 'read'), async (req, res) => {
+router.get('/custom-roles', authMiddleware, rbac('settings', 'read'), // reference data read by HR, Attendance, Behaviour, Inventory, Report Cards and the Users invite form — deliberately the coarse grant (v5.275.0)
+  async (req, res) => {
   try {
     const roles = await tenantModel('custom_roles', tenantContext(req)).find({ schoolId: req.jwtUser.schoolId }).sort({ createdAt: 1 }).lean();
     res.json({ success: true, data: roles });
@@ -2017,7 +2043,7 @@ router.get('/custom-roles', authMiddleware, rbac('settings', 'read'), async (req
   }
 });
 
-router.post('/custom-roles', authMiddleware, rbac('settings', 'create'), async (req, res) => {
+router.post('/custom-roles', authMiddleware, rbac('settings', 'create', 'permissions'), async (req, res) => {
   try {
     // Same dedicated capability as PUT /school's permission writes — a
     // new role's starting permissions are a permission grant, not a
@@ -2096,8 +2122,14 @@ router.post('/custom-roles', authMiddleware, rbac('settings', 'create'), async (
   }
 });
 
-router.put('/custom-roles/:key', authMiddleware, rbac('settings', 'update'), async (req, res) => {
+router.put('/custom-roles/:key', authMiddleware, rbac('settings', 'update', 'permissions'), async (req, res) => {
   try {
+    // Strict Roles & Permissions check (v5.275.0): editing or deleting a custom role
+    // changes what its holders can do, exactly like the role matrix — the same
+    // explicit grant creating one already required, not the coarse settings grant.
+    if (!(await _canManagePermissions(req))) {
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'You do not have permission to manage Roles & Permissions.' } });
+    }
     const { key } = req.params;
     const { schoolId } = req.jwtUser;
     const { label, color, scopeLevel } = req.body;
@@ -2139,8 +2171,14 @@ router.put('/custom-roles/:key', authMiddleware, rbac('settings', 'update'), asy
   }
 });
 
-router.delete('/custom-roles/:key', authMiddleware, rbac('settings', 'delete'), async (req, res) => {
+router.delete('/custom-roles/:key', authMiddleware, rbac('settings', 'delete', 'permissions'), async (req, res) => {
   try {
+    // Strict Roles & Permissions check (v5.275.0): editing or deleting a custom role
+    // changes what its holders can do, exactly like the role matrix — the same
+    // explicit grant creating one already required, not the coarse settings grant.
+    if (!(await _canManagePermissions(req))) {
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'You do not have permission to manage Roles & Permissions.' } });
+    }
     const { key } = req.params;
     const { schoolId } = req.jwtUser;
 
@@ -2174,7 +2212,7 @@ router.delete('/custom-roles/:key', authMiddleware, rbac('settings', 'delete'), 
    GET  /api/settings/admission-counter  — peek current seq + next preview
    PUT  /api/settings/admission-counter  — set counter for migrations
    ══════════════════════════════════════════════════════════════ */
-router.get('/admission-counter', authMiddleware, rbac('settings', 'read'), async (req, res) => {
+router.get('/admission-counter', authMiddleware, rbac('settings', 'read', 'school'), async (req, res) => {
   try {
     const Schools  = _model('schools');
     const school   = await Schools.findOne({ id: req.jwtUser.schoolId }, { admissionConfig: 1 }).lean();
@@ -2187,7 +2225,7 @@ router.get('/admission-counter', authMiddleware, rbac('settings', 'read'), async
   }
 });
 
-router.put('/admission-counter', authMiddleware, rbac('settings', 'update'), async (req, res) => {
+router.put('/admission-counter', authMiddleware, rbac('settings', 'update', 'school'), async (req, res) => {
   try {
     const value = parseInt(req.body.value, 10);
     if (isNaN(value) || value < 0) {
@@ -2219,7 +2257,7 @@ router.put('/admission-counter', authMiddleware, rbac('settings', 'update'), asy
    ══════════════════════════════════════════════════════════════ */
 
 /* POST /api/settings/link-codes  { studentId, relationship? } */
-router.post('/link-codes', authMiddleware, rbac('settings', 'update'), async (req, res) => {
+router.post('/link-codes', authMiddleware, rbac('settings', 'update', 'users'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
     const studentId    = String(req.body?.studentId || '');
@@ -2294,7 +2332,7 @@ router.post('/link-codes', authMiddleware, rbac('settings', 'update'), async (re
 });
 
 /* GET /api/settings/link-codes?studentId=&status=&limit= */
-router.get('/link-codes', authMiddleware, rbac('settings', 'read'), async (req, res) => {
+router.get('/link-codes', authMiddleware, rbac('settings', 'read', 'users'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const limit = Math.min(Number(req.query.limit) || 50, 200);

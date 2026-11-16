@@ -38,7 +38,7 @@ async function _school(req) {
 }
 
 /* GET /api/smart-reminders */
-router.get('/', authMiddleware, rbac('settings', 'read'), async (req, res) => {
+router.get('/', authMiddleware, rbac('settings', 'read', 'reminders'), async (req, res) => {
   try {
     const school = await _school(req);
     const history = await runHistory(school.schoolId);
@@ -60,7 +60,7 @@ router.get('/', authMiddleware, rbac('settings', 'read'), async (req, res) => {
 });
 
 /* POST /api/smart-reminders/:key/preview */
-router.post('/:key/preview', authMiddleware, rbac('settings', 'read'), async (req, res) => {
+router.post('/:key/preview', authMiddleware, rbac('settings', 'read', 'reminders'), async (req, res) => {
   try {
     const school = await _school(req);
     const result = await previewRule(req.params.key, { schoolId: school.schoolId, tz: school.tz });
@@ -73,7 +73,7 @@ router.post('/:key/preview', authMiddleware, rbac('settings', 'read'), async (re
 });
 
 /* POST /api/smart-reminders/:key/run */
-router.post('/:key/run', authMiddleware, rbac('settings', 'update'), async (req, res) => {
+router.post('/:key/run', authMiddleware, rbac('settings', 'update', 'reminders'), async (req, res) => {
   try {
     const school = await _school(req);
     const force = req.body?.force === true;

@@ -83,7 +83,7 @@ function _isSuperAdmin(req) {
 // "Settings" access an admin granted via Roles & Permissions. Matches the
 // already-correct sibling implementation of the same "invite user"
 // operation at server/routes/settings.js's own POST /users/invite.
-router.post('/invite', authMiddleware, inviteLimiter, rbac('settings', 'create'), async (req, res) => {
+router.post('/invite', authMiddleware, inviteLimiter, rbac('settings', 'create', 'users'), async (req, res) => {
 
   const { name, email: userEmail, role, phone, staffId, ...extra } = req.body;
   if (!name || !userEmail) return res.status(400).json({ error: 'name and email are required' });
@@ -181,7 +181,7 @@ router.post('/invite', authMiddleware, inviteLimiter, rbac('settings', 'create')
    Returns: { created, skipped, errors }
 */
 // RBAC fix: same as POST /invite above — checks {settings, create}.
-router.post('/bulk-invite', authMiddleware, inviteLimiter, rbac('settings', 'create'), async (req, res) => {
+router.post('/bulk-invite', authMiddleware, inviteLimiter, rbac('settings', 'create', 'users'), async (req, res) => {
 
   const rows = req.body;
   if (!Array.isArray(rows) || !rows.length) {
@@ -269,7 +269,7 @@ router.post('/bulk-invite', authMiddleware, inviteLimiter, rbac('settings', 'cre
 // RBAC fix: same class as POST /invite above ('users' was never a valid
 // action string). Checks {settings, update} — this route updates the
 // user's account state via a role-change notification.
-router.post('/:id/role-change', authMiddleware, rbac('settings', 'update'), async (req, res) => {
+router.post('/:id/role-change', authMiddleware, rbac('settings', 'update', 'users'), async (req, res) => {
 
   const { newRole, oldRole, note } = req.body;
   if (!newRole) return res.status(400).json({ error: 'newRole is required' });

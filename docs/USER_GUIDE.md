@@ -916,7 +916,26 @@ If you were given a temporary password that you haven't yet changed, just sign i
 
 ---
 
-> **Admin / Superadmin only** — the settings below are managed by school administrators.
+> **Admin / Superadmin, or anyone given that section** — the settings below are managed by school administrators, who can hand individual sections to other staff (next paragraph).
+
+### Giving someone part of Settings
+
+Each Settings tab is its own row under **Settings → Roles & Permissions → Settings**, with View / Edit / Delete, for a role or for one person (**Per User**). Give only the rows a person needs; they see only those tabs, and the server refuses the rest.
+
+| Row | Opens |
+|---|---|
+| **School** | School tab: profile, branding, regional & houses, academics & staff, portals, admissions & payments, email/SMTP; school sections; admission numbers |
+| **Academic setup** | Changing grading and report settings and report-card templates (reading them stays open to staff who need it) |
+| **Users & invites** | Users tab: invite, edit role, remove, reactivate, reset passwords; parent link codes |
+| **Manage Roles & Permissions** | Roles & Permissions tab and custom roles. Only given deliberately; nobody can grant more than they hold themselves |
+| **Modules** | Turning modules on and off |
+| **Notifications** | Which alerts are sent, and how |
+| **Smart reminders** | Smart Reminders tab |
+| **Message templates** | Message Templates tab |
+| **View System Info** | System tab |
+| **View Audit Log** | Audit Log tab. Only given deliberately |
+
+**Subscription** stays with admins (it's the school's contract), and everyone has **Account**. Roles that existed before these rows keep exactly the Settings access they had until you edit and save them.
 
 ### School Profile
 Update school name, short name, code, type, address, contact details, timezone, currency, and active curriculum tracks.

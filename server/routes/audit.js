@@ -23,18 +23,20 @@
 
 const express = require('express');
 const { authMiddleware } = require('../middleware/auth');
+const { hasExplicitSubGrant } = require('../middleware/rbac');
 const { ok, parsePagination, paginate, E } = require('../utils/response');
 const AuditService = require('../services/audit');
 
 const router = express.Router();
 
 /* ── Auth guard ──────────────────────────────────────────────── */
-function _adminGuard(req, res, next) {
+/* Admin, or a role explicitly granted Settings → "View Audit Log" (v5.275.0).
+   Strict (hasExplicitSubGrant): never opened by a coarse settings grant. */
+async function _adminGuard(req, res, next) {
   const { role } = req.jwtUser;
-  if (!['admin', 'superadmin'].includes(role)) {
-    return E.forbidden(res, 'Admin access required');
-  }
-  next();
+  if (['admin', 'superadmin'].includes(role)) return next();
+  if (await hasExplicitSubGrant(req, 'settings', 'audit_log', 'read')) return next();
+  return E.forbidden(res, 'Admin access, or the View Audit Log permission, is required');
 }
 
 /* ════════════════════════════════════════════════════════════════

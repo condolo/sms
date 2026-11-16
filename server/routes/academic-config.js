@@ -212,7 +212,7 @@ router.get('/', authMiddleware, PLAN, rbac('settings', 'read'), async (req, res)
 /* ═══════════════════════════════════════════════════════════════
    PUT /api/academic-config — save / update config (upsert)
    ═══════════════════════════════════════════════════════════════ */
-router.put('/', authMiddleware, PLAN, rbac('settings', 'update'), async (req, res) => {
+router.put('/', authMiddleware, PLAN, rbac('settings', 'update', 'academics'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(ConfigSchema, req.body);
@@ -244,7 +244,7 @@ router.put('/', authMiddleware, PLAN, rbac('settings', 'update'), async (req, re
 /* ═══════════════════════════════════════════════════════════════
    POST /api/academic-config/reset — reset to system defaults
    ═══════════════════════════════════════════════════════════════ */
-router.post('/reset', authMiddleware, PLAN, rbac('settings', 'delete'), async (req, res) => {
+router.post('/reset', authMiddleware, PLAN, rbac('settings', 'delete', 'academics'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     await tenantModel('academic_config', tenantContext(req)).deleteOne({ schoolId });
@@ -279,7 +279,7 @@ router.get('/grade', authMiddleware, PLAN, rbac('grades', 'read'), async (req, r
    Body: { academicYearId, reason }
    Admin only. Irreversible without direct DB intervention.
    ═══════════════════════════════════════════════════════════════ */
-router.post('/archive-year', authMiddleware, PLAN, rbac('settings', 'update'), async (req, res) => {
+router.post('/archive-year', authMiddleware, PLAN, rbac('settings', 'update', 'academics'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
     if (!['admin', 'superadmin'].includes(role)) {

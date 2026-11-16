@@ -6,6 +6,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.275.0] - 2026-11-16 - feat(settings): give people individual Settings sections
+
+Asked for directly: split the Settings module into sections so rights can be given per section. Before, every Settings route checked one coarse `settings` grant, and ticking any Settings row in Roles & Permissions was merged into it, so giving someone "Manage Users" also opened the school profile, modules, notifications, grading changes and more.
+
+### Added
+- **One Roles & Permissions row per Settings tab:** School (incl. email/SMTP), Academic setup (grading & report settings, report-card templates), Users & invites (and parent link codes), Manage Roles & Permissions, Modules, Notifications, Smart reminders, Message templates, View System Info, View Audit Log. Each tab shows only for people with its row, and **its server routes check that row** (`rbac('settings', action, '<section>')`).
+- **`PUT /settings/school` checks each section a request touches:** school fields → School, `moduleConfig` → Modules, `modulePermissions`/`roleLabels`/`hiddenSystemRoles` → Roles & Permissions. A request touching a section the person lacks is refused in full, with the section named.
+- **Audit Log can be granted** (it was hard-coded to admins). It's strict: only an explicit "View Audit Log" grant opens it, never the coarse one.
+
+### Fixed
+- **Editing or deleting a custom role** now needs the strict Roles & Permissions grant, as creating one already did. Before, any coarse Settings `update`/`delete` holder could change or remove custom roles.
+
+### Unchanged on purpose
+- **Roles not re-saved since these rows existed** keep their old Settings access. A section check falls back to the coarse grant until the role is saved in Roles & Permissions, which then writes every row explicitly. Defaults copy today's: admin everything; deputy/principal everything except Roles & Permissions and Audit Log; others nothing.
+- **Reference reads stay on the coarse grant** because other modules use them: the staff user list (HR, Inventory), the custom-role list (HR, Attendance, Behaviour, Inventory, Report Cards) and the academic config read.
+- **Subscription stays admin-only.** Academic years and year transitions stay admin-only, as before.
+
+Tests: new `settings-sections.test.js` (8, real rbac against saved role grants); `settings-audit`, `settings-permission-escalation` and `settings-staff-responsibilities-collision-guard` mocks gained `hasPermission`. Docs: User Guide §16 "Giving someone part of Settings".
+
+---
+
 ## [v5.274.0] - 2026-11-15 - fix(timetable): one place to enter who teaches what
 
 Raised after v5.273.0: assignments could still be entered and edited on each teacher's profile as well as in Subject allocation, and "taught together" could only be linked from the profile. Two paths make data entry and updates confusing. Decided: HODs are consulted and give the allocation to the timetabler, who enters and updates it.
