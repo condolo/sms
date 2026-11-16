@@ -103,6 +103,9 @@
       <button class="pa-nav-item active" onclick="showView('overview')" id="nav-overview">
         <i class="fas fa-chart-pie"></i> Overview
       </button>
+      <button class="pa-nav-item" onclick="showView('analytics')" id="nav-analytics">
+        <i class="fas fa-wave-square"></i> Live Analytics
+      </button>
       <button class="pa-nav-item" onclick="showView('mywork')" id="nav-mywork">
         <i class="fas fa-list-check"></i> My Work
       </button>
@@ -183,6 +186,8 @@
    ============================================================ */
 
 let _currentView = 'overview';
+let _analyticsRange = '24h';
+let _analyticsTimer = null;
 
 /* ── HTML-escape untrusted data before interpolating into innerHTML ──
    This page is plain JS (no framework, no auto-escaping) rendering data
@@ -515,13 +520,17 @@ async function apiFetch(url, opts = {}) {
 /* ── Navigation ─────────────────────────────────────────── */
 function showView(view) {
   _currentView = view;
+  if (view !== 'analytics' && _analyticsTimer) {
+    clearInterval(_analyticsTimer);
+    _analyticsTimer = null;
+  }
   document.querySelectorAll('.pa-nav-item').forEach(el => el.classList.remove('active'));
   document.getElementById('nav-' + view)?.classList.add('active');
 
-  const titles = { overview:'Overview', mywork:'My Work', pending:'Pending Approvals', demos:'Demo Requests', tickets:'Support Tickets', schools:'Registered Schools', organizations:'Organizations', provision:'Provision New School', announcements:'System Announcements', diagnostics:'System Diagnostics', branding:'Branding & Platform Settings', landing:'Landing Page CMS', billing:'Billing Overview', referrals:'Referral Program', team:'Platform Team' };
+  const titles = { overview:'Overview', analytics:'Live Analytics', mywork:'My Work', pending:'Pending Approvals', demos:'Demo Requests', tickets:'Support Tickets', schools:'Registered Schools', organizations:'Organizations', provision:'Provision New School', announcements:'System Announcements', diagnostics:'System Diagnostics', branding:'Branding & Platform Settings', landing:'Landing Page CMS', billing:'Billing Overview', referrals:'Referral Program', team:'Platform Team' };
   document.getElementById('view-title').textContent = titles[view] || view;
 
-  const views = { overview: renderOverview, mywork: renderMyWork, pending: renderPending, demos: renderDemoRequests, tickets: renderTickets, schools: renderSchools, organizations: renderOrganizations, provision: renderProvision, announcements: renderAnnouncements, diagnostics: renderDiagnostics, branding: renderBranding, landing: renderLandingCMS, billing: renderBillingOverview, referrals: renderReferrals, team: renderTeam };
+  const views = { overview: renderOverview, analytics: renderAnalytics, mywork: renderMyWork, pending: renderPending, demos: renderDemoRequests, tickets: renderTickets, schools: renderSchools, organizations: renderOrganizations, provision: renderProvision, announcements: renderAnnouncements, diagnostics: renderDiagnostics, branding: renderBranding, landing: renderLandingCMS, billing: renderBillingOverview, referrals: renderReferrals, team: renderTeam };
   (views[view] || (() => {}))();
 }
 
@@ -807,6 +816,202 @@ async function newTicket() {
   }
 }
 
+/* ── LIVE ANALYTICS ─────────────────────────────────────── */
+function _anNum(n) {
+  const v = Number(n);
+  return Number.isFinite(v) ? v.toLocaleString() : '—';
+}
+function _anPct(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return '—';
+  return (v > 0 && v < 1 ? v.toFixed(1) : Math.round(v * 10) / 10) + '%';
+}
+function _anAgo(iso) {
+  if (!iso) return 'never';
+  const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  if (s < 60) return s + 's ago';
+  if (s < 3600) return Math.round(s / 60) + 'm ago';
+  return Math.round(s / 3600) + 'h ago';
+}
+function _anTime(t, range) {
+  const d = new Date(t);
+  if (range === '24h') return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (range === '7d') return d.toLocaleDateString([], { weekday: 'short', hour: '2-digit' });
+  return d.toLocaleDateString([], { day: 'numeric', month: 'short' });
+}
+function _anSpark(points, pick, color) {
+  const vals = (points || []).map(p => Number(pick(p)) || 0);
+  const n = vals.length;
+  if (n < 2) return '<div class="pa-an-empty-chart">Not enough history yet</div>';
+  const max = Math.max(1, ...vals);
+  const coords = vals.map((v, i) =>
+    ((i / (n - 1)) * 100).toFixed(2) + ',' + (30 - (v / max) * 27).toFixed(2)
+  ).join(' ');
+  return `<svg class="pa-spark" viewBox="0 0 100 30" preserveAspectRatio="none">
+    <polyline points="${coords}" fill="none" stroke="${color}" stroke-width="1.4" vector-effect="non-scaling-stroke"/>
+  </svg>`;
+}
+function _anMeter(label, value, max, unit, hint) {
+  const v = Number(value);
+  const p = Number.isFinite(v) && max > 0 ? Math.min(100, Math.round((v / max) * 100)) : 0;
+  const tone = p >= 90 ? '#f04438' : p >= 70 ? '#f79009' : '#12b76a';
+  return `<div class="pa-an-meter">
+    <div class="pa-an-meter-row"><span>${_esc(label)}</span><strong>${Number.isFinite(v) ? _anNum(v) + (unit || '') : '—'}</strong></div>
+    <div class="pa-an-meter-track"><div class="pa-an-meter-fill" style="width:${p}%;background:${tone}"></div></div>
+    ${hint ? `<div class="pa-an-meter-hint">${hint}</div>` : ''}
+  </div>`;
+}
+function setAnalyticsRange(range) {
+  _analyticsRange = range;
+  renderAnalytics();
+}
+
+async function renderAnalytics() {
+  if (_analyticsTimer) { clearInterval(_analyticsTimer); _analyticsTimer = null; }
+  const el = document.getElementById('pa-content');
+  el.innerHTML = '<div class="pa-loading"><i class="fas fa-circle-notch fa-spin"></i> Reading the meters…</div>';
+
+  async function load() {
+    try {
+      const [overview, history, system, errors] = await Promise.all([
+        apiFetch('/api/platform/analytics/overview').then(r => { if (!r.ok) throw new Error('overview ' + r.status); return r.json(); }).then(j => j.data || {}),
+        apiFetch('/api/platform/analytics/history?range=' + _analyticsRange).then(r => { if (!r.ok) throw new Error('history ' + r.status); return r.json(); }).then(j => j.data || {}),
+        apiFetch('/api/platform/analytics/system').then(r => { if (!r.ok) throw new Error('system ' + r.status); return r.json(); }).then(j => j.data || {}),
+        apiFetch('/api/platform/analytics/errors?range=' + _analyticsRange).then(r => { if (!r.ok) throw new Error('errors ' + r.status); return r.json(); }).then(j => j.data || []),
+      ]);
+
+      const health = system.health || overview.system || {};
+      const telemetry = system.telemetry || overview.telemetry || {};
+      const roles = Object.entries(overview.users?.byRole || {}).map(([k, v]) => `${k} ${v}`).join(' · ');
+      const range = _analyticsRange;
+      const rangeBtn = (r, label) =>
+        `<button class="${range === r ? 'active' : ''}" onclick="setAnalyticsRange('${r}')">${label}</button>`;
+
+      el.innerHTML = `
+        <div class="pa-an-head">
+          <div>
+            <h3>Live analytics</h3>
+            <p>Who is using the product, how fast it answers, what they use and how the machine is holding up. Refreshes every 30 s while this view is open.</p>
+          </div>
+          <div class="pa-an-range">${rangeBtn('24h','24h')}${rangeBtn('7d','7d')}${rangeBtn('30d','30d')}</div>
+        </div>
+
+        <div class="pa-an-grid">
+          <div class="pa-an-card"><div class="pa-an-label">Active now</div><div class="pa-an-value">${_anNum(overview.users?.now)}</div><div class="pa-an-sub">${_anNum(overview.users?.m15)} in 15 min</div></div>
+          <div class="pa-an-card"><div class="pa-an-label">Active 1 h</div><div class="pa-an-value">${_anNum(overview.users?.h1)}</div><div class="pa-an-sub">${_esc(roles) || 'no roles yet'}</div></div>
+          <div class="pa-an-card"><div class="pa-an-label">Requests / min</div><div class="pa-an-value">${_anNum(overview.traffic?.perMinute)}</div><div class="pa-an-sub">${_anNum(overview.traffic?.requests)} last hour</div></div>
+          <div class="pa-an-card"><div class="pa-an-label">p95 latency</div><div class="pa-an-value">${_anNum(overview.traffic?.p95)} ms</div><div class="pa-an-sub">p50 ${_anNum(overview.traffic?.p50)} · p99 ${_anNum(overview.traffic?.p99)}</div></div>
+          <div class="pa-an-card"><div class="pa-an-label">5xx error rate</div><div class="pa-an-value ${Number(overview.traffic?.errorRate) >= 1 ? 'pa-an-bad' : 'pa-an-good'}">${_anPct(overview.traffic?.errorRate)}</div><div class="pa-an-sub">${_anNum(overview.traffic?.errors5)} server · ${_anNum(overview.traffic?.errors4)} client</div></div>
+          <div class="pa-an-card"><div class="pa-an-label">DAU today</div><div class="pa-an-value">${_anNum(overview.users?.dauToday)}</div><div class="pa-an-sub">yesterday ${_anNum(overview.users?.dauYesterday)} · 7d avg ${_anNum(overview.users?.dauAvg7)}</div></div>
+          <div class="pa-an-card"><div class="pa-an-label">Active schools</div><div class="pa-an-value">${_anNum((overview.users?.bySchool || []).length)}</div><div class="pa-an-sub">${_anNum((overview.modules || []).length)} modules touched</div></div>
+          <div class="pa-an-card"><div class="pa-an-label">Uptime</div><div class="pa-an-value">${health.uptimeSec ? Math.floor(health.uptimeSec / 3600) + 'h ' + Math.floor((health.uptimeSec % 3600) / 60) + 'm' : '—'}</div><div class="pa-an-sub">DB ${Number.isFinite(Number(health.dbPingMs)) ? _anNum(health.dbPingMs) + ' ms' : '—'} · loop ${Number.isFinite(Number(health.eventLoopMs)) ? _anNum(health.eventLoopMs) + ' ms' : '—'}</div></div>
+        </div>
+
+        <div class="pa-an-grid-2">
+          <div class="pa-card">
+            <div class="pa-card-header"><h3>Requests · ${range}</h3><span class="pa-an-muted">${_anNum((history.points || []).reduce((s, p) => s + (p.requests || 0), 0))} total</span></div>
+            ${_anSpark(history.points, p => p.requests, '#7c3aed')}
+            <div class="pa-an-axis"><span>${history.points?.[0] ? _anTime(history.points[0].t, range) : ''}</span><span>${history.points?.length ? _anTime(history.points[history.points.length - 1].t, range) : ''}</span></div>
+          </div>
+          <div class="pa-card">
+            <div class="pa-card-header"><h3>p95 latency · ${range}</h3><span class="pa-an-muted">ms</span></div>
+            ${_anSpark(history.points, p => p.p95, '#0d9488')}
+            <div class="pa-an-axis"><span>peak ${Math.max(0, ...(history.points || []).map(p => p.p95))} ms</span><span>now ${_anNum(overview.traffic?.p95)} ms</span></div>
+          </div>
+        </div>
+
+        <div class="pa-an-grid-2">
+          <div class="pa-card">
+            <div class="pa-card-header"><h3>Modules · last 24 h</h3><span class="pa-an-muted">${(overview.modules || []).length}</span></div>
+            <table class="pa-an-table"><thead><tr><th>Module</th><th>Req</th><th>Schools</th><th>p95</th><th>5xx</th></tr></thead><tbody>
+              ${(overview.modules || []).map(m => `<tr><td>${_esc(m.module)}</td><td>${_anNum(m.requests)}</td><td>${_anNum(m.schools)}</td><td>${_anNum(m.p95)} ms</td><td class="${Number(m.errorRate) >= 1 ? 'pa-an-bad' : 'pa-an-good'}">${_anPct(m.errorRate)}</td></tr>`).join('') || '<tr><td colspan="5" class="pa-an-empty">No module traffic captured yet.</td></tr>'}
+            </tbody></table>
+          </div>
+          <div class="pa-card">
+            <div class="pa-card-header"><h3>Slowest route families · 1 h</h3><span class="pa-an-muted">p95</span></div>
+            <table class="pa-an-table"><thead><tr><th>Route</th><th>p95</th><th>Req</th><th>5xx</th></tr></thead><tbody>
+              ${(overview.slowRoutes || []).map(r => `<tr><td class="pa-an-mono" title="${_esc(r.route)}">${_esc(r.route)}</td><td>${_anNum(r.p95)} ms</td><td>${_anNum(r.requests)}</td><td>${_anNum(r.errors5)}</td></tr>`).join('') || '<tr><td colspan="4" class="pa-an-empty">Nothing slow enough to rank yet.</td></tr>'}
+            </tbody></table>
+          </div>
+        </div>
+
+        <div class="pa-an-grid-2">
+          <div class="pa-card">
+            <div class="pa-card-header"><h3>Who is online</h3><span class="pa-an-muted">last 60 s</span></div>
+            ${(overview.users?.bySchool || []).length
+              ? `<ul class="pa-an-list">${overview.users.bySchool.map(s => `<li><span>${_esc(s.name)}</span><strong>${_anNum(s.count)}</strong></li>`).join('')}</ul>`
+              : '<div class="pa-an-empty">No live sessions in the last minute.</div>'}
+          </div>
+          <div class="pa-card">
+            <div class="pa-card-header"><h3>Busiest schools · 1 h</h3><span class="pa-an-muted">requests</span></div>
+            <table class="pa-an-table"><tbody>
+              ${(overview.schools || []).map(s => `<tr><td>${_esc(s.name)}</td><td>${_anNum(s.requests)}</td><td>${_anNum(s.p95)} ms</td><td class="${Number(s.errorRate) >= 1 ? 'pa-an-bad' : 'pa-an-good'}">${_anPct(s.errorRate)}</td></tr>`).join('') || '<tr><td class="pa-an-empty">No school traffic yet.</td></tr>'}
+            </tbody></table>
+          </div>
+        </div>
+
+        <div class="pa-an-grid-2">
+          <div class="pa-card">
+            <div class="pa-card-header"><h3>Machine room</h3><span class="pa-an-muted">30 s sample</span></div>
+            ${_anMeter('Heap', health.heapUsedMb, health.heapTotalMb || 1, ' MB', `${_anNum(health.heapUsedMb)} of ${_anNum(health.heapTotalMb)} MB · RSS ${_anNum(health.rssMb)} MB`)}
+            ${_anMeter('Event loop p95', health.eventLoopMs, 100, ' ms', 'Under 50 ms is healthy; over 100 ms is a stall.')}
+            ${_anMeter('Mongo ping', health.dbPingMs, 100, ' ms', health.dbState === 1 ? 'Connected' : 'Not connected')}
+            ${_anMeter('Telemetry buffer', telemetry.bufferedRoutes, 2000, ' routes', `Flushed ${_anAgo(telemetry.lastFlushAt)} in ${_anNum(telemetry.lastFlushMs)} ms · failures ${_anNum(telemetry.flushFailures)}`)}
+            <div class="pa-an-foot">
+              <span><i class="fas fa-database"></i> ${system.db ? `${_anNum(system.db.objects)} docs · ${_anNum(system.db.dataSizeMb)} MB` : 'DB stats pending'}</span>
+              <span class="${Number(telemetry.lastFlushAt ? (Date.now() - new Date(telemetry.lastFlushAt).getTime()) / 1000 : 0) > 180 ? 'pa-an-bad' : 'pa-an-good'}"><i class="fas fa-circle" style="font-size:7px"></i> ${telemetry.enabled === false ? 'telemetry off' : telemetry.lastFlushAt ? 'flush ' + _anAgo(telemetry.lastFlushAt) : 'warming up'}</span>
+            </div>
+          </div>
+          <div class="pa-card">
+            <div class="pa-card-header"><h3>Errors by route</h3><span class="pa-an-muted">${range}</span></div>
+            <table class="pa-an-table"><thead><tr><th>Route</th><th>5xx</th><th>4xx</th><th>Rate</th></tr></thead><tbody>
+              ${(errors || []).map(e => `<tr><td class="pa-an-mono" title="${_esc(e.route)}">${_esc(e.route)}</td><td>${_anNum(e.errors5)}</td><td>${_anNum(e.errors4)}</td><td>${_anPct(e.errorRate)}</td></tr>`).join('') || '<tr><td colspan="4" class="pa-an-empty">No errors in this window. Good.</td></tr>'}
+            </tbody></table>
+          </div>
+        </div>
+
+        <div class="pa-an-generated">Generated ${new Date(overview.generatedAt).toLocaleTimeString()}${telemetry.flushFailures ? ' · ' + telemetry.flushFailures + ' flush failure(s)' : ''}</div>
+      `;
+
+      if (_analyticsTimer) clearInterval(_analyticsTimer);
+      _analyticsTimer = setInterval(() => {
+        if (_currentView === 'analytics') load();
+      }, 30000);
+    } catch (err) {
+      el.innerHTML = `<div class="pa-card" style="text-align:center;padding:32px">
+        <div style="font-size:32px;color:#98a2b3;margin-bottom:8px"><i class="fas fa-satellite-dish"></i></div>
+        <h3 style="font-size:15px;margin-bottom:4px">Telemetry is warming up</h3>
+        <p style="font-size:12px;color:#667085;max-width:420px;margin:0 auto 14px">The meters start collecting on the first authenticated request after deploy. If this stays empty, check that <code>PLATFORM_TELEMETRY</code> is not set to <code>off</code>.</p>
+        <button class="pa-btn pa-btn-primary" onclick="renderAnalytics()">Try again</button>
+      </div>`;
+    }
+  }
+
+  await load();
+}
+
+async function _loadLiveStrip() {
+  const el = document.getElementById('pa-live-strip');
+  if (!el) return;
+  el.style.display = '';
+  try {
+    const res = await apiFetch('/api/platform/analytics/overview');
+    if (!res.ok) { el.style.display = 'none'; return; }
+    const d = (await res.json()).data || {};
+    el.innerHTML = `
+      <div class="pa-an-card"><div class="pa-an-label">Active now</div><div class="pa-an-value">${_anNum(d.users?.now)}</div><div class="pa-an-sub">${_anNum(d.users?.m15)} in 15 min</div></div>
+      <div class="pa-an-card"><div class="pa-an-label">Requests / min</div><div class="pa-an-value">${_anNum(d.traffic?.perMinute)}</div><div class="pa-an-sub">${_anNum(d.traffic?.requests)} last hour</div></div>
+      <div class="pa-an-card"><div class="pa-an-label">p95 latency</div><div class="pa-an-value">${_anNum(d.traffic?.p95)} ms</div><div class="pa-an-sub">p50 ${_anNum(d.traffic?.p50)} · p99 ${_anNum(d.traffic?.p99)}</div></div>
+      <div class="pa-an-card"><div class="pa-an-label">5xx error rate</div><div class="pa-an-value ${Number(d.traffic?.errorRate) >= 1 ? 'pa-an-bad' : 'pa-an-good'}">${_anPct(d.traffic?.errorRate)}</div><div class="pa-an-sub">${_anNum(d.traffic?.errors5)} server errors</div></div>
+      <div class="pa-an-card" style="display:flex;flex-direction:column;justify-content:center;cursor:pointer" onclick="showView('analytics')">
+        <div class="pa-an-label">Live analytics</div>
+        <div style="font-size:13px;font-weight:600;color:var(--primary);margin-top:4px">Open the meters <i class="fas fa-arrow-right" style="font-size:10px"></i></div>
+      </div>`;
+  } catch {
+    el.style.display = 'none';
+  }
+}
+
 async function renderOverview() {
   const el = document.getElementById('pa-content');
   el.innerHTML = '<div class="pa-loading"><i class="fas fa-circle-notch fa-spin"></i> Loading stats…</div>';
@@ -847,6 +1052,8 @@ async function renderOverview() {
         </div>
       </div>
 
+      <div id="pa-live-strip" class="pa-an-grid" style="margin-bottom:16px"></div>
+
       <div class="pa-card">
         <div class="pa-card-header"><h3>Plan Breakdown</h3></div>
         <div class="mrr-grid">
@@ -864,6 +1071,7 @@ async function renderOverview() {
         </div>
       </div>`;
 
+    _loadLiveStrip();
   } catch (err) {
     el.innerHTML = _offlineStatsHTML();
     toast('Could not reach server — showing demo data', 'info');
