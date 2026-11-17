@@ -166,3 +166,24 @@ Still below best practice:
 - Parent read was verified against the server count after the cache removal; the bell delta event was added after the live pass and still needs a final deployed check.
 - Server tests: `messages-unread-count.test.js` (3 tests), messages/portal suites, teacher overview regression, attendance probe, index migration safety.
 - The EGM reviewers did not have access to the authoritative checkout; their code references are to the worktree mirror and are labelled as such.
+
+### Next pass (commit `cfe2c4f`) — implemented and locally verified
+
+Every priority item above now has an implementation; verification below is from
+the local stack (real Mongo seed, real API, real browser), not mocks:
+
+| Area | What was verified |
+| --- | --- |
+| Navigation | Admin sees Inbox/Sent/Chats/Groups; Chats loads conversations for a non-teacher staff role (server guard widened to every non-portal role). |
+| Pagination | Inbox paged at 30; with 34 messages "Load older messages" appeared, loaded the rest to 34, then disappeared. |
+| Deep link | `/messages?msg=<id>` opened the exact message (fetched via new `GET /:id`), then cleaned the param from the URL; opening a row writes it back. |
+| Mark unread | Button on a read message; list row and counters flipped in place (a real bug — the infinite-query cache shape — was found and fixed during this check); server persisted `isRead.<user> = false`. |
+| Mark all + undo | Toast carried Undo; clicking it restored exactly the snapshot unread rows (server `read-all {ids, read:false}`). |
+| Dialogs | Staff compose slide-over, parent compose, student compose and student thread modal: `role=dialog`, `aria-labelledby` resolves, Escape closes, page scroll locks, focus moves in, Tab stays trapped, focus returns to the trigger. |
+| Thread identity | Teacher → admin send stamped `inReplyTo`/`threadId` (conversation root), confirmed in the live API payload; admin reply landed in the same thread. |
+| Child linkage | Parent send stored `childId`/`childName` on the message; the parent Sent row and the teacher's detail pane both show "About Amara Osei"; the reply inherits the context. |
+| Recipient dedupe | `/messages/recipients` returns `ids[]` per person, combined role labels, and no email addresses for staff callers. |
+| System taxonomy | Covered by server tests (coalescing, event keys, linkage); not yet exercised through a real timetable publish on the demo. |
+
+Full server suite after the change: 429 suites / 4733 tests, all passing.
+
