@@ -103,6 +103,9 @@
       <button class="pa-nav-item active" onclick="showView('overview')" id="nav-overview">
         <i class="fas fa-chart-pie"></i> Overview
       </button>
+      <button class="pa-nav-item" onclick="showView('analytics')" id="nav-analytics">
+        <i class="fas fa-wave-square"></i> Live Analytics
+      </button>
       <button class="pa-nav-item" onclick="showView('mywork')" id="nav-mywork">
         <i class="fas fa-list-check"></i> My Work
       </button>
@@ -515,13 +518,15 @@ async function apiFetch(url, opts = {}) {
 /* ── Navigation ─────────────────────────────────────────── */
 function showView(view) {
   _currentView = view;
+  window.__platformView = view;
+  window.stopAnalyticsTimer?.();
   document.querySelectorAll('.pa-nav-item').forEach(el => el.classList.remove('active'));
   document.getElementById('nav-' + view)?.classList.add('active');
 
-  const titles = { overview:'Overview', mywork:'My Work', pending:'Pending Approvals', demos:'Demo Requests', tickets:'Support Tickets', schools:'Registered Schools', organizations:'Organizations', provision:'Provision New School', announcements:'System Announcements', diagnostics:'System Diagnostics', branding:'Branding & Platform Settings', landing:'Landing Page CMS', billing:'Billing Overview', referrals:'Referral Program', team:'Platform Team' };
+  const titles = { overview:'Overview', analytics:'Live Analytics', mywork:'My Work', pending:'Pending Approvals', demos:'Demo Requests', tickets:'Support Tickets', schools:'Registered Schools', organizations:'Organizations', provision:'Provision New School', announcements:'System Announcements', diagnostics:'System Diagnostics', branding:'Branding & Platform Settings', landing:'Landing Page CMS', billing:'Billing Overview', referrals:'Referral Program', team:'Platform Team' };
   document.getElementById('view-title').textContent = titles[view] || view;
 
-  const views = { overview: renderOverview, mywork: renderMyWork, pending: renderPending, demos: renderDemoRequests, tickets: renderTickets, schools: renderSchools, organizations: renderOrganizations, provision: renderProvision, announcements: renderAnnouncements, diagnostics: renderDiagnostics, branding: renderBranding, landing: renderLandingCMS, billing: renderBillingOverview, referrals: renderReferrals, team: renderTeam };
+  const views = { overview: renderOverview, analytics: renderAnalytics, mywork: renderMyWork, pending: renderPending, demos: renderDemoRequests, tickets: renderTickets, schools: renderSchools, organizations: renderOrganizations, provision: renderProvision, announcements: renderAnnouncements, diagnostics: renderDiagnostics, branding: renderBranding, landing: renderLandingCMS, billing: renderBillingOverview, referrals: renderReferrals, team: renderTeam };
   (views[view] || (() => {}))();
 }
 
@@ -847,6 +852,8 @@ async function renderOverview() {
         </div>
       </div>
 
+      <div id="pa-live-strip" class="pa-cmd-strip"></div>
+
       <div class="pa-card">
         <div class="pa-card-header"><h3>Plan Breakdown</h3></div>
         <div class="mrr-grid">
@@ -864,6 +871,7 @@ async function renderOverview() {
         </div>
       </div>`;
 
+    _loadLiveStrip();
   } catch (err) {
     el.innerHTML = _offlineStatsHTML();
     toast('Could not reach server — showing demo data', 'info');
@@ -4344,6 +4352,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 });
 </script>
+<script src="/js/platform-analytics.js"></script>
 </body>
 </html>
 

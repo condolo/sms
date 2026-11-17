@@ -10,6 +10,7 @@ const path       = require('path');
 const rateLimit  = require('express-rate-limit');
 const { verify: verifyJwt } = require('./utils/jwt');
 const monitoring = require('./utils/monitoring');
+const telemetry  = require('./utils/telemetry');
 const { connect }             = require('./config/db');
 const { ensureIndexes }       = require('./utils/indexes');
 const { backfillFinanceSubPermissions } = require('./utils/finance-permission-backfill');
@@ -152,6 +153,9 @@ app.use(mongoSanitize());
 /* ── Monitoring: request context (Sentry, if active) ───────── */
 app.use(monitoring.requestHandler());
 
+/* ── Platform telemetry: finish-listener only, no I/O ──────── */
+telemetry.init(app);
+
 /* ── Rate limiting ──────────────────────────────────────────── */
 // All rate limiter messages use the app's standard { success, error } envelope so
 // clients never fall back to the generic "Request failed" string.
@@ -279,6 +283,7 @@ app.use('/api/auth/pin',    require('./routes/pin'));      // the app-lock PIN, 
 app.use('/api/auth',        require('./routes/auth'));
 app.use('/api/onboard',     require('./routes/onboard'));
 app.use('/api/sync',        require('./routes/sync'));
+app.use('/api/platform/analytics', require('./routes/platform-analytics'));
 app.use('/api/platform',    require('./routes/platform'));
 app.use('/api/collections', require('./routes/collections'));
 app.use('/api/users',       require('./routes/users'));
@@ -527,6 +532,14 @@ app.use('/css', express.static(path.join(ROOT_DIR, 'css'), {
       res.setHeader('Cache-Control', 'no-cache');
     }
   }
+}));
+
+/* The platform console's analytics view is a separate classic script so the
+   200 KB inline page stays readable. Scope the mount to /js only — never
+   serve the repository root (see the security note above). */
+app.use('/js', express.static(path.join(ROOT_DIR, 'js'), {
+  index: false,
+  maxAge: 0,
 }));
 
 // SPA fallback — serve the appropriate index.html for all non-API routes.

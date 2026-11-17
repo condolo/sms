@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import useAuthStore from '@/store/auth.js';
 import { _get } from '@/api/client.js';
+import PlatformAnalytics from './PlatformAnalytics.jsx';
 
 /* ── Data fetchers ─────────────────────────────────────────── */
 const fetchHealth = ()  => _get('/ops/health');
@@ -235,7 +236,9 @@ export default function PlatformConsole() {
               <Layers size={18} className="text-violet-600" />
               Platform Console
             </h1>
-            <p className="text-xs text-slate-500 mt-0.5">Operational health · Integrity · Compliance · Release history</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Live analytics · Operational health · Integrity · Compliance · Release history
+            </p>
           </div>
           <button
             onClick={() => refetch()}
@@ -249,6 +252,8 @@ export default function PlatformConsole() {
       </div>
 
       <div className="max-w-5xl mx-auto px-6 py-6 space-y-5">
+
+        <PlatformAnalytics />
 
         {/* Loading */}
         {isLoading && (
