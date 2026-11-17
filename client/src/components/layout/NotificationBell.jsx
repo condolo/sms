@@ -45,6 +45,9 @@ export default function NotificationBell({ myUserId, onSelect }) {
   const lastFetchRef = useRef(0);
 
   const refreshCount = useCallback(() => {
+    // Wait for the session's user id. Before this guard, a bell rendered
+    // during session hydration polled with no identity and logged a 401.
+    if (!myUserId) return;
     // An unauthenticated/forbidden bell must not keep polling: it was the
     // source of a steady stream of 401s in the error log (and pointless DB
     // work). The component remounts on the next successful login.
@@ -56,7 +59,7 @@ export default function NotificationBell({ myUserId, onSelect }) {
       .catch(err => {
         if (err?.status === 401 || err?.status === 403) stoppedRef.current = true;
       });
-  }, []);
+  }, [myUserId]);
 
   useEffect(() => {
     refreshCount();
