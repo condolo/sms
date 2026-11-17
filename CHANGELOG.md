@@ -6,6 +6,21 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.276.1] - 2026-11-17 - fix(subjects): re-adding a deleted subject no longer fails with "Internal server error"
+
+Reported (Trinity): adding a subject that had been deleted (CRE) gave "Internal server error".
+
+### Fixed
+- **Why it failed:** deleting a subject only deactivates it, and the database keeps one subject per code per school (index `sub_school_code`). The 2026-10-14 change that let a deleted subject's code be reused passed its tests only because the test mocks have no unique index; on the real database the insert was always refused, which showed as a 500. Nothing was written when it failed.
+- **Now:** adding a subject whose code a deleted subject holds returns `INACTIVE_SUBJECT_EXISTS` (409) naming it. The Subjects catalog offers to reactivate that subject with the details just entered, which keeps its marks, timetable, class curriculum and teacher assignments (all keyed by subject id). A second subject would have been cut off from all of that.
+- Editing a subject to a code a deleted subject holds gives a clear 409 instead of a 500.
+- A duplicate-key error that slips past the checks (two saves at once) is a 409 "already uses this code", not a 500.
+- **Departments:** re-adding a deleted department's code said "already exists" while the department stayed hidden, with no way back. It now restores that same department with the new details; subjects that pointed at it reconnect.
+
+Tests: `subjects.test.js` now pins the real behaviour (deleted code → 409 naming the subject, nothing created; edit to a deleted code → 409; duplicate-key → 409). Checked on the local demo against the real index: create → delete → re-add gave the reactivate offer; reactivate + update kept the same subject id; a deleted department re-added came back with the same id.
+
+---
+
 ## [v5.276.0] - 2026-11-16 - fix(behaviour): dashboard and incident report add up; house points and a House filter
 
 Reported: the Behaviour dashboard and the downloaded incident report "don't add up, particularly in net points … some points were hidden when downloading", and house points were expected in the report. Then asked for: filter incidents by class, stream and house.

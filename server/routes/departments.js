@@ -79,6 +79,19 @@ router.post('/', authMiddleware, rbac('subjects', 'create'), async (req, res) =>
 
     const Dept = tenantModel('departments', tenantContext(req));
     const dup  = await Dept.findOne({ schoolId, code: data.code }).lean();
+    // Re-adding a DELETED department (2026-11-17): delete only deactivates,
+    // the code stays taken (index dept_school_code) and the department was
+    // invisible, so admins hit "already exists" with nothing to fix. Bring
+    // the same department back with the new details instead — subjects that
+    // pointed at it reconnect, nothing is duplicated.
+    if (dup && dup.isActive === false) {
+      const restored = await Dept.findOneAndUpdate(
+        { id: dup.id, schoolId },
+        { ...data, isActive: true, updatedBy: userId },
+        { new: true },
+      ).lean();
+      return ok(res, { ...restored, restored: true });
+    }
     if (dup) return E.conflict(res, `Department code '${data.code}' already exists`);
 
     const doc = await Dept.create({

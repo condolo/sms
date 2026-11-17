@@ -11,7 +11,7 @@ const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
 const { moduleGate }     = require('../middleware/module-gate');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
-const { ok, created, E } = require('../utils/response');
+const { ok, created, fail, E } = require('../utils/response');
 
 const router = express.Router();
 const MODGATE = moduleGate('subjects');
@@ -116,6 +116,21 @@ router.post('/', authMiddleware, rbac('subjects', 'create'), async (req, res) =>
     const dup = await tenantModel('subjects', tenantContext(req)).findOne({ schoolId, code: data.code, isActive: { $ne: false } }).lean();
     if (dup) return E.conflict(res, `Subject code '${data.code}' already exists`);
 
+    // Reported 2026-11-17 (Trinity): re-adding a deleted subject gave
+    // "Internal server error". "Delete" only deactivates a subject, and the
+    // database keeps ONE subject per code per school (index sub_school_code),
+    // so the insert below always failed for a retired code. Creating a second
+    // subject would also cut it off from the old one's marks, timetable,
+    // class curriculum and teacher assignments (all keyed by subject id).
+    // Instead, point the admin at the deleted subject so it can be
+    // reactivated — with everything still linked to it.
+    const retired = await tenantModel('subjects', tenantContext(req)).findOne({ schoolId, code: data.code, isActive: false }).lean();
+    if (retired) {
+      return fail(res, 'INACTIVE_SUBJECT_EXISTS',
+        `A deleted subject "${retired.name}" already uses the code ${data.code}. Reactivate it instead — its marks, timetable and class links are kept.`,
+        409, { subjectId: retired.id, subjectName: retired.name });
+    }
+
     const doc = await tenantModel('subjects', tenantContext(req)).create({
       ...data,
       id:           uuidv4(),
@@ -126,7 +141,12 @@ router.post('/', authMiddleware, rbac('subjects', 'create'), async (req, res) =>
       updatedBy:    userId,
     });
     return created(res, doc.toObject());
-  } catch (err) { console.error('[subjects POST /]', err); return E.serverError(res); }
+  } catch (err) {
+    // Duplicate code that slipped past the checks above (e.g. two saves at
+    // once): say so plainly instead of "Internal server error".
+    if (err && err.code === 11000) return E.conflict(res, 'Another subject already uses this code.');
+    console.error('[subjects POST /]', err); return E.serverError(res);
+  }
 });
 
 /* ── PUT /api/subjects/:id — update ────────────────────────── */
@@ -147,6 +167,12 @@ router.put('/:id', authMiddleware, rbac('subjects', 'update'), async (req, res) 
         schoolId, code: data.code, id: { $ne: req.params.id }, isActive: { $ne: false },
       }).lean();
       if (conflict) return E.conflict(res, `Subject code '${data.code}' already used`);
+      // A deleted subject still holds its code (one code per school in the
+      // database), so this edit would otherwise fail with a server error.
+      const retired = await tenantModel('subjects', tenantContext(req)).findOne({
+        schoolId, code: data.code, id: { $ne: req.params.id }, isActive: false,
+      }).lean();
+      if (retired) return E.conflict(res, `The code ${data.code} belongs to the deleted subject "${retired.name}". Reactivate that subject, or choose a different code.`);
     }
 
     const doc = await tenantModel('subjects', tenantContext(req)).findOneAndUpdate(
@@ -156,7 +182,12 @@ router.put('/:id', authMiddleware, rbac('subjects', 'update'), async (req, res) 
     );
     if (!doc) return E.notFound(res, 'Subject not found');
     return ok(res, doc.toObject());
-  } catch (err) { console.error('[subjects PUT /:id]', err); return E.serverError(res); }
+  } catch (err) {
+    // Duplicate code that slipped past the checks above (e.g. two saves at
+    // once): say so plainly instead of "Internal server error".
+    if (err && err.code === 11000) return E.conflict(res, 'Another subject already uses this code.');
+    console.error('[subjects PUT /:id]', err); return E.serverError(res);
+  }
 });
 
 /* ── DELETE /api/subjects/:id — soft-delete ────────────────── */

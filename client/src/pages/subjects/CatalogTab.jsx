@@ -670,7 +670,24 @@ export default function CatalogTab({ flash }) {
   const saveSub = useMutation({
     mutationFn: ({ id, data }) => id ? subsApi.update(id, data) : subsApi.create(data),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['subjects'] }); setSubSlide(null); flash('Subject saved'); },
-    onError: err => flash(err.message ?? 'Save failed', 'error'),
+    onError: async (err, vars) => {
+      // A deleted subject already holds this code (v5.277.0). Offer to bring
+      // it back — with the details just typed — instead of a dead end; the
+      // old subject's marks, timetable and class links stay attached.
+      const info = err?.extra?.error;
+      if (err?.code === 'INACTIVE_SUBJECT_EXISTS' && info?.subjectId) {
+        if (!confirm(`${err.message}\n\nReactivate "${info.subjectName}" now with the details you entered?`)) return;
+        try {
+          await subsApi.reactivate(info.subjectId);
+          await subsApi.update(info.subjectId, vars.data);
+          qc.invalidateQueries({ queryKey: ['subjects'] });
+          setSubSlide(null);
+          flash(`"${vars.data?.name ?? info.subjectName}" reactivated`);
+        } catch (e) { flash(e.message ?? 'Reactivate failed', 'error'); }
+        return;
+      }
+      flash(err.message ?? 'Save failed', 'error');
+    },
   });
   const deleteSub = useMutation({
     mutationFn: id => subsApi.remove(id),

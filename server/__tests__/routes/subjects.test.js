@@ -34,12 +34,16 @@ function matches(doc, filter) {
   });
 }
 let mockStores;
+let mockCreateThrows = false;
 function mockCollFor(col) {
   const docs = () => mockStores[col] || (mockStores[col] = []);
   return {
     find:    (filter) => mockChain(docs().filter(d => matches(d, filter))),
     findOne: (filter) => mockChain(docs().find(d => matches(d, filter)) ?? null),
-    create:  async (doc) => { const d = { ...doc }; docs().push(d); return { ...d, toObject: () => d }; },
+    create:  async (doc) => {
+      if (mockCreateThrows) { const e = new Error('E11000 duplicate key'); e.code = 11000; throw e; }
+      const d = { ...doc }; docs().push(d); return { ...d, toObject: () => d };
+    },
     findOneAndUpdate: (filter, update) => {
       const d = docs().find(x => matches(x, filter));
       if (!d) return { then: (res) => res(null) };
@@ -92,12 +96,26 @@ describe('GET /api/subjects — inactive subjects hidden by default, visible wit
 });
 
 describe('POST /api/subjects — code uniqueness scoped to active subjects only', () => {
-  test('a code held only by a deactivated subject can be reused', async () => {
+  // v5.277.0 (Trinity, 2026-11-17): this used to expect 201, but the real
+  // database keeps one subject per code per school (index sub_school_code)
+  // and these mocks have no index, so in production it was always a 500.
+  // Now: point at the deleted subject so it is reactivated, links intact.
+  test('a code held by a deleted subject: 409 naming that subject, nothing created', async () => {
     mockStores.subjects = [
       { id: 'sub_old', schoolId: SCHOOL, name: 'Old Subject', code: 'OLD', departmentId: 'dep_1', isActive: false },
     ];
-    const res = await supertest(buildApp()).post('/api/subjects').send({ name: 'New Subject', code: 'OLD', departmentId: 'dep_1' });
-    expect(res.status).toBe(201);
+    const res = await supertest(buildApp()).post('/api/subjects').send({ name: 'New Subject', code: 'old', departmentId: 'dep_1' });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatchObject({ code: 'INACTIVE_SUBJECT_EXISTS', subjectId: 'sub_old', subjectName: 'Old Subject' });
+    expect(mockStores.subjects).toHaveLength(1);
+  });
+
+  test('a duplicate-key error from the database is a 409, not "Internal server error"', async () => {
+    mockCreateThrows = true;
+    try {
+      const res = await supertest(buildApp()).post('/api/subjects').send({ name: 'Race', code: 'RACE', departmentId: 'dep_1' });
+      expect(res.status).toBe(409);
+    } finally { mockCreateThrows = false; }
   });
 
   test('a code held by an ACTIVE subject is still refused', async () => {
@@ -110,13 +128,15 @@ describe('POST /api/subjects — code uniqueness scoped to active subjects only'
 });
 
 describe('PUT /api/subjects/:id — same active-only code scoping', () => {
-  test('editing a subject to take a code held only by a deactivated subject succeeds', async () => {
+  test('editing a subject to take a deleted subject\x27s code: 409 naming it (was a 500 in production)', async () => {
     mockStores.subjects = [
       { id: 'sub_1', schoolId: SCHOOL, name: 'Biology', code: 'BIO', departmentId: 'dep_1', isActive: true },
       { id: 'sub_old', schoolId: SCHOOL, name: 'Old Subject', code: 'OLD', departmentId: 'dep_1', isActive: false },
     ];
     const res = await supertest(buildApp()).put('/api/subjects/sub_1').send({ name: 'Biology', code: 'OLD', departmentId: 'dep_1' });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(409);
+    expect(res.body.error.message).toMatch(/deleted subject "Old Subject"/);
+    expect(mockStores.subjects[0].code).toBe('BIO');
   });
 
   test('editing to a code held by another ACTIVE subject is still refused', async () => {
