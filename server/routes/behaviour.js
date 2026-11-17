@@ -454,8 +454,18 @@ router.get('/incidents', authMiddleware, PLAN, MODGATE, behaviourAccess('read'),
     // query for the page; see utils/behaviour-replies.js.
     const replies = await behaviourReplies.replyCounts(tenantContext(req), schoolId, docs.map(d => d.id), { viewerId: req.jwtUser.userId })
       .catch(() => ({}));
+    // Older and seeded incidents were saved without studentName (only new
+    // ones are backfilled on create), so lists showed the raw id, e.g.
+    // "std_demo_6". Fill it at read time from the student record — one
+    // query per page, stored incidents untouched.
+    const unnamed = [...new Set(docs.filter(d => !d.studentName && d.studentId).map(d => d.studentId))];
+    const nameDocs = unnamed.length
+      ? await tenantModel('students', tenantContext(req)).find({ schoolId, id: { $in: unnamed } }).select('id firstName lastName').lean()
+      : [];
+    const nameMap = Object.fromEntries(nameDocs.map(s => [s.id, `${s.firstName ?? ''} ${s.lastName ?? ''}`.trim()]));
     const docsWithReporter = docs.map(d => ({
       ...d,
+      studentName: d.studentName || nameMap[d.studentId] || d.studentName,
       reportedByName: reporterMap[behaviourReplies.loggerOf(d)]?.name || null,
       reportedByRole: reporterMap[behaviourReplies.loggerOf(d)]?.role || null,
       replyCount: replies[d.id]?.count || 0,

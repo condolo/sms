@@ -836,6 +836,22 @@ async function sendPasswordChanged({ name, email, schoolName, schoolEmail, schoo
 }
 
 /* 11. Role / permission change notification */
+/* Parent login email moved (v5.277.0) — sent to BOTH the old and new
+   address when a guardian email edit on the student profile moves the
+   parent's login (students.js PUT /:id). Fixed wording, no editable
+   template: it is a security notice like a password change. */
+async function sendLoginEmailChanged({ name, email, newEmail, schoolName, schoolEmail, schoolId = null }) {
+  const support = schoolEmail || SUPPORT_EMAIL;
+  const subject = `Your ${schoolName || 'school'} sign-in email has changed`;
+  const html = await _wrap(`
+    <h2>Your sign-in email has changed</h2>
+    <p>Hello ${name || ''},</p>
+    <p>The school updated the email on your parent account. From now on, sign in and receive school notifications at <strong>${newEmail}</strong>. Your password has not changed.</p>
+    <p style="font-size:13px;color:#6b7280">If you did not expect this change, contact the school at <a href="mailto:${support}">${support}</a>.</p>
+  `, schoolName, schoolId);
+  return _sendAsSchool(email, subject, html, { schoolName, schoolEmail, schoolId });
+}
+
 async function sendRoleChanged({ name, email, schoolName, schoolEmail, schoolId = null, oldRole, newRole, changedBy }) {
   const fmt    = r => (r || 'staff').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   const support = schoolEmail || SUPPORT_EMAIL;
@@ -1713,6 +1729,7 @@ async function sendReferralPayoutRejected({ name, email: toEmail, amount, curren
 }
 
 module.exports = {
+  sendLoginEmailChanged,
   invalidateSmtpCache,
   invalidateLogoCache,
   _resolveTransporter, // test-only access — see students-bulk-welcome-email-fix.test.js's sibling email-resolve-transporter.test.js

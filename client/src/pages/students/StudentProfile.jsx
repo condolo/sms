@@ -201,11 +201,17 @@ export default function StudentProfile() {
      branches now surface via the app's standard toast system. */
   const { mutate: updateStudent, isPending: saving } = useMutation({
     mutationFn: data => studentsApi.update(studentId, data),
-    onSuccess: () => {
+    onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['students', studentId] });
       qc.invalidateQueries({ queryKey: ['students'] });
       setEditing(false);
       toast.success('Student profile saved.');
+      // A changed guardian email also moves that parent's login (v5.277.0);
+      // say so, and say when it could not (address already in use).
+      for (const s of (res?.data ?? res)?.guardianAccountSync ?? []) {
+        if (s.status === 'updated') toast.success(`Parent login and notifications now use ${s.to}.`);
+        else toast.error(s.reason);
+      }
     },
     onError: (err) => {
       // The server's top-level message for a 422 is always the same generic

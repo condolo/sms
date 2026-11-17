@@ -14,8 +14,8 @@
    Fix matches by EMAIL (lowercased/trimmed the same way account
    creation stores it) + guardianOf containing this student, never by
    studentId alone (one account can be shared across siblings), and
-   only touches `name` — never the login email itself, even if the
-   email field is also edited in the same request.
+   only touches `name`. (Since v5.277.0 an EMAIL change moves the login
+   email too — see students-guardian-email-sync.test.js.)
 
    All DB calls are mocked — no MongoDB required.
    ============================================================ */

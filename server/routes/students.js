@@ -1099,6 +1099,57 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('students', 'update'), as
       { nameField: 'fatherName', emailField: 'fatherEmail' },
     ];
     const studentDocId = existing.id || String(existing._id);
+
+    // Reported 2026-11-16 (Trinitas): a parent's email was changed here but
+    // notifications kept going to the old address. Parent notifications
+    // (notify-students.js) go to the parent's LOGIN account (users.email),
+    // and this route only ever changed the student record. Now, when a
+    // guardian slot's email changes, the parent account linked to this
+    // student under the OLD email moves to the new one — the same person,
+    // so siblings sharing that account follow too. Skipped (and reported
+    // back as guardianAccountSync) if another account already uses the new
+    // address, rather than merging two people's accounts. Runs before the
+    // name sync below, which looks the account up by the new email.
+    const guardianAccountSync = [];
+    for (const { emailField } of guardianSlots) {
+      if (data[emailField] === undefined) continue;
+      const oldEmail = (existing[emailField] || '').toLowerCase().trim();
+      const newEmail = (doc[emailField] || '').toLowerCase().trim();
+      if (!oldEmail || !newEmail || oldEmail === newEmail) continue;
+      try {
+        const Users = tenantModel('users', tenantContext(req));
+        const account = await Users.findOne(
+          { schoolId, role: 'parent', email: oldEmail, $or: [{ guardianOf: studentDocId }, { studentIds: studentDocId }] }
+        ).select('_id id name').lean();
+        if (!account) continue;
+        const taken = await Users.findOne({ schoolId, email: newEmail, _id: { $ne: account._id } }).select('_id').lean();
+        if (taken) {
+          guardianAccountSync.push({ field: emailField, status: 'skipped', reason: `Another account in this school already uses ${newEmail}, so the parent's login still uses ${oldEmail}. Update it from Settings → Users.` });
+          continue;
+        }
+        await Users.updateOne({ _id: account._id }, { $set: { email: newEmail, updatedAt: new Date().toISOString() } });
+        guardianAccountSync.push({ field: emailField, status: 'updated', from: oldEmail, to: newEmail });
+        AuditService.log({
+          action: 'parent.login_email_changed', actor: req.jwtUser, schoolId,
+          target: { type: 'user', id: account.id ?? String(account._id), label: account.name },
+          details: { from: oldEmail, to: newEmail, via: `student ${studentDocId} ${emailField}` }, req,
+        });
+        // Tell both addresses: the old one so a wrong edit is noticed, the
+        // new one so the parent knows what to sign in with.
+        try {
+          const emailUtil = require('../utils/email');
+          if (typeof emailUtil.sendLoginEmailChanged === 'function') {
+            const school = await _model('schools').findOne({ id: schoolId }).select('name systemEmail').lean();
+            enqueueBatch([oldEmail, newEmail].map(to => () => emailUtil.sendLoginEmailChanged({
+              name: account.name, email: to, newEmail, schoolId, schoolName: school?.name, schoolEmail: school?.systemEmail,
+            }))).catch(() => {});
+          }
+        } catch (_) { /* notice is best-effort */ }
+      } catch (e) {
+        guardianAccountSync.push({ field: emailField, status: 'skipped', reason: 'The parent login could not be updated. Update it from Settings → Users.' });
+      }
+    }
+
     for (const { nameField, emailField } of guardianSlots) {
       if (data[nameField] === undefined || data[nameField] === existing[nameField]) continue;
       const email = (doc[emailField] || '').toLowerCase().trim();
@@ -1127,7 +1178,7 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('students', 'update'), as
       });
     }
 
-    return ok(res, doc);
+    return ok(res, guardianAccountSync.length ? { ...doc, guardianAccountSync } : doc);
   } catch (err) {
     console.error('[students PUT/:id]', err);
     return E.serverError(res);

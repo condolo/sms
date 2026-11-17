@@ -6,6 +6,16 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.276.2] - 2026-11-17 - fix: parent email changes reach the parent's login; behaviour lists show student names
+
+### Fixed
+- **A changed parent email kept getting notifications at the old address** (reported, Trinitas). Parent notifications go to the parent's login account (`users.email`), but editing a mother/father/parent email on the student profile only changed the student record. Now, when a guardian email changes there, the parent account linked to that student under the old email moves to the new one. Siblings sharing that account follow, and other parents' accounts are never touched. Both addresses get a "your sign-in email has changed" notice (password unchanged), and the change is audit-logged (`parent.login_email_changed`). If another account already uses the new address, nothing moves, and the profile shows a message to fix it in Settings → Users. Existing mismatches are not changed retroactively: re-save the email on the student profile, or correct it in Settings → Users.
+- **Behaviour lists showed student ids such as `std_demo_6`** (Overview "Serious Incidents" and the Incidents table). Older and seeded incidents were saved without a student name, and only new ones get it filled in. `GET /behaviour/incidents` now fills missing names from the student records when it reads them; stored incidents are unchanged.
+
+Tests: new `students-guardian-email-sync.test.js` (4: the login moves and both addresses are told; another student's parent is untouched; address already in use → skipped and reported; unchanged email → nothing). `behaviour-totals-consistency.test.js` adds the name fill. Full server suite passes apart from one test that belongs to uncommitted, unrelated work.
+
+---
+
 ## [v5.276.1] - 2026-11-17 - fix(subjects): re-adding a deleted subject no longer fails with "Internal server error"
 
 Reported (Trinity): adding a subject that had been deleted (CRE) gave "Internal server error".

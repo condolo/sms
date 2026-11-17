@@ -142,6 +142,10 @@ describe('saving and listing', () => {
     await api().put(`/api/behaviour/incidents/${id}`).send({ type: 'demerit' });
     expect(mockDb.data.behaviour_incidents.find(i => i.id === id).points).toBe(-6);
   });
+  test('incidents saved without a student name show the student\x27s name, not the id', async () => {
+    const res = await api().get('/api/behaviour/incidents').query({ studentId: 's_red2' });
+    expect(res.body.data[0].studentName).toBe('B R');
+  });
   test('the incident list skips deleted incidents', async () => {
     const res = await api().get('/api/behaviour/incidents').query({ studentId: 's_red2', limit: 50 });
     expect(res.body.data.map(i => i.points)).toEqual([-3]);
