@@ -635,7 +635,18 @@ export default function ParentDashboard() {
     setFamilySummary(prev => prev ? { ...prev, unreadMessages: Math.max(0, (prev.unreadMessages ?? 0) - 1) } : prev);
     messagesApi.markRead(m.id)
       .then(() => window.dispatchEvent(new Event('messages:read')))
-      .catch(() => {});
+      .catch(() => {
+        /* Do not leave the optimistic read in place if the server refused
+           it: the bell would keep the old count and the inbox would claim
+           the message was read. Put both back. */
+        const uid = session?.user?.id;
+        setInboxMessages(prev => prev?.map(x => (x.id === m.id
+          ? { ...x, isRead: { ...x.isRead, [uid]: false } }
+          : x)) ?? prev);
+        setFamilySummary(prev => prev
+          ? { ...prev, unreadMessages: (prev.unreadMessages ?? 0) + 1 }
+          : prev);
+      });
   }
   /* Expanding a message IS reading it — the old list had no way to open
      a message at all, so opening one now marks it read and expands it in

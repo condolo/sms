@@ -88,9 +88,13 @@ function EmptyDetail({ tab, onCreateGroup, onCompose }) {
           <Check size={13} strokeWidth={3} />
         </span>
       </div>
-      <h3 className="relative text-sm font-bold text-slate-800">Your inbox, minus the noise</h3>
+      <h3 className="relative text-sm font-bold text-slate-800">
+        {tab === 'sent' ? 'Nothing sent yet' : 'Your inbox, minus the noise'}
+      </h3>
       <p className="relative mt-1 max-w-xs text-xs leading-relaxed text-slate-400">
-        Pick a conversation on the left to read it, or start a direct message to one person, several people, or a saved group.
+        {tab === 'sent'
+          ? 'Pick a sent message on the left to reread it, or start a new conversation.'
+          : 'Pick a conversation on the left to read it, or start a direct message to one person, several people, or a saved group.'}
       </p>
       <button
         onClick={() => onCompose?.()}

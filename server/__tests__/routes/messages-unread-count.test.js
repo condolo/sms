@@ -56,6 +56,8 @@ jest.mock('../../utils/tenant-model', () => ({
     if (collection === 'messages') {
       return {
         countDocuments: jest.fn((filter) => Promise.resolve(mockMessageDocs.filter(d => mockMatchesFilter(d, filter)).length)),
+        updateMany: jest.fn(() => Promise.resolve({ modifiedCount: 1 })),
+        findOneAndUpdate: jest.fn(() => ({ lean: () => Promise.resolve({ id: 'm_read' }) })),
       };
     }
     return { findOne: () => ({ lean: () => Promise.resolve(null) }) };
@@ -120,5 +122,16 @@ describe('GET /api/messages/unread-count', () => {
     messagesRouter._resetUnreadCache();
     const fresh = await supertest(buildApp(me)).get('/api/messages/unread-count');
     expect(fresh.body.data.count).toBe(2);
+  });
+
+  test('a read-only role can mark one message read and mark all read', async () => {
+    // The mock role_permissions grants messages:['read'] only — exactly the
+    // parent/student case that used to 403 on both routes.
+    const me = { userId: 'usr_parent', schoolId: SCHOOL_A, role: 'parent' };
+    const one = await supertest(buildApp(me)).patch('/api/messages/m_1/read').send({});
+    expect(one.status).toBe(200);
+    const all = await supertest(buildApp(me)).patch('/api/messages/read-all').send({});
+    expect(all.status).toBe(200);
+    expect(all.body.updated).toBe(1);
   });
 });

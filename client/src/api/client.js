@@ -1025,6 +1025,9 @@ export const parentPortal = {
 export const studentMessaging = {
   recipients: ()   => _get('/student-portal/message-recipients'),
   send:       (data) => _post('/student-portal/messages', data),
+  inbox:      ()   => _get('/student-portal/inbox'),
+  thread:     (id) => _get(`/student-portal/threads/${id}`),
+  reply:      (id, data) => _post(`/student-portal/threads/${id}/messages`, data),
 };
 
 export const studentSubjects = {

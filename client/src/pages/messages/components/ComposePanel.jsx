@@ -918,8 +918,10 @@ export default function ComposePanel({ open, initial, onClose, onSent, currentRo
               )}
             </div>
 
-            {/* Footer */}
-            <div className="shrink-0 border-t border-slate-200 bg-white px-6 py-4">
+            {/* Footer. Extra bottom padding keeps the Send button clear of
+                the floating help bubble anchored to the viewport corner —
+                it used to cover the right half of this button. */}
+            <div className="shrink-0 border-t border-slate-200 bg-white px-6 pt-4 pb-16">
               <div className="flex items-center justify-between gap-4">
                 <p className="min-w-0 truncate text-[11px] text-slate-400">
                   {footerTarget}

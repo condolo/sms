@@ -724,8 +724,12 @@ async function createDirectMessage(req, { recipientUserIds, subject, body, sende
    "Mark all read" used to fire one PATCH /:id/read per row from the
    browser: 100 unread messages meant 100 requests, 100 findOneAndUpdate
    round-trips and 100 cache invalidations. One updateMany is both
-   cheaper and atomic from the reader's point of view. */
-router.patch('/read-all', rbac('messages', 'update'), async (req, res) => {
+   cheaper and atomic from the reader's point of view.
+   RBAC is read, not update: marking a message you can already read as
+   read is part of reading it. The messages module has no 'update' sub,
+   so the old update check 403'd every parent/student holding View
+   Messages but not Send Messages — their badge could never clear. */
+router.patch('/read-all', rbac('messages', 'read'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
     const Msg = tenantModel('messages', tenantContext(req));
@@ -743,7 +747,7 @@ router.patch('/read-all', rbac('messages', 'update'), async (req, res) => {
 });
 
 /* ── PATCH /api/messages/:id/read — mark as read ─────────── */
-router.patch('/:id/read', rbac('messages', 'update'), async (req, res) => {
+router.patch('/:id/read', rbac('messages', 'read'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const Msg = tenantModel('messages', tenantContext(req));
@@ -877,6 +881,7 @@ module.exports = router;
 // messages actually use `recipients` + `isRead.${userId}`).
 module.exports._inboxQuery = _inboxQuery;
 module.exports._resetUnreadCache = _resetUnreadCache;
+module.exports.invalidateUnreadCache = _invalidateUnread;
 // Reused by parent-portal.js's parent-safe compose route — see
 // createDirectMessage's own header comment for why this is shared
 // rather than reimplemented.

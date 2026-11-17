@@ -338,6 +338,79 @@ function ComposeMessageModal({ open, sent, recipientOptions, form, onFormChange,
   );
 }
 
+/* Student thread modal — the inbox half of the compose route. The
+   server already exposes /student-portal/inbox and /threads/:id; this is
+   the missing surface that made a student unable to read a teacher's
+   reply. Hoisted to top level for the same input-focus reason as
+   ComposeMessageModal. */
+function StudentThreadModal({ open, thread, data, loading, error, reply, onReplyChange, sending, onSend, onClose, primary }) {
+  const messages = data?.messages ?? [];
+  const person = data?.counterpart ?? thread;
+  if (!open) return null;
+  return (
+    <AnimatePresence>
+      <motion.div key="thread-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        className="fixed inset-0 bg-black/30 z-40" onClick={onClose} />
+      <motion.div key="thread-dialog" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }}
+        role="dialog" aria-modal="true" aria-label={`Conversation with ${person?.name || 'school office'}`}
+        className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+          <div className="flex items-start justify-between px-5 py-4 border-b border-slate-100">
+            <div className="min-w-0">
+              <h3 className="text-sm font-semibold text-slate-900 truncate">{person?.name || 'School office'}</h3>
+              <p className="text-[11px] text-slate-400 capitalize">{String(person?.role || 'staff').replace(/_/g, ' ')}</p>
+            </div>
+            <button onClick={onClose} aria-label="Close conversation" className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100">
+              <X size={16} />
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3 bg-slate-50/60">
+            {loading ? (
+              <div className="flex items-center justify-center py-10 text-slate-400"><Loader2 size={18} className="animate-spin" /></div>
+            ) : error ? (
+              <p className="text-[12px] text-red-600 text-center py-6">{error}</p>
+            ) : messages.length === 0 ? (
+              <p className="text-[12px] text-slate-400 text-center py-8">No messages in this conversation yet.</p>
+            ) : messages.map(m => (
+              <div key={m.id} className={`flex ${m.mine ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[82%] rounded-2xl px-3.5 py-2.5 ${m.mine ? 'text-white rounded-br-md' : 'bg-white border border-slate-200 text-slate-700 rounded-bl-md'}`}
+                  style={m.mine ? { background: primary } : undefined}>
+                  {m.subject && <p className={`text-[11px] font-semibold mb-1 ${m.mine ? 'text-white/80' : 'text-slate-400'}`}>{m.subject}</p>}
+                  <p className="text-[12.5px] leading-relaxed whitespace-pre-wrap">{m.body}</p>
+                  <p className={`text-[9.5px] mt-1.5 ${m.mine ? 'text-white/60' : 'text-slate-400'}`}>{m.from} · {_fmtDate(m.at)}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="border-t border-slate-100 px-5 py-3">
+            {error && <p className="text-[11px] text-red-600 mb-2">{error}</p>}
+            <div className="flex items-end gap-2">
+              <textarea
+                rows={2}
+                aria-label="Write a reply"
+                placeholder="Write a reply…"
+                className="flex-1 text-[12.5px] border border-slate-200 rounded-xl px-3 py-2 resize-none focus:outline-none focus:ring-1"
+                value={reply}
+                onChange={e => onReplyChange(e.target.value)}
+              />
+              <button
+                onClick={onSend}
+                disabled={sending || !reply.trim()}
+                className="flex items-center gap-1.5 text-[12px] font-semibold text-white px-4 py-2.5 rounded-xl disabled:opacity-50"
+                style={{ background: primary }}
+              >
+                <Send size={12} /> {sending ? 'Sending…' : 'Send'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
 /* ══════════════════════════════════════════════════════════════════
    MAIN COMPONENT
    ══════════════════════════════════════════════════════════════════ */
@@ -385,6 +458,18 @@ export default function StudentDashboard() {
   const [composeSending,   setComposeSending]   = useState(false);
   const [recipientOptions, setRecipientOptions] = useState(null); // null = loading
 
+  // Student inbox — the read half. Backend routes already existed
+  // (/student-portal/inbox and /threads/:id); this state gives them a UI.
+  const [threads,         setThreads]         = useState([]);
+  const [threadsLoading,  setThreadsLoading]  = useState(true);
+  const [messagesTab,     setMessagesTab]     = useState('inbox'); // inbox | announcements
+  const [activeThread,    setActiveThread]    = useState(null);
+  const [threadData,      setThreadData]      = useState(null);
+  const [threadLoading,   setThreadLoading]   = useState(false);
+  const [threadError,     setThreadError]     = useState('');
+  const [replyBody,       setReplyBody]       = useState('');
+  const [replySending,    setReplySending]    = useState(false);
+
   function handlePasswordChange(e) {
     e.preventDefault();
     if (!currentPw) { setPwBanner({ type: 'error', msg: 'Current password is required.' }); return; }
@@ -431,9 +516,57 @@ export default function StudentDashboard() {
       .then(() => {
         setComposeSent(true);
         setComposeForm({ category: '', subject: '', body: '' });
+        loadThreads();
       })
       .catch(err => setComposeError(err.message || 'Could not send — please try again.'))
       .finally(() => setComposeSending(false));
+  }
+
+  function loadThreads() {
+    setThreadsLoading(true);
+    studentMessaging.inbox()
+      .then(r => setThreads(r?.data?.threads ?? []))
+      .catch(() => setThreads([]))
+      .finally(() => setThreadsLoading(false));
+  }
+
+  function openThread(thread) {
+    setActiveThread(thread);
+    setThreadData(null);
+    setThreadError('');
+    setReplyBody('');
+    setThreadLoading(true);
+    studentMessaging.thread(thread.counterpartUserId)
+      .then(r => {
+        setThreadData(r?.data ?? null);
+        // The thread endpoint marks the conversation read server-side;
+        // tell the bell and refresh the list's unread dots.
+        window.dispatchEvent(new Event('messages:read'));
+        loadThreads();
+      })
+      .catch(err => setThreadError(err?.message || 'Could not load this conversation.'))
+      .finally(() => setThreadLoading(false));
+  }
+
+  function sendReply() {
+    const counterpartUserId = activeThread?.counterpartUserId;
+    if (!counterpartUserId || !replyBody.trim()) return;
+    setReplySending(true);
+    setThreadError('');
+    studentMessaging.reply(counterpartUserId, {
+      body: replyBody.trim(),
+      subject: activeThread.subject ? `Re: ${activeThread.subject}` : undefined,
+    })
+      .then(() => {
+        setReplyBody('');
+        return studentMessaging.thread(counterpartUserId);
+      })
+      .then(r => {
+        setThreadData(r?.data ?? null);
+        loadThreads();
+      })
+      .catch(err => setThreadError(err?.message || 'Could not send your reply.'))
+      .finally(() => setReplySending(false));
   }
 
   /* ── Live per-school branding — same pattern as Sidebar.jsx (admin shell).
@@ -477,6 +610,7 @@ export default function StudentDashboard() {
         setRideError(err?.message || 'Transport details could not be loaded.');
       })
       .finally(() => setRideLoading(false));
+    loadThreads();
   }, []);
 
   /* ── "See all exams" ──     One request for the whole window, not a second dashboard payload: the
@@ -509,6 +643,7 @@ export default function StudentDashboard() {
      origin. See ParentDashboard.jsx's scrollToSection for the full story. */
   function scrollToSection(sectionId) {    setActiveNav(sectionId);
     setMobileNavOpen(false);
+    if (sectionId === 'section-messages') setMessagesTab('inbox');
     const el = document.getElementById(sectionId);
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
@@ -592,6 +727,8 @@ export default function StudentDashboard() {
     classTeacher, behaviourSummary, upcomingExams, announcements, upcomingEvents,
     borrowedBooks,
   } = data;
+
+  const unreadThreads = threads.reduce((sum, t) => sum + (Number(t.unread) || 0), 0);
 
   /* ── Derived values ── */
   const portalConfig   = school?.portalConfig ?? {};
@@ -708,13 +845,14 @@ export default function StudentDashboard() {
             >
               <Icon size={15} className="flex-shrink-0 opacity-85" />
               <span className="flex-1">{label}</span>
-              {/* Messages badge — only shown when there are unread announcements */}
-              {id === 'section-messages' && announcements?.length > 0 && (
+              {/* Messages badge — unread direct conversations, not every
+                  announcement (which has no read state of its own). */}
+              {id === 'section-messages' && unreadThreads > 0 && (
                 <span
                   id="sidebar-messages-badge"
                   className="bg-red-500 text-white text-[10px] font-bold px-[6px] py-[1px] rounded-full leading-snug"
                 >
-                  {announcements.length}
+                  {unreadThreads}
                 </span>
               )}
             </button>
@@ -812,7 +950,7 @@ export default function StudentDashboard() {
           <span id="topbar-term-badge" className="inline text-[12px] font-medium text-slate-500 bg-slate-100 px-3 py-1 rounded-full whitespace-nowrap">
             {termLabel}
           </span>
-          <NotificationBell myUserId={session?.user?.id} onSelect={() => scrollToSection('section-messages')} />
+          <NotificationBell myUserId={session?.user?.id} onSelect={() => { setMessagesTab('inbox'); scrollToSection('section-messages'); }} />
           <div className="flex items-center gap-2 w-full sm:w-auto order-last sm:order-none">
             <button
               id="btn-report-card"
@@ -1457,51 +1595,104 @@ export default function StudentDashboard() {
             )}
           </div>
 
-          {/* ── Announcements / Messages ───────────────────────────
-              Always rendered (never gated on `announcements.length`) so
-              the sidebar's "Messages" item and the notification bell's
-              onSelect target always resolve. */}
+          {/* ── Messages / Announcements ───────────────────────────
+              The sidebar's "Messages" item and the bell's onSelect both
+              land here. Inbox is the default now — the server has exposed
+              /student-portal/inbox and /threads/:id for a while, but this
+              section only ever rendered announcements, so a teacher's
+              reply had nowhere to appear. */}
           <div id="section-messages" className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden">
-            <div className="px-[18px] py-3.5 border-b border-slate-100 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Bell size={14} className="text-amber-500" />
-                <h2 className="text-[13px] font-bold text-slate-900">Announcements</h2>
-              </div>
-              <div className="flex items-center gap-2">
-                {announcements?.length > 0 && (
-                  <span
-                    id="announcements-count-badge"
-                    className="text-[11px] font-semibold text-amber-600 bg-amber-50 px-2.5 py-[5px] rounded-full"
-                  >
-                    {announcements.length} new
+            <div className="px-[18px] py-3.5 border-b border-slate-100 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <MessageSquare size={14} className="text-violet-500 flex-shrink-0" />
+                <h2 className="text-[13px] font-bold text-slate-900">Messages</h2>
+                {unreadThreads > 0 && (
+                  <span className="text-[10px] font-bold text-white bg-red-500 px-2 py-[2px] rounded-full">
+                    {unreadThreads} unread
                   </span>
                 )}
-                <button
-                  id="messages-new-btn"
-                  onClick={openCompose}
-                  disabled={composeSending}
-                  className="text-[11px] font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 px-3 py-[6px] rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  New Message
-                </button>
               </div>
+              <button
+                id="messages-new-btn"
+                onClick={openCompose}
+                disabled={composeSending}
+                className="text-[11px] font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 px-3 py-[6px] rounded-lg disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+              >
+                New Message
+              </button>
             </div>
-            {!announcements?.length ? (
-              <p id="announcements-empty" className="text-[12px] text-slate-400 text-center py-6">
-                No announcements right now
-              </p>
+
+            <div className="px-[18px] pt-2 border-b border-slate-100 flex items-center gap-1">
+              <button
+                onClick={() => setMessagesTab('inbox')}
+                className={`px-3 py-2 text-[11px] font-semibold border-b-2 -mb-px ${messagesTab === 'inbox' ? 'border-violet-500 text-violet-700' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+              >
+                Inbox{unreadThreads > 0 ? ` · ${unreadThreads}` : ''}
+              </button>
+              <button
+                onClick={() => setMessagesTab('announcements')}
+                className={`px-3 py-2 text-[11px] font-semibold border-b-2 -mb-px ${messagesTab === 'announcements' ? 'border-amber-500 text-amber-700' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+              >
+                Announcements{announcements?.length ? ` · ${announcements.length}` : ''}
+              </button>
+            </div>
+
+            {messagesTab === 'inbox' ? (
+              threadsLoading ? (
+                <div className="flex items-center justify-center py-8 text-slate-400"><Loader2 size={16} className="animate-spin" /></div>
+              ) : threads.length === 0 ? (
+                <div className="px-5 py-8 text-center">
+                  <p className="text-[12px] text-slate-400">No messages yet.</p>
+                  <button onClick={openCompose} className="mt-2 text-[11px] font-semibold text-violet-700 hover:text-violet-900">
+                    Message a teacher →
+                  </button>
+                </div>
+              ) : (
+                <div id="student-inbox-list" className="divide-y divide-slate-50">
+                  {threads.map(t => {
+                    const unread = Number(t.unread) > 0;
+                    return (
+                      <button
+                        key={t.counterpartUserId}
+                        onClick={() => openThread(t)}
+                        className={`w-full text-left px-[18px] py-3.5 flex items-start gap-3 hover:bg-slate-50 transition-colors ${unread ? 'bg-violet-50/40' : ''}`}
+                      >
+                        <div className="w-8 h-8 rounded-full bg-violet-100 text-violet-700 flex items-center justify-center text-[10px] font-bold flex-shrink-0">
+                          {_initials(t.name || 'School office')}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <p className={`text-[12px] truncate ${unread ? 'font-bold text-slate-900' : 'font-semibold text-slate-700'}`}>{t.name || 'School office'}</p>
+                            <span className="text-[9px] uppercase tracking-wide text-slate-400">{String(t.role || 'staff').replace(/_/g, ' ')}</span>
+                            <span className="ml-auto text-[10px] text-slate-400 flex-shrink-0">{_fmtDate(t.lastAt)}</span>
+                          </div>
+                          <p className={`text-[11.5px] truncate mt-0.5 ${unread ? 'text-slate-700' : 'text-slate-500'}`}>{t.subject || '(no subject)'}</p>
+                          <p className="text-[11px] text-slate-400 truncate mt-0.5">{t.preview}</p>
+                        </div>
+                        {unread && <span className="w-2 h-2 rounded-full bg-violet-500 mt-1.5 flex-shrink-0" aria-label="Unread" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              )
             ) : (
-              <div id="announcements-list" className="divide-y divide-slate-50">
-                {announcements.map((ann, i) => (
-                  <div key={`ann-${ann.id ?? i}`} id={`announcement-${ann.id ?? i}`} className="px-[18px] py-3.5">
-                    <p className="text-[13px] font-semibold text-slate-800 mb-0.5">{ann.title}</p>
-                    {ann.body && (
-                      <p className="text-[12px] text-slate-500 line-clamp-2 leading-relaxed">{ann.body}</p>
-                    )}
-                    <p className="text-[10px] text-slate-400 mt-1.5">{_fmtDate(ann.createdAt)}</p>
-                  </div>
-                ))}
-              </div>
+              !announcements?.length ? (
+                <p id="announcements-empty" className="text-[12px] text-slate-400 text-center py-6">
+                  No announcements right now
+                </p>
+              ) : (
+                <div id="announcements-list" className="divide-y divide-slate-50">
+                  {announcements.map((ann, i) => (
+                    <div key={`ann-${ann.id ?? i}`} id={`announcement-${ann.id ?? i}`} className="px-[18px] py-3.5">
+                      <p className="text-[13px] font-semibold text-slate-800 mb-0.5">{ann.title}</p>
+                      {ann.body && (
+                        <p className="text-[12px] text-slate-500 line-clamp-2 leading-relaxed">{ann.body}</p>
+                      )}
+                      <p className="text-[10px] text-slate-400 mt-1.5">{_fmtDate(ann.createdAt)}</p>
+                    </div>
+                  ))}
+                </div>
+              )
             )}
           </div>
 
@@ -1597,6 +1788,20 @@ export default function StudentDashboard() {
         sending={composeSending}
         onClose={() => setComposeOpen(false)}
         onSend={sendCompose}
+        primary={primary}
+      />
+
+      <StudentThreadModal
+        open={!!activeThread}
+        thread={activeThread}
+        data={threadData}
+        loading={threadLoading}
+        error={threadError}
+        reply={replyBody}
+        onReplyChange={setReplyBody}
+        sending={replySending}
+        onSend={sendReply}
+        onClose={() => { setActiveThread(null); setThreadData(null); setThreadError(''); }}
         primary={primary}
       />
 
