@@ -407,8 +407,13 @@
     el.innerHTML = skeleton();
     var qs = '?range=' + ERR_RANGE + '&status=' + ERR_STATUS +
       (ERR_Q ? '&q=' + encodeURIComponent(ERR_Q) : '');
-    get('/api/platform/analytics/error-log' + qs).then(function (rows) {
-      rows = rows || [];
+    get('/api/platform/analytics/error-log' + qs).then(function (log) {
+      var rows = (log && log.rows) || [];
+      var retention = (log && log.retentionDays) || 7;
+      var capturedSince = log && log.capturedSince;
+      var sinceLabel = capturedSince
+        ? new Date(capturedSince).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+        : '';
       var count5 = rows.reduce(function (s, r) { return s + (r.status >= 500 ? r.count : 0); }, 0);
       var count4 = rows.reduce(function (s, r) { return s + (r.status < 500 ? r.count : 0); }, 0);
       var rangeBtn = function (r, label) {
@@ -466,7 +471,7 @@
           '<div class="pa-log-chips">' + statusBtn('all', 'All') + statusBtn('4xx', '4xx client') + statusBtn('5xx', '5xx server') + '</div>' +
           '<div class="pa-log-search-wrap"><input id="pa-log-q" class="pa-log-search" aria-label="Filter errors by route, code or message" placeholder="Filter route, code or message…" value="' + esc(ERR_Q) + '" onkeydown="if(event.key===\'Enter\') searchErrorLog()"><button class="pa-cmd-btn" onclick="searchErrorLog()">Search</button></div>' +
         '</div>' +
-        '<div class="pa-log-summary"><span><strong>' + num(rows.length) + '</strong> fingerprints</span><span class="bad">' + num(count5) + ' server</span><span class="warn">' + num(count4) + ' client</span><span>' + ERR_RANGE + ' · 7-day retention</span></div>' +
+        '<div class="pa-log-summary"><span><strong>' + num(rows.length) + '</strong> fingerprints</span><span class="bad">' + num(count5) + ' server</span><span class="warn">' + num(count4) + ' client</span><span>' + ERR_RANGE + ' · ' + retention + '-day retention' + (sinceLabel ? ' · capture began ' + esc(sinceLabel) : '') + '</span></div>' +
         '<div class="pa-log-list">' + rowsHtml + '</div>' +
         '<footer class="pa-cmd-foot"><span>Samples are captured after the response is sent, batched once a minute.</span><span class="pa-cmd-foot-right"><span class="pa-cmd-dot on"></span> streaming</span></footer>' +
         '</div>';

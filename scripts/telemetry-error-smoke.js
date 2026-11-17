@@ -58,10 +58,11 @@ const { _model } = require('../server/utils/model');
   if (res.status !== 400) throw new Error('telemetry intercepted response');
 
   await telemetry.flush();
-  const all = await telemetry.errorLog('24h');
-  const five = await telemetry.errorLog('24h', { status: '5xx' });
-  const four = await telemetry.errorLog('24h', { status: '4xx' });
-  const search = await telemetry.errorLog('24h', { q: 'timeout' });
+  const log = await telemetry.errorLog('24h');
+  const all = log.rows;
+  const five = (await telemetry.errorLog('24h', { status: '5xx' })).rows;
+  const four = (await telemetry.errorLog('24h', { status: '4xx' })).rows;
+  const search = (await telemetry.errorLog('24h', { q: 'timeout' })).rows;
 
   const testRow = all.find((r) => r.route === '/api/err/test');
   const throwRow = all.find((r) => r.route === '/api/err/throw');
@@ -81,6 +82,7 @@ const { _model } = require('../server/utils/model');
   assert(throwRow.message === 'Internal server error', 'response message changed');
   assert(valRow && valRow.detail === 'guardianPhone must be a valid phone', 'validation issue detail missing');
   assert(valRow.code === 'VALIDATION_ERROR', 'validation code missing');
+  assert(log.capturedSince && log.retentionDays === 7, 'error log metadata missing');
 
   console.log(JSON.stringify({
     all: all.map((r) => ({ route: r.route, status: r.status, code: r.code, message: r.message, count: r.count })),

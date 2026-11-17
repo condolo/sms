@@ -1212,6 +1212,15 @@ code, .pa-mono {
 .pa-cmd-panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
 .pa-cmd-panel h3 { font: 600 12px/1 'Inter', sans-serif; color: var(--text); }
 .pa-cmd-panel-head > span { font: 600 10px/1 'Inter', sans-serif; color: var(--faint); }
+.pa-cmd-link {
+  appearance: none; -webkit-appearance: none;
+  border: 0; background: transparent; padding: 0; margin: 0;
+  color: var(--primary); cursor: pointer;
+  font: 700 10px/1 'Inter', sans-serif; letter-spacing: .01em;
+  white-space: nowrap;
+}
+.pa-cmd-link:hover { color: #4338ca; text-decoration: underline; text-underline-offset: 2px; }
+.pa-cmd-link:focus-visible { outline: 2px solid rgba(79,70,229,.45); outline-offset: 3px; border-radius: 4px; }
 .pa-cmd-chart-svg { display: block; width: 100%; height: 150px; margin-top: 8px; }
 .pa-cmd-chart-empty {
   height: 150px; display: grid; place-items: center; margin-top: 8px;

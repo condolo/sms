@@ -964,25 +964,32 @@ async function errorLog(range, { status = 'all', q = '', limit = 100 } = {}) {
   }
 
   const cap = Math.min(200, Math.max(1, Number(limit) || 100));
-  const rows = await T.errors()
-    .find(filter)
-    .sort({ count: -1, lastAt: -1 })
-    .limit(cap)
-    .lean();
+  const [rows, oldest] = await Promise.all([
+    T.errors()
+      .find(filter)
+      .sort({ count: -1, lastAt: -1 })
+      .limit(cap)
+      .lean(),
+    T.errors().findOne({}).sort({ firstAt: 1 }).select('firstAt').lean(),
+  ]);
 
-  return rows.map((r) => ({
-    route: r.route,
-    method: r.method,
-    status: r.status,
-    code: r.code,
-    message: r.message,
-    detail: r.detail || '',
-    exception: r.exception || '',
-    count: r.count,
-    firstAt: r.firstAt,
-    lastAt: r.lastAt,
-    requestId: r.requestId || null,
-  }));
+  return {
+    rows: rows.map((r) => ({
+      route: r.route,
+      method: r.method,
+      status: r.status,
+      code: r.code,
+      message: r.message,
+      detail: r.detail || '',
+      exception: r.exception || '',
+      count: r.count,
+      firstAt: r.firstAt,
+      lastAt: r.lastAt,
+      requestId: r.requestId || null,
+    })),
+    capturedSince: oldest?.firstAt || _stats.startedAt,
+    retentionDays: HEALTH_TTL_DAYS,
+  };
 }
 
 let _systemCache = { at: 0, data: null };
