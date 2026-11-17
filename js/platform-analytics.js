@@ -25,8 +25,10 @@
   }
   function pct(v) {
     var n = Number(v);
-    if (!Number.isFinite(n)) return '—';
-    return (n > 0 && n < 1 ? n.toFixed(1) : Math.round(n * 10) / 10) + '%';
+    if (!Number.isFinite(n)) return '-';
+    if (n > 0 && n < 0.01) return '<0.01%';
+    if (n > 0 && n < 1) return (Math.round(n * 100) / 100) + '%';
+    return (Math.round(n * 10) / 10) + '%';
   }
   function ago(iso) {
     if (!iso) return 'never';
@@ -202,8 +204,11 @@
     var liveBySchool = {};
     (o.users && o.users.bySchool || []).forEach(function (s) { liveBySchool[s.schoolId] = s.count; });
     var range = RANGE;
-    var errRate = Number(traffic.errorRate) || 0;
     var p95 = Number(traffic.p95) || 0;
+    var rangeRequests = points.reduce(function (s, p) { return s + (Number(p.requests) || 0); }, 0);
+    var rangeErrors5 = points.reduce(function (s, p) { return s + (Number(p.errors5) || 0); }, 0);
+    var rangeErrors4 = points.reduce(function (s, p) { return s + (Number(p.errors4) || 0); }, 0);
+    var rangeErrRate = rangeRequests ? (rangeErrors5 / rangeRequests) * 100 : 0;
     var lastAt = points.length ? timeLabel(points[points.length - 1].t, range) : '';
 
     var rangeBtn = function (r, label) {
@@ -266,14 +271,14 @@
           spark: mini(points, function (p) { return p.requests; }, '#a78bfa'),
         }) +
         kpi({
-          label: 'Requests / min',
-          value: num(traffic.perMinute),
-          sub: num(traffic.requests) + ' in the last hour',
+          label: 'Requests · ' + range,
+          value: num(rangeRequests),
+          sub: num(traffic.perMinute) + '/min now · ' + num(traffic.requests) + ' last hour',
           delta: trend(points, function (p) { return p.requests; }, false),
           spark: mini(points, function (p) { return p.requests; }, '#818cf8'),
         }) +
         kpi({
-          label: 'p95 latency',
+          label: 'p95 latency · 1h',
           value: num(p95),
           unit: 'ms',
           sub: 'p50 ' + num(traffic.p50) + ' · p99 ' + num(traffic.p99),
@@ -282,10 +287,10 @@
           spark: mini(points, function (p) { return p.p95; }, '#2dd4bf'),
         }) +
         kpi({
-          label: '5xx error rate',
-          value: pct(errRate),
-          sub: num(traffic.errors5) + ' server · ' + num(traffic.errors4) + ' client',
-          tone: errRate >= 1 ? 'danger' : 'mint',
+          label: '5xx error rate · ' + range,
+          value: pct(rangeErrRate),
+          sub: num(rangeErrors5) + ' server · ' + num(rangeErrors4) + ' client · ' + range,
+          tone: rangeErrRate >= 1 ? 'danger' : 'mint',
           delta: trend(points, function (p) { return p.errors5; }, true),
           spark: mini(points, function (p) { return p.errors5; }, '#fb7185'),
         }) +
@@ -339,7 +344,7 @@
           '</div>' +
           '<div class="pa-cmd-machine-foot"><span>' + (sys.db ? num(sys.db.objects) + ' docs · ' + num(sys.db.dataSizeMb) + ' MB' : 'DB stats pending') + '</span>' +
           '<span class="' + (tel.flushFailures ? 'bad' : 'good') + '">' + (tel.flushFailures ? '⚠ ' + num(tel.flushFailures) + ' flush failures' : '✓ pipeline healthy') + '</span></div>') +
-        panel('Errors', range, errorRows) +
+        panel('Errors', '<button class="pa-cmd-link" onclick="showView(\'errorlog\')">Open log →</button>', errorRows) +
       '</div>' +
 
       '<div class="pa-cmd-grid wide">' +
@@ -371,6 +376,103 @@
     for (var i = 0; i < bars.length; i++) {
       (function (bar) { bar.style.width = bar.getAttribute('data-w') + '%'; })(bars[i]);
     }
+  }
+
+  /* ── Error log ──────────────────────────────────────────── */
+  var ERR_RANGE = '24h';
+  var ERR_STATUS = 'all';
+  var ERR_Q = '';
+
+  function setErrorRange(r) { ERR_RANGE = r; renderErrorLog(); }
+  function setErrorStatus(s) { ERR_STATUS = s; renderErrorLog(); }
+  function searchErrorLog() {
+    var el = document.getElementById('pa-log-q');
+    ERR_Q = el ? el.value.trim() : '';
+    renderErrorLog();
+  }
+  function copyError(btn) {
+    var raw = btn.getAttribute('data-copy') || '';
+    var text = decodeURIComponent(raw);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () {
+        btn.textContent = 'Copied ✓';
+        setTimeout(function () { btn.textContent = 'Copy diagnostics'; }, 1600);
+      }).catch(function () {});
+    }
+  }
+
+  function renderErrorLog() {
+    var el = document.getElementById('pa-content');
+    if (!el) return;
+    el.innerHTML = skeleton();
+    var qs = '?range=' + ERR_RANGE + '&status=' + ERR_STATUS +
+      (ERR_Q ? '&q=' + encodeURIComponent(ERR_Q) : '');
+    get('/api/platform/analytics/error-log' + qs).then(function (rows) {
+      rows = rows || [];
+      var count5 = rows.reduce(function (s, r) { return s + (r.status >= 500 ? r.count : 0); }, 0);
+      var count4 = rows.reduce(function (s, r) { return s + (r.status < 500 ? r.count : 0); }, 0);
+      var rangeBtn = function (r, label) {
+        return '<button class="' + (ERR_RANGE === r ? 'active' : '') + '" aria-pressed="' + (ERR_RANGE === r) + '" onclick="setErrorRange(\'' + r + '\')">' + label + '</button>';
+      };
+      var statusBtn = function (s, label) {
+        return '<button class="pa-log-chip ' + (ERR_STATUS === s ? 'active' : '') + '" aria-pressed="' + (ERR_STATUS === s) + '" onclick="setErrorStatus(\'' + s + '\')">' + label + '</button>';
+      };
+      var rowsHtml = rows.map(function (r) {
+        var s = Number(r.status) || 0;
+        var cls = s >= 500 ? 's5' : 's4';
+        var copy = encodeURIComponent(
+          'HTTP ' + s + ' · ' + r.route + '\n' + (r.code || '') + '\n' + (r.message || '') +
+          (r.detail && r.detail !== r.message ? '\nexception: ' + r.detail : '') +
+          (r.requestId ? '\nrequest: ' + r.requestId : '')
+        );
+        return '<details class="pa-log-row">' +
+          '<summary>' +
+            '<span class="pa-log-status ' + cls + '">' + s + '</span>' +
+            '<span class="pa-log-route" title="' + esc(r.route) + '">' + esc(r.route) + '</span>' +
+            '<span class="pa-log-count">' + num(r.count) + '×</span>' +
+            '<span class="pa-log-time">' + ago(r.lastAt) + '</span>' +
+          '</summary>' +
+          '<div class="pa-log-body">' +
+            (r.code ? '<div class="pa-log-code">' + esc(r.code) + '</div>' : '') +
+            '<p class="pa-log-message">' + esc(r.message || 'No message was attached to this response.') + '</p>' +
+            (r.detail && r.detail !== r.message
+              ? '<div class="pa-log-detail"><span>' + (s >= 500 ? 'Server exception' : 'Detail') + '</span><code>' + esc(r.detail) + '</code></div>'
+              : '') +
+            '<div class="pa-log-meta">first ' + ago(r.firstAt) + ' · last ' + ago(r.lastAt) +
+              (r.requestId ? ' · request <code>' + esc(r.requestId) + '</code>' : '') + '</div>' +
+            '<button class="pa-cmd-btn pa-log-copy" data-copy="' + esc(copy) + '" onclick="copyError(this)">Copy diagnostics</button>' +
+          '</div>' +
+          '</details>';
+      }).join('');
+      if (!rowsHtml) rowsHtml = '<div class="pa-cmd-empty">' + (
+        ERR_Q || ERR_STATUS !== 'all'
+          ? 'Nothing matches this filter. Try a wider range or clear the search.'
+          : 'No error samples in this window. That is the good kind of empty.'
+      ) + '</div>';
+
+      el.innerHTML = '<div class="pa-cmd">' +
+        '<header class="pa-cmd-head">' +
+          '<div>' +
+            '<div class="pa-cmd-eyebrow"><span class="pa-cmd-live"></span> ERROR LOG <span class="pa-cmd-sep">/</span> EXACT MESSAGES</div>' +
+            '<h2>What actually broke</h2>' +
+            '<p>Deduplicated 4xx and 5xx responses with the message the API sent, the request id to trace, and how often it happened. Emails, phone numbers and IDs are masked.</p>' +
+          '</div>' +
+          '<div class="pa-cmd-actions">' +
+            '<div class="pa-cmd-range">' + rangeBtn('24h', '24h') + rangeBtn('7d', '7d') + rangeBtn('30d', '30d') + '</div>' +
+            '<button class="pa-cmd-btn" onclick="renderErrorLog()">↻ Refresh</button>' +
+          '</div>' +
+        '</header>' +
+        '<div class="pa-log-filters">' +
+          '<div class="pa-log-chips">' + statusBtn('all', 'All') + statusBtn('4xx', '4xx client') + statusBtn('5xx', '5xx server') + '</div>' +
+          '<div class="pa-log-search-wrap"><input id="pa-log-q" class="pa-log-search" aria-label="Filter errors by route, code or message" placeholder="Filter route, code or message…" value="' + esc(ERR_Q) + '" onkeydown="if(event.key===\'Enter\') searchErrorLog()"><button class="pa-cmd-btn" onclick="searchErrorLog()">Search</button></div>' +
+        '</div>' +
+        '<div class="pa-log-summary"><span><strong>' + num(rows.length) + '</strong> fingerprints</span><span class="bad">' + num(count5) + ' server</span><span class="warn">' + num(count4) + ' client</span><span>' + ERR_RANGE + ' · 7-day retention</span></div>' +
+        '<div class="pa-log-list">' + rowsHtml + '</div>' +
+        '<footer class="pa-cmd-foot"><span>Samples are captured after the response is sent, batched once a minute.</span><span class="pa-cmd-foot-right"><span class="pa-cmd-dot on"></span> streaming</span></footer>' +
+        '</div>';
+    }).catch(function (e) {
+      el.innerHTML = errorView(e.message);
+    });
   }
 
   /* ── Entry points ───────────────────────────────────────── */
@@ -418,13 +520,18 @@
         '<div class="pa-cmd-strip-card"><div class="pa-cmd-strip-label">Active now</div><div class="pa-cmd-strip-value">' + num(u.now) + '</div><div class="pa-cmd-strip-sub">' + num(u.m15) + ' in 15 min</div></div>' +
         '<div class="pa-cmd-strip-card"><div class="pa-cmd-strip-label">Requests / min</div><div class="pa-cmd-strip-value">' + num(t.perMinute) + '</div><div class="pa-cmd-strip-sub">' + num(t.requests) + ' last hour</div></div>' +
         '<div class="pa-cmd-strip-card"><div class="pa-cmd-strip-label">p95 latency</div><div class="pa-cmd-strip-value">' + num(t.p95) + '<span>ms</span></div><div class="pa-cmd-strip-sub">p50 ' + num(t.p50) + ' · p99 ' + num(t.p99) + '</div></div>' +
-        '<div class="pa-cmd-strip-card ' + (Number(t.errorRate) >= 1 ? 'bad' : 'good') + '"><div class="pa-cmd-strip-label">5xx error rate</div><div class="pa-cmd-strip-value">' + pct(t.errorRate) + '</div><div class="pa-cmd-strip-sub">' + num(t.errors5) + ' server errors</div></div>' +
+        '<div class="pa-cmd-strip-card ' + (Number(t.errorRate) >= 1 ? 'bad' : 'good') + '"><div class="pa-cmd-strip-label">5xx error rate</div><div class="pa-cmd-strip-value">' + pct(t.errorRate) + '</div><div class="pa-cmd-strip-sub">' + num(t.errors5) + ' server errors · last hour</div></div>' +
         '<div class="pa-cmd-strip-card link" onclick="showView(\'analytics\')"><div class="pa-cmd-strip-label">Live analytics</div><div class="pa-cmd-strip-link">Open the control room →</div></div>';
     }).catch(function () { el.style.display = 'none'; });
   }
 
   window.renderAnalytics = renderAnalytics;
   window.setAnalyticsRange = setAnalyticsRange;
+  window.renderErrorLog = renderErrorLog;
+  window.setErrorRange = setErrorRange;
+  window.setErrorStatus = setErrorStatus;
+  window.searchErrorLog = searchErrorLog;
+  window.copyError = copyError;
   window._loadLiveStrip = loadLiveStrip;
   window.stopAnalyticsTimer = stop;
 })();

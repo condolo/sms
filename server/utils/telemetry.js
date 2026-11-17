@@ -45,6 +45,7 @@ const T = {
   schoolHour: () => _model('platform_school_hour'),
   schoolDay:  () => _model('platform_school_day'),
   users:  () => _model('platform_user_days'),
+  errors: () => _model('platform_error_samples'),
   health: () => _model('platform_health_samples'),
 };
 
@@ -63,6 +64,8 @@ let _schoolBuckets = new Map();  // schoolId|module|hourISO -> bucket
 let _presence = new Map();       // userId -> { lastSeen, role, schoolId, name? }
 let _dailyUsers = new Map();     // date|schoolId|role -> Set<userId>
 let _dailyDirty = new Set();      // keys changed since the last flush
+let _errorSamples = new Map();    // fingerprint -> exact 4xx/5xx sample
+let _errorRouteCounts = new Map(); // route -> new fingerprints this flush
 let _flushing = false;
 let _rolling = false;
 let _timers = [];
@@ -151,12 +154,103 @@ function _prunePresence() {
   while (_dailyUsers.size > MAX_DAILY_SETS) _dailyUsers.delete(sorted.shift());
 }
 
+/* ── Exact error samples ────────────────────────────────────── */
+function _redactMessage(value) {
+  return String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\bBearer\s+[\w.-]+/gi, 'Bearer <token>')
+    .replace(/\b(password|passwd|token|secret|api[_-]?key|authorization)\b\s*[:=]\s*[^\s,;]+/gi, '$1=<redacted>')
+    .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '<email>')
+    .replace(/\b[0-9a-f]{8}-[0-9a-f-]{27}\b/gi, '<id>')
+    .replace(/\b[0-9a-f]{24}\b/gi, '<id>')
+    .replace(/\+?\d[\d\s()-]{7,}\d/g, '<number>')
+    .slice(0, 500);
+}
+
+/** Read the error envelope an API route just sent. This runs inside the
+ *  response's own `json` call, so it adds no I/O and no second serialisation. */
+function _captureError(req, res, body) {
+  const status = res.statusCode || 0;
+  if (status < 400) return;
+  const error = body && typeof body === 'object' && body.error && typeof body.error === 'object'
+    ? body.error : null;
+  const exception = req._telemetryException || null;
+  let code = error?.code || body?.code || exception?.code || '';
+  let message = error?.message
+    || (typeof body?.error === 'string' ? body.error : '')
+    || body?.message
+    || '';
+  const issueText = Array.isArray(error?.issues)
+    ? error.issues.slice(0, 3).map((i) => i?.message).filter(Boolean).join('; ')
+    : '';
+  if (!message && issueText) message = issueText;
+  if (!code && issueText) code = 'VALIDATION_ERROR';
+  if (!message && !code && !exception) return;
+  if (!message) message = exception?.message || '';
+
+  const route = normalizeRoute({
+    baseUrl: req.baseUrl || '',
+    routePath: req.route?.path || '',
+    originalUrl: req.originalUrl || req.url || '',
+  });
+  const cleanMessage = _redactMessage(message);
+  const detail = _redactMessage(exception?.message || issueText || '').slice(0, 300);
+  const key = `${route}|${req.method}|${status}|${code}|${cleanMessage}|${detail}`;
+  const now = new Date();
+
+  const existing = _errorSamples.get(key);
+  if (existing) {
+    existing.count += 1;
+    existing.lastAt = now;
+    if (req.correlationId) existing.requestId = req.correlationId;
+    return;
+  }
+  if (_errorSamples.size >= 200) return;
+  const routeCount = _errorRouteCounts.get(route) || 0;
+  if (routeCount >= 25) return;
+  _errorRouteCounts.set(route, routeCount + 1);
+  _errorSamples.set(key, {
+    route,
+    method: req.method,
+    status,
+    code: String(code || '').slice(0, 80),
+    message: cleanMessage,
+    detail,
+    exception: String(exception?.name || '').slice(0, 60),
+    count: 1,
+    firstAt: now,
+    lastAt: now,
+    requestId: req.correlationId || '',
+    schoolId: req.jwtUser?.schoolId || null,
+  });
+}
+
+/** Attach the server-side exception to the response sample. The global
+ *  error handler calls this before sending its generic 500 envelope, so the
+ *  log keeps the root message without ever leaking a stack to the client. */
+function recordException(err, req) {
+  if (!err || !req) return;
+  try {
+    req._telemetryException = {
+      name: err.name || 'Error',
+      code: String(err.code || '').slice(0, 80),
+      message: _redactMessage(err.message || String(err)),
+    };
+  } catch { /* telemetry never breaks error handling */ }
+}
+
 /* ── Middleware ──────────────────────────────────────────────── */
 function middleware() {
   if (!ENABLED) return (_req, _res, next) => next();
   return (req, res, next) => {
     if (shouldSkipPath(req.originalUrl || req.url || '')) return next();
     const started = process.hrtime.bigint();
+    const originalJson = res.json.bind(res);
+    res.json = (body) => {
+      try { _captureError(req, res, body); } catch { /* telemetry never breaks a response */ }
+      return originalJson(body);
+    };
     res.once('finish', () => {
       try {
         const ms = Number(process.hrtime.bigint() - started) / 1e6;
@@ -270,27 +364,61 @@ function _userOps(daily, dirty) {
   return ops;
 }
 
+function _errorOps(errors) {
+  const ops = [];
+  for (const [fingerprint, e] of errors) {
+    ops.push({
+      updateOne: {
+        filter: { fingerprint },
+        update: {
+          $inc: { count: e.count },
+          $set: { lastAt: e.lastAt, requestId: e.requestId },
+          $setOnInsert: {
+            route: e.route,
+            method: e.method,
+            status: e.status,
+            code: e.code,
+            message: e.message,
+            detail: e.detail || '',
+            exception: e.exception || '',
+            firstAt: e.firstAt,
+            schoolId: e.schoolId,
+            expiresAt: new Date(Date.now() + HEALTH_TTL_DAYS * DAY_MS),
+          },
+        },
+        upsert: true,
+      },
+    });
+  }
+  return ops;
+}
+
 async function flush() {
   if (!ENABLED || _flushing) return;
   if (mongoose.connection.readyState !== 1) { _stats.lastError = 'db-not-connected'; return; }
-  if (_routeBuckets.size === 0 && _schoolBuckets.size === 0 && _dailyDirty.size === 0) return;
+  if (_routeBuckets.size === 0 && _schoolBuckets.size === 0 && _dailyDirty.size === 0 && _errorSamples.size === 0) return;
 
   _flushing = true;
   const started = Date.now();
   const routes = _routeBuckets;
   const schools = _schoolBuckets;
+  const errors = _errorSamples;
   const dailyDirty = new Set(_dailyDirty);
   _routeBuckets = new Map();
   _schoolBuckets = new Map();
+  _errorSamples = new Map();
+  _errorRouteCounts = new Map();
   _dailyDirty.clear();
 
   try {
     const routeOps = _routeOps(routes);
     const schoolOps = _schoolOps(schools);
     const userOps = _userOps(_dailyUsers, dailyDirty);
+    const errorOps = _errorOps(errors);
     if (routeOps.length) await T.min().bulkWrite(routeOps, { ordered: false });
     if (schoolOps.length) await T.schoolHour().bulkWrite(schoolOps, { ordered: false });
     if (userOps.length) await T.users().bulkWrite(userOps, { ordered: false });
+    if (errorOps.length) await T.errors().bulkWrite(errorOps, { ordered: false });
 
     _prunePresence();
     // Drop previous days; today's sets stay for the rest of the day.
@@ -710,6 +838,7 @@ async function overview() {
     telemetry: {
       enabled: ENABLED,
       bufferedRoutes: _routeBuckets.size,
+      bufferedErrors: _errorSamples.size,
       bufferedSchools: _schoolBuckets.size,
       presenceTracked: _presence.size,
       ..._stats,
@@ -818,6 +947,44 @@ async function errors(range) {
   }));
 }
 
+/**
+ * Exact error samples — the message the API actually sent, deduped by
+ * (route, status, code, message). Retained 7 days; platform-only.
+ */
+async function errorLog(range, { status = 'all', q = '', limit = 100 } = {}) {
+  const spec = _rangeSpec(range);
+  const filter = { lastAt: { $gte: spec.from } };
+  if (status === '4xx') filter.status = { $gte: 400, $lt: 500 };
+  if (status === '5xx') filter.status = { $gte: 500, $lt: 600 };
+
+  const term = String(q || '').trim();
+  if (term) {
+    const rx = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    filter.$or = [{ route: rx }, { code: rx }, { message: rx }];
+  }
+
+  const cap = Math.min(200, Math.max(1, Number(limit) || 100));
+  const rows = await T.errors()
+    .find(filter)
+    .sort({ count: -1, lastAt: -1 })
+    .limit(cap)
+    .lean();
+
+  return rows.map((r) => ({
+    route: r.route,
+    method: r.method,
+    status: r.status,
+    code: r.code,
+    message: r.message,
+    detail: r.detail || '',
+    exception: r.exception || '',
+    count: r.count,
+    firstAt: r.firstAt,
+    lastAt: r.lastAt,
+    requestId: r.requestId || null,
+  }));
+}
+
 let _systemCache = { at: 0, data: null };
 async function system() {
   if (_systemCache.data && Date.now() - _systemCache.at < 15_000) return _systemCache.data;
@@ -839,6 +1006,7 @@ async function system() {
     telemetry: {
       enabled: ENABLED,
       bufferedRoutes: _routeBuckets.size,
+      bufferedErrors: _errorSamples.size,
       bufferedSchools: _schoolBuckets.size,
       presenceTracked: _presence.size,
       ..._stats,
@@ -865,6 +1033,9 @@ async function ensureIndexes() {
       T.schoolDay().collection.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
       T.users().collection.createIndex({ date: 1, schoolId: 1, role: 1 }, { unique: true }),
       T.users().collection.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+      T.errors().collection.createIndex({ fingerprint: 1 }, { unique: true }),
+      T.errors().collection.createIndex({ lastAt: -1 }),
+      T.errors().collection.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
       T.health().collection.createIndex({ at: -1 }),
       T.health().collection.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
     ]);
@@ -901,6 +1072,7 @@ function stats() {
   return {
     enabled: ENABLED,
     bufferedRoutes: _routeBuckets.size,
+    bufferedErrors: _errorSamples.size,
     bufferedSchools: _schoolBuckets.size,
     presenceTracked: _presence.size,
     ..._stats,
@@ -919,6 +1091,8 @@ module.exports = {
   schools,
   modules,
   errors,
+  errorLog,
+  recordException,
   system,
   stats,
   _middlewareForTests: middleware,

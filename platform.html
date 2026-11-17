@@ -106,6 +106,9 @@
       <button class="pa-nav-item" onclick="showView('analytics')" id="nav-analytics">
         <i class="fas fa-wave-square"></i> Live Analytics
       </button>
+      <button class="pa-nav-item" onclick="showView('errorlog')" id="nav-errorlog">
+        <i class="fas fa-bug"></i> Error Log
+      </button>
       <button class="pa-nav-item" onclick="showView('mywork')" id="nav-mywork">
         <i class="fas fa-list-check"></i> My Work
       </button>
@@ -523,10 +526,10 @@ function showView(view) {
   document.querySelectorAll('.pa-nav-item').forEach(el => el.classList.remove('active'));
   document.getElementById('nav-' + view)?.classList.add('active');
 
-  const titles = { overview:'Overview', analytics:'Live Analytics', mywork:'My Work', pending:'Pending Approvals', demos:'Demo Requests', tickets:'Support Tickets', schools:'Registered Schools', organizations:'Organizations', provision:'Provision New School', announcements:'System Announcements', diagnostics:'System Diagnostics', branding:'Branding & Platform Settings', landing:'Landing Page CMS', billing:'Billing Overview', referrals:'Referral Program', team:'Platform Team' };
+  const titles = { overview:'Overview', analytics:'Live Analytics', errorlog:'Error Log', mywork:'My Work', pending:'Pending Approvals', demos:'Demo Requests', tickets:'Support Tickets', schools:'Registered Schools', organizations:'Organizations', provision:'Provision New School', announcements:'System Announcements', diagnostics:'System Diagnostics', branding:'Branding & Platform Settings', landing:'Landing Page CMS', billing:'Billing Overview', referrals:'Referral Program', team:'Platform Team' };
   document.getElementById('view-title').textContent = titles[view] || view;
 
-  const views = { overview: renderOverview, analytics: renderAnalytics, mywork: renderMyWork, pending: renderPending, demos: renderDemoRequests, tickets: renderTickets, schools: renderSchools, organizations: renderOrganizations, provision: renderProvision, announcements: renderAnnouncements, diagnostics: renderDiagnostics, branding: renderBranding, landing: renderLandingCMS, billing: renderBillingOverview, referrals: renderReferrals, team: renderTeam };
+  const views = { overview: renderOverview, analytics: renderAnalytics, errorlog: renderErrorLog, mywork: renderMyWork, pending: renderPending, demos: renderDemoRequests, tickets: renderTickets, schools: renderSchools, organizations: renderOrganizations, provision: renderProvision, announcements: renderAnnouncements, diagnostics: renderDiagnostics, branding: renderBranding, landing: renderLandingCMS, billing: renderBillingOverview, referrals: renderReferrals, team: renderTeam };
   (views[view] || (() => {}))();
 }
 
