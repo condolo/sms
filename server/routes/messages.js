@@ -135,84 +135,24 @@ function _inboxQuery({ schoolId, userId, role }) {
   };
 }
 
-/* ── Unread-count micro-cache ────────────────────────────────
-   The bell polls this endpoint from every authenticated tab. A
-   countDocuments over a school's inbox is cheap once the recipients
-   index exists, but repeated polling from every open tab still adds
-   up; a short per-process cache absorbs route-change refreshes, a
-   second tab, and the poll itself without ever returning a count older
-   than UNREAD_CACHE_MS. Writes invalidate the affected user (read) or
-   the whole school (send/delete); another instance's cache expires on
-   its own, which the bell's polling interval already tolerates. */
-const UNREAD_CACHE_MS  = 20_000;
-const UNREAD_CACHE_MAX = 2_000;
-const _unreadCache = new Map();
-
-function _unreadKey(schoolId, userId) { return `${schoolId}|${userId}`; }
-
-function _readUnreadCache(schoolId, userId) {
-  const key = _unreadKey(schoolId, userId);
-  const hit = _unreadCache.get(key);
-  if (!hit) return null;
-  if (Date.now() - hit.at > UNREAD_CACHE_MS) {
-    _unreadCache.delete(key);
-    return null;
-  }
-  return hit.count;
-}
-
-function _pruneUnreadCache() {
-  const now = Date.now();
-  for (const [key, hit] of _unreadCache) {
-    if (now - hit.at > UNREAD_CACHE_MS) _unreadCache.delete(key);
-  }
-  // Pathological churn (many users on one process): drop the oldest 10%
-  // rather than let an unbounded Map grow. The bell re-fetches on miss.
-  if (_unreadCache.size >= UNREAD_CACHE_MAX) {
-    const oldest = [..._unreadCache.entries()]
-      .sort((a, b) => a[1].at - b[1].at)
-      .slice(0, Math.ceil(_unreadCache.size / 10));
-    for (const [key] of oldest) _unreadCache.delete(key);
-  }
-}
-
-function _writeUnreadCache(schoolId, userId, count) {
-  if (_unreadCache.size >= UNREAD_CACHE_MAX) _pruneUnreadCache();
-  _unreadCache.set(_unreadKey(schoolId, userId), { count, at: Date.now() });
-}
-
-function _invalidateUnread(schoolId, userIds = null) {
-  if (!schoolId) return;
-  if (userIds) {
-    for (const userId of userIds) _unreadCache.delete(_unreadKey(schoolId, userId));
-    return;
-  }
-  const prefix = `${schoolId}|`;
-  for (const key of _unreadCache.keys()) {
-    if (key.startsWith(prefix)) _unreadCache.delete(key);
-  }
-}
-
-function _resetUnreadCache() { _unreadCache.clear(); }
-
 /* ── GET /api/messages/unread-count — bell badge count ───────
    Registered before GET /:id-shaped routes would matter — there are
    none in this file today (only PATCH /:id/read and DELETE /:id), so
    no path-shadowing risk, but kept right next to GET / since both
-   share _inboxQuery(). */
+   share _inboxQuery().
+   No in-process cache here on purpose: Render runs more than one
+   instance, so a read handled by instance A cannot invalidate
+   instance B's cached count. The badge then sat stale for the whole
+   TTL after the user read a message — worse than the load the cache
+   saved. The recipients index makes the count cheap enough. */
 router.get('/unread-count', rbac('messages', 'read'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
-    const cached = _readUnreadCache(schoolId, userId);
-    if (cached !== null) {
-      return res.json({ data: { count: cached, cached: true } });
-    }
     const Msg = tenantModel('messages', tenantContext(req));
     const count = await Msg.countDocuments({
       ..._inboxQuery({ schoolId, userId, role }),
       [`isRead.${userId}`]: { $ne: true },
     });
-    _writeUnreadCache(schoolId, userId, count);
     res.json({ data: { count } });
   } catch (err) {
     console.error('[messages/unread-count]', err);
@@ -543,10 +483,6 @@ router.post('/', rbac('messages', 'create'), async (req, res) => {
       isRead: {},
       createdAt: new Date().toISOString(),
     });
-    /* A send can target a role group or 'all', so the recipient set is
-       not always known here — clear the school's bell cache. It is a
-       small Map, and sends are far rarer than polls. */
-    _invalidateUnread(schoolId);
 
     /* ── Send email notifications to recipients ──────────── */
     const school      = req.school;
@@ -684,7 +620,6 @@ async function createDirectMessage(req, { recipientUserIds, subject, body, sende
     ...(extra || {}),
     createdAt: new Date().toISOString(),
   });
-  _invalidateUnread(schoolId, recipientUserIds);
 
   const school = req.school ?? await _model('schools').findOne({ id: schoolId }).lean();
   const schoolEmail = school?.systemEmail || '';
@@ -738,7 +673,6 @@ router.patch('/read-all', rbac('messages', 'read'), async (req, res) => {
       [`isRead.${userId}`]: { $ne: true },
     };
     const result = await Msg.updateMany(query, { $set: { [`isRead.${userId}`]: true } });
-    _invalidateUnread(schoolId, [userId]);
     res.json({ success: true, updated: result.modifiedCount ?? 0 });
   } catch (err) {
     console.error('[messages/read-all]', err);
@@ -757,7 +691,6 @@ router.patch('/:id/read', rbac('messages', 'read'), async (req, res) => {
       { new: true }
     ).lean();
     if (!msg) return res.status(404).json({ error: 'Message not found' });
-    _invalidateUnread(schoolId, [userId]);
     res.json(msg);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -796,7 +729,6 @@ router.delete('/:id', rbac('messages', 'delete'), async (req, res) => {
     } catch (err) {
       console.error('[messages DELETE] attachment sweep failed:', err.message);
     }
-    _invalidateUnread(schoolId);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -880,8 +812,6 @@ module.exports = router;
 // queried recipientId/readAt, fields this collection has never had —
 // messages actually use `recipients` + `isRead.${userId}`).
 module.exports._inboxQuery = _inboxQuery;
-module.exports._resetUnreadCache = _resetUnreadCache;
-module.exports.invalidateUnreadCache = _invalidateUnread;
 // Reused by parent-portal.js's parent-safe compose route — see
 // createDirectMessage's own header comment for why this is shared
 // rather than reimplemented.

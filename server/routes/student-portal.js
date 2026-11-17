@@ -24,7 +24,7 @@ const { resolveCurrentPeriod } = require('./academic-config');
 const { audienceClause }        = require('../utils/announcement-audience');
 const { transportRidesFor }     = require('../utils/transport-ride');
 const { _getMpesaConfig } = require('./mpesa');
-const { createDirectMessage, _inboxQuery, invalidateUnreadCache } = require('./messages');
+const { createDirectMessage, _inboxQuery } = require('./messages');
 const { resolveMessageCategories, resolveOneCategory } = require('../utils/parent-message-recipients');
 const { recipientSummary } = require('../utils/message-audience');
 const { messageExtras } = require('../utils/message-extras');
@@ -654,7 +654,6 @@ router.get('/threads/:counterpartUserId', authMiddleware, PLAN, async (req, res)
     const unreadIds = docs.filter(m => m.senderId !== userId && !m.isRead?.[userId]).map(m => m.id);
     if (unreadIds.length) {
       await Msg.updateMany({ schoolId, id: { $in: unreadIds } }, { $set: { [`isRead.${userId}`]: true } }).catch(() => {});
-      invalidateUnreadCache(schoolId, [userId]);
     }
 
     const counterpart = await tenantModel('users', tenantContext(req))

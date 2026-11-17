@@ -51,7 +51,7 @@ function msgKey(m) {
 }
 
 /* ── empty states ─────────────────────────────────────────── */
-function EmptyDetail({ tab, onCreateGroup, onCompose }) {
+function EmptyDetail({ tab, hasMessages = false, onCreateGroup, onCompose }) {
   if (tab === 'groups') {
     return (
       <div className="flex h-full flex-col items-center justify-center bg-slate-50 px-8 text-center">
@@ -89,11 +89,15 @@ function EmptyDetail({ tab, onCreateGroup, onCompose }) {
         </span>
       </div>
       <h3 className="relative text-sm font-bold text-slate-800">
-        {tab === 'sent' ? 'Nothing sent yet' : 'Your inbox, minus the noise'}
+        {tab === 'sent' && !hasMessages ? 'Nothing sent yet'
+          : tab === 'sent' ? 'Pick a sent message'
+          : 'Your inbox, minus the noise'}
       </h3>
       <p className="relative mt-1 max-w-xs text-xs leading-relaxed text-slate-400">
         {tab === 'sent'
-          ? 'Pick a sent message on the left to reread it, or start a new conversation.'
+          ? (hasMessages
+              ? 'Choose a message on the left to reread it, or start a new conversation.'
+              : 'Pick a sent message on the left to reread it, or start a new conversation.')
           : 'Pick a conversation on the left to read it, or start a direct message to one person, several people, or a saved group.'}
       </p>
       <button
@@ -1026,6 +1030,7 @@ export default function MessagesPage() {
           ) : (
             <EmptyDetail
               tab={tab}
+              hasMessages={msgs.length > 0}
               onCreateGroup={() => openCompose({ mode: 'group', createNew: true })}
               onCompose={() => openCompose({})}
             />

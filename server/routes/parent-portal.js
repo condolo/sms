@@ -28,7 +28,7 @@ const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { isTimetablePublished, publishedReader } = require('../utils/timetable-publish');
 const { resolveCurrentPeriod } = require('./academic-config');
 const { _getMpesaConfig } = require('./mpesa');
-const { _inboxQuery, invalidateUnreadCache } = require('./messages');
+const { _inboxQuery } = require('./messages');
 const { ok, created, E } = require('../utils/response');
 const AuditService = require('../services/audit');
 // Weekly Snapshot's read logic is shared with weekly-snapshots.js's own
@@ -1630,7 +1630,6 @@ router.get('/threads/:counterpartUserId', authMiddleware, PLAN, async (req, res)
     const unreadIds = docs.filter(m => m.senderId !== userId && !m.isRead?.[userId]).map(m => m.id);
     if (unreadIds.length) {
       await Msg.updateMany({ schoolId, id: { $in: unreadIds } }, { $set: { [`isRead.${userId}`]: true } }).catch(() => {});
-      invalidateUnreadCache(schoolId, [userId]);
     }
 
     const counterpart = await tenantModel('users', tenantContext(req))

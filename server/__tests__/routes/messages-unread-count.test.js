@@ -79,7 +79,6 @@ function buildApp(jwtUser) {
 
 beforeEach(() => {
   invalidatePermCache(SCHOOL_A);
-  messagesRouter._resetUnreadCache();
   mockMessageDocs = [];
 });
 
@@ -106,22 +105,6 @@ describe('GET /api/messages/unread-count', () => {
     const res = await supertest(buildApp(me)).get('/api/messages/unread-count');
     expect(res.status).toBe(200);
     expect(res.body.data.count).toBe(0);
-  });
-
-  test('a repeat poll inside the cache window does not re-count; a reset sees the new row', async () => {
-    const me = { userId: 'usr_me', schoolId: SCHOOL_A, role: 'teacher' };
-    mockMessageDocs = [{ schoolId: SCHOOL_A, recipients: ['usr_me'], isRead: {} }];
-    const first = await supertest(buildApp(me)).get('/api/messages/unread-count');
-    expect(first.body.data.count).toBe(1);
-
-    mockMessageDocs.push({ schoolId: SCHOOL_A, recipients: ['teachers'], isRead: {} });
-    const cached = await supertest(buildApp(me)).get('/api/messages/unread-count');
-    expect(cached.body.data.count).toBe(1);
-    expect(cached.body.data.cached).toBe(true);
-
-    messagesRouter._resetUnreadCache();
-    const fresh = await supertest(buildApp(me)).get('/api/messages/unread-count');
-    expect(fresh.body.data.count).toBe(2);
   });
 
   test('a read-only role can mark one message read and mark all read', async () => {
