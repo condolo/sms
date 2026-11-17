@@ -718,8 +718,16 @@ router.get('/classes/:classId/overview', authMiddleware, async (req, res) => {
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([month, agg]) => ({ month, ...agg }));
 
+    // Published report-card snapshots for this class. This must run before
+    // the subject/student trend blocks below — they derive from `snaps`.
+    const snapFilter = { schoolId, classId: req.params.classId };
+    if (hasStreamScope) {
+      snapFilter.streamId = { $in: streamIds };
+    }
+    const snaps = await ReportCards.find(snapFilter)
+      .sort({ publishedAt: -1 }).lean().catch(() => []);
+
     // Subject trend: per-subject class average across terms.
-    const subjectByTerm = new Map(); // subjectId -> [{ term, average }]
     const termSnaps = new Map(); // termLabel -> Map(subjectId -> {sum, count})
     for (const snap of snaps) {
       const termLabel = `${snap.academicYear || ''} T${snap.termNumber ?? ''}`.trim();
@@ -735,20 +743,20 @@ router.get('/classes/:classId/overview', authMiddleware, async (req, res) => {
         termMap.set(sid, agg);
       }
     }
-    const allSubjectIds2 = new Set();
-    for (const snap of snaps) { if (snap.subjects) for (const sid of Object.keys(snap.subjects)) allSubjectIds2.add(sid); }
-    const subjectDocs2 = allSubjectIds2.size
-      ? await tenantModel('subjects', tenantContext(req)).find({ schoolId, id: { $in: [...allSubjectIds2] } }).select('id name').lean().catch(() => [])
+    const allSubjectIds = new Set();
+    for (const snap of snaps) { if (snap.subjects) for (const sid of Object.keys(snap.subjects)) allSubjectIds.add(sid); }
+    const subjectDocs = allSubjectIds.size
+      ? await tenantModel('subjects', tenantContext(req)).find({ schoolId, id: { $in: [...allSubjectIds] } }).select('id name').lean().catch(() => [])
       : [];
-    const subjectNameMap2 = Object.fromEntries(subjectDocs2.map(s => [s.id, s.name]));
-    const subjectTrend = [...allSubjectIds2].map(sid => {
+    const subjectNameMap = Object.fromEntries(subjectDocs.map(s => [s.id, s.name]));
+    const subjectTrend = [...allSubjectIds].map(sid => {
       const terms = [...termSnaps.entries()].map(([termLabel, termMap]) => {
         const agg = termMap.get(sid);
         return agg && agg.count > 0 ? { term: termLabel, average: Math.round(agg.sum / agg.count) } : null;
       }).filter(Boolean);
       return {
         subjectId: sid,
-        subjectName: subjectNameMap2[sid] ?? sid,
+        subjectName: subjectNameMap[sid] ?? sid,
         terms,
       };
     }).filter(s => s.terms.length > 0);
@@ -778,20 +786,6 @@ router.get('/classes/:classId/overview', authMiddleware, async (req, res) => {
         improving: delta != null ? delta > 0 : null,
       };
     }).sort((a, b) => (b.delta ?? 0) - (a.delta ?? 0));
-    if (hasStreamScope) {
-      snapFilter.streamId = { $in: streamIds };
-    }
-    const snaps = await ReportCards.find(snapFilter)
-      .sort({ publishedAt: -1 }).lean().catch(() => []);
-    // Resolve subject names from the subjects collection.
-    const allSubjectIds = new Set();
-    for (const snap of snaps) {
-      if (snap.subjects) for (const sid of Object.keys(snap.subjects)) allSubjectIds.add(sid);
-    }
-    const subjectDocs = allSubjectIds.size
-      ? await tenantModel('subjects', tenantContext(req)).find({ schoolId, id: { $in: [...allSubjectIds] } }).select('id name').lean().catch(() => [])
-      : [];
-    const subjectNameMap = Object.fromEntries(subjectDocs.map(s => [s.id, s.name]));
 
     const subjectAgg = new Map();
     for (const snap of snaps) {
@@ -878,7 +872,7 @@ router.get('/students/:studentId/digest', authMiddleware, async (req, res) => {
 router.get('/dashboard', authMiddleware, async (req, res) => {
   if (!_requireTeacher(req, res)) return;
   try {
-    const { schoolId, userId } = req.jwtUser;
+    const { schoolId, userId, role } = req.jwtUser;
 
     const Teachers           = tenantModel('teachers', tenantContext(req));
     const TeachingAssignments = tenantModel('teaching_assignments', tenantContext(req));
@@ -1426,7 +1420,10 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
             .select('subjectName className classId date startTime type').lean()
             .catch(() => [])
         : [],
-      Messages.countDocuments({ schoolId, recipientId: userId, readAt: null }).catch(() => 0),
+      Messages.countDocuments({
+        ..._inboxQuery({ schoolId, userId, role }),
+        [`isRead.${userId}`]: { $ne: true },
+      }).catch(() => 0),
       Announcements.find({
         schoolId,
         $or: [{ expiresAt: { $gte: new Date() } }, { expiresAt: { $exists: false } }, { expiresAt: null }],

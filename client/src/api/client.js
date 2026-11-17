@@ -376,6 +376,7 @@ export const attendance = {
   },
   conflictOfficerConfig: {
     get:  ()      => _get('/attendance/conflict-officer-config'),
+    probe: ()     => _get('/attendance/conflict-officer-config/probe'),
     save: (steps) => _put('/attendance/conflict-officer-config', { steps }),
   },
 };
@@ -957,6 +958,7 @@ export const messages = {
   list:        (params) => _get('/messages', params),
   send:        (data)   => _post('/messages', data),
   markRead:    (id)     => _patch(`/messages/${id}/read`, {}),
+  markAllRead: ()       => _patch('/messages/read-all', {}),
   remove:      (id)     => _delete(`/messages/${id}`),
   unreadCount: ()       => _get('/messages/unread-count'),
   recipients:  (params) => _get('/messages/recipients', params),

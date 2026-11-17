@@ -138,6 +138,11 @@ app.use(cors({
   credentials: true
 }));
 
+/* ── Platform telemetry: finish-listener only, no I/O ────────
+   Mounted before body parsing so malformed-JSON 400s and other
+   pre-route failures still reach the error log.                */
+telemetry.init(app);
+
 app.use(express.json({ limit: '10mb' }));   // 10MB for bulk sync payloads
 app.use(express.urlencoded({ extended: true }));
 app.use(require('cookie-parser')());
@@ -152,9 +157,6 @@ app.use(mongoSanitize());
 
 /* ── Monitoring: request context (Sentry, if active) ───────── */
 app.use(monitoring.requestHandler());
-
-/* ── Platform telemetry: finish-listener only, no I/O ──────── */
-telemetry.init(app);
 
 /* ── Rate limiting ──────────────────────────────────────────── */
 // All rate limiter messages use the app's standard { success, error } envelope so
@@ -628,6 +630,7 @@ app.use(monitoring.errorHandler());
 /* ── Error handler ──────────────────────────────────────────── */
 app.use((err, req, res, next) => {
   console.error('[SERVER ERROR]', err.stack);
+  telemetry.recordException(err, req);
   monitoring.captureException(err, {
     route:    req.path,
     method:   req.method,

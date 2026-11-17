@@ -539,7 +539,15 @@ router.get('/:id/photo', authMiddleware, async (req, res) => { // rbac: no modul
     const Photos = tenantModel('user_photos', tenantContext(req));
     const photo  = await Photos.findOne({ userId: req.params.id, schoolId }).lean();
 
-    if (!photo?.photoBase64) return res.status(404).end();
+    /* No photo is the normal case for most accounts, not a missing
+       resource. A 404 here turned every avatar render into an "error"
+       (62/24h in the platform error table) and made real 404s harder to
+       spot. 204 is cacheable, keeps <img> on its onError path, and does
+       not pollute the 4xx signal. */
+    if (!photo?.photoBase64) {
+      res.set('Cache-Control', 'private, max-age=300');
+      return res.status(204).end();
+    }
 
     const [header, data] = photo.photoBase64.split(',');
     const mimeMatch = header?.match(/data:(image\/[\w+]+);base64/);

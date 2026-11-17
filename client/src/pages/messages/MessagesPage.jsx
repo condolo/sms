@@ -289,11 +289,14 @@ export default function MessagesPage() {
   });
 
   async function markAllRead() {
-    const unread = msgs.filter(m => !m.isRead?.[userId]);
-    await Promise.allSettled(unread.map(m => msgsApi.markRead(msgKey(m))));
-    qc.invalidateQueries({ queryKey: ['messages'] });
-    window.dispatchEvent(new CustomEvent('messages:read'));
-    flash('Inbox marked as read');
+    try {
+      await msgsApi.markAllRead();
+      qc.invalidateQueries({ queryKey: ['messages'] });
+      window.dispatchEvent(new CustomEvent('messages:read'));
+      flash('Inbox marked as read');
+    } catch {
+      flash('Could not mark all messages read', 'error');
+    }
   }
 
   function openMessage(msg) {

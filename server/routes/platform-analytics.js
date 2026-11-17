@@ -72,6 +72,17 @@ router.get('/errors', async (req, res) => {
   }
 });
 
+router.get('/error-log', async (req, res) => {
+  try {
+    const status = ['4xx', '5xx'].includes(String(req.query.status)) ? String(req.query.status) : 'all';
+    const q = String(req.query.q || '').trim().slice(0, 120);
+    return ok(res, await telemetry.errorLog(rangeOf(req), { status, q, limit: req.query.limit }));
+  } catch (err) {
+    console.error('[platform/analytics error-log]', err);
+    return E.serverError(res);
+  }
+});
+
 router.get('/system', async (_req, res) => {
   try {
     return ok(res, await telemetry.system());

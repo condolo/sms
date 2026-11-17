@@ -226,7 +226,7 @@ export default function AttendancePage() {
   const canViewConflictsDirect = isAttendanceFloor || can('attendance__conflicts', 'read');
   const { data: conflictOfficerProbe, isError: conflictOfficerDenied } = useQuery({
     queryKey: ['attendance', 'conflict-officer-config'],
-    queryFn:  () => attendanceApi.conflictOfficerConfig.get(),
+    queryFn:  () => attendanceApi.conflictOfficerConfig.probe(),
     enabled:  !canViewConflictsDirect,
     retry:    false,
     staleTime: 5 * 60_000,
@@ -234,8 +234,9 @@ export default function AttendancePage() {
   // Still waiting on the officer probe (only fires when the direct checks
   // already failed) — don't redirect off Conflicts until it settles, so an
   // actual assigned Resolver isn't bounced out mid-load.
+  const conflictOfficerAllowed = conflictOfficerProbe?.data?.allowed === true;
   const conflictAccessSettled = canViewConflictsDirect || conflictOfficerProbe !== undefined || conflictOfficerDenied;
-  const canViewConflicts = canViewConflictsDirect || (!!conflictOfficerProbe && !conflictOfficerDenied);
+  const canViewConflicts = canViewConflictsDirect || (!conflictOfficerDenied && conflictOfficerAllowed);
 
   // A direct URL/deep-link (or a permission revoked mid-session) could land
   // viewMode on a tab this user can no longer see — bounce back to Register

@@ -124,13 +124,76 @@ function _inboxQuery({ schoolId, userId, role }) {
     .map(([group]) => group);
   return {
     schoolId,
-    $or: [
-      { recipients: 'all' },
-      { recipients: { $in: groups } },
-      { recipients: userId },
-    ],
+    /* One $in, not an $or of three shapes. Mongo can turn this into a
+       SORT_MERGE over the recipients multikey index, so the inbox list
+       keeps its createdAt order without an in-memory sort, and the
+       unread count touches the index entries for this user rather than
+       every message in the school. Semantically identical: an array
+       field matches when any element is in the list, and a scalar field
+       matches when its value is. */
+    recipients: { $in: ['all', ...groups, userId] },
   };
 }
+
+/* ── Unread-count micro-cache ────────────────────────────────
+   The bell polls this endpoint from every authenticated tab. A
+   countDocuments over a school's inbox is cheap once the recipients
+   index exists, but repeated polling from every open tab still adds
+   up; a short per-process cache absorbs route-change refreshes, a
+   second tab, and the poll itself without ever returning a count older
+   than UNREAD_CACHE_MS. Writes invalidate the affected user (read) or
+   the whole school (send/delete); another instance's cache expires on
+   its own, which the bell's polling interval already tolerates. */
+const UNREAD_CACHE_MS  = 20_000;
+const UNREAD_CACHE_MAX = 2_000;
+const _unreadCache = new Map();
+
+function _unreadKey(schoolId, userId) { return `${schoolId}|${userId}`; }
+
+function _readUnreadCache(schoolId, userId) {
+  const key = _unreadKey(schoolId, userId);
+  const hit = _unreadCache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.at > UNREAD_CACHE_MS) {
+    _unreadCache.delete(key);
+    return null;
+  }
+  return hit.count;
+}
+
+function _pruneUnreadCache() {
+  const now = Date.now();
+  for (const [key, hit] of _unreadCache) {
+    if (now - hit.at > UNREAD_CACHE_MS) _unreadCache.delete(key);
+  }
+  // Pathological churn (many users on one process): drop the oldest 10%
+  // rather than let an unbounded Map grow. The bell re-fetches on miss.
+  if (_unreadCache.size >= UNREAD_CACHE_MAX) {
+    const oldest = [..._unreadCache.entries()]
+      .sort((a, b) => a[1].at - b[1].at)
+      .slice(0, Math.ceil(_unreadCache.size / 10));
+    for (const [key] of oldest) _unreadCache.delete(key);
+  }
+}
+
+function _writeUnreadCache(schoolId, userId, count) {
+  if (_unreadCache.size >= UNREAD_CACHE_MAX) _pruneUnreadCache();
+  _unreadCache.set(_unreadKey(schoolId, userId), { count, at: Date.now() });
+}
+
+function _invalidateUnread(schoolId, userIds = null) {
+  if (!schoolId) return;
+  if (userIds) {
+    for (const userId of userIds) _unreadCache.delete(_unreadKey(schoolId, userId));
+    return;
+  }
+  const prefix = `${schoolId}|`;
+  for (const key of _unreadCache.keys()) {
+    if (key.startsWith(prefix)) _unreadCache.delete(key);
+  }
+}
+
+function _resetUnreadCache() { _unreadCache.clear(); }
 
 /* ── GET /api/messages/unread-count — bell badge count ───────
    Registered before GET /:id-shaped routes would matter — there are
@@ -140,13 +203,21 @@ function _inboxQuery({ schoolId, userId, role }) {
 router.get('/unread-count', rbac('messages', 'read'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
+    const cached = _readUnreadCache(schoolId, userId);
+    if (cached !== null) {
+      return res.json({ data: { count: cached, cached: true } });
+    }
     const Msg = tenantModel('messages', tenantContext(req));
     const count = await Msg.countDocuments({
       ..._inboxQuery({ schoolId, userId, role }),
       [`isRead.${userId}`]: { $ne: true },
     });
+    _writeUnreadCache(schoolId, userId, count);
     res.json({ data: { count } });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    console.error('[messages/unread-count]', err);
+    res.status(500).json({ error: 'Failed to load unread count' });
+  }
 });
 
 /* ── GET /api/messages/recipients — compose-time people directory ──
@@ -324,44 +395,49 @@ router.delete('/groups/:id', rbac('messages', 'delete'), async (req, res) => {
 router.get('/', rbac('messages', 'read'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
-    const { tab = 'inbox', page = 1, limit = 50 } = req.query;
+    const { tab = 'inbox' } = req.query;
     const Msg = tenantModel('messages', tenantContext(req));
+
+    /* Clamp both knobs: an unbounded `limit` (or a NaN from ?page=abc)
+       used to reach Mongo as-is, turning a malformed URL into a slow or
+       failing scan instead of a cheap 400-shaped list. */
+    const pageNum  = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 50));
 
     const query = tab === 'sent'
       ? { schoolId, senderId: userId }
       : _inboxQuery({ schoolId, userId, role });
 
-    const skip  = (Math.max(1, parseInt(page)) - 1) * parseInt(limit);
-    const total = await Msg.countDocuments(query);
-    const msgs  = await Msg.find(query)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit))
-      .lean();
+    const skip = (pageNum - 1) * limitNum;
 
-    // Enrich senderName for legacy messages that were stored without it
-    const missingNameIds = [...new Set(msgs.filter(m => !m.senderName && m.senderId).map(m => m.senderId))];
-    if (missingNameIds.length) {
-      const User = tenantModel('users', tenantContext(req));
-      const users = await User.find({ id: { $in: missingNameIds }, schoolId }).select('id name').lean();
-      const nameMap = Object.fromEntries(users.map(u => [u.id, u.name]));
-      msgs.forEach(m => { if (!m.senderName && m.senderId) m.senderName = nameMap[m.senderId] ?? null; });
-    }
+    /* count + find are independent; running them together removes one
+       full round-trip from the list's critical path. The recipients
+       index (server/utils/indexes.js) covers both. */
+    const [total, msgs] = await Promise.all([
+      Msg.countDocuments(query),
+      Msg.find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limitNum)
+        .lean(),
+    ]);
 
-    /* Direct and group messages store userIds in `recipients`; the old
-       client could only render role labels ("Direct"), so a multi-person
-       message looked identical to a one-person one. Resolve those ids to
-       name/role once for the whole page, and expose a stable
-       recipientUsers array the compose/detail UI can render as chips. */
+    /* One directory lookup for both jobs below: legacy senders missing
+       senderName, and the real user ids behind `recipients`. They used
+       to be two sequential User.find() calls on every list request. */
+    const senderIds = [...new Set(msgs.filter(m => !m.senderName && m.senderId).map(m => m.senderId))];
     const directIds = [...new Set(msgs.flatMap(m => namedRecipients(m)))];
-    const byId = directIds.length
-      ? Object.fromEntries(
-          (await tenantModel('users', tenantContext(req))
-            .find({ id: { $in: directIds } }).select('id name role isActive').lean())
-            .map(u => [u.id, u]),
-        )
-      : {};
+    const directoryIds = [...new Set([...senderIds, ...directIds])];
+    const directory = directoryIds.length
+      ? await tenantModel('users', tenantContext(req))
+          .find({ id: { $in: directoryIds } })
+          .select('id name role isActive')
+          .lean()
+      : [];
+    const byId = Object.fromEntries(directory.map(u => [u.id, u]));
+
     msgs.forEach(m => {
+      if (!m.senderName && m.senderId) m.senderName = byId[m.senderId]?.name ?? null;
       Object.assign(m, recipientSummary(m), {
         recipientUsers: namedRecipients(m).map(id => ({
           id,
@@ -380,7 +456,7 @@ router.get('/', rbac('messages', 'read'), async (req, res) => {
 
     res.json({
       data: msgs,
-      pagination: { total, page: parseInt(page), limit: parseInt(limit), pages: Math.ceil(total / parseInt(limit)) }
+      pagination: { total, page: pageNum, limit: limitNum, pages: Math.ceil(total / limitNum) },
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -467,6 +543,10 @@ router.post('/', rbac('messages', 'create'), async (req, res) => {
       isRead: {},
       createdAt: new Date().toISOString(),
     });
+    /* A send can target a role group or 'all', so the recipient set is
+       not always known here — clear the school's bell cache. It is a
+       small Map, and sends are far rarer than polls. */
+    _invalidateUnread(schoolId);
 
     /* ── Send email notifications to recipients ──────────── */
     const school      = req.school;
@@ -604,6 +684,7 @@ async function createDirectMessage(req, { recipientUserIds, subject, body, sende
     ...(extra || {}),
     createdAt: new Date().toISOString(),
   });
+  _invalidateUnread(schoolId, recipientUserIds);
 
   const school = req.school ?? await _model('schools').findOne({ id: schoolId }).lean();
   const schoolEmail = school?.systemEmail || '';
@@ -639,6 +720,28 @@ async function createDirectMessage(req, { recipientUserIds, subject, body, sende
   return msg.toObject();
 }
 
+/* ── PATCH /api/messages/read-all — clear the badge in one write ──
+   "Mark all read" used to fire one PATCH /:id/read per row from the
+   browser: 100 unread messages meant 100 requests, 100 findOneAndUpdate
+   round-trips and 100 cache invalidations. One updateMany is both
+   cheaper and atomic from the reader's point of view. */
+router.patch('/read-all', rbac('messages', 'update'), async (req, res) => {
+  try {
+    const { schoolId, userId, role } = req.jwtUser;
+    const Msg = tenantModel('messages', tenantContext(req));
+    const query = {
+      ..._inboxQuery({ schoolId, userId, role }),
+      [`isRead.${userId}`]: { $ne: true },
+    };
+    const result = await Msg.updateMany(query, { $set: { [`isRead.${userId}`]: true } });
+    _invalidateUnread(schoolId, [userId]);
+    res.json({ success: true, updated: result.modifiedCount ?? 0 });
+  } catch (err) {
+    console.error('[messages/read-all]', err);
+    res.status(500).json({ error: 'Failed to mark messages read' });
+  }
+});
+
 /* ── PATCH /api/messages/:id/read — mark as read ─────────── */
 router.patch('/:id/read', rbac('messages', 'update'), async (req, res) => {
   try {
@@ -650,6 +753,7 @@ router.patch('/:id/read', rbac('messages', 'update'), async (req, res) => {
       { new: true }
     ).lean();
     if (!msg) return res.status(404).json({ error: 'Message not found' });
+    _invalidateUnread(schoolId, [userId]);
     res.json(msg);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -688,6 +792,7 @@ router.delete('/:id', rbac('messages', 'delete'), async (req, res) => {
     } catch (err) {
       console.error('[messages DELETE] attachment sweep failed:', err.message);
     }
+    _invalidateUnread(schoolId);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -771,6 +876,7 @@ module.exports = router;
 // queried recipientId/readAt, fields this collection has never had —
 // messages actually use `recipients` + `isRead.${userId}`).
 module.exports._inboxQuery = _inboxQuery;
+module.exports._resetUnreadCache = _resetUnreadCache;
 // Reused by parent-portal.js's parent-safe compose route — see
 // createDirectMessage's own header comment for why this is shared
 // rather than reimplemented.

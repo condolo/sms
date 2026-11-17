@@ -260,6 +260,24 @@ describe('GET /dashboard — myClasses comes from every way a school assigns a c
   });
 });
 
+describe('GET /classes/:classId/overview', () => {
+  test('returns the class overview instead of throwing on an undefined snapshots query', async () => {
+    mockClassDocs = [{ id: CLASS_ID, schoolId: SCHOOL_A, name: 'Standard 4A', formTeacherId: TEACHER_ID }];
+    mockStudentDocs = [
+      { id: 'stu_1', schoolId: SCHOOL_A, firstName: 'Amara', lastName: 'Osei', classId: CLASS_ID, status: 'active' },
+    ];
+    mockAttendanceDocs = [
+      { schoolId: SCHOOL_A, classId: CLASS_ID, studentId: 'stu_1', date: '2026-10-01', status: 'present' },
+      { schoolId: SCHOOL_A, classId: CLASS_ID, studentId: 'stu_1', date: '2026-10-02', status: 'absent' },
+    ];
+    const res = await supertest(buildApp()).get(`/api/teacher-portal/classes/${CLASS_ID}/overview`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.classId).toBe(CLASS_ID);
+    expect(res.body.data.className).toBe('Standard 4A');
+    expect(res.body.data.studentCount).toBe(1);
+  });
+});
+
 describe('GET /dashboard — atRiskStudents (3+ absences)', () => {
   test('a student with 3 in-term absences is flagged; an out-of-term absence does not count toward the threshold', async () => {
     mockStudentDocs = [

@@ -86,18 +86,22 @@ async function _isAttendanceConflictOfficer(schoolId, ctx, userId) {
    explicit 'attendance__conflicts' grant (hasExplicitSubGrant, no coarse-
    grant fallback) — this reveals cross-class data quality issues school-wide,
    not just a caller's own register, so it stays off by default like 'report'. */
+async function _hasAttendanceConflictAccess(req, action = 'read') {
+  try {
+    const { schoolId, userId, role } = req.jwtUser || {};
+    if (ScopeEngine.ATTENDANCE_FLOOR_ROLES.has(role)) return true;
+    if (schoolId && userId && await _isAttendanceConflictOfficer(schoolId, tenantContext(req), userId)) {
+      return true;
+    }
+  } catch (err) {
+    console.error('[attendance] conflict-officer check failed, falling back to explicit grant check:', err.message);
+  }
+  return hasExplicitSubGrant(req, 'attendance', 'conflicts', action);
+}
+
 function attendanceConflictAccess(action) {
   return async (req, res, next) => {
-    try {
-      const { schoolId, userId, role } = req.jwtUser || {};
-      if (ScopeEngine.ATTENDANCE_FLOOR_ROLES.has(role)) return next();
-      if (schoolId && userId && await _isAttendanceConflictOfficer(schoolId, tenantContext(req), userId)) {
-        return next();
-      }
-    } catch (err) {
-      console.error('[attendance] conflict-officer check failed, falling back to explicit grant check:', err.message);
-    }
-    if (await hasExplicitSubGrant(req, 'attendance', 'conflicts', action)) return next();
+    if (await _hasAttendanceConflictAccess(req, action)) return next();
     return E.forbidden(res, 'Only admins, principals, deputies, the assigned Attendance Conflict Resolver, or an explicitly granted role can access attendance conflicts.');
   };
 }
@@ -584,6 +588,22 @@ router.put('/conflicts/:id/resolve', authMiddleware, PLAN, MODGATE, attendanceCo
    not an ordinary attendance:update, and an already-assigned resolver
    reassigning themself (or someone else) without admin oversight would
    be a privilege-escalation path this guards against. */
+/* GET /conflict-officer-config/probe — one boolean for the UI.
+   AttendancePage needs to know whether to show the Conflicts tab for a
+   teacher who is not a floor role. It used to call the real config
+   endpoint and treat the expected 403 as "no access", which put ~100
+   authorization probes into the 4xx error table every day. This endpoint
+   returns the same decision as 200 { allowed } and exposes no config. */
+router.get('/conflict-officer-config/probe', authMiddleware, PLAN, MODGATE, async (req, res) => {
+  try {
+    const allowed = await _hasAttendanceConflictAccess(req, 'read');
+    return ok(res, { allowed });
+  } catch (err) {
+    console.error('[attendance/conflict-officer-config probe]', err);
+    return E.serverError(res);
+  }
+});
+
 router.get('/conflict-officer-config', authMiddleware, PLAN, MODGATE, attendanceConflictAccess('read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;

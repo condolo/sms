@@ -264,7 +264,7 @@ const INDEXES = [
   },
 
   /* ── messages / notifications ───────────────────────────────
-     Primary: inbox query by schoolId + recipientId */
+     Primary: inbox query by schoolId + the recipients array */
   /* ── message_groups ───────────────────────────────────────────────
      Saved recipient lists (reusable groups). Primary lookup: a school's
      own groups, newest first; the group detail screen fetches one by id. */
@@ -371,7 +371,12 @@ const INDEXES = [
   {
     col: 'messages',
     indexes: [
-      { key: { schoolId: 1, recipientId: 1, createdAt: -1 }, name: 'messages_inbox' },
+      /* Inbox/unread queries filter schoolId + recipients (a multikey array
+         of userIds and audience keys) and sort by createdAt. The old
+         messages_inbox index keyed `recipientId`, a field this collection
+         has not written for years, so every bell poll was a school-wide
+         scan. Kept out of the way of the sent-tab index below. */
+      { key: { schoolId: 1, recipients: 1, createdAt: -1 }, name: 'messages_recipients_date' },
       { key: { schoolId: 1, senderId: 1, createdAt: -1 },    name: 'messages_sent' },
       { key: { id: 1 },                                       name: 'messages_id', unique: true, sparse: true },
     ],
@@ -1267,6 +1272,11 @@ const DROP_INDEXES = [
   // see that block's own comment for why this HAD to be a drop, not an
   // in-place edit of the same index name.
   { col: 'report_card_draft_comments', name: 'rcdc_student_term' },
+  // Messages inbox was keyed on `recipientId`, a field the route stopped
+  // writing when it moved to the `recipients` array. Replaced by
+  // messages_recipients_date; dropping it removes a write-amplification tax
+  // on every message insert for an index nothing can use.
+  { col: 'messages', name: 'messages_inbox' },
 ];
 
 /**
