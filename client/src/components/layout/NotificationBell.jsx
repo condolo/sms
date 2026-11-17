@@ -21,7 +21,8 @@ import { Bell } from 'lucide-react';
 import clsx from 'clsx';
 import { messages as messagesApi } from '@/api/client.js';
 
-const POLL_MS = 45_000;
+const POLL_MS = 90_000;
+const ROUTE_REFRESH_MIN_MS = 15_000;
 
 function _timeAgo(iso) {
   if (!iso) return '';
@@ -40,15 +41,36 @@ export default function NotificationBell({ myUserId, onSelect }) {
   const [items, setItems] = useState([]);
   const [loadingList, setLoadingList] = useState(false);
   const ref = useRef(null);
+  const stoppedRef = useRef(false);
+  const lastFetchRef = useRef(0);
 
   const refreshCount = useCallback(() => {
-    messagesApi.unreadCount().then(r => setCount(r?.data?.count ?? 0)).catch(() => {});
+    // An unauthenticated/forbidden bell must not keep polling: it was the
+    // source of a steady stream of 401s in the error log (and pointless DB
+    // work). The component remounts on the next successful login.
+    if (stoppedRef.current) return;
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+    lastFetchRef.current = Date.now();
+    messagesApi.unreadCount()
+      .then(r => setCount(r?.data?.count ?? 0))
+      .catch(err => {
+        if (err?.status === 401 || err?.status === 403) stoppedRef.current = true;
+      });
   }, []);
 
   useEffect(() => {
     refreshCount();
     const t = setInterval(refreshCount, POLL_MS);
-    return () => clearInterval(t);
+    // A background tab does no work; becoming visible refreshes immediately,
+    // so the badge is never stale when the user looks at it.
+    function onVisibility() {
+      if (document.visibilityState === 'visible') refreshCount();
+    }
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, [refreshCount]);
 
   // Marking read happens on a different page (MessagesPage.jsx) or through
@@ -66,7 +88,13 @@ export default function NotificationBell({ myUserId, onSelect }) {
   // remount to trigger the mount effect above again). Catches both "came
   // back after reading everything" and "a new message arrived while away".
   const location = useLocation();
-  useEffect(() => { refreshCount(); }, [location.pathname, refreshCount]);
+  useEffect(() => {
+    // Route-change refreshes are useful, but they used to fire on every
+    // navigation even when the poll had just run. Throttle them so a quick
+    // click-through does not become a request per page.
+    if (Date.now() - lastFetchRef.current < ROUTE_REFRESH_MIN_MS) return;
+    refreshCount();
+  }, [location.pathname, refreshCount]);
 
   useEffect(() => {
     function handler(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
