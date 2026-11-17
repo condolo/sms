@@ -6,6 +6,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.276.3] - 2026-11-17 - feat(timetable): Subject allocation by class, with collapsible classes
+
+### Added
+- **Class picker** on Timetable → Subject allocation ("All classes" or one class), next to the department picker. Picking a section narrows the class list.
+- **Collapsible classes:** click a class header to fold or unfold it, or use **Collapse all / Expand all**.
+- **Each class header summarises the class** even when folded: number of subjects, how many have no teacher, and how many need attention, or "all done".
+- Opening a class's timetable moves to a small **Timetable ↗** button in the header, since clicking the header now folds the class.
+
+Rows are unchanged: one per subject in the class's curriculum (Classes → Curriculum), plus any teacher assignment for a subject outside it, flagged as such. Checked on the local demo: Form 1A shows its 12 curriculum subjects, none outside; fold, collapse all, expand all and the class picker work. Client only, no server change.
+
+---
+
 ## [v5.276.2] - 2026-11-17 - fix: parent email changes reach the parent's login; behaviour lists show student names
 
 ### Fixed

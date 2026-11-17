@@ -17,7 +17,7 @@
    ============================================================ */
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { AlertCircle, CheckCircle2, HelpCircle, ArrowUpCircle, UserX, Loader2, Users, Plus, X, Repeat } from 'lucide-react';
+import { AlertCircle, CheckCircle2, HelpCircle, ArrowUpCircle, UserX, Loader2, Users, Plus, X, Repeat, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react';
 import { timetable as ttApi, teachingAssignments as taApi } from '@/api/client.js';
 
 const STATUS = {
@@ -80,6 +80,10 @@ export default function AllocationView({ canEdit, onOpenClass, initialTeacher = 
   const [section, setSection] = useState('');
   const [dept, setDept] = useState('');
   const [search, setSearch] = useState('');
+  // One class at a time, and collapsible class sections (v5.276.3) — asked for
+  // so a timetabler can work through allocation class by class.
+  const [klass, setKlass] = useState('');
+  const [collapsed, setCollapsed] = useState(() => new Set());
   const [teacherFilter, setTeacherFilter] = useState(initialTeacher);
   const [onlyNoClasses, setOnlyNoClasses] = useState(false);
   const [adding, setAdding] = useState(null);       // row key
@@ -146,6 +150,12 @@ export default function AllocationView({ canEdit, onOpenClass, initialTeacher = 
     .filter(x => x.id !== a.id);
 
   const sections = useMemo(() => [...new Set(res.rows.map(r => r.sectionKey).filter(Boolean))].sort(), [res.rows]);
+  // Classes in the order the server lists them, narrowed by the section picker.
+  const classOptions = useMemo(() => {
+    const m = new Map();
+    for (const r of res.rows) if ((!section || r.sectionKey === section) && !m.has(r.classId)) m.set(r.classId, r.className);
+    return [...m.entries()];
+  }, [res.rows, section]);
   const teacherById = useMemo(() => new Map(res.teachers.map(t => [String(t.teacherId), t])), [res.teachers]);
 
   const rows = useMemo(() => {
@@ -154,16 +164,29 @@ export default function AllocationView({ canEdit, onOpenClass, initialTeacher = 
     return res.rows.filter(r =>
       f.test(r)
       && (!section || r.sectionKey === section)
+      && (!klass || r.classId === klass)
       && (!dept || r.departmentId === dept)
       && (!teacherFilter || r.assignments.some(a => String(a.teacherKey) === String(teacherFilter)))
       && (!q || `${r.className} ${r.streamName || ''} ${r.subjectName} ${r.assignments.map(a => a.teacherName).join(' ')}`.toLowerCase().includes(q)));
-  }, [res.rows, filter, section, dept, search, teacherFilter]);
+  }, [res.rows, filter, section, dept, search, teacherFilter, klass]);
 
+  // Per class: the rows shown, plus that class's whole-curriculum counts so a
+  // collapsed header still says what is left to do.
   const byClass = useMemo(() => {
     const m = new Map();
     for (const r of rows) { const k = r.classId; if (!m.has(k)) m.set(k, { className: r.className, rows: [] }); m.get(k).rows.push(r); }
-    return [...m.entries()];
-  }, [rows]);
+    const all = new Map();
+    for (const r of res.rows) {
+      const t = all.get(r.classId) || { total: 0, noTeacher: 0, open: 0 };
+      t.total += 1;
+      if (r.status === 'no_teacher') t.noTeacher += 1;
+      if (r.status !== 'done' || r.teacherOnLeave || r.teacherNotCurrent) t.open += 1;
+      all.set(r.classId, t);
+    }
+    return [...m.entries()].map(([cid, g]) => [cid, { ...g, counts: all.get(cid) }]);
+  }, [rows, res.rows]);
+  const toggleClass = (cid) => setCollapsed(prev => { const n = new Set(prev); if (n.has(cid)) n.delete(cid); else n.add(cid); return n; });
+  const allCollapsed = byClass.length > 0 && byClass.every(([cid]) => collapsed.has(cid));
 
   const teachers = useMemo(() => res.teachers.filter(t => (!onlyNoClasses || t.status === 'no_classes') && (!dept || t.departmentId === dept)), [res.teachers, onlyNoClasses, dept]);
   const s = res.summary || {};
@@ -200,9 +223,15 @@ export default function AllocationView({ canEdit, onOpenClass, initialTeacher = 
             <button key={f.id} onClick={() => setFilter(f.id)} className={`text-xs px-2.5 py-1 rounded-full border ${filter === f.id ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200'}`}>{f.label}</button>
           ))}
           {sections.length > 1 && (
-            <select value={section} onChange={e => setSection(e.target.value)} className="text-xs border border-slate-200 rounded-md px-2 py-1 bg-white">
+            <select value={section} onChange={e => { setSection(e.target.value); setKlass(''); }} className="text-xs border border-slate-200 rounded-md px-2 py-1 bg-white">
               <option value="">All sections</option>
               {sections.map(x => <option key={x} value={x}>{x}</option>)}
+            </select>
+          )}
+          {classOptions.length > 1 && (
+            <select value={klass} onChange={e => setKlass(e.target.value)} className="text-xs border border-slate-200 rounded-md px-2 py-1 bg-white" aria-label="Class">
+              <option value="">All classes</option>
+              {classOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
             </select>
           )}
           {res.departments?.length > 0 && (
@@ -212,6 +241,11 @@ export default function AllocationView({ canEdit, onOpenClass, initialTeacher = 
             </select>
           )}
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search class, subject or teacher" className="text-xs border border-slate-200 rounded-md px-2 py-1 w-56" />
+          {byClass.length > 1 && (
+            <button onClick={() => setCollapsed(allCollapsed ? new Set() : new Set(byClass.map(([cid]) => cid)))} className="text-xs px-2 py-1 rounded-md border border-slate-200 text-slate-600 bg-white hover:bg-slate-50">
+              {allCollapsed ? 'Expand all' : 'Collapse all'}
+            </button>
+          )}
           {teacherFilter && (
             <button onClick={() => setTeacherFilter(null)} className="text-xs px-2 py-1 rounded-md bg-sky-50 text-sky-700 border border-sky-200 inline-flex items-center gap-1">
               {teacherById.get(String(teacherFilter))?.name} <X size={11} />
@@ -259,7 +293,23 @@ export default function AllocationView({ canEdit, onOpenClass, initialTeacher = 
             </p>
           ) : byClass.map(([cid, g]) => (
             <div key={cid} className="border-b border-slate-100 last:border-b-0">
-              <button onClick={() => onOpenClass?.(cid, '')} className="w-full text-left px-4 py-2 bg-slate-50 text-xs font-semibold text-slate-700 hover:bg-slate-100">{g.className}</button>
+              <div className="flex items-center gap-2 px-4 py-2 bg-slate-50 hover:bg-slate-100">
+                <button onClick={() => toggleClass(cid)} aria-expanded={!collapsed.has(cid)} className="flex-1 flex items-center gap-1.5 text-left text-xs font-semibold text-slate-700">
+                  {collapsed.has(cid) ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+                  {g.className}
+                  <span className="font-normal text-slate-400">
+                    · {g.counts?.total ?? g.rows.length} subject{(g.counts?.total ?? g.rows.length) === 1 ? '' : 's'}
+                    {g.counts?.noTeacher > 0 && <span className="text-red-600"> · {g.counts.noTeacher} no teacher</span>}
+                    {g.counts?.open > 0 ? <span className="text-amber-600"> · {g.counts.open} need attention</span> : <span className="text-emerald-600"> · all done</span>}
+                  </span>
+                </button>
+                {onOpenClass && (
+                  <button onClick={() => onOpenClass(cid, '')} className="text-[11px] text-slate-500 hover:text-slate-800 inline-flex items-center gap-1" title="Open this class's timetable">
+                    Timetable <ExternalLink size={11} />
+                  </button>
+                )}
+              </div>
+              {!collapsed.has(cid) && (
               <table className="w-full text-xs">
                 <thead className="text-[10px] uppercase tracking-wide text-slate-400">
                   <tr><th className="text-left font-semibold px-4 py-1.5">Subject</th><th className="text-left font-semibold px-2">Teacher</th><th className="font-semibold px-2">Lessons/wk</th><th className="font-semibold px-2">Doubles</th><th className="font-semibold px-2">Placed</th><th className="text-left font-semibold px-2">Status</th></tr>
@@ -358,6 +408,7 @@ export default function AllocationView({ canEdit, onOpenClass, initialTeacher = 
                   ))}
                 </tbody>
               </table>
+              )}
             </div>
           ))}
         </div>
