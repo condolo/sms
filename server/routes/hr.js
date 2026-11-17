@@ -20,7 +20,7 @@ const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { _model } = require('../utils/model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 const AuditService = require('../services/audit');
-const { dispatchNotification } = require('../utils/notify-dispatch');
+const { dispatchNotification, createSystemMessage } = require('../utils/notify-dispatch');
 const email = require('../utils/email');
 const { computePayrollForPeriod } = require('../utils/payroll-engine');
 const { getStatutoryCalculator, supportedCountries } = require('../utils/statutory');
@@ -287,20 +287,12 @@ router.get('/leave', async (req, res) => {
 
 /* ── Leave workflow helpers ──────────────────────────────────── */
 
-async function _sendSystemMessage(req, recipientUserId, subject, body) {
+async function _sendSystemMessage(req, recipientUserId, subject, body, { eventKey = 'hr_leave_workflow', coalesceKey = null } = {}) {
   const { schoolId, userId: senderId } = req.jwtUser;
-  await tenantModel('messages', tenantContext(req)).create({
-    id: uuidv4(),
-    schoolId,
-    senderId,
-    senderName: 'System',
-    senderRole: 'system',
-    recipients: [recipientUserId],
-    subject,
-    body,
-    type: 'direct',
-    isRead: {},
-    createdAt: new Date().toISOString(),
+  await createSystemMessage({
+    ctx: tenantContext(req), schoolId, eventKey, senderId,
+    recipientUserId, subject, body,
+    coalesceKey: coalesceKey ?? `${eventKey}:${recipientUserId}:${subject}`,
   });
 }
 

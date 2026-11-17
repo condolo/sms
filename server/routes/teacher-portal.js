@@ -38,6 +38,21 @@ function _requireTeacher(req, res) {
   return true;
 }
 
+/* Messaging endpoints (inbox + 1:1 threads) are staff tools, not
+   classroom tools: any non-portal role may use them. They were gated to
+   teacher/staff only, which is why the admin's Messages page silently
+   lost the Chats tab the teacher's had — the navigation differed by
+   role for no permission reason. The pairing logic itself is
+   role-agnostic. */
+function _requireMessagingStaff(req, res) {
+  const role = req.jwtUser?.role;
+  if (role === 'parent' || role === 'guardian' || role === 'student') {
+    E.forbidden(res, 'This endpoint is for staff accounts only.');
+    return false;
+  }
+  return true;
+}
+
 const _resolveTeacher = (userId, email, schoolId) =>
   resolveTeacher(userId, email, schoolId, 'firstName lastName title photo email');
 
@@ -1484,7 +1499,7 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
    direct messages), not the parent-scoped view that 403s here.
    ══════════════════════════════════════════════════════════════ */
 router.get('/inbox', authMiddleware, async (req, res) => {
-  if (!_requireTeacher(req, res)) return;
+  if (!_requireMessagingStaff(req, res)) return;
   try {
     const { schoolId, userId, role } = req.jwtUser;
     const Msg = tenantModel('messages', tenantContext(req));
@@ -1583,7 +1598,7 @@ router.get('/inbox', authMiddleware, async (req, res) => {
    two faces cannot disagree about what a conversation contains.
    ══════════════════════════════════════════════════════════════ */
 router.get('/threads/:counterpartUserId', authMiddleware, async (req, res) => {
-  if (!_requireTeacher(req, res)) return;
+  if (!_requireMessagingStaff(req, res)) return;
   try {
     const { schoolId, userId, role } = req.jwtUser;
     const counterpartUserId = req.params.counterpartUserId;
@@ -1645,7 +1660,7 @@ router.get('/threads/:counterpartUserId', authMiddleware, async (req, res) => {
    document shape stay identical.
    ══════════════════════════════════════════════════════════════ */
 router.post('/threads/:counterpartUserId/messages', authMiddleware, async (req, res) => {
-  if (!_requireTeacher(req, res)) return;
+  if (!_requireMessagingStaff(req, res)) return;
   try {
     const { schoolId, userId } = req.jwtUser;
     const counterpartUserId = req.params.counterpartUserId;

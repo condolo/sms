@@ -14,12 +14,19 @@
    conversation with whichever recipient the grouping happened to pick.
    ============================================================ */
 
-/* ── Role → recipient group mapping ─────────────────────── */
+/* ── Role → recipient group mapping ───────────────────────
+   `teachers` includes every classroom-facing staff role INCLUDING
+   `deputy` — before, an announcement "To: Teachers" silently skipped
+   deputies even though BROADCAST_ROLES and the compose UI treat them
+   as staff. `staff` likewise includes `deputy`. Custom roles are
+   deliberately NOT auto-added here: an unknown role in a group would
+   let a broadcast reach accounts nobody vetted; add explicit entries
+   when a custom role is created. */
 const ROLE_GROUPS = {
-  teachers: ['teacher', 'section_head', 'deputy_principal'],
+  teachers: ['teacher', 'section_head', 'deputy_principal', 'deputy'],
   parents:  ['parent', 'guardian'],
   students: ['student'],
-  staff:    ['teacher', 'section_head', 'deputy_principal', 'principal', 'hr',
+  staff:    ['teacher', 'section_head', 'deputy_principal', 'deputy', 'principal', 'hr',
              'admissions_officer', 'finance', 'exams_officer', 'timetabler',
              'discipline_committee'],
 };

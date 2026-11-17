@@ -379,6 +379,13 @@ export default function MessagesPanel({
                           <span className="text-[9.5px] font-bold uppercase tracking-[0.04em] text-slate-400 bg-slate-100 rounded px-1.5 py-[2px]">
                             {isSent ? 'Sent' : role.label}
                           </span>
+                          {/* The child this message is about — the parent sent it
+                              with a child selected, so show which one. */}
+                          {m.childName && (
+                            <span className="inline-flex items-center gap-0.5 text-[9.5px] font-bold uppercase tracking-[0.04em] text-sky-600 bg-sky-50 rounded px-1.5 py-[2px]">
+                              {m.childName}
+                            </span>
+                          )}
                           {m.isGroup && (
                             <span className="inline-flex items-center gap-1 text-[9.5px] font-bold uppercase tracking-[0.04em] text-violet-500 bg-violet-50 rounded px-1.5 py-[2px]">
                               <Users size={9} /> Group

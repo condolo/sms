@@ -28,6 +28,7 @@ import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { rememberDest, locationToDest } from '@/utils/postLoginRedirect.js';
+import { useDialogBehavior, trapTabKey } from '@/ui/Dialog.jsx';
 import useAuthStore from '@/store/auth.js';
 import { useSchoolTheme } from '@/hooks/useSchoolTheme.js';
 import { buildModuleConfigMap } from '@/config/moduleNav.js';
@@ -245,18 +246,25 @@ function QuickStat({ icon: Icon, label, value, valueColor, onClick, iconBg, icon
    a different component type and unmounted+remounted the whole modal
    — destroying and recreating the <input>/<textarea> DOM nodes, which
    is what drops focus. Same fix already applied to MessagesPanel. ── */
-function ComposeMessageModal({ open, mode, sent, recipientOptions, form, onFormChange, error, sending, onClose, onSend, primary }) {
+function ComposeMessageModal({ open, mode, sent, recipientOptions, form, onFormChange, error, sending, onClose, onSend, primary, activeChildName }) {
+  /* Shared dialog behavior: Escape closes, page scroll locks, focus
+     moves inside and returns to the trigger. Hooks run before the
+     early return below. */
+  const dialogRef = useRef(null);
+  useDialogBehavior(open, onClose, dialogRef);
   if (!open) return null;
   return (
     <AnimatePresence>
       <motion.div key="compose-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         className="fixed inset-0 bg-black/30 z-40" onClick={onClose} />
-      <motion.div key="compose-dialog" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }}
-        role="dialog" aria-modal="true" aria-label={mode === 'reply' ? 'Reply to message' : 'New message'}
+      <motion.div key="compose-dialog" ref={dialogRef} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }}
+        role="dialog" aria-modal="true" aria-labelledby="parent-compose-title"
+        tabIndex={-1}
+        onKeyDown={e => { if (e.key !== 'Escape') trapTabKey(e, e.currentTarget); }}
         className="fixed inset-0 z-50 flex items-center justify-center p-4">
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md" onClick={e => e.stopPropagation()}>
           <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-            <h3 className="text-sm font-semibold text-slate-900">{mode === 'reply' ? 'Reply' : 'New Message'}</h3>
+            <h3 id="parent-compose-title" className="text-sm font-semibold text-slate-900">{mode === 'reply' ? 'Reply' : 'New Message'}</h3>
             <button onClick={onClose} aria-label="Close message" className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100">
               <X size={16} />
             </button>
@@ -272,6 +280,14 @@ function ComposeMessageModal({ open, mode, sent, recipientOptions, form, onFormC
             </div>
           ) : (
             <div className="px-5 py-4 space-y-3">
+              {/* Which child this message is about — stored ON the message
+                 (server keeps childId/childName) so the teacher reading it
+                 never has to guess in a two-child family. */}
+              {activeChildName && (
+                <p className="inline-flex items-center gap-1.5 rounded-full bg-slate-50 border border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
+                  About {activeChildName}
+                </p>
+              )}
               <div>
                 <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">To</label>
                 {mode === 'reply' && (
@@ -1641,6 +1657,7 @@ export default function ParentDashboard() {
         onClose={() => setComposeOpen(false)}
         onSend={sendCompose}
         primary={primary}
+        activeChildName={children.find(c => c.id === activeChildId)?.name ?? null}
       />
       </>
     );

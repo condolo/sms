@@ -31,6 +31,7 @@ const AuditService = require('../services/audit');
 const {
   getWorkflowConfig, saveWorkflowConfig, resolveStep, resolveAssigneeLabel,
 } = require('../utils/workflow-config');
+const { createSystemMessage } = require('../utils/notify-dispatch');
 
 const REQ_WORKFLOW_KEY = 'inventory_requisition';
 
@@ -544,10 +545,10 @@ function _requisitionSummary(doc) {
    collection), not a new notification channel. */
 async function _sendSystemMessage(req, recipientUserId, subject, body) {
   const { schoolId, userId: senderId } = req.jwtUser;
-  await tenantModel('messages', tenantContext(req)).create({
-    id: uuidv4(), schoolId, senderId, senderName: 'System', senderRole: 'system',
-    recipients: [recipientUserId], subject, body, type: 'direct', isRead: {},
-    createdAt: new Date().toISOString(),
+  await createSystemMessage({
+    ctx: tenantContext(req), schoolId, eventKey: 'inventory_requisition', senderId,
+    recipientUserId, subject, body,
+    coalesceKey: `inventory_requisition:${recipientUserId}:${subject}`,
   });
 }
 

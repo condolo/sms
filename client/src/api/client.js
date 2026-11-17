@@ -956,9 +956,13 @@ export const hr = {
 
 export const messages = {
   list:        (params) => _get('/messages', params),
+  get:         (id)     => _get(`/messages/${id}`),
   send:        (data)   => _post('/messages', data),
-  markRead:    (id)     => _patch(`/messages/${id}/read`, {}),
-  markAllRead: ()       => _patch('/messages/read-all', {}),
+  /* `opts` — { read: false } marks a message unread; omitted means read. */
+  markRead:    (id, opts)     => _patch(`/messages/${id}/read`, opts ?? {}),
+  /* `opts` — { ids, read: false } restores exactly those rows (the
+     "Mark all read" undo); omitted marks the whole inbox read. */
+  markAllRead: (opts)   => _patch('/messages/read-all', opts ?? {}),
   remove:      (id)     => _delete(`/messages/${id}`),
   unreadCount: ()       => _get('/messages/unread-count'),
   recipients:  (params) => _get('/messages/recipients', params),

@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import clsx from 'clsx';
 import { messages as msgsApi, teacherPortalApi } from '@/api/client.js';
+import { useDialogBehavior, trapTabKey } from '@/ui/Dialog.jsx';
 import {
   ATTACHMENT_MAX_BYTES, AUDIENCE_OPTIONS, MESSAGE_KINDS, POLL_MAX_OPTIONS,
   POLL_MIN_OPTIONS, canBroadcast, isPortalRole, isRichKind, kindMeta,
@@ -89,6 +90,12 @@ export default function ComposePanel({ open, initial, onClose, onSent, currentRo
   const qc = useQueryClient();
   const portal = isPortalRole(currentRole);
   const broadcastAllowed = canBroadcast(currentRole);
+  /* Shared dialog behavior: Escape closes, page scroll locks, focus
+     moves into the panel and returns to the trigger. The slide-over
+     keeps its own animated markup, so this is the behavior half of
+     ui/Dialog — the focus trap rides on the panel's onKeyDown below. */
+  const panelRef = useRef(null);
+  useDialogBehavior(open, onClose, panelRef);
   /* Rich compose (kind / due / poll / attachment) and the server-resolved
      class-and-staff audiences exist only on the teacher portal, for the two
      roles it accepts — teacher and staff. Everyone else keeps the plain
@@ -309,17 +316,22 @@ export default function ComposePanel({ open, initial, onClose, onSent, currentRo
            • POST /messages — the plain route every other role uses; it
              deliberately ignores the extra fields. */
       const richSend = mode === 'audience' || (mode !== 'announcement' && carriesExtras);
+      /* A merged directory row (the same person with two account records)
+         carries every matching id — sending to all of them guarantees the
+         message reaches the person however the office looks them up. */
+      const recipientIds = selected.flatMap(s =>
+        (Array.isArray(s.ids) && s.ids.length) ? s.ids : [s.id]);
       let sent;
 
       if (richSend) {
         const payload = { ...base, ...buildExtras() };
         if (mode === 'audience') payload.category = categoryKey;
         else if (mode === 'group') payload.groupId = groupId;
-        else payload.memberIds = selected.map(s => s.id);
+        else payload.memberIds = recipientIds;
         sent = await teacherPortalApi.compose(payload);
       } else {
         const payload = { ...base, type: mode === 'announcement' ? 'announcement' : 'direct' };
-        if (mode === 'direct') payload.recipients = selected.map(s => s.id);
+        if (mode === 'direct') payload.recipients = recipientIds;
         if (mode === 'announcement') payload.recipients = [audience];
         if (mode === 'group') payload.groupId = groupId;
         sent = await msgsApi.send(payload);
@@ -362,8 +374,17 @@ export default function ComposePanel({ open, initial, onClose, onSent, currentRo
             onClick={onClose}
           />
           <motion.div
+            ref={panelRef}
             initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
             transition={{ type: 'spring', stiffness: 320, damping: 32 }}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="compose-title"
+            tabIndex={-1}
+            onKeyDown={e => {
+              if (e.key === 'Escape') return; // useDialogBehavior already closed it — don't double-run
+              trapTabKey(e, e.currentTarget);
+            }}
             className="fixed inset-y-0 right-0 z-50 flex w-full max-w-2xl flex-col bg-slate-50 shadow-2xl"
           >
             {/* Header */}
@@ -375,7 +396,7 @@ export default function ComposePanel({ open, initial, onClose, onSent, currentRo
                   <div className="mb-1 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-white/70">
                     <Sparkles size={12} /> New conversation
                   </div>
-                  <h2 className="text-lg font-bold">Compose a message</h2>
+                  <h2 id="compose-title" className="text-lg font-bold">Compose a message</h2>
                   <p className="mt-0.5 text-xs text-white/70">
                     Direct to one person or many, or broadcast to an audience.
                   </p>

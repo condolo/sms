@@ -36,7 +36,7 @@ function mockMatchFilter(doc, filter) {
   });
 }
 function mockChain(result) {
-  return { select: () => mockChain(result), lean: () => Promise.resolve(result) };
+  return { select: () => mockChain(result), sort: () => mockChain(result), lean: () => Promise.resolve(result) };
 }
 
 let mockRolePermsDocs;
@@ -69,7 +69,13 @@ jest.mock('../../utils/tenant-model', () => ({
     if (collection === 'classes')  return { findOne: () => mockChain({ id: 'cls_001', name: 'Form 1A' }) };
     if (collection === 'subjects') return { findOne: () => mockChain({ id: 'subj_eng', name: 'English Language' }) };
     if (collection === 'users')    return { find: () => mockChain(mockUsersDocs) };
-    if (collection === 'messages') return { create: (doc) => { mockMessagesCreate(doc); return Promise.resolve(doc); } };
+    // createSystemMessage's coalesce lookup finds nothing → falls through to create
+    if (collection === 'messages') {
+      return {
+        findOne: () => mockChain(null),
+        create: (doc) => { mockMessagesCreate(doc); return Promise.resolve(doc); },
+      };
+    }
     // Enum validation (2026-11, mark-submissions.js's POST / submit route):
     // a numeric submission's assessmentType must be one of the school's
     // configured customTypes (assessment.js's exported getConfig) — this

@@ -11,7 +11,7 @@
    ============================================================ */
 
 function chain(result) {
-  return { select: () => chain(result), lean: () => Promise.resolve(result) };
+  return { select: () => chain(result), sort: () => chain(result), lean: () => Promise.resolve(result) };
 }
 
 function makeStore(seed = []) {

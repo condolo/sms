@@ -21,6 +21,7 @@ import {
 import NotificationBell from '@/components/layout/NotificationBell.jsx';
 import FloatingHelp from '@/components/help/FloatingHelp.jsx';
 import TransportRideCard from '@/components/transport/TransportRideCard.jsx';
+import { useDialogBehavior, trapTabKey } from '@/ui/Dialog.jsx';
 import { auth as authApi, studentMessaging, studentPortalApi } from '@/api/client.js';
 import { lessonTeachers, lessonIsForStream, isCombined } from '@/utils/lessonLabels.js';
 
@@ -254,17 +255,24 @@ function ChangePasswordModal({ open, currentPw, newPw, confirmPw, onCurrentChang
    ComposeMessageModal — a function defined inside a render body gets a
    new identity every render and would remount on each keystroke). */
 function ComposeMessageModal({ open, sent, recipientOptions, form, onFormChange, error, sending, onClose, onSend, primary }) {
+  /* Shared dialog behavior: Escape closes, page scroll locks, focus
+     moves inside and returns to the trigger. Hooks run before the
+     early return below. */
+  const dialogRef = useRef(null);
+  useDialogBehavior(open, onClose, dialogRef);
   if (!open) return null;
   return (
     <AnimatePresence>
       <motion.div key="compose-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         className="fixed inset-0 bg-black/30 z-40" onClick={onClose} />
-      <motion.div key="compose-dialog" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }}
-        role="dialog" aria-modal="true" aria-label="New message"
+      <motion.div key="compose-dialog" ref={dialogRef} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }}
+        role="dialog" aria-modal="true" aria-labelledby="student-compose-title"
+        tabIndex={-1}
+        onKeyDown={e => { if (e.key !== 'Escape') trapTabKey(e, e.currentTarget); }}
         className="fixed inset-0 z-50 flex items-center justify-center p-4">
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md" onClick={e => e.stopPropagation()}>
           <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-            <h3 className="text-sm font-semibold text-slate-900">New Message</h3>
+            <h3 id="student-compose-title" className="text-sm font-semibold text-slate-900">New Message</h3>
             <button onClick={onClose} aria-label="Close new message" className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100">
               <X size={16} />
             </button>
@@ -349,18 +357,27 @@ function ComposeMessageModal({ open, sent, recipientOptions, form, onFormChange,
 function StudentThreadModal({ open, thread, data, loading, error, reply, onReplyChange, sending, onSend, onClose, primary }) {
   const messages = data?.messages ?? [];
   const person = data?.counterpart ?? thread;
+  /* Shared dialog behavior: Escape closes, page scroll locks, focus
+     moves inside and returns to the trigger. Hooks run before the
+     early return below. */
+  const dialogRef = useRef(null);
+  useDialogBehavior(open, onClose, dialogRef);
   if (!open) return null;
   return (
     <AnimatePresence>
       <motion.div key="thread-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         className="fixed inset-0 bg-black/30 z-40" onClick={onClose} />
-      <motion.div key="thread-dialog" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }}
-        role="dialog" aria-modal="true" aria-label={`Conversation with ${person?.name || 'school office'}`}
+      <motion.div key="thread-dialog" ref={dialogRef} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }}
+        role="dialog" aria-modal="true"
+        aria-labelledby={person?.name ? 'student-thread-title' : undefined}
+        aria-label={person?.name ? undefined : 'Conversation with the school office'}
+        tabIndex={-1}
+        onKeyDown={e => { if (e.key !== 'Escape') trapTabKey(e, e.currentTarget); }}
         className="fixed inset-0 z-50 flex items-center justify-center p-4">
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
           <div className="flex items-start justify-between px-5 py-4 border-b border-slate-100">
             <div className="min-w-0">
-              <h3 className="text-sm font-semibold text-slate-900 truncate">{person?.name || 'School office'}</h3>
+              <h3 id="student-thread-title" className="text-sm font-semibold text-slate-900 truncate">{person?.name || 'School office'}</h3>
               <p className="text-[11px] text-slate-400 capitalize">{String(person?.role || 'staff').replace(/_/g, ' ')}</p>
             </div>
             <button onClick={onClose} aria-label="Close conversation" className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100">

@@ -10,10 +10,10 @@
    so nobody is offered a mode their role cannot use.
    ============================================================ */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
-  Check, ChevronRight, Inbox, MessageCircle, MessageSquare,
+  Check, ChevronRight, Inbox, Mail, MessageCircle, MessageSquare,
   Plus, Search, Send, Sparkles, UserPlus, Users, X,
 } from 'lucide-react';
 import clsx from 'clsx';
@@ -29,14 +29,14 @@ import MessageDetail from './components/MessageDetail.jsx';
 import MessageRow from './components/MessageRow.jsx';
 import ThreadView from './components/ThreadView.jsx';
 
-/* A conversation is the pair (this user, one counterpart). The server can
-   pair them for these two roles, and this page is the only place on the web
-   that reads them: ProtectedRoute sends parents, guardians and students to
-   their own portals, so a parent never reaches this screen (their inbox, with
-   no conversation view, is ParentDashboard's MessagesPanel; the parent-portal
-   thread routes serve the mobile app). A student account has no pairing route
-   at all, so it gets the inbox and sent tabs only. */
-const CHAT_ROLES = new Set(['teacher', 'staff']);
+/* A conversation is the pair (this user, one counterpart). The pairing
+   routes are staff tools, not classroom tools — every non-portal role
+   gets them (they were gated to teacher/staff only, which is why the
+   admin's Messages page silently lost the Chats tab the teacher's had).
+   This page is only reachable by staff anyway (ProtectedRoute sends
+   parents, guardians and students to their own portals, whose thread
+   routes serve the mobile app), but the guard keeps the tab honest if
+   routing ever changes. */
 
 const MESSAGE_FILTERS = [
   { id: 'all', label: 'All' },
@@ -190,17 +190,33 @@ export default function MessagesPage() {
   const [composing, setComposing] = useState(null);
   const [toast, setToast] = useState(null);
   const toastTimer = useRef(null);
+  /* A message reached by deep link (?msg=…) may not sit in the loaded
+     list pages — fetching it separately lets the detail pane render it
+     without forcing a full inbox refetch. */
+  const [linkedMsg, setLinkedMsg] = useState(null);
 
-  const chatCapable = CHAT_ROLES.has(userRole);
+  /* Every non-portal role gets conversations — see the comment above. */
+  const chatCapable = !portal;
   /* Only the teacher portal pairs conversations for a role that can reach
-     this page (see CHAT_ROLES above), so there is no parent branch here. */
+     this page (see the comment above), so there is no parent branch here. */
   const chatApi = teacherPortalApi;
   const canStartChat = chatCapable;
 
-  const messageQuery = useQuery({
+  const PAGE_SIZE = 30;
+
+  /* Inbox/sent in pages of 30 — the old fixed limit:100 made the first
+     paint wait on a hundred-row query and has no ceiling for a school
+     with years of announcements. "Load older" pulls the next page. */
+  const messageQuery = useInfiniteQuery({
     queryKey: ['messages', tab],
-    queryFn: () => msgsApi.list({ tab, limit: 100 }),
+    queryFn: ({ pageParam = 1 }) => msgsApi.list({ tab, limit: PAGE_SIZE, page: pageParam }),
     enabled: tab !== 'groups' && tab !== 'chats',
+    initialPageParam: 1,
+    getNextPageParam: (last) => {
+      const p = last?.pagination;
+      if (!p || p.page >= p.pages) return undefined;
+      return p.page + 1;
+    },
     staleTime: 15_000,
   });
 
@@ -239,11 +255,15 @@ export default function MessagesPage() {
     staleTime: 60_000,
   });
 
-  const msgs = (tab === 'groups' || tab === 'chats') ? [] : (messageQuery.data?.data ?? []);
+  const msgs = (tab === 'groups' || tab === 'chats')
+    ? []
+    : (messageQuery.data?.pages ?? []).flatMap(p => p?.data ?? []);
   const groups = groupsQuery.data?.data ?? [];
   const threads = threadsQuery.data?.data?.threads ?? [];
   const contacts = contactsQuery.data?.data?.contacts ?? [];
-  const selected = msgs.find(m => msgKey(m) === selectedId) ?? null;
+  /* A deep-linked message renders even when it is not in the loaded pages. */
+  const selected = msgs.find(m => msgKey(m) === selectedId)
+    ?? (linkedMsg && msgKey(linkedMsg) === selectedId ? linkedMsg : null);
   const selectedGroup = groups.find(g => g.id === selectedGroupId) ?? null;
   const unreadCount = unreadQuery.data?.data?.count ?? 0;
   /* Only conversations with a person count toward the Chats badge — see
@@ -272,44 +292,143 @@ export default function MessagesPage() {
     );
   }, [groups, search]);
 
-  function flash(msg, type = 'success') {
+  function flash(msg, type = 'success', action = null) {
     if (toastTimer.current) clearTimeout(toastTimer.current);
-    setToast({ msg, type });
+    setToast({ msg, type, action });
     toastTimer.current = setTimeout(() => setToast(null), 3200);
   }
 
-  /* ── mark read ─────────────────────────────────────────── */
+  /* ── mark read / unread ────────────────────────────────── */
   const markRead = useMutation({
     mutationFn: id => msgsApi.markRead(id),
     onSuccess: (_, id) => {
-      qc.setQueriesData({ queryKey: ['messages'] }, old => {
-        if (!old?.data || !Array.isArray(old.data)) return old;
-        return {
-          ...old,
-          data: old.data.map(m => msgKey(m) === id
-            ? { ...m, isRead: { ...(m.isRead ?? {}), [userId]: true } }
-            : m),
-        };
-      });
+      setListReadState(id, true);
       qc.invalidateQueries({ queryKey: ['messages', 'unread-count'] });
       window.dispatchEvent(new CustomEvent('messages:read', { detail: { delta: -1 } }));
     },
   });
 
+  /* "Mark unread" on an open message — the reader's way back out of an
+     accidental open. One PATCH, then the badge reflects +1 again. */
+  const markUnread = useMutation({
+    mutationFn: id => msgsApi.markRead(id, { read: false }),
+    onSuccess: (_, id) => {
+      setListReadState(id, false);
+      qc.invalidateQueries({ queryKey: ['messages', 'unread-count'] });
+      window.dispatchEvent(new CustomEvent('messages:read', { detail: { delta: 1 } }));
+      flash('Marked as unread');
+    },
+    onError: err => flash(err.message || 'Could not mark unread', 'error'),
+  });
+
+  /* The list cache can be a plain page (older callers) or the infinite
+     query's { pages: [...] } shape — update both so the row flips in
+     place without a refetch. Each infinite page is the server body
+     { data: [messages], pagination }, so the rows live at page.data. */
+  function setListReadState(id, read) {
+    qc.setQueriesData({ queryKey: ['messages'] }, old => {
+      const flip = m => (msgKey(m) === id
+        ? { ...m, isRead: { ...(m.isRead ?? {}), [userId]: read } }
+        : m);
+      if (Array.isArray(old?.data)) {
+        return { ...old, data: old.data.map(flip) };
+      }
+      if (Array.isArray(old?.pages)) {
+        return {
+          ...old,
+          pages: old.pages.map(p => (
+            p?.data && Array.isArray(p.data)
+              ? { ...p, data: p.data.map(flip) }
+              : p
+          )),
+        };
+      }
+      return old;
+    });
+  }
+
   async function markAllRead() {
+    /* Snapshot which rows were unread FIRST — undo puts back exactly
+       those, not "whatever looks unread now". */
+    const wasUnread = filteredMessages
+      .filter(m => tab === 'inbox' && !m.isRead?.[userId])
+      .map(msgKey);
     try {
       await msgsApi.markAllRead();
       qc.invalidateQueries({ queryKey: ['messages'] });
       window.dispatchEvent(new CustomEvent('messages:read', { detail: { count: 0 } }));
-      flash('Inbox marked as read');
+      flash('Inbox marked as read', 'success',
+        wasUnread.length ? { label: 'Undo', onClick: () => undoMarkAllRead(wasUnread) } : null);
     } catch {
       flash('Could not mark all messages read', 'error');
+    }
+  }
+
+  async function undoMarkAllRead(ids) {
+    try {
+      await msgsApi.markAllRead({ ids, read: false });
+      qc.invalidateQueries({ queryKey: ['messages'] });
+      qc.invalidateQueries({ queryKey: ['messages', 'unread-count'] });
+      window.dispatchEvent(new CustomEvent('messages:read', { detail: { delta: ids.length } }));
+      flash('Unread restored');
+    } catch {
+      flash('Could not restore unread state', 'error');
+    }
+  }
+
+  /* Deep link: /messages?msg=<id> opens that message directly — a
+     notification push, a bookmark or a "show me this one" link all land
+     on the exact row, not a scrolled hunt. Consumed once on mount; the
+     row is fetched separately because it may sit beyond the loaded
+     pages. Any other query params survive the cleanup. */
+  useEffect(() => {
+    let params;
+    try {
+      params = new URLSearchParams(window.location.search);
+    } catch {
+      return;
+    }
+    const id = params.get('msg');
+    if (!id) return;
+    params.delete('msg');
+    const qs = params.toString();
+    try {
+      window.history.replaceState(null, '', qs ? `${window.location.pathname}?${qs}` : window.location.pathname);
+    } catch {
+      /* history is unavailable in some embedded contexts — the link still works */
+    }
+    setTab('inbox');
+    setFilter('all');
+    setSelectedId(id);
+    setShowMobileDetail(true);
+    msgsApi.get(id)
+      .then(res => { if (res?.data) setLinkedMsg(res.data); })
+      .catch(() => {
+        /* a stale or foreign id just falls back to the empty detail pane */
+      });
+    // Runs once per mount: the link is consumed, not observed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* Keep the URL honest so a refresh (or a shared link) reopens the same
+     message. replaceState only — the back button must not become a
+     museum of every message the user glanced at. */
+  function syncMsgParam(id) {
+    try {
+      const url = new URL(window.location.href);
+      if (id) url.searchParams.set('msg', id);
+      else url.searchParams.delete('msg');
+      window.history.replaceState(null, '', url.pathname + (url.search || ''));
+    } catch {
+      /* ignore — the UI state itself is already correct */
     }
   }
 
   function openMessage(msg) {
     setSelectedId(msgKey(msg));
     setShowMobileDetail(true);
+    setLinkedMsg(null);
+    syncMsgParam(msgKey(msg));
     if (tab === 'inbox' && !msg.isRead?.[userId]) {
       markRead.mutate(msgKey(msg));
     }
@@ -324,6 +443,8 @@ export default function MessagesPage() {
     setSelectedThreadId(null);
     setPickingChat(false);
     setShowMobileDetail(false);
+    setLinkedMsg(null);
+    syncMsgParam(null);
   }
 
   function openThread(counterpartUserId) {
@@ -929,6 +1050,18 @@ export default function MessagesPage() {
                 />
               ))
             )}
+
+            {/* Load older — the list is paged server-side now; the button
+                only appears when another page actually exists. */}
+            {tab !== 'groups' && tab !== 'chats' && messageQuery.hasNextPage && (
+              <button
+                onClick={() => messageQuery.fetchNextPage()}
+                disabled={messageQuery.isFetchingNextPage}
+                className="w-full border-t border-slate-100 bg-slate-50/60 py-3 text-[11px] font-semibold text-violet-700 transition hover:bg-violet-50 disabled:opacity-50"
+              >
+                {messageQuery.isFetchingNextPage ? 'Loading…' : 'Load older messages'}
+              </button>
+            )}
           </div>
 
           {/* Footer hint */}
@@ -1017,7 +1150,9 @@ export default function MessagesPage() {
               userRole={userRole}
               onDelete={id => deleteMsg.mutate(id)}
               deleting={deleteMsg.isPending}
-              onBack={() => { setShowMobileDetail(false); setSelectedId(null); }}
+              onMarkUnread={tab === 'inbox' ? id => markUnread.mutate(id) : null}
+              markingUnread={markUnread.isPending}
+              onBack={() => { setShowMobileDetail(false); setSelectedId(null); syncMsgParam(null); }}
               onReply={m => replyPrefill(m, false)}
               onReplyAll={m => replyPrefill(m, true)}
               onQuickReply={(m, text) => quickReply.mutateAsync({ msg: m, body: text })}
@@ -1055,12 +1190,25 @@ export default function MessagesPage() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 12, scale: 0.98 }}
             className={clsx(
-              'fixed bottom-6 right-6 z-[60] flex items-center gap-2 rounded-xl px-4 py-3 text-xs font-semibold shadow-xl',
+              'fixed bottom-6 right-6 z-[60] flex items-center gap-3 rounded-xl px-4 py-3 text-xs font-semibold shadow-xl',
               toast.type === 'error' ? 'bg-rose-600 text-white' : 'bg-slate-900 text-white',
             )}
+            role="status"
           >
             {toast.type !== 'error' && <Check size={14} />}
             {toast.msg}
+            {toast.action && (
+              <button
+                onClick={() => {
+                  if (toastTimer.current) clearTimeout(toastTimer.current);
+                  setToast(null);
+                  toast.action.onClick?.();
+                }}
+                className="rounded-lg bg-white/15 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-white transition hover:bg-white/25"
+              >
+                {toast.action.label}
+              </button>
+            )}
           </motion.div>
         )}
       </AnimatePresence>

@@ -37,6 +37,7 @@ const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, E } = require('../utils/response');
 const AuditService = require('../services/audit');
 const { getWorkflowConfig, resolveStep } = require('../utils/workflow-config');
+const { createSystemMessage } = require('../utils/notify-dispatch');
 const { enqueueJob, registerHandler } = require('../utils/job-queue');
 const { _model } = require('../utils/model');
 const { isManagement } = require('../utils/subject-scope');
@@ -513,9 +514,12 @@ async function _notifyReviewers(req, label, body) {
       ? await resolveStep(ctx, schoolId, config.steps[0])
       : await Users.find({ schoolId, role: { $in: ['admin', 'principal', 'section_head'] }, isActive: { $ne: false } }).select('id').lean();
     for (const u of targets) {
-      await tenantModel('messages', ctx).create({
-        id: uuidv4(), schoolId, senderId: req.jwtUser.userId, senderName: 'System', senderRole: 'system',
-        recipients: [u.id], subject: 'Marks submitted for review', body: `${label}: ${body}`, type: 'direct', isRead: {}, createdAt: new Date().toISOString(),
+      await createSystemMessage({
+        ctx, schoolId, eventKey: 'marks_review', senderId: req.jwtUser.userId,
+        recipientUserId: u.id, subject: 'Marks submitted for review', body: `${label}: ${body}`,
+        // Repeated submissions the same day merge into one row per reviewer
+        // instead of stacking identical subjects in the inbox.
+        coalesceKey: `marks_review:${u.id}`,
       });
     }
   } catch (err) { console.error('[mark-submissions notify reviewers]', err); }
@@ -531,9 +535,10 @@ async function _notifyUnlockParties(req, sub, subject, body) {
       ? await resolveStep(ctx, schoolId, config.steps[0])
       : await Users.find({ schoolId, role: { $in: ['admin', 'principal'] }, isActive: { $ne: false } }).select('id').lean();
     for (const u of targets) {
-      await tenantModel('messages', ctx).create({
-        id: uuidv4(), schoolId, senderId: req.jwtUser.userId, senderName: 'System', senderRole: 'system',
-        recipients: [u.id], subject, body, type: 'direct', isRead: {}, createdAt: new Date().toISOString(),
+      await createSystemMessage({
+        ctx, schoolId, eventKey: 'marks_unlock', senderId: req.jwtUser.userId,
+        recipientUserId: u.id, subject, body,
+        coalesceKey: `marks_unlock:${u.id}:${subject}`,
       });
     }
   } catch (err) { console.error('[mark-submissions notify unlock]', err); }
@@ -542,9 +547,10 @@ async function _notifyUnlockParties(req, sub, subject, body) {
 async function _notifyUser(req, userId, subject, body) {
   try {
     const { schoolId } = req.jwtUser;
-    await tenantModel('messages', tenantContext(req)).create({
-      id: uuidv4(), schoolId, senderId: req.jwtUser.userId, senderName: 'System', senderRole: 'system',
-      recipients: [userId], subject, body, type: 'direct', isRead: {}, createdAt: new Date().toISOString(),
+    await createSystemMessage({
+      ctx: tenantContext(req), schoolId, eventKey: 'marks_status', senderId: req.jwtUser.userId,
+      recipientUserId: userId, subject, body,
+      coalesceKey: `marks_status:${userId}:${subject}`,
     });
   } catch (err) { console.error('[mark-submissions notify user]', err); }
 }

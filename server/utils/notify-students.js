@@ -23,8 +23,14 @@ const { dispatchNotification } = require('./notify-dispatch');
  * @param {string} opts.schoolId
  * @param {string} opts.eventKey - notif-settings.js EVENT_REGISTRY key
  * @param {Array<{studentId, inAppSubject, inAppBody, emailDigestSubject, emailDigestBody, sendEmail}>} opts.items
+ * @param {string} [opts.coalesceKey] - override the default per-student
+ *   coalescing. By default two events for the SAME student, with the
+ *   SAME subject, on the SAME day merge into one message (duplicate
+ *   daily summaries / marks rows collapse); pass an explicit key to
+ *   coalesce wider — e.g. a timetable publish coalesces per class so a
+ *   day's 15 lesson edits become ONE message listing every change.
  */
-async function notifyGuardiansForStudents({ ctx, schoolId, eventKey, items }) {
+async function notifyGuardiansForStudents({ ctx, schoolId, eventKey, items, coalesceKey }) {
   for (const item of items || []) {
     if (!item?.studentId) continue;
     try {
@@ -41,6 +47,10 @@ async function notifyGuardiansForStudents({ ctx, schoolId, eventKey, items }) {
         emailDigestSubject: item.emailDigestSubject,
         emailDigestBody:    item.emailDigestBody,
         sendEmail: item.sendEmail,
+        coalesceKey: coalesceKey !== undefined
+          ? coalesceKey
+          : `${eventKey}:${item.studentId}:${item.inAppSubject ?? ''}`,
+        meta: { studentId: item.studentId },
       });
     } catch (err) {
       // One student's notification failing must never block the rest —

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
-  AlertTriangle, ArrowLeft, CheckCheck, CornerUpLeft, Loader2,
-  Megaphone, MessageSquare, ReplyAll, Send, Trash2, Users,
+  AlertTriangle, ArrowLeft, CheckCheck, CornerUpLeft, GraduationCap, Loader2,
+  Mail, Megaphone, MessageSquare, ReplyAll, Send, Trash2, Users,
 } from 'lucide-react';
 import useAuthStore from '@/store/auth.js';
 import {
@@ -48,6 +48,7 @@ function RecipientPills({ msg }) {
 
 export default function MessageDetail({
   msg, userId, userRole, onDelete, deleting, onBack,
+  onMarkUnread, markingUnread,
   onReply, onReplyAll, onQuickReply, replying,
   onVote, voting, onDownloadAttachment, downloadingAttachment,
 }) {
@@ -111,6 +112,17 @@ export default function MessageDetail({
         <div className="flex shrink-0 items-center gap-1">
           {!isMine && (
             <>
+              {onMarkUnread && msg.isRead?.[userId] && (
+                <button
+                  onClick={() => onMarkUnread(msg.id ?? msg._id)}
+                  disabled={markingUnread}
+                  title="Mark as unread"
+                  aria-label="Mark as unread"
+                  className="rounded-lg p-2 text-slate-400 transition hover:bg-violet-50 hover:text-violet-600 disabled:opacity-50"
+                >
+                  {markingUnread ? <Loader2 size={16} className="animate-spin" /> : <Mail size={16} />}
+                </button>
+              )}
               <button
                 onClick={() => onReply?.(msg)}
                 title="Reply"
@@ -161,6 +173,15 @@ export default function MessageDetail({
                     </span>
                   )}
                 </div>
+                {/* The child this message is about, when the sender said so —
+                   a parent with two children writing "can Brian bring his PE
+                   kit" must never leave the teacher guessing which child. */}
+                {(msg.childName || msg.childId) && (
+                  <div className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-700">
+                    <GraduationCap size={10} />
+                    About {msg.childName || 'a linked student'}
+                  </div>
+                )}
                 <div className="mt-2">
                   <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
                     {isGroup ? 'Group' : isAnnouncement ? 'Audience' : 'To'}

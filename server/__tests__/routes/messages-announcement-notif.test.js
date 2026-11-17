@@ -6,7 +6,11 @@
    ============================================================ */
 
 function chain(result) {
-  return { select: () => chain(result), lean: () => Promise.resolve(result) };
+  return {
+    select: () => chain(result),
+    sort:   () => chain(result),   // thread-stitch lookup sorts; result is a single doc
+    lean:   () => Promise.resolve(result),
+  };
 }
 
 function makeStore(seed = []) {

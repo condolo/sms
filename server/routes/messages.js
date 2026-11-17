@@ -30,6 +30,29 @@ router.use(authMiddleware, tenantMiddleware, moduleGate('messages'));
    role outside this set, including custom roles built on a staff base. */
 const PORTAL_ROLES = new Set(['parent', 'guardian', 'student']);
 
+/* A portal CONTEXT is broader than the role name: the JWT carries
+   guardianOf/studentIds only for parent-shaped tokens and studentId for
+   student tokens (routes/auth.js _buildTokenPayload). A custom role that
+   reuses that identity shape is treated as portal too, so the
+   "parents may only message staff" invariant does not silently depend
+   on the literal role string. A staff token carries none of these. */
+function _isPortalContext(jwtUser) {
+  if (!jwtUser) return false;
+  if (PORTAL_ROLES.has(jwtUser.role)) return true;
+  const guardianOf = jwtUser.guardianOf ?? jwtUser.studentIds;
+  if (Array.isArray(guardianOf) && guardianOf.length) return true;
+  if (Array.isArray(jwtUser.roles) && jwtUser.roles.some(r => PORTAL_ROLES.has(r))) return true;
+  return Boolean(jwtUser.studentId);
+}
+
+/* School-wide ('all') broadcasts are an administration action, not a
+   classroom one: any teacher could previously fan out to every account
+   in the school with no cap. Group audiences (teachers/parents/…) stay
+   open to every BROADCAST_ROLES member. */
+const SCHOOLWIDE_BROADCAST_ROLES = new Set([
+  'superadmin', 'admin', 'principal', 'deputy_principal', 'deputy',
+]);
+
 const BROADCAST_ROLES = new Set([
   'superadmin', 'admin', 'principal', 'deputy_principal', 'deputy',
   'section_head', 'teacher', 'hr',
@@ -105,8 +128,8 @@ async function _resolveDirectRecipients(req, rawRecipients) {
     return { status: 400, error: 'One or more recipients are invalid or inactive.' };
   }
 
-  if (PORTAL_ROLES.has(role)) {
-    const disallowed = users.find(u => PORTAL_ROLES.has(u.role));
+  if (_isPortalContext(req.jwtUser)) {
+    const disallowed = users.find(u => _isPortalContext({ role: u.role }));
     if (disallowed) {
       return { status: 403, error: 'Parents and students can only message staff members.' };
     }
@@ -170,7 +193,7 @@ router.get('/recipients', rbac('messages', 'read'), async (req, res) => {
     const { userId, role } = req.jwtUser;
     const User = tenantModel('users', tenantContext(req));
     const q = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 80) : '';
-    const scope = PORTAL_ROLES.has(role) ? 'staff' : (req.query.scope || 'all');
+    const scope = _isPortalContext(req.jwtUser) ? 'staff' : (req.query.scope || 'all');
     const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 30));
 
     const filter = {
@@ -192,19 +215,53 @@ router.get('/recipients', rbac('messages', 'read'), async (req, res) => {
     }
 
     const users = await User.find(filter)
-      .select('id name role')
+      .select('id name role email')
       .sort({ name: 1 })
       .limit(limit)
       .lean();
 
-    res.json({
-      data: users.map(u => ({
+    /* Duplicate account records (the same person entered twice — one row
+       per role) render as two identical compose targets, and a sender
+       cannot tell whether choosing both sends twice. Merge server-side
+       by email — the client never sees the address, only the merged row:
+       one id (the canonical account), every matching id under `ids`, and
+       all roles shown on one line. Accounts with no email cannot be
+       merged safely, so they stay distinct rows. */
+    const byEmail = new Map();
+    const merged = [];
+    for (const u of users) {
+      const key = typeof u.email === 'string' && u.email.includes('@')
+        ? u.email.trim().toLowerCase()
+        : null;
+      if (!key) {
+        merged.push({
+          id: u.id,
+          name: u.name || 'Unnamed user',
+          role: u.role,
+          roleLabel: _roleLabel(u.role),
+        });
+        continue;
+      }
+      const existing = byEmail.get(key);
+      if (existing) {
+        existing.ids.push(u.id);
+        if (u.role && !existing.roles.includes(u.role)) existing.roles.push(u.role);
+        existing.roleLabel = existing.roles.map(_roleLabel).join(' · ');
+        continue;
+      }
+      const person = {
         id: u.id,
+        ids: [u.id],
         name: u.name || 'Unnamed user',
         role: u.role,
+        roles: [u.role].filter(Boolean),
         roleLabel: _roleLabel(u.role),
-      })),
-    });
+      };
+      byEmail.set(key, person);
+      merged.push(person);
+    }
+
+    res.json({ data: merged });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -455,8 +512,8 @@ router.post('/', rbac('messages', 'create'), async (req, res) => {
       if (invalid) {
         return res.status(400).json({ error: `Unknown audience "${invalid}". Choose Everyone, Teachers, Parents, Students, or Staff.` });
       }
-      if (recipientList.includes('all') && PORTAL_ROLES.has(senderRole)) {
-        return res.status(403).json({ error: 'Only staff members may send school-wide announcements.' });
+      if (recipientList.includes('all') && !SCHOOLWIDE_BROADCAST_ROLES.has(senderRole)) {
+        return res.status(403).json({ error: 'School-wide announcements are limited to administrators. You can still announce to Teachers, Parents, Students, or Staff.' });
       }
     } else {
       const resolved = await _resolveDirectRecipients(req, req.body.recipients);
@@ -467,6 +524,29 @@ router.post('/', rbac('messages', 'create'), async (req, res) => {
 
     if (!recipientList.length) {
       return res.status(400).json({ error: 'Choose at least one recipient.' });
+    }
+
+    /* Thread identity: a 1:1 reply is a continuation of the conversation
+       with that person, not a new unrelated row. Stamp `inReplyTo` (the
+       prior message) and `threadId` (the conversation root) so the inbox
+       can group without pattern-matching subjects, and every later reply
+       points at the same root. Multi-recipient, group and announcement
+       sends are their own conversations and stay unstamped. */
+    let thread = null;
+    if (!group && type === 'direct' && recipientList.length === 1) {
+      const otherId = recipientList[0];
+      if (!AUDIENCE_KEYS.has(otherId)) {
+        thread = await Msg.findOne({
+          schoolId,
+          $or: [
+            { senderId: userId, recipients: otherId },
+            { senderId: otherId, recipients: userId },
+          ],
+        })
+          .sort({ createdAt: -1 })
+          .select('id threadId childId childName')
+          .lean();
+      }
     }
 
     const msg = await Msg.create({
@@ -480,6 +560,16 @@ router.post('/', rbac('messages', 'create'), async (req, res) => {
       body,
       type, // 'direct' | 'announcement'
       ...(group ? { groupId: group.id, groupName: group.name } : {}),
+      ...(thread
+        ? {
+            inReplyTo: thread.id,
+            threadId: thread.threadId || thread.id,
+            // A reply keeps the family context the parent's first message
+            // carried, so the teacher always knows which child is meant.
+            ...(thread.childId ? { childId: thread.childId } : {}),
+            ...(thread.childName ? { childName: thread.childName } : {}),
+          }
+        : {}),
       isRead: {},
       createdAt: new Date().toISOString(),
     });
@@ -504,74 +594,50 @@ router.post('/', rbac('messages', 'create'), async (req, res) => {
        recipient having an email address, and push must not inherit that. */
     const pushTargetIds = new Set();
 
+    /* Resolve every audience ONCE into a person map, then notify each
+       person exactly one time. The old per-audience loop resolved each
+       key independently, so ['all','teachers'] emailed every teacher
+       twice and push deduped only by luck of being a Set. */
+    const people = new Map(); // userId → { name, email }
+    const addPerson = (u) => {
+      if (!u?.id || u.id === userId || people.has(u.id)) return;
+      people.set(u.id, { name: u.name || '', email: u.email || '' });
+    };
     for (const recipient of recipientList) {
       if (recipient === 'all') {
-        // Notify all active users in the school (except sender)
         const targets = await User.find({
-          schoolId, isActive: true, id: { $ne: userId }
-        }).lean();
-        for (const u of targets) pushTargetIds.add(u.id);
-        for (const u of targets) {
-          if (u.email && emailEnabled) {
-            // Push a thunk — function not yet called — so enqueueBatch
-            // can control when each batch of SMTP calls fires.
-            notifyJobs.push(() => email.sendMessageNotification({
-              recipientName:  u.name,
-              recipientEmail: u.email,
-              senderName,
-              subject,
-              preview,
-              schoolName:  school.name,
-              schoolEmail,
-              schoolId,
-              isDirect:    false,
-              appUrl:      loginUrl,
-            }));
-          }
-        }
+          schoolId, isActive: true, id: { $ne: userId },
+        }).select('id name email').lean();
+        for (const u of targets) addPerson(u);
       } else if (ROLE_GROUPS[recipient]) {
-        // Notify members of a role group
-        const roles   = ROLE_GROUPS[recipient];
         const targets = await User.find({
           schoolId, isActive: true,
-          role: { $in: roles },
-          id:   { $ne: userId }
-        }).lean();
-        for (const u of targets) pushTargetIds.add(u.id);
-        for (const u of targets) {
-          if (u.email && emailEnabled) {
-            notifyJobs.push(() => email.sendMessageNotification({
-              recipientName:  u.name,
-              recipientEmail: u.email,
-              senderName,
-              subject,
-              preview,
-              schoolName:  school.name,
-              schoolEmail,
-              schoolId,
-              isDirect:    false,
-              appUrl:      loginUrl,
-            }));
-          }
-        }
+          role: { $in: ROLE_GROUPS[recipient] },
+          id:   { $ne: userId },
+        }).select('id name email').lean();
+        for (const u of targets) addPerson(u);
       } else {
-        // Direct / group — already validated and loaded above
-        const target = directRecipientUsers.find(u => u.id === recipient);
-        if (target?.id && target.id !== userId) pushTargetIds.add(target.id);
-        if (target?.email && emailEnabled) {
-          notifyJobs.push(() => email.sendMessageNotification({
-            recipientName:  target.name,
-            recipientEmail: target.email,
-            senderName,
-            subject,
-            preview,
-            schoolName:  school.name,
-            schoolEmail,
-            schoolId,
-            isDirect:    true,
-            appUrl:      loginUrl,
-          }));
-        }
+        addPerson(directRecipientUsers.find(u => u.id === recipient));
+      }
+    }
+
+    /* One email per person, one push per person — collected from the same
+       map so a person reached by two audiences still gets one of each. */
+    for (const u of people.values()) {
+      pushTargetIds.add(u.id);
+      if (u.email && emailEnabled) {
+        notifyJobs.push(() => email.sendMessageNotification({
+          recipientName:  u.name,
+          recipientEmail: u.email,
+          senderName,
+          subject,
+          preview,
+          schoolName:  school.name,
+          schoolEmail,
+          schoolId,
+          isDirect,
+          appUrl:      loginUrl,
+        }));
       }
     }
 
@@ -610,13 +676,43 @@ async function createDirectMessage(req, { recipientUserIds, subject, body, sende
   const Msg  = tenantModel('messages', tenantContext(req));
   const User = tenantModel('users', tenantContext(req));
 
+  /* Same thread stitching as POST /: a one-to-one message continues the
+     existing conversation with that person. Shared here so every portal
+     reply route (parent thread, student thread, teacher thread,
+     behaviour replies) gets conversation identity for free instead of
+     each route re-deriving it. Multi-recipient and group sends stay
+     unstamped — they are their own conversations. `extra` (if it ever
+     carries these fields itself) wins over the stitched ones. */
+  let thread = null;
+  if (!groupId && recipientUserIds.length === 1) {
+    const otherId = recipientUserIds[0];
+    thread = await Msg.findOne({
+      schoolId,
+      $or: [
+        { senderId: userId, recipients: otherId },
+        { senderId: otherId, recipients: userId },
+      ],
+    })
+      .sort({ createdAt: -1 })
+      .select('id threadId childId childName')
+      .lean();
+  }
+
   const msg = await Msg.create({
     id: uuidv4(), schoolId, senderId: userId, senderName, senderRole,
     recipients: recipientUserIds, subject, body, type, isRead: {},
     // A saved-group send stays an ordinary direct message to every member;
     // the stamp is only what lets the inbox show the group badge.
     ...(groupId ? { groupId, groupName } : {}),
-    // kind / dueAt / context / attachment / poll — absent on a plain message.
+    ...(thread
+      ? {
+          inReplyTo: thread.id,
+          threadId: thread.threadId || thread.id,
+          ...(thread.childId ? { childId: thread.childId } : {}),
+          ...(thread.childName ? { childName: thread.childName } : {}),
+        }
+      : {}),
+    // kind / dueAt / context / attachment / poll / childId — absent on a plain message.
     ...(extra || {}),
     createdAt: new Date().toISOString(),
   });
@@ -655,7 +751,7 @@ async function createDirectMessage(req, { recipientUserIds, subject, body, sende
   return msg.toObject();
 }
 
-/* ── PATCH /api/messages/read-all — clear the badge in one write ──
+/* ── Mark read / unread — PATCH /read-all and POST /read-all ──
    "Mark all read" used to fire one PATCH /:id/read per row from the
    browser: 100 unread messages meant 100 requests, 100 findOneAndUpdate
    round-trips and 100 cache invalidations. One updateMany is both
@@ -663,35 +759,109 @@ async function createDirectMessage(req, { recipientUserIds, subject, body, sende
    RBAC is read, not update: marking a message you can already read as
    read is part of reading it. The messages module has no 'update' sub,
    so the old update check 403'd every parent/student holding View
-   Messages but not Send Messages — their badge could never clear. */
-router.patch('/read-all', rbac('messages', 'read'), async (req, res) => {
+   Messages but not Send Messages — their badge could never clear.
+
+   The body is optional for backward compatibility (a bare call marks
+   the whole inbox read, as before). `{ ids, read: false }` is the undo
+   path behind "Mark all read": the client snapshots which rows were
+   unread, and one updateMany puts exactly those back — no N-request
+   undo, no touching rows the reader never saw. */
+async function _setReadState(req, res) {
   try {
     const { schoolId, userId, role } = req.jwtUser;
     const Msg = tenantModel('messages', tenantContext(req));
+    const wantRead = req.body?.read !== false; // absent → true (legacy shape)
+
+    /* Marking unread is opt-in per row: a bare `{read:false}` would
+       otherwise un-read the whole inbox on one stray call. */
+    if (!wantRead && !Array.isArray(req.body?.ids)) {
+      return res.status(400).json({ error: 'Pass the message ids to mark unread.' });
+    }
+
     const query = {
       ..._inboxQuery({ schoolId, userId, role }),
-      [`isRead.${userId}`]: { $ne: true },
+      [`isRead.${userId}`]: wantRead ? { $ne: true } : true,
     };
-    const result = await Msg.updateMany(query, { $set: { [`isRead.${userId}`]: true } });
+    const ids = Array.isArray(req.body?.ids)
+      ? _cleanIdList(req.body.ids).slice(0, 200)
+      : null;
+    if (ids) {
+      if (!ids.length) return res.json({ success: true, updated: 0 });
+      query.id = { $in: ids };
+    }
+
+    const result = await Msg.updateMany(query, { $set: { [`isRead.${userId}`]: wantRead } });
     res.json({ success: true, updated: result.modifiedCount ?? 0 });
   } catch (err) {
     console.error('[messages/read-all]', err);
-    res.status(500).json({ error: 'Failed to mark messages read' });
+    res.status(500).json({ error: 'Failed to update read state' });
   }
-});
+}
+router.patch('/read-all', rbac('messages', 'read'), _setReadState);
+router.post('/read-all', rbac('messages', 'read'), _setReadState);
 
-/* ── PATCH /api/messages/:id/read — mark as read ─────────── */
+/* ── PATCH /api/messages/:id/read — mark read, or unread ───
+   `read` defaults to true (the legacy shape). `{ read: false }` is the
+   per-row "mark unread" action. Membership is enforced the same way the
+   inbox list is — a sender may also mark their own message (the read
+   map on a sent row tracks the OTHER party's read in some surfaces),
+   but a message outside this user's inbox is a 404, not a write. */
 router.patch('/:id/read', rbac('messages', 'read'), async (req, res) => {
   try {
-    const { schoolId, userId } = req.jwtUser;
+    const { schoolId, userId, role } = req.jwtUser;
+    const wantRead = req.body?.read !== false;
     const Msg = tenantModel('messages', tenantContext(req));
     const msg = await Msg.findOneAndUpdate(
-      { id: req.params.id, schoolId },
-      { $set: { [`isRead.${userId}`]: true } },
+      {
+        id: req.params.id,
+        schoolId,
+        $or: [{ senderId: userId }, _inboxQuery({ schoolId, userId, role })],
+      },
+      { $set: { [`isRead.${userId}`]: wantRead } },
       { new: true }
     ).lean();
     if (!msg) return res.status(404).json({ error: 'Message not found' });
     res.json(msg);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* ── GET /api/messages/:id — one message, same membership ───
+   The detail endpoint the inbox list's pagination and any future
+   preview-only payload lean on: the list can stay small because a
+   reader who deep-links (or reloads with ?msg=) can fetch the row
+   directly. Same membership as the inbox — the sender or a recipient
+   of the message; anyone else gets a 404 indistinguishable from a
+   message that does not exist. */
+router.get('/:id', rbac('messages', 'read'), async (req, res) => {
+  try {
+    const { schoolId, userId, role } = req.jwtUser;
+    const Msg = tenantModel('messages', tenantContext(req));
+    const msg = await Msg.findOne({
+      id: req.params.id,
+      schoolId,
+      $or: [{ senderId: userId }, _inboxQuery({ schoolId, userId, role })],
+    }).lean();
+    if (!msg) return res.status(404).json({ error: 'Message not found' });
+    /* Same enrichment the list applies, so a detail fetched standalone
+       renders identically to one picked from a list row. */
+    const directIds = namedRecipients(msg);
+    const directory = directIds.length
+      ? await tenantModel('users', tenantContext(req))
+          .find({ id: { $in: directIds } })
+          .select('id name role isActive').lean()
+      : [];
+    const byId = Object.fromEntries(directory.map(u => [u.id, u]));
+    Object.assign(msg, recipientSummary(msg), {
+      recipientUsers: directIds.map(id => ({
+        id,
+        name: byId[id]?.name ?? 'Removed user',
+        role: byId[id]?.role ?? '',
+        roleLabel: _roleLabel(byId[id]?.role),
+        isActive: byId[id]?.isActive !== false,
+      })),
+      isGroup: Boolean(msg.groupId),
+    });
+    res.json({ data: msg });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

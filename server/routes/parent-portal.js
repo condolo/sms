@@ -709,12 +709,27 @@ router.post('/messages', authMiddleware, PLAN, async (req, res) => {
     // Re-fetched, not trusted from the JWT — same convention messages.js's
     // own POST / uses, since a JWT's name can be stale.
     const senderUser = await tenantModel('users', tenantContext(req)).findOne({ id: userId, schoolId }).select('name email').lean();
+    // The child this message is about, stored ON the message: with two
+    // children in one inbox, the teacher reading "can Brian bring his
+    // PE kit" must never have to guess which child is meant, and a
+    // reply keeps the context automatically (createDirectMessage
+    // stitches it from the conversation root).
+    const childDoc = await tenantModel('students', tenantContext(req))
+      .findOne({ schoolId, id: childId })
+      .select('firstName lastName fullName').lean();
+    const childName = childDoc
+      ? (childDoc.fullName || [childDoc.firstName, childDoc.lastName].filter(Boolean).join(' ') || null)
+      : null;
     const msg = await createDirectMessage(req, {
       recipientUserIds,
       subject: subject.trim(),
       body: body.trim(),
       senderName: senderUser?.name || senderUser?.email || 'Parent',
       senderRole: 'parent',
+      extra: {
+        ...(childId ? { childId } : {}),
+        ...(childName ? { childName } : {}),
+      },
     });
     return created(res, msg);
   } catch (err) {

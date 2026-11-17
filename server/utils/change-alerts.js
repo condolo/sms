@@ -102,11 +102,18 @@ async function notifyTimetableChange({ ctx, schoolId, before, after }) {
   }
 
   const subjectLine = `${subjectName} — ${className} has changed`;
-  const body = lines.join('\n');
+  /* Each coalesced chunk must carry its own lesson label: when a day's
+     changes merge into one message, appended lines otherwise lose which
+     lesson they describe. */
+  const body = `${subjectLine}\n${lines.join('\n')}`;
 
   if (students.length) {
     await notifyGuardiansForStudents({
       ctx, schoolId, eventKey: 'timetable_change',
+      // One day's publish can touch many lessons; without coalescing each
+      // slot wrote its own row per guardian — a 15-lesson publish was 15
+      // messages. Per-class-per-day one message lists every change.
+      coalesceKey: `timetable_change:${slot.classId || 'school'}`,
       items: students.map(s => ({
         studentId: s.id,
         inAppSubject: subjectLine,
@@ -154,10 +161,11 @@ async function notifyRouteChange({ ctx, schoolId, before, after }) {
 
   const lines = changed.map(f => _describe(f, before, after, ROUTE_LABEL));
   const subjectLine = `${route.name || 'Your school bus'} has changed`;
-  const body = lines.join('\n');
+  const body = `${subjectLine}\n${lines.join('\n')}`;
 
   await notifyGuardiansForStudents({
     ctx, schoolId, eventKey: 'transport_route_change',
+    coalesceKey: `transport_route_change:${route.id}`,
     items: assignments.map(a => ({
       studentId: a.studentId,
       inAppSubject: subjectLine,
