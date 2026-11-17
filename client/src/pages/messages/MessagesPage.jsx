@@ -292,7 +292,7 @@ export default function MessagesPage() {
         };
       });
       qc.invalidateQueries({ queryKey: ['messages', 'unread-count'] });
-      window.dispatchEvent(new CustomEvent('messages:read'));
+      window.dispatchEvent(new CustomEvent('messages:read', { detail: { delta: -1 } }));
     },
   });
 
@@ -300,7 +300,7 @@ export default function MessagesPage() {
     try {
       await msgsApi.markAllRead();
       qc.invalidateQueries({ queryKey: ['messages'] });
-      window.dispatchEvent(new CustomEvent('messages:read'));
+      window.dispatchEvent(new CustomEvent('messages:read', { detail: { count: 0 } }));
       flash('Inbox marked as read');
     } catch {
       flash('Could not mark all messages read', 'error');

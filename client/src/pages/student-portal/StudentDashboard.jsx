@@ -265,7 +265,7 @@ function ComposeMessageModal({ open, sent, recipientOptions, form, onFormChange,
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md" onClick={e => e.stopPropagation()}>
           <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
             <h3 className="text-sm font-semibold text-slate-900">New Message</h3>
-            <button onClick={onClose} className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100">
+            <button onClick={onClose} aria-label="Close new message" className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100">
               <X size={16} />
             </button>
           </div>
@@ -288,6 +288,7 @@ function ComposeMessageModal({ open, sent, recipientOptions, form, onFormChange,
                   <p className="text-[12px] text-slate-400 mt-1">No one is set up to receive messages for you yet — contact the school office directly.</p>
                 ) : (
                   <select
+                    aria-label="Recipient"
                     className="w-full mt-1 text-[13px] border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1"
                     value={form.category}
                     onChange={e => onFormChange(f => ({ ...f, category: e.target.value }))}
@@ -302,6 +303,7 @@ function ComposeMessageModal({ open, sent, recipientOptions, form, onFormChange,
               <div>
                 <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Subject</label>
                 <input
+                  aria-label="Subject"
                   className="w-full mt-1 text-[13px] border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1"
                   value={form.subject}
                   onChange={e => onFormChange(f => ({ ...f, subject: e.target.value }))}
@@ -310,6 +312,7 @@ function ComposeMessageModal({ open, sent, recipientOptions, form, onFormChange,
               <div>
                 <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Message</label>
                 <textarea
+                  aria-label="Message"
                   rows={4}
                   className="w-full mt-1 text-[13px] border border-slate-200 rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-1"
                   value={form.body}

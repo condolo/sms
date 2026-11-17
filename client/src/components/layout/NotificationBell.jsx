@@ -78,11 +78,28 @@ export default function NotificationBell({ myUserId, onSelect }) {
 
   // Marking read happens on a different page (MessagesPage.jsx) or through
   // this bell's own rows — either way, re-sync immediately rather than
-  // waiting out the rest of the poll interval.
-  useEffect(() => {
-    window.addEventListener('messages:read', refreshCount);
-    return () => window.removeEventListener('messages:read', refreshCount);
+  // waiting out the rest of the poll interval. A caller that already knows
+  // the delta (the parent's inline read) can send detail.delta so the badge
+  // moves at once even if the follow-up GET is slow.
+  const onMessagesRead = useCallback((event) => {
+    if (event?.detail?.count != null) {
+      setCount(Math.max(0, Number(event.detail.count) || 0));
+      return;
+    }
+    const delta = Number(event?.detail?.delta);
+    if (Number.isFinite(delta) && delta !== 0) {
+      // The caller already knows the authoritative local delta; do not
+      // immediately GET the server before its write has landed.
+      setCount(c => Math.max(0, c + delta));
+      return;
+    }
+    refreshCount();
   }, [refreshCount]);
+
+  useEffect(() => {
+    window.addEventListener('messages:read', onMessagesRead);
+    return () => window.removeEventListener('messages:read', onMessagesRead);
+  }, [onMessagesRead]);
 
   // "View all" sends the viewer off to read messages elsewhere (the full
   // Messages page, or this portal's own inline section) — re-sync the real
