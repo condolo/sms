@@ -348,6 +348,20 @@ describe('access control — attendanceConflictAccess', () => {
     expect(res.status).toBe(403);
   });
 
+  test('the UI probe answers 200 { allowed:false } instead of a 403', async () => {
+    mockJwtUser = { userId: 'usr_teacher', schoolId: SCHOOL_A, role: 'teacher', roles: ['teacher'] };
+    const res = await supertest(buildApp()).get('/api/attendance/conflict-officer-config/probe');
+    expect(res.status).toBe(200);
+    expect(res.body.data.allowed).toBe(false);
+  });
+
+  test('the UI probe answers allowed:true for a floor role', async () => {
+    mockJwtUser = { userId: 'usr_admin', schoolId: SCHOOL_A, role: 'admin', roles: ['admin'] };
+    const res = await supertest(buildApp()).get('/api/attendance/conflict-officer-config/probe');
+    expect(res.status).toBe(200);
+    expect(res.body.data.allowed).toBe(true);
+  });
+
   test('the configured Conflict Resolver passes even without the floor role or an explicit grant', async () => {
     mockJwtUser = { userId: 'usr_admissions', schoolId: SCHOOL_A, role: 'admissions_officer', roles: ['admissions_officer'] };
     mockConflicts = makeFakeCollection([]);

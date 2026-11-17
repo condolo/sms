@@ -376,6 +376,7 @@ export const attendance = {
   },
   conflictOfficerConfig: {
     get:  ()      => _get('/attendance/conflict-officer-config'),
+    probe: ()     => _get('/attendance/conflict-officer-config/probe'),
     save: (steps) => _put('/attendance/conflict-officer-config', { steps }),
   },
 };
