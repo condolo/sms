@@ -19,6 +19,7 @@ import {
   students    as studentsApi,
   studentSubjects as enrollApi,
   teachers    as teachersApi,
+  classSubjects as csApi,
 } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 import { useSections } from '@/hooks/useSections.js';
@@ -667,9 +668,36 @@ export default function CatalogTab({ flash }) {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['departments'] }); setDelTarget(null); flash('Department deactivated'); },
     onError: err => flash(err.message ?? 'Delete failed', 'error'),
   });
+  /* The Catalog's Compulsory setting is the starting value for each class.
+     After saving a subject, if any class offering it is set differently,
+     offer to bring those classes in line (v5.276.4). Reported: "marked
+     compulsory, then in a specific class it's not marked compulsory". */
+  async function offerApplyToClasses(subjectId, name) {
+    try {
+      const r = await csApi.applyCatalog({ subjectId, dryRun: true });
+      const p = r?.data ?? r;
+      if (!p?.changes?.length) return;
+      const target = p.changes[0].compulsory ? 'compulsory' : 'an elective';
+      const list = p.changes.map(c => c.className).join(', ');
+      const enrolNote = p.studentsToEnrol
+        ? `\n\n${p.studentsToEnrol} student enrolment(s) will be added so nobody drops out of the elective's registers and markbooks. Remove those who don't take it under Enrollment.`
+        : '';
+      if (!window.confirm(`${name || 'This subject'} is set differently in ${p.changes.length} class${p.changes.length !== 1 ? 'es' : ''}: ${list}.\n\nMake it ${target} in ${p.changes.length !== 1 ? 'all of them' : 'that class'} too?${enrolNote}\n\nCancel keeps each class as it is (you can still change it in Classes → Curriculum).`)) return;
+      await csApi.applyCatalog({ subjectId });
+      qc.invalidateQueries({ queryKey: ['student-subjects-counts'] });
+      qc.invalidateQueries({ queryKey: ['subjects-with-curriculum'] });
+      flash(`${name || 'Subject'} updated in ${p.changes.length} class${p.changes.length !== 1 ? 'es' : ''}`);
+    } catch (e) { flash(e.message ?? 'Could not update the classes', 'error'); }
+  }
+
   const saveSub = useMutation({
     mutationFn: ({ id, data }) => id ? subsApi.update(id, data) : subsApi.create(data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['subjects'] }); setSubSlide(null); flash('Subject saved'); },
+    onSuccess: async (_res, vars) => {
+      qc.invalidateQueries({ queryKey: ['subjects'] });
+      setSubSlide(null);
+      flash('Subject saved');
+      if (vars?.id) await offerApplyToClasses(vars.id, vars.data?.name);
+    },
     onError: async (err, vars) => {
       // A deleted subject already holds this code (v5.277.0). Offer to bring
       // it back — with the details just typed — instead of a dead end; the

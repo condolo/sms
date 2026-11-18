@@ -21,6 +21,7 @@ const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, E } = require('../utils/response');
 const ScopeEngine         = require('../utils/scopeEngine');
 const { scopeMiddleware } = require('../middleware/scopeMiddleware');
+const AuditService        = require('../services/audit');
 
 const router = express.Router();
 
@@ -558,6 +559,104 @@ router.post('/bulk', authMiddleware, rbac('subjects', 'update'), async (req, res
     });
   } catch (err) {
     console.error('[class-subjects POST /bulk]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ── POST /api/class-subjects/apply-catalog — make classes match the Catalog ─
+   Body: { subjectId } (every class offering that subject)
+      or { classId }   (every subject in that class's curriculum)
+      + dryRun: true   to only report what would change.
+   Reported (2026-11-18): "a subject is marked compulsory, then you go to a
+   specific class and it's not marked compulsory". The Catalog flag is only
+   the starting value for a class (see POST / above); changing it later never
+   reached classes that already offered the subject. This is the explicit,
+   confirmed way to bring them in line. Classes may still differ afterwards
+   via the per-class toggle.
+   Turning a class's subject into an ELECTIVE makes its roster "students
+   enrolled in it" (utils/elective-scope.js). So that nobody silently drops
+   out of registers and markbooks, every active student of that class not yet
+   enrolled is enrolled; the school then removes those who don't take it. */
+router.post('/apply-catalog', authMiddleware, rbac('subjects', 'update'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const { subjectId, classId, dryRun } = req.body || {};
+    if (!subjectId && !classId) return E.badRequest(res, 'subjectId or classId required');
+
+    const linkFilter = { schoolId, isActive: { $ne: false } };
+    if (subjectId) linkFilter.subjectId = subjectId;
+    if (classId)   linkFilter.classId   = classId;
+    const links = await tenantModel('class_subjects', tenantContext(req)).find(linkFilter).lean();
+
+    const subjIds = [...new Set(links.map(l => l.subjectId).filter(Boolean))];
+    const subjects = subjIds.length
+      ? await tenantModel('subjects', tenantContext(req)).find({ schoolId, id: { $in: subjIds }, isActive: { $ne: false } }).select('id name isCompulsory').lean()
+      : [];
+    const subById = new Map(subjects.map(x => [x.id, x]));
+
+    const changes = links
+      .filter(l => subById.has(l.subjectId) && Boolean(l.isCompulsoryForClass) !== Boolean(subById.get(l.subjectId).isCompulsory))
+      .map(l => ({ link: l, to: Boolean(subById.get(l.subjectId).isCompulsory) }));
+
+    const classIds = [...new Set(changes.map(c => c.link.classId))];
+    const classes = classIds.length
+      ? await tenantModel('classes', tenantContext(req)).find({ schoolId, $or: [{ id: { $in: classIds } }, { _id: { $in: classIds.filter(x => /^[a-fd]{24}$/i.test(x)) } }] }).select('id name').lean()
+      : [];
+    const className = id => (classes.find(c => (c.id || String(c._id)) === id) || {}).name || 'Class';
+
+    // Students to enrol where a class's subject becomes an elective.
+    const toElective = changes.filter(c => !c.to);
+    const toEnrol = [];
+    if (toElective.length) {
+      const electiveClassIds = [...new Set(toElective.map(c => c.link.classId))];
+      const students = await tenantModel('students', tenantContext(req))
+        .find({ schoolId, classId: { $in: electiveClassIds }, status: 'active' }).select('id classId').lean();
+      const electiveSubIds = [...new Set(toElective.map(c => c.link.subjectId))];
+      const existing = await tenantModel('student_subjects', tenantContext(req))
+        .find({ schoolId, subjectId: { $in: electiveSubIds }, studentId: { $in: students.map(x => x.id) } }).select('studentId subjectId').lean();
+      const have = new Set(existing.map(e => `${e.subjectId}|${e.studentId}`));
+      for (const c of toElective) {
+        for (const st of students) {
+          if (st.classId === c.link.classId && !have.has(`${c.link.subjectId}|${st.id}`)) {
+            toEnrol.push({ studentId: st.id, subjectId: c.link.subjectId, classId: st.classId });
+            have.add(`${c.link.subjectId}|${st.id}`);
+          }
+        }
+      }
+    }
+
+    const summary = {
+      changes: changes.map(c => ({
+        classSubjectId: c.link.id, classId: c.link.classId, className: className(c.link.classId),
+        subjectId: c.link.subjectId, subjectName: subById.get(c.link.subjectId).name, compulsory: c.to,
+      })),
+      toCompulsory: changes.filter(c => c.to).length,
+      toElective:   toElective.length,
+      studentsToEnrol: toEnrol.length,
+    };
+    if (dryRun || !changes.length) return ok(res, { ...summary, applied: false });
+
+    const CS = tenantModel('class_subjects', tenantContext(req));
+    for (const want of [true, false]) {
+      const group = changes.filter(c => c.to === want);
+      const ids  = group.map(c => c.link.id).filter(Boolean);
+      const oids = group.filter(c => !c.link.id).map(c => c.link._id);
+      const or   = [ids.length && { id: { $in: ids } }, oids.length && { _id: { $in: oids } }].filter(Boolean);
+      if (or.length) await CS.updateMany({ schoolId, $or: or }, { $set: { isCompulsoryForClass: want, updatedBy: userId } });
+    }
+    if (toEnrol.length) {
+      await tenantModel('student_subjects', tenantContext(req)).insertMany(toEnrol.map(e => ({
+        id: uuidv4(), schoolId, ...e, enrolledAt: new Date(), enrolledBy: userId,
+      })));
+    }
+    AuditService.log({
+      action: 'curriculum.apply_catalog', actor: req.jwtUser, schoolId, req,
+      target: { type: subjectId ? 'subject' : 'class', id: subjectId || classId, label: `${changes.length} class curriculum setting(s) matched to the Catalog` },
+      details: { changes: summary.changes, studentsEnrolled: toEnrol.length },
+    });
+    return ok(res, { ...summary, applied: true });
+  } catch (err) {
+    console.error('[class-subjects POST /apply-catalog]', err);
     return E.serverError(res);
   }
 });

@@ -149,6 +149,7 @@ export default function CurriculumTab({ flash }) {
   /* Split into in-curriculum and available */
   const inCurriculum = compatible.filter(s => s.inCurriculum);
   const available    = compatible.filter(s => !s.inCurriculum);
+  const catalogMismatch = inCurriculum.filter(s => Boolean(s.isCompulsory) !== Boolean(s.isCompulsoryForClass));
 
   /* Dept filter */
   const depts = departments;
@@ -160,7 +161,11 @@ export default function CurriculumTab({ flash }) {
   async function handleAdd(subjectId) {
     setAdding(subjectId);
     try {
-      await csApi.assign({ classId, subjectId, isCompulsoryForClass: false });
+      // No isCompulsoryForClass: the server starts the class from the
+      // subject's Catalog setting (v5.276.4). Sending false here used to
+      // override it, so a subject marked compulsory in the Catalog was
+      // always added to a class as not compulsory.
+      await csApi.assign({ classId, subjectId });
       qc.invalidateQueries({ queryKey: ['subjects-with-curriculum', classId] });
       flash('Subject added to curriculum');
     } catch (err) {
@@ -189,10 +194,32 @@ export default function CurriculumTab({ flash }) {
     } finally { setToggling(null); }
   }
 
+  /* Subjects whose compulsory setting in this class differs from the Catalog. */
+  const [matching, setMatching] = useState(false);
+  async function handleMatchCatalog() {
+    setMatching(true);
+    try {
+      const preview = await csApi.applyCatalog({ classId, dryRun: true });
+      const p = preview?.data ?? preview;
+      if (!p?.changes?.length) { flash('Already matches the Catalog'); return; }
+      const lines = p.changes.map(c => `• ${c.subjectName}: ${c.compulsory ? 'compulsory' : 'elective'}`).join('\n');
+      const enrolNote = p.studentsToEnrol
+        ? `\n\n${p.studentsToEnrol} student enrolment(s) will be added so nobody drops out of the new elective's register and markbook. Remove those who don't take it under Enrollment.`
+        : '';
+      if (!window.confirm(`Make ${selectedClass?.name ?? 'this class'} match the Catalog?\n\n${lines}${enrolNote}`)) return;
+      await csApi.applyCatalog({ classId });
+      qc.invalidateQueries({ queryKey: ['subjects-with-curriculum', classId] });
+      qc.invalidateQueries({ queryKey: ['student-subjects-counts'] });
+      flash(`Updated ${p.changes.length} subject${p.changes.length !== 1 ? 's' : ''} to match the Catalog`);
+    } catch (err) {
+      flash(err.message || 'Could not match the Catalog', 'error');
+    } finally { setMatching(false); }
+  }
+
   async function handleBulkAddSection() {
     if (available.length === 0) return;
     try {
-      await csApi.bulk({ classId, subjects: available.map(s => ({ subjectId: s.id, isCompulsoryForClass: false })) });
+      await csApi.bulk({ classId, subjects: available.map(s => ({ subjectId: s.id })) });   // Catalog setting, as above
       qc.invalidateQueries({ queryKey: ['subjects-with-curriculum', classId] });
       flash(`Added ${available.length} subject${available.length !== 1 ? 's' : ''} to curriculum`);
     } catch (err) {
@@ -288,7 +315,21 @@ export default function CurriculumTab({ flash }) {
                 <h2 className="text-sm font-semibold text-slate-900">{selectedClass?.name} Curriculum</h2>
                 <p className="text-xs text-slate-500 mt-0.5">{inCurriculum.length} subject{inCurriculum.length !== 1 ? 's' : ''} assigned</p>
               </div>
+              {editable && catalogMismatch.length > 0 && (
+                <button onClick={handleMatchCatalog} disabled={matching}
+                  title={'Differs from the Catalog: ' + catalogMismatch.map(s => s.name).join(', ')}
+                  className="text-xs font-medium flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 text-amber-800 px-2.5 py-1 hover:bg-amber-100 disabled:opacity-60">
+                  {matching && <Loader2 size={12} className="animate-spin" />}
+                  Match Catalog ({catalogMismatch.length})
+                </button>
+              )}
             </div>
+            {catalogMismatch.length > 0 && (
+              <p className="text-[11px] text-amber-700 mb-2">
+                Set differently from the Catalog here: {catalogMismatch.map(s => `${s.name} (${s.isCompulsory ? 'compulsory' : 'elective'} in the Catalog)`).join(', ')}.
+                That's fine if intended; otherwise use Match Catalog or the toggle.
+              </p>
+            )}
 
             {inCurriculum.length === 0 ? (
               <div className="rounded-xl border-2 border-dashed border-slate-200 py-12 text-center">

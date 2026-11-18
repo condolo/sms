@@ -1053,6 +1053,7 @@ export const classSubjects = {
   enrollmentAnalytics: (params)  => _get('/class-subjects/enrollment-analytics', params),
   assign:   (data)               => _post('/class-subjects', data),
   bulk:     (data)               => _post('/class-subjects/bulk', data),
+  applyCatalog: (data)           => _post('/class-subjects/apply-catalog', data),
   update:   (id, data)           => _put(`/class-subjects/${id}`, data),
   remove:   (id)                 => _delete(`/class-subjects/${id}`),
 };

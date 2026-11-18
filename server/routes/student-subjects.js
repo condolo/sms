@@ -15,17 +15,45 @@ const { ok, created, fail, E } = require('../utils/response');
 const router = express.Router();
 
 /* GET /api/student-subjects/counts
-   Returns { [subjectId]: number } for all subjects in the school.
+   Returns { [subjectId]: number } — how many ACTIVE students take each
+   subject, counted the way every roster in the system is built (v5.276.4):
+     • a class where the subject is compulsory → every active student in it;
+     • a class where it is an elective → that class's active students
+       enrolled in it (student_subjects).
+   Reported (2026-11-18): "if enrollment for maths is 309, it should be the
+   same for any compulsory subject". This used to count raw student_subjects
+   rows: students who left still counted, and students in a class where the
+   subject is compulsory but who never got an enrolment row did not, so two
+   subjects compulsory in the same classes showed different totals. A
+   student counts once per subject, whatever happened to their rows.
    Used by SubjectsPage to show enrollment badges per subject. */
 router.get('/counts', authMiddleware, async (req, res) => { // rbac: intentionally open to every authenticated user — reference/count data
   try {
     const { schoolId } = req.jwtUser;
-    const agg = await tenantModel('student_subjects', tenantContext(req)).aggregate([
-      { $match: { schoolId } },
-      { $group: { _id: '$subjectId', count: { $sum: 1 } } },
+    const [links, students, rows] = await Promise.all([
+      tenantModel('class_subjects', tenantContext(req)).find({ schoolId, isActive: { $ne: false } }).select('classId subjectId isCompulsoryForClass').lean(),
+      tenantModel('students', tenantContext(req)).find({ schoolId, status: 'active' }).select('id classId').lean(),
+      tenantModel('student_subjects', tenantContext(req)).find({ schoolId }).select('studentId subjectId').lean(),
     ]);
+    const byClass = new Map();
+    for (const st of students) {
+      if (!st.classId || !st.id) continue;
+      if (!byClass.has(st.classId)) byClass.set(st.classId, []);
+      byClass.get(st.classId).push(st.id);
+    }
+    const enrolled = new Set(rows.map(r => `${r.subjectId}|${r.studentId}`));
+    const takers = new Map();   // subjectId -> Set(studentId)
+    for (const l of links) {
+      const roster = byClass.get(l.classId) || [];
+      if (!roster.length || !l.subjectId) continue;
+      if (!takers.has(l.subjectId)) takers.set(l.subjectId, new Set());
+      const set = takers.get(l.subjectId);
+      for (const sid of roster) {
+        if (l.isCompulsoryForClass || enrolled.has(`${l.subjectId}|${sid}`)) set.add(sid);
+      }
+    }
     const map = {};
-    for (const { _id, count } of agg) map[_id] = count;
+    for (const [subjectId, set] of takers) map[subjectId] = set.size;
     return ok(res, map);
   } catch (err) { console.error('[student-subjects GET /counts]', err); return E.serverError(res); }
 });

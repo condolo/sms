@@ -6,6 +6,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.276.4] - 2026-11-18 - fix(subjects): compulsory in the Catalog now reaches classes; enrolment counts follow class rosters
+
+Reported: "a subject is marked compulsory, then you go to a specific class and it's not marked compulsory", and "if enrollment for maths is 309, it should be the same for any compulsory subject".
+
+### Fixed
+- **Subjects added to a class ignored the Catalog's Compulsory setting.** The server already starts a new class link from the Catalog (since 15 Oct), but the Curriculum screen's **Add** and **Add all** always sent "not compulsory", overriding it. They no longer send a value, so a new class link starts from the Catalog setting; the per-class toggle still lets one class differ.
+- **Changing a subject's Compulsory setting later never reached classes that already offered it.** After saving a subject in the Catalog, if any class has it set differently, the Catalog now lists those classes and offers to bring them in line (Cancel leaves them as they are).
+- **Enrolment counts on the Catalog** counted raw enrolment records: students who had left still counted, and students in a class where the subject is compulsory but with no enrolment record did not, so subjects compulsory in the same classes showed different totals. `GET /student-subjects/counts` now counts active students the way rosters are built everywhere else: every active student of a class where the subject is compulsory, plus the enrolled active students of classes where it is an elective, each student once. Subjects compulsory in the same classes now show the same number.
+
+### Added
+- **Match Catalog** in Classes → Curriculum. When a class's settings differ from the Catalog, a note lists them and the button brings that class in line after a confirmation that names each change.
+- `POST /api/class-subjects/apply-catalog` (`{ subjectId }` or `{ classId }`, optional `dryRun`), behind `subjects:update` and audit-logged as `curriculum.apply_catalog`. When a class's subject becomes an elective, every active student of that class not yet enrolled is enrolled, so nobody drops off that subject's registers and markbooks; the school then removes those who don't take it. The confirmation says how many enrolments this adds.
+
+Existing differences are not changed automatically. Use Match Catalog per class, or re-save the subject in the Catalog. On the demo data, 21 class settings differed from the Catalog.
+
+Tests: new `subject-compulsory-sync.test.js` (8): counts follow rosters (leavers excluded, compulsory = whole class, elective = enrolled, same classes = same number); apply-catalog preview writes nothing; applies by subject and by class; an elective switch enrols the class; no-op writes and logs nothing; adding without a flag starts from the Catalog. Checked on the local demo: English went from 21 to 26 enrolled after Form 5A/6A followed the Catalog; Match Catalog on Form 1A and the Catalog save prompt for Chemistry both worked.
+
+---
+
 ## [v5.276.3] - 2026-11-17 - feat(timetable): Subject allocation by class, with collapsible classes
 
 ### Added
