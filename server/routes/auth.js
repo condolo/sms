@@ -135,8 +135,15 @@ async function _buildTokenPayload(user, schoolId, schoolDoc = null) {
     payload.demoExpiresAt = schoolDoc.expiresAt || null;
   }
 
-  // Include guardian link only for roles that use it — keeps tokens lean for everyone else
-  if (role === 'parent' || role === 'guardian') {
+  /* Guardian links travel with the token whenever the account holds a
+     parent/guardian role — not only when it is the PRIMARY role. A staff
+     member who is also a parent (roles: ['teacher','parent']) must be able
+     to switch into the parent face without a second account, and every
+     parent-portal read is scoped from these arrays. For a parent-primary
+     account this is exactly the old behaviour. */
+  const roleList = Array.isArray(user.roles) && user.roles.length ? user.roles : [role];
+  const holdsParentRole = roleList.includes('parent') || roleList.includes('guardian');
+  if (role === 'parent' || role === 'guardian' || holdsParentRole) {
     payload.guardianOf = Array.isArray(user.guardianOf) ? user.guardianOf : [];
     payload.studentIds = Array.isArray(user.studentIds) ? user.studentIds : (payload.guardianOf || []);
   }
@@ -584,6 +591,10 @@ async function _handleLogin(req, res) {
         mfaRequired: true,
         userId:      _userId,
         schoolId:    req.school.id,
+        // Additive: the app needs the school to finish the challenge when it
+        // signed in WITHOUT a school (POST /login-credentials). Web ignores it.
+        schoolSlug:  req.school.slug,
+        schoolName:  req.school.name || req.school.slug,
         hint:        `A 6-digit code has been sent to ${user.email.replace(/(.{2})(.*)(@.*)/, '$1***$3')}`
       });
     }

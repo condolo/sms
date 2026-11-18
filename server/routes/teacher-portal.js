@@ -31,7 +31,13 @@ const { loadStudentDigest } = require('../utils/student-digest');
 
 function _requireTeacher(req, res) {
   const role = req.jwtUser?.role;
-  if (role !== 'teacher' && role !== 'staff') {
+  /* Same multi-role rule as the parent portal: a parent-first account that
+     also teaches may open the teacher face (role switching), so the check
+     looks at every role the account holds, not only the primary one. */
+  const roles = Array.isArray(req.jwtUser?.roles) && req.jwtUser.roles.length
+    ? req.jwtUser.roles
+    : [role];
+  if (role !== 'teacher' && role !== 'staff' && !roles.includes('teacher')) {
     E.forbidden(res, 'This endpoint is for teacher accounts only.');
     return false;
   }

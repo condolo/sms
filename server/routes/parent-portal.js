@@ -55,7 +55,16 @@ const router = express.Router();
 
 function _requireParent(req, res) {
   const role = req.jwtUser?.role;
-  if (role !== 'parent' && role !== 'guardian') {
+  /* A staff member who is also a parent holds both roles on ONE account
+     (mobile role switching sends the same token to both faces). Rejecting
+     anything whose PRIMARY role is not parent made the parent face a dead
+     end for them, so accept any account that holds the role at all. */
+  const roles = Array.isArray(req.jwtUser?.roles) && req.jwtUser.roles.length
+    ? req.jwtUser.roles
+    : [role];
+  const isParent = role === 'parent' || role === 'guardian'
+    || roles.includes('parent') || roles.includes('guardian');
+  if (!isParent) {
     E.forbidden(res, 'This endpoint is for parent accounts only.');
     return false;
   }

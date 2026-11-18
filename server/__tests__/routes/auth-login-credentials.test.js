@@ -297,6 +297,50 @@ describe('POST /api/auth/login-credentials', () => {
     expect(res.body.data.user.id).toBe('usr_stu_1');
   });
 
+  test('a teacher who is also a parent carries guardian links in the token (role switching)', async () => {
+    const user = makeUser({
+      role: 'teacher', primaryRole: 'teacher', roles: ['teacher', 'parent'],
+      guardianOf: ['std_1'], studentIds: ['std_1'],
+    });
+    mockCandidates = [user];
+    mockScopedUsers = { sch_a: user };
+
+    const res = await supertest(buildApp())
+      .post('/api/auth/login-credentials')
+      .send({ email: 'user@example.com', password: PASSWORD, platform: 'mobile' });
+
+    expect(res.status).toBe(200);
+    const jwt = require('jsonwebtoken');
+    const payload = jwt.decode(res.body.data.token);
+    expect(payload.role).toBe('teacher');
+    expect(payload.roles).toEqual(['teacher', 'parent']);
+    // Without these the parent face would render empty (or 403) even though
+    // the account is linked — the server must send them for ANY role list
+    // that includes parent/guardian, not only for a parent primary role.
+    expect(payload.guardianOf).toEqual(['std_1']);
+    expect(payload.studentIds).toEqual(['std_1']);
+  });
+
+  test('the MFA challenge names the school so a school-less sign-in can finish', async () => {
+    mockSchoolsById.sch_a.isDemo = false;
+    try {
+      const user = makeUser({ role: 'admin', primaryRole: 'admin', roles: ['admin'], mfaEnabled: true });
+      mockCandidates = [user];
+      mockScopedUsers = { sch_a: user };
+
+      const res = await supertest(buildApp())
+        .post('/api/auth/login-credentials')
+        .send({ email: 'user@example.com', password: PASSWORD, platform: 'mobile' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.mfaRequired).toBe(true);
+      expect(res.body.schoolSlug).toBe('school-a');
+      expect(res.body.schoolName).toBe('School A');
+    } finally {
+      mockSchoolsById.sch_a.isDemo = true;
+    }
+  });
+
   test('a missing password is a 400 — the caller’s own input, not an account answer', async () => {
     const res = await supertest(buildApp())
       .post('/api/auth/login-credentials')
