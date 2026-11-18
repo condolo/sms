@@ -5,7 +5,7 @@ const mongoose   = require('mongoose');
 const { sign, verify } = require('../utils/jwt');
 const { _model } = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
-const { tenantMiddleware } = require('../middleware/tenant');
+const { tenantMiddleware, _findSchool, _rejectExpiredDemo } = require('../middleware/tenant');
 const { authMiddleware }   = require('../middleware/auth');
 const rateLimit  = require('express-rate-limit');
 const email      = require('../utils/email');
@@ -19,6 +19,7 @@ const { _mergeUserOverrides } = require('../middleware/rbac');
 const { issueCsrfCookie, clearCsrfCookie } = require('../utils/csrf');
 const passwordTicket = require('../utils/password-ticket');
 const { schoolLoginUrl } = require('../utils/school-url');
+const demo = require('../utils/demo');
 
 const router = express.Router();
 
@@ -388,7 +389,14 @@ const SecurityService = require('../services/securityService');
    Returns: { token, user, school } — or, for platform: 'mobile', the same
    payload inside { success, data } with no cookie (students sign in this way).
 */
-router.post('/login', loginIpLimiter, tenantMiddleware, async (req, res) => {
+/* ── Canonical login handler ─────────────────────────────────
+   Shared by POST /login (the school is resolved by tenantMiddleware
+   from the subdomain or X-School-Slug header) and
+   POST /login-credentials (the school is discovered from the
+   credentials themselves). Everything after tenant resolution lives
+   here exactly once, so the two doors cannot drift on first-login,
+   password-expiry, MFA, session, cookie or mobile-token behaviour. */
+async function _handleLogin(req, res) {
   try {
     // NOTE: renamed to userEmail to avoid shadowing the module-level `email` import
     // 'identifier' supports admission-number login for students; falls back to 'email' for staff
@@ -627,6 +635,161 @@ router.post('/login', loginIpLimiter, tenantMiddleware, async (req, res) => {
     });
   } catch (err) {
     console.error('[auth/login]', err);
+    res.status(500).json({ error: 'Login failed' });
+  }
+}
+
+router.post('/login', loginIpLimiter, tenantMiddleware, _handleLogin);
+
+/* ── POST /api/auth/login-credentials — sign in with no school slug ──
+   The mobile shape of login: email (or admission number) + password, and
+   the school is discovered from the account instead of being chosen by the
+   user first. The tenant-scoped /login stays the primary door — this route
+   never replaces it and delegates to the same handler once it knows the
+   school.
+
+   Safety rules, each one load-bearing:
+     • No enumeration: an unknown account, a wrong password and a locked
+       account all cost the same work (the dummy bcrypt compare below) and
+       answer the same generic 401.
+     • No password oracle: when the credentials happen to exist at more
+       than one school, the school list is only returned AFTER the password
+       has been proved — a stranger learns nothing.
+     • The per-account lock still applies: a locked account cannot walk in
+       through this door, and failures through this door still increment the
+       same per-school counter (so brute force cannot dodge the lockout by
+       omitting the slug).
+     • Bounded: at most MAX_LOGIN_CANDIDATES accounts are examined; a
+       pathological identifier cannot turn login into a scan.
+     • One code path: on a single match the request is handed to
+       _handleLogin with req.school set, so MFA, password expiry, session
+       records, cookies and mobile tokens are identical to /login. */
+const MAX_LOGIN_CANDIDATES = 5;
+
+/* A fixed, never-matching bcrypt hash. Comparing against it when no account
+   was found makes "no such email" cost roughly what "wrong password" costs,
+   instead of returning in ~1ms and revealing which emails exist. Generated
+   once, self-contained (bcrypt hashes carry their salt). */
+const TIMING_DUMMY_HASH = '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy';
+
+/** The same password rule /login applies, including identity cutover. */
+async function _candidatePasswordMatches(candidate, password) {
+  try {
+    if (isIdentityCutoverEnabled() && candidate.identityId) {
+      const identity = await _model('identities').findOne({ id: candidate.identityId }).lean();
+      return identity?.passwordHash?.startsWith('$2')
+        ? await bcrypt.compare(password, identity.passwordHash)
+        : false;
+    }
+    return candidate.password?.startsWith('$2')
+      ? await bcrypt.compare(password, candidate.password)
+      : false;
+  } catch {
+    return false;
+  }
+}
+
+router.post('/login-credentials', loginIpLimiter, async (req, res) => {
+  try {
+    const { email: userEmail, password, identifier } = req.body || {};
+    const loginId = String((identifier || userEmail) || '').toLowerCase().trim();
+    if (!loginId || !password) {
+      return res.status(400).json({ error: 'Email or admission number and password required' });
+    }
+
+    /* The one legitimate cross-tenant user read: before a school is known
+       there is nothing to scope to. Projected to the fields the decision
+       needs, capped, and never echoed back.
+
+       TWO queries, not an $or: the platform-wide email index
+       (`users_email_ci`) is case-insensitive and only usable on a query
+       that declares the same collation, and usernames need their own
+       global index (users_username_lookup, indexes.js). An $or spanning
+       both fields could use neither and would scan every account in the
+       platform on each sign-in. */
+    const projection = 'id schoolId email username password identityId isActive role primaryRole roles';
+    const [byEmail, byUsername] = await Promise.all([
+      _model('users').find({ email: loginId })
+        .collation({ locale: 'en', strength: 2 })
+        .select(projection)
+        .limit(MAX_LOGIN_CANDIDATES)
+        .lean(),
+      _model('users').find({ username: loginId })
+        .select(projection)
+        .limit(MAX_LOGIN_CANDIDATES)
+        .lean(),
+    ]);
+
+    const candidates = [];
+    const seenCandidateIds = new Set();
+    for (const doc of [...(byEmail || []), ...(byUsername || [])]) {
+      const key = doc.id || (doc._id ? String(doc._id) : null);
+      if (!key || seenCandidateIds.has(key)) continue;
+      seenCandidateIds.add(key);
+      candidates.push(doc);
+      if (candidates.length >= MAX_LOGIN_CANDIDATES) break;
+    }
+
+    if (!candidates.length) {
+      await bcrypt.compare(password, TIMING_DUMMY_HASH).catch(() => false);
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    const matches = [];
+    for (const candidate of candidates) {
+      if (await _candidatePasswordMatches(candidate, password)) matches.push(candidate);
+    }
+
+    if (!matches.length) {
+      const clientIp = req.headers['cf-connecting-ip'] || req.ip;
+      /* Record the failure against every candidate school so the normal
+         per-account lock still tightens. No school name is known here. */
+      for (const candidate of candidates) {
+        SecurityService.recordFail(candidate.schoolId, loginId, clientIp, {}).catch(() => {});
+      }
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    /* The password proved, so a lockout is now the caller's own business. */
+    for (const match of matches) {
+      const retryAfter = await SecurityService.checkAccountLock(match.schoolId, loginId);
+      if (retryAfter !== null) {
+        return res.status(429).json({
+          error: 'Too many failed login attempts. Please wait before trying again.',
+          retryAfter,
+        });
+      }
+    }
+
+    const schools = [];
+    const expiredDemo = [];
+    for (const match of matches) {
+      const school = await _findSchool({ id: match.schoolId });
+      if (!school || !school.isActive) continue;
+      if (demo.isExpired(school)) { expiredDemo.push(school); continue; }
+      schools.push(school);
+    }
+
+    if (!schools.length) {
+      if (expiredDemo.length) return _rejectExpiredDemo(res, expiredDemo[0]);
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    if (schools.length > 1) {
+      return res.status(409).json({
+        error: 'multiple_schools',
+        message: 'This sign-in works at more than one school. Choose one to continue.',
+        schools: schools.map(s => ({ id: s.id, slug: s.slug, name: s.name, logoUrl: s.logoUrl ?? null })),
+      });
+    }
+
+    /* Hand over to the canonical handler with the tenant resolved. It
+       re-reads the user scoped to this school and re-checks everything
+       (lock, password, expiry, MFA) before issuing the session. */
+    req.school = schools[0];
+    return _handleLogin(req, res);
+  } catch (err) {
+    console.error('[auth/login-credentials]', err);
     res.status(500).json({ error: 'Login failed' });
   }
 });

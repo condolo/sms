@@ -248,6 +248,11 @@ const INDEXES = [
       // platform. Collation strength 2 folds case, matching the
       // case-insensitive search the console performs.
       { key: { email: 1 }, name: 'users_email_ci', partialFilterExpression: { email: { $type: 'string' } }, collation: { locale: 'en', strength: 2 } },
+      // Platform-wide username lookup — the credentials-only login
+      // (auth.js POST /login-credentials) resolves an admission number
+      // before a school is known, so the compound {schoolId, username}
+      // index above cannot serve it either.
+      { key: { username: 1 }, name: 'users_username_lookup', partialFilterExpression: { username: { $type: 'string' } } },
     ],
   },
 

@@ -185,4 +185,4 @@ async function _findSchool(filter) {
   } catch { return null; }
 }
 
-module.exports = { tenantMiddleware, _mapSchoolDoc, CURRENCY_SYMBOLS };
+module.exports = { tenantMiddleware, _mapSchoolDoc, _findSchool, _rejectExpiredDemo, CURRENCY_SYMBOLS };
