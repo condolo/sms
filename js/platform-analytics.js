@@ -167,8 +167,27 @@
   }
 
   /* ── Data ───────────────────────────────────────────────── */
+  /* A 401 here is not a telemetry problem — it means the platform
+     session cookie expired (or was cleared) while this tab stayed open.
+     The rest of the console handles that in platform.html's api()
+     helper, which locks the screen; this module used its own fetch and
+     only knew "non-OK", so an expired session rendered a "warming up"
+     error card with "→ 401" and left the console unlocked. Hand off to
+     the same lock screen and throw a marker the catches below skip. */
+  function sessionExpired() {
+    try {
+      if (typeof window._showLogin === 'function') {
+        window._showLogin('Your session has expired. Please sign in again.');
+      }
+    } catch (e) { /* lock screen unavailable — still stop painting data */ }
+    var err = new Error('PLATFORM_SESSION_EXPIRED');
+    err.sessionExpired = true;
+    return err;
+  }
+
   function get(path) {
     return fetch(path, { credentials: 'include' }).then(function (r) {
+      if (r.status === 401) throw sessionExpired();
       if (!r.ok) throw new Error(path + ' → ' + r.status);
       return r.json();
     }).then(function (j) { return j.data; });
@@ -476,6 +495,8 @@
         '<footer class="pa-cmd-foot"><span>Samples are captured after the response is sent, batched once a minute.</span><span class="pa-cmd-foot-right"><span class="pa-cmd-dot on"></span> streaming</span></footer>' +
         '</div>';
     }).catch(function (e) {
+      // A 401 already locked the console — don't paint an error card behind it.
+      if (e && e.sessionExpired) { el.innerHTML = ''; return; }
       el.innerHTML = errorView(e.message);
     });
   }
@@ -503,6 +524,8 @@
           }, 30000);
         }
       }).catch(function (e) {
+        // A 401 already locked the console — leave the skeleton, not an error card.
+        if (e && e.sessionExpired) { el.innerHTML = ''; return; }
         if (window.__platformView === 'analytics') el.innerHTML = errorView(e.message);
       });
     }
