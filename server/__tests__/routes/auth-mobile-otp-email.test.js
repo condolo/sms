@@ -275,6 +275,7 @@ describe('POST /api/auth/mobile/otp/request', () => {
     const app = buildApp();
     await supertest(app).post('/api/auth/mobile/otp/request').send({ email: 'parent@example.com' });
     expect(email.sendLoginOTP).toHaveBeenCalledTimes(1);
+    const firstHash = mockAccounts[0].loginOtp;
 
     const res = await supertest(app)
       .post('/api/auth/mobile/otp/request')
@@ -283,6 +284,23 @@ describe('POST /api/auth/mobile/otp/request', () => {
     expect(res.status).toBe(200);
     expect(res.body.data.sent).toBe(true);
     expect(email.sendLoginOTP).toHaveBeenCalledTimes(1);
+    expect(mockAccounts[0].loginOtp).toBe(firstHash);
+  });
+
+  test('the hourly cap stops inbox bombing without telling the caller', async () => {
+    const now = Date.now();
+    mockAccounts = [makeAccount({
+      loginOtpSentAt: new Date(now - 5 * 60 * 1000).toISOString(),
+      loginOtpSends: Array.from({ length: 5 }, (_, i) => new Date(now - (i + 1) * 60 * 1000).toISOString()),
+    })];
+
+    const res = await supertest(buildApp())
+      .post('/api/auth/mobile/otp/request')
+      .send({ email: 'parent@example.com' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.sent).toBe(true);
+    expect(email.sendLoginOTP).not.toHaveBeenCalled();
   });
 
   test('no email at all is a 400 — that one is the caller’s business', async () => {
@@ -342,6 +360,30 @@ describe('POST /api/auth/mobile/otp/verify', () => {
     const res = await supertest(buildApp())
       .post('/api/auth/mobile/otp/verify')
       .send({ email: 'stranger@example.com', code: '123456' });
+
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('INVALID_OTP');
+  });
+
+  test('the attempt cap refuses the correct code too', async () => {
+    mockAccounts = [makeAccount({ id: 'usr_a', schoolId: 'sch_a' })];
+    seedCode('123456', { loginOtpAttempts: 5 });
+
+    const res = await supertest(buildApp())
+      .post('/api/auth/mobile/otp/verify')
+      .send({ email: 'parent@example.com', code: '123456' });
+
+    expect(res.status).toBe(401);
+    expect(res.body.data).toBeUndefined();
+  });
+
+  test('an expired code is refused', async () => {
+    mockAccounts = [makeAccount({ id: 'usr_a', schoolId: 'sch_a' })];
+    seedCode('123456', { loginOtpExpiry: new Date(Date.now() - 1000).toISOString() });
+
+    const res = await supertest(buildApp())
+      .post('/api/auth/mobile/otp/verify')
+      .send({ email: 'parent@example.com', code: '123456' });
 
     expect(res.status).toBe(401);
     expect(res.body.error.code).toBe('INVALID_OTP');
