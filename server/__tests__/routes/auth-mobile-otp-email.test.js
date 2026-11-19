@@ -33,6 +33,8 @@ const SCHOOLS = {
   sch_a: { id: 'sch_a', slug: 'school-a', name: 'School A', isActive: true, isDemo: false, systemEmail: 'office@a.test' },
   sch_b: { id: 'sch_b', slug: 'school-b', name: 'School B', isActive: true, isDemo: false, systemEmail: 'office@b.test' },
   sch_admin: { id: 'sch_admin', slug: 'school-admin', name: 'Admin School', isActive: true, isDemo: false, systemEmail: 'office@admin.test' },
+  sch_demo: { id: 'sch_demo', slug: 'demo', name: 'Demo School', isActive: true, isDemo: true, systemEmail: 'office@demo.test' },
+  sch_demo2: { id: 'sch_demo2', slug: 'demo-two', name: 'Demo School Two', isActive: true, isDemo: true, systemEmail: 'office@demo2.test' },
 };
 
 jest.mock('../../middleware/tenant', () => ({
@@ -219,6 +221,39 @@ describe('POST /api/auth/mobile/otp/request', () => {
     const sent = email.sendLoginOTP.mock.calls[0][0];
     expect(sent.schoolName).toBe('School A');
     expect(sent.schoolId).toBe('sch_a');
+  });
+
+  test('an address that exists only at demo schools never sends platform mail', async () => {
+    mockAccounts = [
+      makeAccount({ id: 'usr_demo', schoolId: 'sch_demo' }),
+      makeAccount({ id: 'usr_demo2', schoolId: 'sch_demo2' }),
+    ];
+
+    const res = await supertest(buildApp())
+      .post('/api/auth/mobile/otp/request')
+      .send({ email: 'parent@example.com' });
+
+    // The answer stays opaque, but the sandbox rule holds: no email at all.
+    expect(res.status).toBe(200);
+    expect(res.body.data.sent).toBe(true);
+    expect(email.sendLoginOTP).not.toHaveBeenCalled();
+    for (const account of mockAccounts) {
+      expect(account.loginOtp).toMatch(/^[0-9a-f]{64}$/); // code still staged
+    }
+  });
+
+  test('a demo + real mix still sends, because the real school needs the code', async () => {
+    mockAccounts = [
+      makeAccount({ id: 'usr_demo', schoolId: 'sch_demo' }),
+      makeAccount({ id: 'usr_real', schoolId: 'sch_a' }),
+    ];
+
+    await supertest(buildApp())
+      .post('/api/auth/mobile/otp/request')
+      .send({ email: 'parent@example.com' });
+
+    expect(email.sendLoginOTP).toHaveBeenCalledTimes(1);
+    expect(email.sendLoginOTP.mock.calls[0][0].schoolId).toBeNull();
   });
 
   test('an unknown address gets the identical answer and no email', async () => {

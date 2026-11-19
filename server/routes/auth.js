@@ -1303,17 +1303,28 @@ router.post('/mobile/otp/request', mobileAuthLimiter, async (req, res) => {
     const primary = resolved[0].school;
     const brandName = names.length === 1 ? (primary.name || primary.slug) : 'Msingi';
 
-    email.sendLoginOTP({
-      name: resolved[0].account.name,
-      email: email_,
-      otp,
-      schoolName: brandName,
-      schoolEmail: names.length === 1 ? (primary.systemEmail || '') : '',
-      schoolId: names.length === 1 ? primary.id : null,
-      ttlMinutes: LOGIN_OTP_TTL_MS / 60000,
-    }).then(sent => {
-      if (!sent) console.error(`[auth/mobile/otp] code for ${email_} was NOT delivered (SMTP failure, demo tenant or unconfigured).`);
-    }).catch(err => console.error('[auth/mobile/otp] send failed:', err.message));
+    /* A multi-school send passes schoolId: null (platform branding), which
+       would bypass _sendAsSchool's demo sandbox check. Respect that rule
+       here: when EVERY matching school is a demo tenant, keep the code in
+       the database but never send platform mail on its behalf. A mixed set
+       still sends, because the real school's account needs the code. */
+    const allDemo = resolved.every(({ school }) =>
+      demo.isDemoSchoolDoc(school) || school.slug === 'demo');
+    if (allDemo) {
+      console.warn(`[auth/mobile/otp] ${email_}: every matching school is a demo tenant — outbound mail suppressed.`);
+    } else {
+      email.sendLoginOTP({
+        name: resolved[0].account.name,
+        email: email_,
+        otp,
+        schoolName: brandName,
+        schoolEmail: names.length === 1 ? (primary.systemEmail || '') : '',
+        schoolId: names.length === 1 ? primary.id : null,
+        ttlMinutes: LOGIN_OTP_TTL_MS / 60000,
+      }).then(sent => {
+        if (!sent) console.error(`[auth/mobile/otp] code for ${email_} was NOT delivered (SMTP failure or unconfigured).`);
+      }).catch(err => console.error('[auth/mobile/otp] send failed:', err.message));
+    }
 
     AuditService.log({ action: 'auth.otp.requested_mobile', actor: { userId: resolved[0].account.id, role: resolved[0].account.primaryRole || resolved[0].account.role, email: email_ }, schoolId: primary.id, req });
     return res.json(ok);
