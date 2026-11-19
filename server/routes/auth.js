@@ -4,6 +4,7 @@ const crypto     = require('crypto');
 const mongoose   = require('mongoose');
 const { sign, verify } = require('../utils/jwt');
 const { _model } = require('../utils/model');
+const { findLoginCandidates, findAccountsByEmail } = require('../services/preauth-account-lookup');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { tenantMiddleware, _findSchool, _rejectExpiredDemo } = require('../middleware/tenant');
 const { authMiddleware }   = require('../middleware/auth');
@@ -670,12 +671,11 @@ router.post('/login', loginIpLimiter, tenantMiddleware, _handleLogin);
        through this door, and failures through this door still increment the
        same per-school counter (so brute force cannot dodge the lockout by
        omitting the slug).
-     • Bounded: at most MAX_LOGIN_CANDIDATES accounts are examined; a
-       pathological identifier cannot turn login into a scan.
+     • Bounded: at most five accounts are examined; a pathological identifier
+       cannot turn login into a scan.
      • One code path: on a single match the request is handed to
        _handleLogin with req.school set, so MFA, password expiry, session
        records, cookies and mobile tokens are identical to /login. */
-const MAX_LOGIN_CANDIDATES = 5;
 
 /* A fixed, never-matching bcrypt hash. Comparing against it when no account
    was found makes "no such email" cost roughly what "wrong password" costs,
@@ -709,37 +709,11 @@ router.post('/login-credentials', loginIpLimiter, async (req, res) => {
     }
 
     /* The one legitimate cross-tenant user read: before a school is known
-       there is nothing to scope to. Projected to the fields the decision
-       needs, capped, and never echoed back.
-
-       TWO queries, not an $or: the platform-wide email index
-       (`users_email_ci`) is case-insensitive and only usable on a query
-       that declares the same collation, and usernames need their own
-       global index (users_username_lookup, indexes.js). An $or spanning
-       both fields could use neither and would scan every account in the
-       platform on each sign-in. */
+       there is nothing to scope to. It lives in
+       services/preauth-account-lookup.js — bounded, projected, and never
+       echoed back — so every sign-in door shares the reviewed exception. */
     const projection = 'id schoolId email username password identityId isActive role primaryRole roles';
-    const [byEmail, byUsername] = await Promise.all([
-      _model('users').find({ email: loginId })
-        .collation({ locale: 'en', strength: 2 })
-        .select(projection)
-        .limit(MAX_LOGIN_CANDIDATES)
-        .lean(),
-      _model('users').find({ username: loginId })
-        .select(projection)
-        .limit(MAX_LOGIN_CANDIDATES)
-        .lean(),
-    ]);
-
-    const candidates = [];
-    const seenCandidateIds = new Set();
-    for (const doc of [...(byEmail || []), ...(byUsername || [])]) {
-      const key = doc.id || (doc._id ? String(doc._id) : null);
-      if (!key || seenCandidateIds.has(key)) continue;
-      seenCandidateIds.add(key);
-      candidates.push(doc);
-      if (candidates.length >= MAX_LOGIN_CANDIDATES) break;
-    }
+    const candidates = await findLoginCandidates(loginId, projection);
 
     if (!candidates.length) {
       await bcrypt.compare(password, TIMING_DUMMY_HASH).catch(() => false);
@@ -1244,14 +1218,11 @@ router.post('/mobile/otp/request', mobileAuthLimiter, async (req, res) => {
     const ok = { success: true, data: { sent: true, expiresInSeconds: LOGIN_OTP_TTL_MS / 1000 } };
 
     /* Global lookup — there is no tenant yet. Same bounded, projected read
-       /login-credentials documents; the case-insensitive collation matches
-       the platform-wide email index. */
-    const accounts = (await _model('users')
-      .find({ email: email_ })
-      .collation({ locale: 'en', strength: 2 })
-      .select('id schoolId email name role primaryRole isActive lastLogin loginOtpSentAt loginOtpSends')
-      .limit(MAX_LOGIN_CANDIDATES)
-      .lean()).filter(account => account.isActive);
+       /login-credentials documents, now through the shared pre-auth service. */
+    const accounts = (await findAccountsByEmail(
+      email_,
+      'id schoolId email name role primaryRole isActive lastLogin loginOtpSentAt loginOtpSends',
+    )).filter(account => account.isActive);
 
     if (!accounts.length) {
       AuditService.log({ action: 'auth.otp.request_unknown', actor: { userId: 'public', role: 'public', email: email_ }, schoolId: null, req });
@@ -1347,12 +1318,10 @@ router.post('/mobile/otp/verify', mobileAuthLimiter, async (req, res) => {
     // One failure shape: unknown address, wrong code, expired code, used code.
     const invalid = { success: false, error: { code: 'INVALID_OTP', message: 'That code isn’t right, or it has expired. Ask for a new one.' } };
 
-    const accounts = (await _model('users')
-      .find({ email: email_ })
-      .collation({ locale: 'en', strength: 2 })
-      .select('id schoolId email name role primaryRole isActive lastLogin loginOtp loginOtpExpiry loginOtpAttempts')
-      .limit(MAX_LOGIN_CANDIDATES)
-      .lean()).filter(account => account.isActive);
+    const accounts = (await findAccountsByEmail(
+      email_,
+      'id schoolId email name role primaryRole isActive lastLogin loginOtp loginOtpExpiry loginOtpAttempts',
+    )).filter(account => account.isActive);
 
     if (!accounts.length) return res.status(401).json(invalid);
 

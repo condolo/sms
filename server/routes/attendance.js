@@ -595,6 +595,9 @@ router.put('/conflicts/:id/resolve', authMiddleware, PLAN, MODGATE, attendanceCo
    authorization probes into the 4xx error table every day. This endpoint
    returns the same decision as 200 { allowed } and exposes no config. */
 router.get('/conflict-officer-config/probe', authMiddleware, PLAN, MODGATE, async (req, res) => {
+  // rbac: intentionally ungated — any authenticated caller gets { allowed };
+  // the real decision is _hasAttendanceConflictAccess. A 403 here would
+  // restore the daily 4xx noise this probe exists to prevent.
   try {
     const allowed = await _hasAttendanceConflictAccess(req, 'read');
     return ok(res, { allowed });
