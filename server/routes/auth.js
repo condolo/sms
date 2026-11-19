@@ -1040,6 +1040,11 @@ async function _stepUpIfRequired(req, res, user) {
       mfaRequired: true,
       userId: user.id || user._id.toString(),
       schoolId: req.school.id,
+      /* Carried so a school-less sign-in (email code) can finish the step-up:
+         /verify-otp is tenant-scoped and the app must say which school the
+         second code belongs to. Password logins already carried these. */
+      schoolSlug: req.school.slug,
+      schoolName: req.school.name || req.school.slug,
       hint: `A 6-digit code has been sent to ${_maskEmail(user.email)}`,
     },
   });
@@ -1200,6 +1205,225 @@ router.post('/otp/verify', mobileAuthLimiter, tenantMiddleware, async (req, res)
     return res.json({ success: true, data: session });
   } catch (err) {
     console.error('[auth/otp/verify]', err);
+    return res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'We could not verify that code.' } });
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   School-less email-code sign-in (app only)
+
+   The app's front door asks for one thing: the email the school holds.
+   It never asks for a school code, because the SAME inbox can be the key
+   to accounts at several schools (a parent with children at two, a teacher
+   who is also a guardian). These two routes mirror /login-credentials —
+   the school is discovered from the account, never typed by the person:
+
+     POST /mobile/otp/request  → one code, stored on every account that
+                                 holds that address
+     POST /mobile/otp/verify   → that code → sessions for every school
+                                 where the code was issued
+
+   One code for all schools, not one per school: the parent gets one email
+   and types six digits once. The email is branded for the school when the
+   address belongs to exactly one, and simply "Msingi" when it spans more.
+
+   The code is deliberately NOT accepted by the tenant-scoped /otp/verify:
+   that route only looks inside one school, while this one is defined by
+   the inbox. Verification spends the same loginOtp fields, so a code can
+   never be used twice through either door.
+   ══════════════════════════════════════════════════════════════ */
+
+router.post('/mobile/otp/request', mobileAuthLimiter, async (req, res) => {
+  try {
+    const email_ = String(req.body?.email || '').trim().toLowerCase();
+    if (!email_) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Email required' } });
+    }
+
+    // Property 2 of the mobile section: one answer in every branch.
+    const ok = { success: true, data: { sent: true, expiresInSeconds: LOGIN_OTP_TTL_MS / 1000 } };
+
+    /* Global lookup — there is no tenant yet. Same bounded, projected read
+       /login-credentials documents; the case-insensitive collation matches
+       the platform-wide email index. */
+    const accounts = (await _model('users')
+      .find({ email: email_ })
+      .collation({ locale: 'en', strength: 2 })
+      .select('id schoolId email name role primaryRole isActive lastLogin loginOtpSentAt loginOtpSends')
+      .limit(MAX_LOGIN_CANDIDATES)
+      .lean()).filter(account => account.isActive);
+
+    if (!accounts.length) {
+      AuditService.log({ action: 'auth.otp.request_unknown', actor: { userId: 'public', role: 'public', email: email_ }, schoolId: null, req });
+      return res.json(ok);
+    }
+
+    const resolved = [];
+    for (const account of accounts) {
+      const school = await _findSchool({ id: account.schoolId });
+      if (!school || !school.isActive) continue;
+      if (demo.isExpired(school)) continue;
+      resolved.push({ account, school });
+    }
+    if (!resolved.length) return res.json(ok);
+
+    /* The same inbox-level throttles the tenant route applies, now across
+       every copy of the address: one resend window and one hourly cap,
+       because it is still one person's inbox. */
+    const now = Date.now();
+    const recentSends = (account) => Array.isArray(account.loginOtpSends)
+      ? account.loginOtpSends.filter(t => now - new Date(t).getTime() < 60 * 60 * 1000)
+      : [];
+    const throttled = resolved.some(({ account }) => {
+      const lastSent = account.loginOtpSentAt ? new Date(account.loginOtpSentAt).getTime() : 0;
+      if (lastSent && now - lastSent < LOGIN_OTP_RESEND_MS) return true;
+      return recentSends(account).length >= LOGIN_OTP_MAX_PER_HOUR;
+    });
+    if (throttled) return res.json(ok);
+
+    const otp = _genOTP();
+    const codeHash = _hashOTP(otp);
+    const sentAt = new Date(now).toISOString();
+    const expiresAt = new Date(now + LOGIN_OTP_TTL_MS).toISOString();
+
+    /* One hash, written to every matching account: the code is one code.
+       Verifying $unset's it everywhere at once. */
+    await Promise.all(resolved.map(({ account, school }) => {
+      const User = tenantModel('users', { schoolId: school.id });
+      return User.updateOne({ _id: account._id }, { $set: {
+        loginOtp: codeHash,
+        loginOtpExpiry: expiresAt,
+        loginOtpAttempts: 0,
+        loginOtpSentAt: sentAt,
+        loginOtpSends: [...recentSends(account), sentAt],
+      } });
+    }));
+
+    const names = [...new Set(resolved.map(r => r.school.name).filter(Boolean))];
+    const primary = resolved[0].school;
+    const brandName = names.length === 1 ? (primary.name || primary.slug) : 'Msingi';
+
+    email.sendLoginOTP({
+      name: resolved[0].account.name,
+      email: email_,
+      otp,
+      schoolName: brandName,
+      schoolEmail: names.length === 1 ? (primary.systemEmail || '') : '',
+      schoolId: names.length === 1 ? primary.id : null,
+      ttlMinutes: LOGIN_OTP_TTL_MS / 60000,
+    }).then(sent => {
+      if (!sent) console.error(`[auth/mobile/otp] code for ${email_} was NOT delivered (SMTP failure, demo tenant or unconfigured).`);
+    }).catch(err => console.error('[auth/mobile/otp] send failed:', err.message));
+
+    AuditService.log({ action: 'auth.otp.requested_mobile', actor: { userId: resolved[0].account.id, role: resolved[0].account.primaryRole || resolved[0].account.role, email: email_ }, schoolId: primary.id, req });
+    return res.json(ok);
+  } catch (err) {
+    console.error('[auth/mobile/otp/request]', err);
+    return res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'We could not send a code right now.' } });
+  }
+});
+
+router.post('/mobile/otp/verify', mobileAuthLimiter, async (req, res) => {
+  try {
+    const email_ = String(req.body?.email || '').trim().toLowerCase();
+    const code = String(req.body?.code || '').trim();
+    const deviceId = typeof req.body?.deviceId === 'string' ? req.body.deviceId.slice(0, 64) : null;
+
+    if (!email_ || !/^\d{6}$/.test(code)) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Enter the 6-digit code from your email.' } });
+    }
+
+    // One failure shape: unknown address, wrong code, expired code, used code.
+    const invalid = { success: false, error: { code: 'INVALID_OTP', message: 'That code isn’t right, or it has expired. Ask for a new one.' } };
+
+    const accounts = (await _model('users')
+      .find({ email: email_ })
+      .collation({ locale: 'en', strength: 2 })
+      .select('id schoolId email name role primaryRole isActive lastLogin loginOtp loginOtpExpiry loginOtpAttempts')
+      .limit(MAX_LOGIN_CANDIDATES)
+      .lean()).filter(account => account.isActive);
+
+    if (!accounts.length) return res.status(401).json(invalid);
+
+    const now = Date.now();
+    const matched = accounts.filter(account =>
+      account.loginOtp
+      && account.loginOtpExpiry
+      && new Date(account.loginOtpExpiry).getTime() >= now
+      && (account.loginOtpAttempts ?? 0) < LOGIN_OTP_MAX_ATTEMPTS
+      && _verifyOTP(code, account.loginOtp),
+    );
+
+    if (!matched.length) {
+      /* Count the attempt against every account whose code is still live —
+         the attacker sees one inbox, so the cap must be one cap. */
+      await Promise.all(accounts
+        .filter(account => account.loginOtp && account.loginOtpExpiry && new Date(account.loginOtpExpiry).getTime() >= now)
+        .map(account => tenantModel('users', { schoolId: account.schoolId })
+          .updateOne({ _id: account._id }, { $inc: { loginOtpAttempts: 1 } }).catch(() => {})));
+      return res.status(401).json(invalid);
+    }
+
+    /* Spend the code on every account it was written to BEFORE issuing any
+       session, so it can never be replayed even if a later step throws. */
+    await Promise.all(matched.map(account => tenantModel('users', { schoolId: account.schoolId })
+      .updateOne({ _id: account._id }, { $unset: {
+        loginOtp: 1, loginOtpExpiry: 1, loginOtpAttempts: 1, loginOtpSentAt: 1, loginOtpSends: 1,
+      } })));
+
+    const signedIn = [];
+    const stepUp = [];
+    for (const account of matched) {
+      const school = await _findSchool({ id: account.schoolId });
+      if (!school || !school.isActive) continue;
+      if (demo.isExpired(school)) continue;
+
+      const fullUser = await tenantModel('users', { schoolId: school.id })
+        .findOne({ id: account.id, schoolId: school.id }).lean();
+      if (!fullUser || !fullUser.isActive) continue;
+
+      const role = fullUser.primaryRole || fullUser.role;
+      const isDemoSchool = !!school.isDemo || school.slug === 'demo';
+      if (!isDemoSchool && MFA_ROLES.has(role) && fullUser.mfaEnabled !== false) {
+        // The code was a FIRST factor (PLAN.md §3): privileged roles still
+        // complete one more code. Handled below when no silent session exists.
+        stepUp.push({ fullUser, school });
+        continue;
+      }
+
+      const recent = fullUser.lastLogin || '';
+      const session = await _issueMobileSession(req, fullUser, school, { deviceId, action: 'auth.otp.login' });
+      signedIn.push({ session, lastLogin: recent });
+    }
+
+    if (signedIn.length > 0) {
+      // Most recently used school first; the rest ride along for switching.
+      signedIn.sort((a, b) => String(b.lastLogin).localeCompare(String(a.lastLogin)));
+      const [primary, ...others] = signedIn;
+      return res.json({
+        success: true,
+        data: { ...primary.session, linkedSchools: others.map(o => o.session) },
+      });
+    }
+
+    /* No school could be opened silently and at least one needs the second
+       code: send it and answer with the challenge, exactly like /login.
+       (When other schools DID open silently we return those sessions and
+       leave the privileged school to the password door — a silent session
+       must never bypass its step-up.) */
+    if (stepUp.length > 0) {
+      stepUp.sort((a, b) => String(b.fullUser.lastLogin || '').localeCompare(String(a.fullUser.lastLogin || '')));
+      const { fullUser, school } = stepUp[0];
+      req.school = school;
+      if (await _stepUpIfRequired(req, res, fullUser)) {
+        AuditService.log({ action: 'auth.otp.step_up_required', actor: { userId: fullUser.id, role: fullUser.primaryRole || fullUser.role, email: email_ }, schoolId: school.id, req });
+        return;
+      }
+    }
+
+    return res.status(401).json(invalid);
+  } catch (err) {
+    console.error('[auth/mobile/otp/verify]', err);
     return res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'We could not verify that code.' } });
   }
 });
