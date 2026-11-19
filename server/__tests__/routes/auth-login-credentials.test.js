@@ -239,6 +239,78 @@ describe('POST /api/auth/login-credentials', () => {
     expect(res.headers['set-cookie']).toBeUndefined();
   });
 
+  test('the app gets ONE sign-in covering every school — no picker', async () => {
+    const a = makeUser({ id: 'usr_a_1', schoolId: 'sch_a', lastLogin: '2026-11-10T10:00:00Z' });
+    const b = makeUser({ id: 'usr_b_1', schoolId: 'sch_b', _id: 'oid_b', lastLogin: '2026-11-18T10:00:00Z' });
+    mockCandidates = [a, b];
+    mockScopedUsers = { sch_a: a, sch_b: b };
+
+    const res = await supertest(buildApp())
+      .post('/api/auth/login-credentials')
+      .send({ email: 'user@example.com', password: PASSWORD, platform: 'mobile' });
+
+    expect(res.status).toBe(200);
+    // The most recently used school opens first; the other rides along.
+    expect(res.body.data.school.id).toBe('sch_b');
+    expect(res.body.data.token).toBeTruthy();
+    expect(res.body.data.linkedSchools).toHaveLength(1);
+    expect(res.body.data.linkedSchools[0].school.id).toBe('sch_a');
+    expect(res.body.data.linkedSchools[0].token).toBeTruthy();
+    // One real session per school.
+    const { createSession } = require('../../services/sessionService');
+    expect(createSession).toHaveBeenCalledTimes(2);
+    // Still cookie-less for the app.
+    expect(res.headers['set-cookie']).toBeUndefined();
+  });
+
+  test('a school that needs MFA is not silently signed in — the other schools still are', async () => {
+    mockSchoolsById.sch_b.isDemo = false;
+    try {
+      const a = makeUser({ id: 'usr_a_1', schoolId: 'sch_a' });
+      const b = makeUser({
+        id: 'usr_b_1', schoolId: 'sch_b', _id: 'oid_b',
+        role: 'admin', primaryRole: 'admin', roles: ['admin'], mfaEnabled: true,
+      });
+      mockCandidates = [a, b];
+      mockScopedUsers = { sch_a: a, sch_b: b };
+
+      const res = await supertest(buildApp())
+        .post('/api/auth/login-credentials')
+        .send({ email: 'user@example.com', password: PASSWORD, platform: 'mobile' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.school.id).toBe('sch_a');
+      expect(res.body.data.linkedSchools).toHaveLength(0);
+    } finally {
+      mockSchoolsById.sch_b.isDemo = true;
+    }
+  });
+
+  test('if EVERY school needs a step-up, the app still gets the picker', async () => {
+    mockSchoolsById.sch_a.isDemo = false;
+    mockSchoolsById.sch_b.isDemo = false;
+    try {
+      const makeAdmin = (id, schoolId, _id) => makeUser({
+        id, schoolId, _id, role: 'admin', primaryRole: 'admin', roles: ['admin'], mfaEnabled: true,
+      });
+      mockCandidates = [makeAdmin('usr_a_1', 'sch_a'), makeAdmin('usr_b_1', 'sch_b', 'oid_b')];
+      mockScopedUsers = {
+        sch_a: mockCandidates[0],
+        sch_b: mockCandidates[1],
+      };
+
+      const res = await supertest(buildApp())
+        .post('/api/auth/login-credentials')
+        .send({ email: 'user@example.com', password: PASSWORD, platform: 'mobile' });
+
+      expect(res.status).toBe(409);
+      expect(res.body.error).toBe('multiple_schools');
+    } finally {
+      mockSchoolsById.sch_a.isDemo = true;
+      mockSchoolsById.sch_b.isDemo = true;
+    }
+  });
+
   test('the same email with only ONE matching password signs into that school alone', async () => {
     const a = makeUser({ id: 'usr_a_1', schoolId: 'sch_a' });
     const b = makeUser({ id: 'usr_b_1', schoolId: 'sch_b', _id: 'oid_b', password: bcrypt.hashSync('OtherPassword2!', 4) });

@@ -774,11 +774,13 @@ router.post('/login-credentials', loginIpLimiter, async (req, res) => {
 
     const schools = [];
     const expiredDemo = [];
+    const schoolByMatchId = new Map();
     for (const match of matches) {
       const school = await _findSchool({ id: match.schoolId });
       if (!school || !school.isActive) continue;
       if (demo.isExpired(school)) { expiredDemo.push(school); continue; }
       schools.push(school);
+      schoolByMatchId.set(school.id, match);
     }
 
     if (!schools.length) {
@@ -787,6 +789,44 @@ router.post('/login-credentials', loginIpLimiter, async (req, res) => {
     }
 
     if (schools.length > 1) {
+      /* One password, several schools — the app must not stop to ask which
+         one. For mobile we sign in to EVERY school the password proved and
+         return the extra sessions alongside the primary one, so switching is
+         a local token swap (no second password prompt, no picker). The picker
+         remains only for accounts that cannot be signed in silently at a
+         school: MFA roles, a forced password change, or a 90-day expiry —
+         those are controls a silent session would bypass. */
+      if (_isMobileClient(req)) {
+        const signedIn = [];
+        for (const school of schools) {
+          const candidate = schoolByMatchId.get(school.id);
+          const fullUser = await tenantModel('users', { schoolId: school.id })
+            .findOne({ id: candidate?.id, schoolId: school.id }).lean();
+          if (!fullUser || !fullUser.isActive) continue;
+          if (fullUser.mustChangePassword || fullUser.mustChangePwd) continue;
+          if (_passwordAge(fullUser) >= PASSWORD_MAX_DAYS) continue;
+          const role = fullUser.primaryRole || fullUser.role;
+          const isDemoSchool = !!school.isDemo || school.slug === 'demo';
+          if (!isDemoSchool && MFA_ROLES.has(role) && fullUser.mfaEnabled !== false) continue;
+          const lastLogin = fullUser.lastLogin || '';
+          const session = await _issueMobileSession(req, fullUser, school, {
+            action: 'auth.login.credentials',
+          });
+          signedIn.push({ session, lastLogin });
+        }
+
+        if (signedIn.length > 0) {
+          // The school used most recently opens first; the rest ride along.
+          signedIn.sort((a, b) => String(b.lastLogin).localeCompare(String(a.lastLogin)));
+          const [primary, ...others] = signedIn;
+          return res.json({
+            success: true,
+            data: { ...primary.session, linkedSchools: others.map(o => o.session) },
+          });
+        }
+        // Every school needs a step a silent session would skip → picker.
+      }
+
       return res.status(409).json({
         error: 'multiple_schools',
         message: 'This sign-in works at more than one school. Choose one to continue.',
