@@ -116,6 +116,7 @@ async function _getPendingTeachers(schoolId, academicYear, dayOfWeek) {
 
       const coveredCount = await _model('lesson_coverage').countDocuments({
         schoolId, classId: c.classId, subjectId: c.subjectId, academicYear,
+        studentId: { $exists: false },   // individual students' marks (v5.277.0) aren't class progress
       });
 
       if (coveredCount < totalItems) hasUncovered = true;

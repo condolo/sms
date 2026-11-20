@@ -375,7 +375,9 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
       // previous count compared rows to topics, which could report 300%.
       const [allTopics, coverageRecords] = await Promise.all([
         Topics.find({ schoolId, $or: topicClassOr }).select('id subjectId subtopics').lean().catch(() => []),
-        Coverage.find({ schoolId, classId: student.classId, $or: coverageStreamOr })
+        // Whole-class marks plus this child's individual ones (v5.277.0);
+        // another student's individual mark never counts for this child.
+        Coverage.find({ schoolId, classId: student.classId, $or: coverageStreamOr, $and: [{ $or: [{ studentId: { $exists: false } }, { studentId: student.id }] }] })
           .select('topicId subtopicId').lean().catch(() => []),
       ]);
       const coveredKeys = new Set(

@@ -196,7 +196,8 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
       // subtopics is one topic and only counts when both are covered.
       const [allTopics, coverageRecords] = await Promise.all([
         Topics.find({ schoolId, $or: topicClassOr }).select('id subjectId subtopics').lean().catch(() => []),
-        Coverage.find({ schoolId, classId: student.classId, $or: streamOr })
+        // Whole-class marks plus this student's individual ones (v5.277.0).
+        Coverage.find({ schoolId, classId: student.classId, $or: streamOr, $and: [{ $or: [{ studentId: { $exists: false } }, { studentId: studentId }] }] })
           .select('topicId subtopicId').lean().catch(() => []),
       ]);
       const coveredKeys = new Set(coverageRecords.map(r => `${r.topicId}__${r.subtopicId ?? ''}`));

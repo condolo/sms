@@ -218,7 +218,8 @@ router.patch('/:id/deliver', authMiddleware, async (req, res) => {
     // Create coverage record if linked to a topic
     if (plan.topicId) {
       const Coverage = tenantModel('lesson_coverage', tenantContext(req));
-      const existing = await Coverage.findOne({ schoolId, teacherId: plan.teacherId, classId: plan.classId, subjectId: plan.subjectId, topicId: plan.topicId }).lean();
+      // Whole-class marks only: one student's individual mark (v5.277.0) must not stop the class being marked.
+      const existing = await Coverage.findOne({ schoolId, teacherId: plan.teacherId, classId: plan.classId, subjectId: plan.subjectId, topicId: plan.topicId, studentId: { $exists: false } }).lean();
       if (!existing) {
         /* Denormalize the display fields the same way POST /lessons/coverage
            does. This route used to write ids only, and every reader that

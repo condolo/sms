@@ -1349,7 +1349,8 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
         const topicClassFilter = { $or: [{ classId: a.classId }, { classId: { $exists: false } }] };
         const [total, covered] = await Promise.all([
           Topics.countDocuments({ schoolId, subjectId: a.subjectId, academicYear, ...topicClassFilter }).catch(() => 0),
-          Coverage.countDocuments({ schoolId, classId: a.classId, subjectId: a.subjectId, academicYear, ...streamFilter }).catch(() => 0),
+          // Whole-class marks only: an individual student's mark (v5.277.0) is not class progress.
+          Coverage.countDocuments({ schoolId, classId: a.classId, subjectId: a.subjectId, academicYear, ...streamFilter, studentId: { $exists: false } }).catch(() => 0),
         ]);
         if (total === 0) return null;
         return {

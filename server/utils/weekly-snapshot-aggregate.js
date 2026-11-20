@@ -166,7 +166,7 @@ async function buildSnapshotsForSchool(ctx, weekStart, weekEnd, timezone, roster
 
     tenantModel('lesson_coverage', ctx)
       .find({ schoolId: ctx.schoolId, classId: { $in: classIds }, coveredAt: { $gte: weekStart, $lte: weekEnd } })
-      .select('classId subjectId subjectName topicId topicTitle subtopicId subtopicTitle coveredAt teacherName notes').lean(),
+      .select('classId subjectId subjectName topicId topicTitle subtopicId subtopicTitle coveredAt teacherName notes studentId').lean(),
 
     ...GROWTH_COLLECTIONS.map(col =>
       tenantModel(col, ctx)
@@ -211,7 +211,8 @@ async function buildSnapshotsForSchool(ctx, weekStart, weekEnd, timezone, roster
     }
 
     result.set(student.id, {
-      topics: (coverageByClass.get(student.classId) ?? []).map(c => ({
+      // Whole-class marks plus this student's own individual ones (v5.277.0).
+      topics: (coverageByClass.get(student.classId) ?? []).filter(c => !c.studentId || c.studentId === student.id).map(c => ({
         subjectId: c.subjectId, subjectName: c.subjectName,
         topicId: c.topicId, topicTitle: c.topicTitle,
         subtopicId: c.subtopicId ?? null, subtopicTitle: c.subtopicTitle ?? null,

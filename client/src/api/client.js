@@ -1339,6 +1339,7 @@ export const lessons = {
     mark:    (data)       => _post('/lessons/coverage', data),
     unmark:  (id)         => _delete(`/lessons/coverage/${id}`),
     unmarkBulk: (params)  => _req('DELETE', '/lessons/coverage', null, params),
+    roster:  (params)     => _get('/lessons/roster', params),   // students coverage can be marked for (v5.277.0)
   },
   /* Lesson Plans — one record per lesson (Trinitas + Trinity template) */
   plans: {

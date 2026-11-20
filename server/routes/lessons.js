@@ -139,6 +139,9 @@ const CoverageSchema = z.object({
   subtopicId:   z.string().optional(),   // id within topic.subtopics
   coveredAt:    z.string().optional(),   // ISO date — defaults to now
   notes:        z.string().max(500).trim().optional(),
+  // Per-student coverage (v5.277.0). Omitted = the whole class/stream, as
+  // always. Given = covered only for these students (one record each).
+  studentIds:   z.array(z.string().min(1)).max(300).optional(),
 });
 
 /* Requested by Trinitas + Trinity (2026-09): a real, per-lesson lesson-plan
@@ -532,6 +535,23 @@ async function _teacherNameFor(req, teacherId) {
    assignment's shared coverage (or another stream's), and vice versa. */
 function _streamFilterPart(streamId) {
   return streamId ? { streamId } : { streamId: { $exists: false } };
+}
+
+/* ── Per-student coverage (v5.277.0) ─────────────────────────────
+   Requested by Mascit Lab Academy: in a tuition-style class, three
+   students can be at three different points of the syllabus. A coverage
+   record with a `studentId` is covered for THAT student only; a record
+   without one is covered for the whole class/stream (every record written
+   before this existed). Two rules keep the two kinds apart everywhere:
+     • CLASS_LEVEL — class/stream progress, HOD summaries, reminders and
+       every class-level upsert read only records with no studentId, so an
+       individual mark never passes for whole-class coverage;
+     • _forStudentPart(id) — a single student's progress (their dashboard,
+       their parent's, their weekly snapshot) counts the whole-class records
+       plus that student's own. */
+const CLASS_LEVEL = Object.freeze({ studentId: { $exists: false } });
+function _forStudentPart(studentId) {
+  return { $or: [{ studentId: { $exists: false } }, { studentId }] };
 }
 
 /* ── Helper: class-scoped topic filter (2026-09 class-scoping fix) ──
@@ -976,7 +996,7 @@ router.get('/my-classes', authMiddleware, PLAN, MODGATE, async (req, res) => {
       // and two records for the same subtopic are still one item.
       const coverageRows = await tenantModel('lesson_coverage', tenantContext(req))
         .find({
-          schoolId, classId: a.classId, subjectId: a.subjectId, academicYear, ..._streamFilterPart(a.streamId),
+          schoolId, classId: a.classId, subjectId: a.subjectId, academicYear, ..._streamFilterPart(a.streamId), ...CLASS_LEVEL,
         })
         .select('topicId subtopicId')
         .lean();
@@ -1017,6 +1037,43 @@ router.get('/my-classes', authMiddleware, PLAN, MODGATE, async (req, res) => {
   } catch (err) { console.error('[lessons/my-classes GET]', err); return E.serverError(res); }
 });
 
+/* ── GET /api/lessons/roster ─ students coverage can be marked for (v5.277.0)
+   ?classId&subjectId[&streamId]. Same scope check as GET /coverage. The
+   roster follows the subject: an elective → this class's students enrolled
+   in it (any stream); otherwise the class's students, narrowed to the
+   stream when the assignment is stream-scoped. Active students only. */
+router.get('/roster', authMiddleware, PLAN, MODGATE, scopeMiddleware, async (req, res) => { // rbac: Lessons scope check below — same as GET /coverage
+  try {
+    const { schoolId } = req.jwtUser;
+    const { classId, subjectId, streamId } = req.query;
+    if (!classId || !subjectId) return E.validation(res, [{ field: 'classId', message: 'classId and subjectId are required' }]);
+
+    const _originalScope = req.scope;
+    req.scope = await ScopeEngine.resolveLessonsScope(req);
+    const _inScope = ScopeEngine.isClassInScope(req, 'lessons', classId, streamId);
+    req.scope = _originalScope;
+    if (!_inScope) return E.forbidden(res, 'This class is not in your teaching assignments.');
+
+    const link = await tenantModel('class_subjects', tenantContext(req))
+      .findOne({ schoolId, classId, subjectId, isActive: { $ne: false } }).select('isCompulsoryForClass').lean();
+    const elective = !!link && link.isCompulsoryForClass === false;
+
+    const filter = { schoolId, classId, status: 'active' };
+    if (elective) {
+      const rows = await tenantModel('student_subjects', tenantContext(req)).find({ schoolId, subjectId }).select('studentId').lean();
+      filter.id = { $in: rows.map(r => r.studentId) };
+    } else if (streamId) {
+      filter.streamId = streamId;
+    }
+    const students = await tenantModel('students', tenantContext(req))
+      .find(filter).select('id firstName lastName admissionNumber streamId').lean();
+    students.sort((a, b) => `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`));
+    return ok(res, { elective, students: students.map(st => ({
+      id: st.id, name: [st.firstName, st.lastName].filter(Boolean).join(' '), admissionNumber: st.admissionNumber || '',
+    })) });
+  } catch (err) { console.error('[lessons/roster GET]', err); return E.serverError(res); }
+});
+
 /* ── GET /api/lessons/coverage ─ detailed coverage for class ── */
 /*
   Returns topics with coverage markers for a given classId + subjectId
@@ -1026,7 +1083,9 @@ router.get('/my-classes', authMiddleware, PLAN, MODGATE, async (req, res) => {
 router.get('/coverage', authMiddleware, PLAN, MODGATE, scopeMiddleware, async (req, res) => { // rbac: scopeMiddleware above + intentionally open — curriculum reference data
   try {
     const { schoolId } = req.jwtUser;
-    const { classId, subjectId, streamId, academicYear } = req.query;
+    // ?studentId: show the syllabus as that one student has covered it —
+    // whole-class marks plus their individual ones (v5.277.0).
+    const { classId, subjectId, streamId, academicYear, studentId: viewStudentId } = req.query;
     if (!classId || !subjectId) {
       return E.validation(res, [{ field: 'classId', message: 'classId and subjectId are required' }]);
     }
@@ -1065,11 +1124,20 @@ router.get('/coverage', authMiddleware, PLAN, MODGATE, scopeMiddleware, async (r
         .lean(),
     ]);
 
-    // Build coverage lookup
+    // Build coverage lookup. Whole-class records decide "covered"; records
+    // for individual students are listed per item (studentCoverage) and, in
+    // a single-student view, count for that student too.
     const covered = {};
+    const byStudent = {};
     coverageRecords.forEach(r => {
       const key = r.subtopicId ? `${r.topicId}__${r.subtopicId}` : r.topicId;
-      covered[key] = { coveredAt: r.coveredAt, notes: r.notes, id: r.id, teacherName: r.teacherName };
+      const entry = { coveredAt: r.coveredAt, notes: r.notes, id: r.id, teacherName: r.teacherName };
+      if (r.studentId) {
+        (byStudent[key] = byStudent[key] || []).push({ ...entry, studentId: r.studentId, studentName: r.studentName || '' });
+        if (viewStudentId && r.studentId === viewStudentId && !covered[key]) covered[key] = { ...entry, studentId: r.studentId, individual: true };
+      } else {
+        covered[key] = entry;
+      }
     });
 
     // Enrich topics with coverage
@@ -1079,6 +1147,7 @@ router.get('/coverage', authMiddleware, PLAN, MODGATE, scopeMiddleware, async (r
         ...st,
         covered:   !!covered[`${t.id}__${st.id}`],
         coverage:  covered[`${t.id}__${st.id}`] || null,
+        studentCoverage: byStudent[`${t.id}__${st.id}`] || [],
       }));
 
       const hasSubs  = enrichedSubtopics.length > 0;
@@ -1092,10 +1161,11 @@ router.get('/coverage', authMiddleware, PLAN, MODGATE, scopeMiddleware, async (r
         covered:     hasSubs ? allDone : !!topicCov,
         partial:     hasSubs ? (someDone && !allDone) : false,
         coverage:    topicCov,
+        studentCoverage: !hasSubs ? (byStudent[topicKey] || []) : [],
       };
     });
 
-    return ok(res, { topics: enriched, academicYear: year });
+    return ok(res, { topics: enriched, academicYear: year, studentId: viewStudentId || null });
   } catch (err) { console.error('[lessons/coverage GET]', err); return E.serverError(res); }
 });
 
@@ -1183,7 +1253,31 @@ router.post('/coverage', authMiddleware, PLAN, MODGATE, rbac('lessons', 'create'
     const cls = await tenantModel('classes', tenantContext(req)).findOne({ id: data.classId, schoolId }).select('name').lean();
     if (cls) update.$set.className = cls.name;
 
-    const doc = await tenantModel('lesson_coverage', tenantContext(req)).findOneAndUpdate(filter, update, { new: true, upsert: true, runValidators: false }).lean();
+    const Coverage = tenantModel('lesson_coverage', tenantContext(req));
+    const studentIds = [...new Set(data.studentIds || [])];
+    if (studentIds.length) {
+      // Only students of this class (and of this stream, for a stream-
+      // scoped assignment) — never a student the teacher doesn't teach.
+      const stuFilter = { schoolId, id: { $in: studentIds }, classId: data.classId };
+      if (data.streamId) stuFilter.streamId = data.streamId;
+      const students = await tenantModel('students', tenantContext(req))
+        .find(stuFilter).select('id firstName lastName').lean();
+      if (students.length !== studentIds.length) {
+        return E.validation(res, [{ field: 'studentIds', message: `Some selected students are not in this ${data.streamId ? 'stream' : 'class'}.` }]);
+      }
+      const records = [];
+      for (const st of students) {
+        const studentName = [st.firstName, st.lastName].filter(Boolean).join(' ');
+        records.push(await Coverage.findOneAndUpdate(
+          { ...filter, studentId: st.id },
+          { $setOnInsert: { ...update.$setOnInsert, id: uuidv4(), studentId: st.id }, $set: { ...update.$set, studentName } },
+          { new: true, upsert: true, runValidators: false },
+        ).lean());
+      }
+      return ok(res, { students: records.length, records });
+    }
+
+    const doc = await Coverage.findOneAndUpdate({ ...filter, ...CLASS_LEVEL }, update, { new: true, upsert: true, runValidators: false }).lean();
     return ok(res, doc);
   } catch (err) { console.error('[lessons/coverage POST]', err); return E.serverError(res); }
 });
@@ -1206,12 +1300,14 @@ router.delete('/coverage/:id', authMiddleware, PLAN, MODGATE, rbac('lessons', 'd
 router.delete('/coverage', authMiddleware, PLAN, MODGATE, rbac('lessons', 'delete'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
-    const { classId, subjectId, streamId, topicId, subtopicId } = req.query;
+    const { classId, subjectId, streamId, topicId, subtopicId, studentId } = req.query;
     if (!classId || !subjectId || !topicId) {
       return E.validation(res, [{ field: 'classId', message: 'classId, subjectId, and topicId are required' }]);
     }
 
-    const filter = { schoolId, classId, subjectId, topicId, ..._streamFilterPart(streamId) };
+    // ?studentId removes one student's individual mark; without it only the
+    // whole-class mark goes — students marked individually keep theirs.
+    const filter = { schoolId, classId, subjectId, topicId, ..._streamFilterPart(streamId), ...(studentId ? { studentId } : CLASS_LEVEL) };
     if (subtopicId) filter.subtopicId = subtopicId;
     if (!isAdmin(req)) filter.teacherId = userId;
 
@@ -1776,7 +1872,7 @@ router.get('/summary', authMiddleware, PLAN, MODGATE, async (req, res) => { // r
     await Promise.all(assignments.map(async a => {
       const key = `${a.classId}__${a.subjectId}__${a.streamId ?? ''}`;
       const count = await tenantModel('lesson_coverage', tenantContext(req)).countDocuments({
-        schoolId, classId: a.classId, subjectId: a.subjectId, academicYear, ..._streamFilterPart(a.streamId),
+        schoolId, classId: a.classId, subjectId: a.subjectId, academicYear, ..._streamFilterPart(a.streamId), ...CLASS_LEVEL,
       });
       coverageCounts[key] = count;
     }));
@@ -1814,10 +1910,13 @@ router.get('/class-summary/:classId', authMiddleware, PLAN, MODGATE, async (req,
   try {
     const { schoolId } = req.jwtUser;
     const { classId } = req.params;
-    const { academicYear: yearQ } = req.query;
+    const { academicYear: yearQ, studentId: summaryStudentId } = req.query;
 
     const school = await _model('schools').findOne({ id: schoolId }, { academicYear: 1 }).lean();
     const academicYear = yearQ || school?.academicYear || String(new Date().getFullYear());
+    // ?studentId = that student's own progress (whole-class marks plus their
+    // individual ones); otherwise whole-class marks only.
+    const whoPart = summaryStudentId ? _forStudentPart(String(summaryStudentId)) : CLASS_LEVEL;
 
     // Get subjects taught in this class via teaching assignments
     const assignments = await tenantModel('teaching_assignments', tenantContext(req))
@@ -1840,7 +1939,7 @@ router.get('/class-summary/:classId', authMiddleware, PLAN, MODGATE, async (req,
       topics.forEach(t => { totalItems += t.subtopics?.length ? t.subtopics.length : 1; });
 
       const coverageRecords = await tenantModel('lesson_coverage', tenantContext(req))
-        .find({ schoolId, classId, subjectId: a.subjectId, academicYear })
+        .find({ schoolId, classId, subjectId: a.subjectId, academicYear, ...whoPart })
         .lean();
 
       const coveredKeys = new Set(coverageRecords.map(r =>
@@ -1929,7 +2028,7 @@ router.get('/pending-teachers', authMiddleware, PLAN, MODGATE, async (req, res) 
         topics.forEach(tp => { totalItems += tp.subtopics?.length ? tp.subtopics.length : 1; });
 
         const cov = await tenantModel('lesson_coverage', tenantContext(req)).countDocuments({
-          schoolId, classId: c.classId, subjectId: c.subjectId, academicYear, ..._streamFilterPart(c.streamId),
+          schoolId, classId: c.classId, subjectId: c.subjectId, academicYear, ..._streamFilterPart(c.streamId), ...CLASS_LEVEL,
         });
         coveredItems += cov;
       }));

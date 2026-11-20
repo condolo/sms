@@ -6,6 +6,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.277.0] - 2026-11-19 - feat(lessons): syllabus coverage for selected students
+
+Requested for tuition-style schools (Mascit Lab Academy): students in one class can be at different points of the syllabus, so "the class is at 80%" says little about a student who joined recently and is at 55%. Marking stays whole class/stream by default; a teacher can now also mark coverage for selected students.
+
+### Added
+- **Lessons → Topics & Coverage → "Mark coverage for: Whole class | Selected students".** In Selected students mode the teacher picks students from that class or stream (an elective's enrolled students only). Ticks then apply to those students only, and unticking removes their individual marks. A topic the whole class has covered counts for everyone and can only be unticked in Whole class mode. With one student picked, the progress bar shows that student's own progress.
+- In Whole class mode, items covered for some students individually show a "N students" tag naming them.
+- `POST /api/lessons/coverage` accepts `studentIds` and writes one record per student (with the student's name); students outside the class or stream are refused (422). `GET /api/lessons/coverage` lists individual marks per item (`studentCoverage`) and takes `?studentId` for one student's view. `GET /api/lessons/class-summary/:classId` takes `?studentId`. New `GET /api/lessons/roster` (same scope check as coverage) for the picker.
+
+### How the two kinds are kept apart
+- A coverage record without a student is whole-class/stream coverage: every record written before this. A record with a student counts for that student only.
+- **Whole-class figures ignore individual marks:** the teacher tracker's class progress, My Classes, the HOD summary and pending-teachers view, lesson reminders, the teacher dashboard and the class summary. Marking a lesson plan delivered still creates the whole-class mark even if some students are already marked individually.
+- **A student's own figures add their marks:** the student dashboard, the parent dashboard and the weekly snapshot count whole-class marks plus that student's own, never another student's.
+- Unmarking a topic for the whole class leaves students' individual marks in place; `DELETE /api/lessons/coverage?studentId=` removes one student's.
+
+No data changes: existing coverage keeps meaning the whole class. Different curricula per student (syllabus tracks) is not part of this release.
+
+Tests: new `lessons-per-student-coverage.test.js` (9): per-student write and refusal; whole-class and individual records stay separate; class view ignores individual marks and lists them; single-student view; class summary with and without a student; unmark scoping; roster for compulsory, stream and elective subjects. Checked on the local demo (Form 1A Biology): marking two students kept the class at 3/4 while their own view showed 4/4; the picker, per-student progress and untick worked on the Lessons page; a parent of an individually covered student saw Biology at 100%, another parent at 75%.
+
+---
+
 ## [v5.276.4] - 2026-11-18 - fix(subjects): compulsory in the Catalog now reaches classes; enrolment counts follow class rosters
 
 Reported: "a subject is marked compulsory, then you go to a specific class and it's not marked compulsory", and "if enrollment for maths is 309, it should be the same for any compulsory subject".

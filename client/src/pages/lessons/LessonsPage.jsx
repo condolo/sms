@@ -218,57 +218,97 @@ function TopicSlideOver({ classId, streamId, subjectId, subjectName, academicYea
 }
 
 /* ── Topic row ───────────────────────────────────────────────── */
-function TopicRow({ topic, classId, streamId, subjectId, academicYear, canManage, onEdit, onDelete }) {
+/* Per-student coverage (v5.277.0). In "Selected students" mode a tick
+   applies to the picked students only; an item counts as covered for a
+   student when the whole class covered it or that student did. */
+function coveredFor(item, studentId) {
+  return !!item.covered || (item.studentCoverage || []).some(x => x.studentId === studentId);
+}
+function leafState(item, picked) {
+  if (!picked) return { done: !!item.covered, partial: false };
+  const k = picked.filter(sid => coveredFor(item, sid)).length;
+  return { done: picked.length > 0 && k === picked.length, partial: k > 0 && k < picked.length, k };
+}
+function IndividualChip({ item }) {
+  const list = item.studentCoverage || [];
+  if (!list.length || item.covered) return null;
+  return (
+    <span title={'Covered individually: ' + list.map(x => x.studentName || 'student').join(', ')}
+      className="text-[10px] font-medium text-violet-700 bg-violet-50 border border-violet-100 rounded-full px-1.5 py-0.5 shrink-0">
+      {list.length} student{list.length !== 1 ? 's' : ''}
+    </span>
+  );
+}
+
+function TopicRow({ topic, classId, streamId, subjectId, academicYear, canManage, onEdit, onDelete, picked = null }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
 
   const hasSubs = topic.subtopics?.length > 0;
-  const allDone = topic.covered;
-  const partial = topic.partial;
+  const leaves  = hasSubs ? topic.subtopics.map(st => ({ item: st, subtopicId: st.id })) : [{ item: topic, subtopicId: undefined }];
+  const states  = leaves.map(l => leafState(l.item, picked));
+  const allDone = picked ? states.every(x => x.done) : topic.covered;
+  const partial = picked ? (!allDone && states.some(x => x.done || x.partial)) : topic.partial;
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['lessons', 'coverage', classId, subjectId, streamId ?? ''] });
 
+  // marks: [{ subtopicId, studentIds? }]
   const markMutation = useMutation({
-    mutationFn: ({ topicId, subtopicId }) => lessonsApi.coverage.mark({
-      classId, ...(streamId ? { streamId } : {}), subjectId, topicId, subtopicId, academicYear,
-    }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['lessons', 'coverage', classId, subjectId, streamId ?? ''] }),
+    mutationFn: (marks) => Promise.all(marks.map(m => lessonsApi.coverage.mark({
+      classId, ...(streamId ? { streamId } : {}), subjectId, topicId: topic.id, subtopicId: m.subtopicId, academicYear,
+      ...(m.studentIds ? { studentIds: m.studentIds } : {}),
+    }))),
+    onSuccess: invalidate,
+    onError: (e) => window.alert(e.message || 'Could not mark coverage'),
   });
 
   const unmarkMutation = useMutation({
-    mutationFn: ({ coverageId, topicId, subtopicId }) => {
+    mutationFn: ({ coverageId, subtopicId, ids }) => {
+      if (ids) return Promise.all(ids.map(id => lessonsApi.coverage.unmark(id)));
       if (coverageId) return lessonsApi.coverage.unmark(coverageId);
-      return lessonsApi.coverage.unmarkBulk({ classId, ...(streamId ? { streamId } : {}), subjectId, topicId, subtopicId });
+      return lessonsApi.coverage.unmarkBulk({ classId, ...(streamId ? { streamId } : {}), subjectId, topicId: topic.id, subtopicId });
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['lessons', 'coverage', classId, subjectId, streamId ?? ''] }),
+    onSuccess: invalidate,
   });
 
+  /* Selected-students mode: tick = mark for the picked students not yet
+     covered; untick = remove their individual marks. A whole-class mark
+     can't be removed from here. */
+  function toggleForStudents(targets) {
+    if (!picked.length) { window.alert('Pick at least one student first.'); return; }
+    const anyOpen = targets.some(t => !leafState(t.item, picked).done);
+    if (anyOpen) {
+      const marks = targets
+        .map(t => ({ subtopicId: t.subtopicId, studentIds: picked.filter(sid => !coveredFor(t.item, sid)) }))
+        .filter(m => m.studentIds.length);
+      if (marks.length) markMutation.mutate(marks);
+      return;
+    }
+    if (targets.some(t => t.item.covered)) {
+      window.alert('This is covered for the whole class. To untick it, switch to "Whole class" mode.');
+      return;
+    }
+    const ids = targets.flatMap(t => (t.item.studentCoverage || []).filter(x => picked.includes(x.studentId)).map(x => x.id)).filter(Boolean);
+    if (ids.length) unmarkMutation.mutate({ ids });
+  }
+
   function toggleTopic() {
+    if (picked) return toggleForStudents(leaves);
     if (allDone) {
-      unmarkMutation.mutate({ topicId: topic.id });
+      unmarkMutation.mutate({});
+    } else if (hasSubs) {
+      markMutation.mutate(topic.subtopics.filter(st => !st.covered).map(st => ({ subtopicId: st.id })));
     } else {
-      if (hasSubs) {
-        // Mark all subtopics at once
-        topic.subtopics.filter(s => !s.covered).forEach(st => {
-          markMutation.mutate({ topicId: topic.id, subtopicId: st.id });
-        });
-      } else {
-        markMutation.mutate({ topicId: topic.id });
-      }
+      markMutation.mutate([{}]);
     }
   }
 
   function toggleSubtopic(st) {
-    if (st.covered) {
-      unmarkMutation.mutate({ coverageId: st.coverage?.id, topicId: topic.id, subtopicId: st.id });
-    } else {
-      markMutation.mutate({ topicId: topic.id, subtopicId: st.id });
-    }
+    if (picked) return toggleForStudents([{ item: st, subtopicId: st.id }]);
+    if (st.covered) unmarkMutation.mutate({ coverageId: st.coverage?.id, subtopicId: st.id });
+    else markMutation.mutate([{ subtopicId: st.id }]);
   }
 
   const isBusy = markMutation.isPending || unmarkMutation.isPending;
-
-  const iconClass = allDone
-    ? 'text-emerald-500'
-    : partial ? 'text-amber-400' : 'text-slate-300';
 
   return (
     <div className="border border-slate-100 rounded-xl overflow-hidden">
@@ -299,9 +339,10 @@ function TopicRow({ topic, classId, streamId, subjectId, academicYear, canManage
         </div>
 
         <div className="flex items-center gap-1 shrink-0">
+          {!hasSubs && !picked && <IndividualChip item={topic} />}
           {hasSubs && (
             <span className="text-[11px] text-slate-400 px-1.5 py-0.5 bg-slate-100 rounded-md">
-              {topic.subtopics.filter(s => s.covered).length}/{topic.subtopics.length}
+              {states.filter(x => x.done).length}/{topic.subtopics.length}
             </span>
           )}
           {canManage && (
@@ -320,26 +361,33 @@ function TopicRow({ topic, classId, streamId, subjectId, academicYear, canManage
 
       {hasSubs && open && (
         <div className="border-t border-slate-100 divide-y divide-slate-50 bg-slate-50/30">
-          {topic.subtopics.map(st => (
-            <div key={st.id} className="flex items-center gap-3 px-4 py-2.5 pl-12">
-              <button
-                onClick={() => toggleSubtopic(st)}
-                disabled={isBusy}
-                className={`shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all
-                  ${st.covered ? 'border-emerald-400 bg-emerald-400' : 'border-slate-200 hover:border-indigo-400'}`}
-              >
-                {st.covered && <Check size={10} className="text-white" strokeWidth={3} />}
-              </button>
-              <span className={`text-xs font-medium ${st.covered ? 'text-slate-400 line-through' : 'text-slate-700'}`}>
-                {st.title}
-              </span>
-              {st.covered && st.coverage?.coveredAt && (
-                <span className="text-[10px] text-slate-400 ml-auto">
-                  {new Date(st.coverage.coveredAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+          {topic.subtopics.map((st, i) => {
+            const stState = states[i];
+            return (
+              <div key={st.id} className="flex items-center gap-3 px-4 py-2.5 pl-12">
+                <button
+                  onClick={() => toggleSubtopic(st)}
+                  disabled={isBusy}
+                  className={`shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all
+                    ${stState.done ? 'border-emerald-400 bg-emerald-400' : stState.partial ? 'border-amber-400 bg-amber-50' : 'border-slate-200 hover:border-indigo-400'}`}
+                >
+                  {stState.done && <Check size={10} className="text-white" strokeWidth={3} />}
+                </button>
+                <span className={`text-xs font-medium ${stState.done ? 'text-slate-400 line-through' : 'text-slate-700'}`}>
+                  {st.title}
                 </span>
-              )}
-            </div>
-          ))}
+                {picked && stState.partial && (
+                  <span className="text-[10px] text-amber-700">{stState.k} of {picked.length}</span>
+                )}
+                {!picked && <IndividualChip item={st} />}
+                {!picked && st.covered && st.coverage?.coveredAt && (
+                  <span className="text-[10px] text-slate-400 ml-auto">
+                    {new Date(st.coverage.coveredAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                  </span>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -353,6 +401,19 @@ function DrillDown({ item, onBack, canManage }) {
   const [search,     setSearch]     = useState('');
   const [showSlider, setShowSlider] = useState(false);
   const [editing,    setEditing]    = useState(null);
+  const [mode,       setMode]       = useState('class');   // 'class' | 'students' (v5.277.0)
+  const [picked,     setPicked]     = useState([]);
+  const [rosterQ,    setRosterQ]    = useState('');
+
+  const { data: rosterResp, isLoading: rosterLoading } = useQuery({
+    queryKey: ['lessons', 'roster', classId, subjectId, streamId ?? ''],
+    queryFn:  () => lessonsApi.coverage.roster({ classId, subjectId, ...(streamId ? { streamId } : {}) }),
+    enabled:  mode === 'students',
+    staleTime: 5 * 60_000,
+  });
+  const roster = rosterResp?.data?.students ?? [];
+  const rosterElective = !!rosterResp?.data?.elective;
+  const pickedForRows = mode === 'students' ? picked : null;
 
   const { data: resp, isLoading } = useQuery({
     queryKey: ['lessons', 'coverage', classId, subjectId, streamId ?? ''],
@@ -370,9 +431,15 @@ function DrillDown({ item, onBack, canManage }) {
     );
   }, [topics, search]);
 
-  const covered = topics.filter(t => t.covered).length;
-  const partial = topics.filter(t => t.partial).length;
+  // One student picked: the bar shows that student's own progress.
+  const soloId  = mode === 'students' && picked.length === 1 ? picked[0] : null;
+  const leavesOf = t => (t.subtopics?.length ? t.subtopics : [t]);
+  const doneFor  = t => leavesOf(t).every(l => coveredFor(l, soloId));
+  const someFor  = t => leavesOf(t).some(l => coveredFor(l, soloId));
+  const covered = soloId ? topics.filter(doneFor).length : topics.filter(t => t.covered).length;
+  const partial = soloId ? topics.filter(t => !doneFor(t) && someFor(t)).length : topics.filter(t => t.partial).length;
   const total   = topics.length;
+  const soloName = soloId ? (roster.find(r => r.id === soloId)?.name || 'Student') : '';
 
   const deleteMutation = useMutation({
     mutationFn: (topic) => lessonsApi.topics.remove(topic.id),
@@ -412,7 +479,7 @@ function DrillDown({ item, onBack, canManage }) {
       {total > 0 && (
         <div className="bg-white border border-slate-100 rounded-xl px-4 py-3">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-medium text-slate-600">Curriculum Progress</span>
+            <span className="text-xs font-medium text-slate-600">{soloId ? `${soloName}'s progress` : 'Curriculum Progress'}</span>
             <span className="text-xs font-semibold text-slate-700">{total > 0 ? Math.round((covered / total) * 100) : 0}%</span>
           </div>
           <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
@@ -426,6 +493,58 @@ function DrillDown({ item, onBack, canManage }) {
             {partial > 0 && <span className="flex items-center gap-1 text-[11px] text-amber-600"><span className="w-2 h-2 rounded-full bg-amber-400 inline-block" />{partial} in progress</span>}
             <span className="flex items-center gap-1 text-[11px] text-slate-400"><span className="w-2 h-2 rounded-full bg-slate-200 inline-block" />{total - covered - partial} not started</span>
           </div>
+        </div>
+      )}
+
+      {/* Who ticks apply to (v5.277.0): the whole class/stream, as always,
+          or only the students picked here — for tuition-style classes where
+          students are at different points of the syllabus. */}
+      {total > 0 && (
+        <div className="bg-white border border-slate-100 rounded-xl px-4 py-3 space-y-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-medium text-slate-600">Mark coverage for</span>
+            <div className="inline-flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
+              {[['class', `Whole ${streamName ? 'stream' : 'class'}`], ['students', 'Selected students']].map(([k, label]) => (
+                <button key={k} onClick={() => setMode(k)}
+                  className={`text-xs font-medium px-2.5 py-1 rounded-md ${mode === k ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-500 hover:text-slate-700'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            {mode === 'students' && picked.length > 0 && (
+              <span className="text-[11px] text-slate-500">{picked.length} selected</span>
+            )}
+          </div>
+          {mode === 'students' && (
+            <>
+              <div className="flex items-center gap-2">
+                <input value={rosterQ} onChange={e => setRosterQ(e.target.value)} placeholder="Find a student…"
+                  className="flex-1 text-xs px-2.5 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/10" />
+                <button onClick={() => setPicked(roster.map(r => r.id))} className="text-[11px] text-indigo-600 hover:underline">All</button>
+                <button onClick={() => setPicked([])} className="text-[11px] text-slate-500 hover:underline">Clear</button>
+              </div>
+              {rosterLoading ? (
+                <div className="py-2"><Loader2 size={14} className="animate-spin text-slate-400" /></div>
+              ) : roster.length === 0 ? (
+                <p className="text-xs text-slate-400">No active students on this {streamName ? 'stream' : 'class'}{rosterElective ? ' are enrolled in this subject' : ''}.</p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
+                  {roster.filter(r => !rosterQ || `${r.name} ${r.admissionNumber}`.toLowerCase().includes(rosterQ.toLowerCase())).map(r => {
+                    const on = picked.includes(r.id);
+                    return (
+                      <button key={r.id} onClick={() => setPicked(p => (p.includes(r.id) ? p.filter(x => x !== r.id) : [...p, r.id]))}
+                        className={`text-[11px] px-2 py-1 rounded-full border ${on ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-300'}`}>
+                        {r.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <p className="text-[11px] text-slate-400">
+                Ticks below apply only to the selected students. Pick one student to see their own progress. Items the whole {streamName ? 'stream' : 'class'} has covered count for everyone.
+              </p>
+            </>
+          )}
         </div>
       )}
 
@@ -467,6 +586,7 @@ function DrillDown({ item, onBack, canManage }) {
               subjectId={subjectId}
               academicYear={academicYear}
               canManage={canManage}
+              picked={pickedForRows}
               onEdit={(topic) => { setEditing(topic); setShowSlider(true); }}
               onDelete={(topic) => { if (window.confirm(`Delete topic "${topic.title}"? This will also remove all coverage records for this topic.`)) deleteMutation.mutate(topic); }}
             />
