@@ -15,7 +15,7 @@
      onOpenClass  fn(classId, streamId) — jump to that class's grid
      initialTeacher  teacher id to filter to on open (link from the Teachers profile)
    ============================================================ */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AlertCircle, CheckCircle2, HelpCircle, ArrowUpCircle, UserX, Loader2, Users, Plus, X, Repeat, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react';
 import { timetable as ttApi, teachingAssignments as taApi } from '@/api/client.js';
@@ -84,6 +84,13 @@ export default function AllocationView({ canEdit, onOpenClass, initialTeacher = 
   // so a timetabler can work through allocation class by class.
   const [klass, setKlass] = useState('');
   const [collapsed, setCollapsed] = useState(() => new Set());
+  /* Rows edited in this view stay on screen until the view changes (v5.277.1).
+     Reported: saving lessons/week could complete a row (or give it a target),
+     so it left "Needs attention" / "No lessons/wk" at once, taking the Doubles
+     box being typed into with it: the doubles were never saved and the subject
+     seemed to vanish. */
+  const [keep, setKeep] = useState(() => new Set());
+  const keepRow = key => setKeep(prev => (prev.has(key) ? prev : new Set(prev).add(key)));
   const [teacherFilter, setTeacherFilter] = useState(initialTeacher);
   const [onlyNoClasses, setOnlyNoClasses] = useState(false);
   const [adding, setAdding] = useState(null);       // row key
@@ -162,13 +169,15 @@ export default function AllocationView({ canEdit, onOpenClass, initialTeacher = 
     const f = FILTERS.find(x => x.id === filter) ?? FILTERS[0];
     const q = search.trim().toLowerCase();
     return res.rows.filter(r =>
-      f.test(r)
+      (f.test(r) || keep.has(r.key))
       && (!section || r.sectionKey === section)
       && (!klass || r.classId === klass)
       && (!dept || r.departmentId === dept)
       && (!teacherFilter || r.assignments.some(a => String(a.teacherKey) === String(teacherFilter)))
       && (!q || `${r.className} ${r.streamName || ''} ${r.subjectName} ${r.assignments.map(a => a.teacherName).join(' ')}`.toLowerCase().includes(q)));
-  }, [res.rows, filter, section, dept, search, teacherFilter, klass]);
+  }, [res.rows, filter, section, dept, search, teacherFilter, klass, keep]);
+  // A different view starts clean.
+  useEffect(() => { setKeep(new Set()); }, [filter, section, dept, search, teacherFilter, klass]);
 
   // Per class: the rows shown, plus that class's whole-curriculum counts so a
   // collapsed header still says what is left to do.
@@ -397,10 +406,10 @@ export default function AllocationView({ canEdit, onOpenClass, initialTeacher = 
                         ))}
                       </td>
                       <td className="px-2 py-2 text-center space-y-1">
-                        {r.assignments.map(a => <div key={a.id}><NumberCell value={a.periodsPerWeek} disabled={!canEdit} onSave={n => update.mutate({ id: a.id, patch: { periodsPerWeek: n } })} /></div>)}
+                        {r.assignments.map(a => <div key={a.id}><NumberCell value={a.periodsPerWeek} disabled={!canEdit} onSave={n => { keepRow(r.key); update.mutate({ id: a.id, patch: { periodsPerWeek: n } }); }} /></div>)}
                       </td>
                       <td className="px-2 py-2 text-center space-y-1">
-                        {r.assignments.map(a => <div key={a.id}><NumberCell value={a.doubleLessons} max={20} disabled={!canEdit} onSave={n => update.mutate({ id: a.id, patch: { doubleLessons: n ?? 0 } })} /></div>)}
+                        {r.assignments.map(a => <div key={a.id}><NumberCell value={a.doubleLessons} max={20} disabled={!canEdit} onSave={n => { keepRow(r.key); update.mutate({ id: a.id, patch: { doubleLessons: n ?? 0 } }); }} /></div>)}
                       </td>
                       <td className="px-2 py-2 text-center text-slate-700">{r.placed}{r.needed ? <span className="text-slate-400"> / {r.needed}</span> : ''}</td>
                       <td className="px-2 py-2"><Chip status={r.status} /></td>

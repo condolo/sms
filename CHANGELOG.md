@@ -6,6 +6,21 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.277.1] - 2026-11-20 - fix(timetable): doubles no longer lost in Subject allocation; teachers and exam admins can edit and delete indicators
+
+### Fixed
+- **Timetable → Subject allocation: entering doubles after lessons/week skipped the doubles and the subject vanished.** The page opens on "Needs attention" (and "No lessons/wk" is another filter). Saving lessons/week can complete a row or give it a target, and it then left that view at once, taking the Doubles box being typed into with it, so the doubles never saved. Rows edited in the current view now stay on screen, showing their new status, until the view changes (filter, section, class, department, teacher or search). Checked on the demo: Standard 4A CRE set to 2 lessons became "Done", stayed in "Needs attention", and its 1 double saved.
+- **Indicators could not be deleted by the subject teacher.** Deleting needed the Grades "delete" right, which teachers don't hold by default, although they own their indicators and could add and edit them. Deleting now needs the same right as editing.
+- **An indicator with scores could not be deleted at all** ("remove those scores first", one by one). The Markbook now says how many scores are recorded and, once confirmed, deletes the indicator and its scores together (`DELETE /api/indicator-marks/definitions/:id?withScores=true`; the first call answers 409 `INDICATOR_HAS_SCORES` with the count). Audit-logged as `indicator.deleted`. Published (locked) indicators still can't be changed or deleted.
+- Edit and delete buttons on indicators only appeared on mouse hover, so they were invisible on tablets and phones. They are now always shown on small screens.
+
+### Changed
+- **Who may add, edit or delete a class/subject's indicators:** its subject teacher (matched by every id form of their login, as for attendance in v5.264.0), management roles, and, new, anyone with full Exams rights in Settings: **Grades & Marks → Enter / Edit Marks** with Delete ticked. Requested: "any admin who has full rights of the exam module".
+
+Tests: `indicator-definitions.test.js`: delete with scores asks first and then removes indicator and scores together; locked stays locked; a full-Exams-rights exams officer can edit and delete without teaching the subject. The three indicator test files' permission mocks gain the strict sub-permission check. 62 indicator tests pass.
+
+---
+
 ## [v5.277.0] - 2026-11-19 - feat(lessons): syllabus coverage for selected students
 
 Requested for tuition-style schools (Mascit Lab Academy): students in one class can be at different points of the syllabus, so "the class is at 80%" says little about a student who joined recently and is at 55%. Marking stays whole class/stream by default; a teacher can now also mark coverage for selected students.

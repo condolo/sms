@@ -1560,7 +1560,8 @@ export const indicatorMarks = {
     list:   (params)     => _get('/indicator-marks/definitions', params),
     create: (data)        => _post('/indicator-marks/definitions', data),
     update: (id, data)   => _put(`/indicator-marks/definitions/${id}`, data),
-    remove: (id)          => _delete(`/indicator-marks/definitions/${id}`),
+    // withScores: also delete the scores recorded against it (v5.277.1)
+    remove: (id, opts = {}) => _req('DELETE', `/indicator-marks/definitions/${id}`, null, opts.withScores ? { withScores: 'true' } : null),
     // Pre-fills a genuinely blank class/subject/term from a sibling
     // class in the same section (e.g. KG2 from KG1's already-typed
     // list) — a no-op (copied:0) when there's nothing to copy or the

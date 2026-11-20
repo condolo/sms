@@ -22,7 +22,8 @@ jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) =
 jest.mock('../../middleware/module-gate', () => ({ moduleGate: () => (_req, _res, next) => next() }));
 jest.mock('../../middleware/scopeMiddleware', () => ({ scopeMiddleware: (_req, _res, next) => next() }));
 jest.mock('../../utils/scopeEngine', () => ({ applyToFilter: jest.fn(), hasNoAssignments: jest.fn(() => false) }));
-jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => next() }));
+jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => next(), hasExplicitSubGrant: async () => !!mockFullExamRights }));
+let mockFullExamRights = false;
 
 let mockTeachingAssignments  = [];
 let mockClassSubjects        = [];
@@ -73,8 +74,14 @@ function mockCollFor(store) {
       return Promise.resolve(removed);
     },
     create: (doc) => { store.push({ ...doc }); return Promise.resolve({ ...doc }); },
+    deleteMany: (filter) => {
+      const before = store.length;
+      for (let i = store.length - 1; i >= 0; i--) if (mockMatches(store[i], filter)) store.splice(i, 1);
+      return Promise.resolve({ deletedCount: before - store.length });
+    },
   };
 }
+jest.mock('../../services/audit', () => ({ log: jest.fn() }));
 
 jest.mock('../../utils/model', () => ({
   _model: jest.fn((c) => {
@@ -258,11 +265,41 @@ describe('DELETE /definitions/:id', () => {
     expect(mockIndicatorDefinitions).toHaveLength(0);
   });
 
-  test('rejected when students already have scores against it', async () => {
-    mockIndicatorMarks = [{ schoolId: SCHOOL_A, indicatorId: 'ind1', studentId: 's1', score: 5 }];
-    const res = await supertest(buildApp(TEACHER_ASSIGNED)).delete('/api/indicator-marks/definitions/ind1');
-    expect(res.status).toBe(400);
+  test('with scores recorded: first asks (409 + count, nothing deleted); confirming deletes the indicator and its scores (v5.277.1)', async () => {
+    mockIndicatorMarks = [
+      { schoolId: SCHOOL_A, indicatorId: 'ind1', studentId: 's1', score: 5 },
+      { schoolId: SCHOOL_A, indicatorId: 'ind1', studentId: 's2', score: 3 },
+      { schoolId: SCHOOL_A, indicatorId: 'other', studentId: 's1', score: 4 },
+    ];
+    let res = await supertest(buildApp(TEACHER_ASSIGNED)).delete('/api/indicator-marks/definitions/ind1');
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatchObject({ code: 'INDICATOR_HAS_SCORES', scoreCount: 2 });
     expect(mockIndicatorDefinitions).toHaveLength(1);
+    res = await supertest(buildApp(TEACHER_ASSIGNED)).delete('/api/indicator-marks/definitions/ind1?withScores=true');
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ deleted: true, scoresDeleted: 2 });
+    expect(mockIndicatorDefinitions).toHaveLength(0);
+    expect(mockIndicatorMarks.map(m => m.indicatorId)).toEqual(['other']);
+  });
+
+  test('locked (published) — not deleted even when confirmed', async () => {
+    mockIndicatorMarks = [{ schoolId: SCHOOL_A, classId: 'classA', subjectId: 'subj_science', termNumber: 2, indicatorId: 'ind1', studentId: 's1', score: 5, isLocked: true }];
+    const res = await supertest(buildApp(TEACHER_ASSIGNED)).delete('/api/indicator-marks/definitions/ind1?withScores=true');
+    expect(res.status).toBe(403);
+    expect(mockIndicatorDefinitions).toHaveLength(1);
+    expect(mockIndicatorMarks).toHaveLength(1);
+  });
+
+  test('someone with full Exams rights (Enter / Edit Marks incl. Delete) may edit and delete without teaching it (v5.277.1)', async () => {
+    mockFullExamRights = true;
+    try {
+      const EXAMS_OFFICER = { userId: 'usr_eo', schoolId: SCHOOL_A, role: 'exams_officer', roles: ['exams_officer'] };
+      let res = await supertest(buildApp(EXAMS_OFFICER)).put('/api/indicator-marks/definitions/ind1').send({ text: 'Fixed' });
+      expect(res.status).toBe(200);
+      res = await supertest(buildApp(EXAMS_OFFICER)).delete('/api/indicator-marks/definitions/ind1');
+      expect(res.status).toBe(200);
+      expect(mockIndicatorDefinitions).toHaveLength(0);
+    } finally { mockFullExamRights = false; }
   });
 
   test('an unassigned teacher is forbidden', async () => {

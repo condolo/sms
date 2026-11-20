@@ -276,8 +276,9 @@ function IndicatorDefRow({ indicator, bandOnly, disabled, onSave, onDelete }) {
     <div className="flex items-center gap-2 py-1 group">
       <p className="flex-1 text-sm text-slate-700">{indicator.text}</p>
       {!bandOnly && <span className="text-xs text-slate-400 shrink-0">/{indicator.maxScore ?? 10}</span>}
+      {/* Always visible on touch screens; hover-revealed on wider ones. */}
       {!disabled && (
-        <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition">
+        <div className="flex items-center gap-0.5 shrink-0 opacity-70 sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100 transition">
           <button onClick={() => setEditing(true)} className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition" title="Edit">
             <Pencil size={12} />
           </button>
@@ -495,9 +496,24 @@ export default function IndicatorMarkbook({
     onSuccess: () => { qc.invalidateQueries({ queryKey: defsQueryKey }); },
     onError:   err => setToast({ msg: err?.message ?? 'Failed to save indicator.', type: 'error' }),
   });
+  /* An indicator that already has scores (v5.277.1): the server says how
+     many; confirming deletes the indicator and those scores together. */
   const { mutate: deleteIndicator } = useMutation({
-    mutationFn: (id) => api.definitions.remove(id),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: defsQueryKey }); },
+    mutationFn: async (id) => {
+      try { return await api.definitions.remove(id); }
+      catch (err) {
+        if (err?.code !== 'INDICATOR_HAS_SCORES') throw err;
+        if (!window.confirm(`${err.message}
+
+Delete the indicator and its scores?`)) return { cancelled: true };
+        return api.definitions.remove(id, { withScores: true });
+      }
+    },
+    onSuccess: (r) => {
+      if (r?.cancelled) return;
+      qc.invalidateQueries({ queryKey: defsQueryKey });
+      qc.invalidateQueries({ queryKey: ['indicator-marks'] });
+    },
     onError:   err => setToast({ msg: err?.message ?? 'Failed to delete indicator.', type: 'error' }),
   });
 

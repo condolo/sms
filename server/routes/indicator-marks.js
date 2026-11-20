@@ -54,10 +54,12 @@ const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware } = require('../middleware/auth');
 const { moduleGate }     = require('../middleware/module-gate');
-const { rbac }           = require('../middleware/rbac');
+const { rbac, hasExplicitSubGrant } = require('../middleware/rbac');
+const { teacherIdForms } = require('../utils/teacher-id-forms');
+const AuditService       = require('../services/audit');
 const { planGate }       = require('../middleware/plan');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
-const { ok, E }           = require('../utils/response');
+const { ok, E, fail }     = require('../utils/response');
 const { canWriteSubject, unassignedPairs, isManagement } = require('../utils/subject-scope');
 const { isElective, isInCurriculum, electiveMarkProblem, pairsNotInCurriculum, canTeachElective } = require('../utils/elective-scope');
 const { isYearArchived } = require('../utils/archival');
@@ -356,21 +358,28 @@ const IndicatorDefinitionSchema = z.object({
  *  so a teacher assigned to just one stream of a whole-class subject
  *  must still be able to manage it. Returns an error message, or null
  *  when allowed. */
+/* Who may add, edit or delete a class+subject's indicators (v5.277.1):
+     • the subject's own teacher (any id form of their login — the Mascit
+       lesson: assignments are not always keyed by the login id);
+     • management roles;
+     • anyone given full Exams rights in Settings: "Enter / Edit Marks"
+       (grades → enter_marks) with Delete ticked. Asked for directly: "any
+       admin who has full rights of the exam module". */
+async function _hasFullExamRights(req) {
+  return hasExplicitSubGrant(req, 'grades', 'enter_marks', 'delete');
+}
 async function _indicatorManageDenial(req, classId, subjectId) {
   if (!(await isInCurriculum(req, classId, subjectId))) {
     return 'This subject is not part of this class\'s curriculum — add it in Curriculum first.';
   }
-  if (await isElective(req, classId, subjectId)) {
-    if (!(await canTeachElective(req, classId, subjectId))) {
-      return 'You are not assigned to teach this elective in this class.';
-    }
-    return null;
-  }
-  if (isManagement(req)) return null;
+  if (isManagement(req) || await _hasFullExamRights(req)) return null;
   const { schoolId, userId } = req.jwtUser;
   const doc = await tenantModel('teaching_assignments', tenantContext(req))
-    .findOne({ schoolId, teacherId: userId, classId, subjectId }).select('id').lean();
-  return doc ? null : 'You are not assigned to teach this subject in this class.';
+    .findOne({ schoolId, teacherId: { $in: await teacherIdForms(userId, schoolId) }, classId, subjectId }).select('id').lean();
+  if (doc) return null;
+  return (await isElective(req, classId, subjectId))
+    ? 'You are not assigned to teach this elective in this class.'
+    : 'You are not assigned to teach this subject in this class.';
 }
 
 /** Whether this class+subject+term's indicator marks are already
@@ -763,10 +772,16 @@ router.put('/definitions/:id', authMiddleware, PLAN, MODGATE, rbac('grades', 'up
 });
 
 /**
- * DELETE /api/indicator-marks/definitions/:id
- * Rejected with 409 if any indicator_marks already score against it.
+ * DELETE /api/indicator-marks/definitions/:id[?withScores=true]
+ * Indicators are the subject teacher's own (see header), so deleting one
+ * needs the same right as editing it — grades:update plus
+ * _indicatorManageDenial — not grades:delete, which teachers don't hold
+ * (v5.277.1: teachers could add and edit indicators but never delete one).
+ * If scores are already recorded against it, the first call answers 409
+ * INDICATOR_HAS_SCORES with the count; repeating it with ?withScores=true
+ * deletes the indicator and those scores together. Never once locked.
  */
-router.delete('/definitions/:id', authMiddleware, PLAN, MODGATE, rbac('grades', 'delete'), async (req, res) => {
+router.delete('/definitions/:id', authMiddleware, PLAN, MODGATE, rbac('grades', 'update'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const existing = await tenantModel('indicator_definitions', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
@@ -782,12 +797,22 @@ router.delete('/definitions/:id', authMiddleware, PLAN, MODGATE, rbac('grades', 
     // copied indicator gets its own fresh id — see copy-from-cycle), so
     // this naturally never counts a different cycle's marks.
     const markCount = await tenantModel('indicator_marks', tenantContext(req)).countDocuments({ schoolId, indicatorId: req.params.id });
+    if (markCount > 0 && req.query.withScores !== 'true') {
+      return fail(res, 'INDICATOR_HAS_SCORES',
+        `${markCount} student score${markCount === 1 ? ' is' : 's are'} recorded against "${existing.text}". Deleting it also deletes ${markCount === 1 ? 'that score' : 'those scores'}.`,
+        409, { scoreCount: markCount });
+    }
     if (markCount > 0) {
-      return E.badRequest(res, `Cannot delete — ${markCount} student score${markCount === 1 ? '' : 's'} already recorded against this indicator. Remove those scores first.`);
+      await tenantModel('indicator_marks', tenantContext(req)).deleteMany({ schoolId, indicatorId: req.params.id });
     }
 
     await tenantModel('indicator_definitions', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId });
-    return ok(res, { id: req.params.id, deleted: true });
+    AuditService.log({
+      action: 'indicator.deleted', actor: req.jwtUser, schoolId, req,
+      target: { type: 'indicator', id: req.params.id, label: existing.text },
+      details: { classId: existing.classId, subjectId: existing.subjectId, termNumber: existing.termNumber, scoresDeleted: markCount },
+    });
+    return ok(res, { id: req.params.id, deleted: true, scoresDeleted: markCount });
   } catch (err) {
     console.error('[indicator-marks DELETE/definitions/:id]', err);
     return E.serverError(res);
