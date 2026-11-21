@@ -25,6 +25,7 @@ import {
   classes    as classesApi,
   streams    as streamsApi,
   timetable  as timetableApi,
+  pastResults as pastResultsApi,
   _csrfToken,
 } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
@@ -551,7 +552,10 @@ td:last-child{font-weight:500}
               <BehaviourTab data={bpsData?.data} loading={bpsLoading} studentId={studentId} />
             )}
             {tab === 'grades' && (
-              <GradesTab data={gradesData?.data?.students?.[0]?.subjects} loading={gradesLoading} />
+              <div className="space-y-4">
+                <GradesTab data={gradesData?.data?.students?.[0]?.subjects} loading={gradesLoading} />
+                <ClassHistoryCard studentId={studentId} />
+              </div>
             )}
             {tab === 'timetable' && (
               <TimetableTab data={timetableData?.data} loading={timetableLoading} />
@@ -1257,6 +1261,32 @@ function BehaviourTab({ data, loading, studentId }) {
 /* ══════════════════════════════════════════════════════════════
    GRADES TAB
    ══════════════════════════════════════════════════════════════ */
+/* Class per academic year (v5.278.0) — saved when students are promoted
+   and by the past-results import. Hidden until there is any. */
+function ClassHistoryCard({ studentId }) {
+  const { data } = useQuery({
+    queryKey: ['past-results', 'class-history', studentId],
+    queryFn:  () => pastResultsApi.classHistory({ studentId }),
+    enabled:  !!studentId,
+    staleTime: 5 * 60_000,
+  });
+  const rows = data?.data ?? [];
+  if (!rows.length) return null;
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <div className="px-4 py-3 border-b border-slate-100 text-sm font-medium text-slate-700">Class history</div>
+      <div className="divide-y divide-slate-100">
+        {rows.map(r => (
+          <div key={r.id || r.academicYearId} className="px-4 py-2.5 flex items-center justify-between text-sm">
+            <span className="text-slate-500">{r.yearName || 'Academic year'}</span>
+            <span className="font-medium text-slate-800">{r.className}{r.streamName ? ` · ${r.streamName}` : ''}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function GradesTab({ data, loading }) {
   if (loading) return <Skeleton className="h-48 rounded-xl" />;
   const subjects = Array.isArray(data) ? data : [];

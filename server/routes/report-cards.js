@@ -972,6 +972,18 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
     }).lean();
     const studentMap = Object.fromEntries(students.map(s => [s.id || s._id.toString(), s]));
 
+    // Class history (v5.278.0): for a past year, a student's stream is the
+    // one they were in THAT year, not today's (promotion clears it).
+    if (scope.academicYearId) {
+      const hist = await tenantModel('student_class_history', ctx)
+        .find({ schoolId, academicYearId: scope.academicYearId, studentId: { $in: Object.keys(studentMap) } })
+        .select('studentId streamId').lean().catch(() => []);
+      for (const h of hist) {
+        const stu = studentMap[h.studentId];
+        if (stu) stu.streamId = h.streamId || null;
+      }
+    }
+
     // ── Step 6f: Resolve stream names once per distinct id present in this
     // class (RCE1 cover field) — same batching convention as Step 6e's
     // per-section template resolution, not a lookup per student.
@@ -1883,10 +1895,22 @@ router.post('/kg/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
    channel + frequency, same shared mechanism as behaviour_incident. One
    dispatch per student so each guardian's message is scoped to their own
    child, not a generic "reports were published" broadcast. */
-async function _notifyReportCardsPublished(req, snaps) {
-  if (!snaps.length) return;
+async function _notifyReportCardsPublished(req, allSnaps) {
+  if (!allSnaps.length) return;
   const { schoolId } = req.jwtUser;
   const ctx = tenantContext(req);
+  // Past years (v5.278.0): publishing an earlier year's report cards (e.g.
+  // after importing past results) must not email every guardian that a
+  // "new" report is out. Only the current academic year notifies; a
+  // snapshot with no year is treated as current, as before.
+  let currentYearId = null;
+  try {
+    const years = await tenantModel('academic_years', ctx).find({ schoolId }).lean();
+    const cur = resolveCurrentPeriod(years || []).year;
+    currentYearId = cur ? (cur.id || String(cur._id)) : null;
+  } catch { /* years unreadable: notify as before rather than not at all */ }
+  const snaps = currentYearId ? allSnaps.filter(s => !s.academicYearId || s.academicYearId === currentYearId) : allSnaps;
+  if (!snaps.length) return;
   const school = await _model('schools').findOne({ id: schoolId }).select('name systemEmail').lean();
   const schoolName  = school?.name || '';
   const schoolEmail = school?.systemEmail || '';

@@ -16,8 +16,15 @@ function mockModelFor(collection) {
   if (!mockUpdateMany[collection]) {
     mockUpdateMany[collection] = jest.fn().mockResolvedValue({ modifiedCount: 0 });
   }
-  return { updateMany: mockUpdateMany[collection] };
+  return {
+    updateMany: mockUpdateMany[collection],
+    // student_class_history (v5.278.0): years the kept record already has
+    find:       jest.fn(() => ({ lean: jest.fn().mockResolvedValue(mockKeptYears.map(academicYearId => ({ academicYearId }))) })),
+    deleteMany: mockDeleteMany,
+  };
 }
+let mockKeptYears = [];
+const mockDeleteMany = jest.fn().mockResolvedValue({ deletedCount: 0 });
 
 jest.mock('../utils/tenant-model', () => ({
   tenantModel: jest.fn((collection) => mockModelFor(collection)),
@@ -27,6 +34,16 @@ const { mergeStudentData, REFERENCING_COLLECTIONS } = require('../utils/student-
 
 beforeEach(() => {
   for (const fn of Object.values(mockUpdateMany)) fn.mockClear();
+});
+
+describe('class history on merge (v5.278.0)', () => {
+  test('a year the kept record already has is dropped from the removed one before re-pointing', async () => {
+    mockKeptYears = ['y2024'];
+    mockDeleteMany.mockClear();
+    await mergeStudentData('sch_1', {}, { id: 'stu_old' }, 'stu_new');
+    expect(mockDeleteMany).toHaveBeenCalledWith({ schoolId: 'sch_1', studentId: { $in: ['stu_old'] }, academicYearId: { $in: ['y2024'] } });
+    mockKeptYears = [];
+  });
 });
 
 describe('mergeStudentData', () => {

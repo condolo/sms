@@ -25,6 +25,7 @@ const {
 const PLAN = planGate('parent_portal');
 const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
+const { sortReportsByPeriod } = require('../utils/report-order');
 const { isTimetablePublished, publishedReader } = require('../utils/timetable-publish');
 const { resolveCurrentPeriod } = require('./academic-config');
 const { _getMpesaConfig } = require('./mpesa');
@@ -299,7 +300,7 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
        series before the page could render. Nothing here depends on anything
        else in the batch — the coverage subject list is the only derived input,
        and only the block below consumes it. */
-    const [attRecords, invoices, recentPayments, reportCards, coverageSubjectIdsRaw, offeredSubjectDocs] = await Promise.all([
+    let [attRecords, invoices, recentPayments, reportCards, coverageSubjectIdsRaw, offeredSubjectDocs] = await Promise.all([
       Attendance.find({ schoolId, studentId: childId, ...attDateFilter })
         .select('status date').lean(),
       FeeInvoices.find({ schoolId, studentId: childId })
@@ -309,7 +310,7 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
         .select('amount paidAt mpesaCode method reference').lean(),
       Reports.find({
         schoolId, studentId: childId, status: 'published', superseded: { $ne: true },
-      }).sort({ publishedAt: -1 }).limit(6)
+      }).sort({ publishedAt: -1 }).limit(60)
         .select('id academicYear termName termNumber totalScore averageScore gpa rankings status publishedAt version termId academicYearId subjects reportLabel cycle')
         .lean(),
       student.classId
@@ -420,6 +421,8 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
     // assessment_marks data. Was previously conflated with lessonsCoverage
     // below (curriculum coverage percentage mislabeled as "Grades"/"My
     // Average") — this is the real thing.
+    // Latest by period, not by publish date (v5.278.0 — see utils/report-order.js).
+    reportCards = sortReportsByPeriod(reportCards, academicYears).slice(0, 6);
     const latestSubjects  = reportCards[0]?.subjects || {};
     const markSubjectIds  = Object.keys(latestSubjects);
     const markSubjectDocs = markSubjectIds.length

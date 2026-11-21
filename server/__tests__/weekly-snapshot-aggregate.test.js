@@ -134,6 +134,19 @@ describe('timezone-aware filtering of instant-stamped fields', () => {
   });
 });
 
+// v5.278.0: marks brought in by the past-results import are saved "now" but
+// belong to earlier years; parents must not see them as this week's marks.
+describe('imported past results', () => {
+  test('a mark imported this week from an earlier year is not in this week\'s snapshot', async () => {
+    mockStores.assessment_marks = mockMakeStore([
+      { schoolId: SCHOOL_A, studentId: 'stu_1', subjectId: 'sub_1', assessmentType: 'ET', instance: 1, rawScore: 70, createdAt: '2026-08-05T09:00:00.000Z', source: 'past_import', academicYearId: 'y2024' },
+      { schoolId: SCHOOL_A, studentId: 'stu_1', subjectId: 'sub_1', assessmentType: 'CA', instance: 1, rawScore: 65, createdAt: '2026-08-05T09:00:00.000Z' },
+    ]);
+    const result = await buildSnapshotsForSchool({ schoolId: SCHOOL_A }, '2026-08-03', '2026-08-09', 'Africa/Nairobi', ROSTER);
+    expect(result.get('stu_1').assignments.map(a => a.rawScore)).toEqual([65]);
+  });
+});
+
 describe('batched-query shape (N+1 avoidance)', () => {
   test('each of the 11 source collections is queried exactly once per school, regardless of roster size', async () => {
     await buildSnapshotsForSchool({ schoolId: SCHOOL_A }, '2026-08-03', '2026-08-09', 'Africa/Nairobi', ROSTER);

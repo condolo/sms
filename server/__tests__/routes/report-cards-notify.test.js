@@ -78,3 +78,20 @@ test('falls back to termName exactly as before when no reportLabel is set', asyn
   const item = mockNotify.mock.calls[0][0].items[0];
   expect(item.inAppBody).toContain('Term 2');
 });
+
+// v5.278.0: publishing an earlier year's report cards (after importing past
+// results) must not tell every family a new report is out.
+test('a past academic year\'s report cards notify nobody; the current year\'s still do', async () => {
+  mockStores.academic_years = { find: () => chain([
+    { id: 'y2024', startDate: '2024-01-08', endDate: '2024-11-22' },
+    { id: 'y2026', startDate: '2026-01-05', endDate: '2026-11-20', isCurrent: true },
+  ]) };
+  const req = { jwtUser: { schoolId: SCHOOL }, tenantContext: {} };
+  await router._notifyReportCardsPublished(req, [{ studentId: 'stu_1', studentName: 'Jane Doe', termName: 'Term 2', academicYearId: 'y2024' }]);
+  expect(mockNotify).not.toHaveBeenCalled();
+  await router._notifyReportCardsPublished(req, [
+    { studentId: 'stu_1', studentName: 'Jane Doe', termName: 'Term 2', academicYearId: 'y2024' },
+    { studentId: 'stu_2', studentName: 'John Smith', termName: 'Term 3', academicYearId: 'y2026' },
+  ]);
+  expect(mockNotify.mock.calls[0][0].items.map(i => i.studentId)).toEqual(['stu_2']);
+});

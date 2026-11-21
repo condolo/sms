@@ -18,6 +18,7 @@ const { planGate }       = require('../middleware/plan');
 const PLAN = planGate('student_portal');
 const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
+const { sortReportsByPeriod } = require('../utils/report-order');
 const { studentStreamOr, filterElectivesForStudent } = require('../utils/lesson-audience');
 const { isTimetablePublished, publishedReader } = require('../utils/timetable-publish');
 const { resolveCurrentPeriod } = require('./academic-config');
@@ -297,9 +298,9 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
     }
 
     // ── Published report cards ───────────────────────────────
-    const reportCards = await Reports.find({
+    let reportCards = await Reports.find({
       schoolId, studentId, status: 'published', superseded: { $ne: true },
-    }).sort({ publishedAt: -1 }).limit(6)
+    }).sort({ publishedAt: -1 }).limit(60)
       .select('id academicYear termName termNumber totalScore averageScore gpa rankings status publishedAt version termId academicYearId subjects reportLabel cycle')
       .lean();
 
@@ -312,6 +313,8 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
     // one still awaiting moderation, is never shown here. Was previously
     // conflated with lessonsCoverage below (curriculum coverage percentage
     // mislabeled as "My Grades"/"My Average") — this is the real thing.
+    // Latest by period, not by publish date (v5.278.0 — see utils/report-order.js).
+    reportCards = sortReportsByPeriod(reportCards, academicYears).slice(0, 6);
     const latestSubjects  = reportCards[0]?.subjects || {};
     const markSubjectIds  = Object.keys(latestSubjects);
     const markSubjectDocs = markSubjectIds.length

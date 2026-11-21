@@ -15,7 +15,7 @@ import {
   Search, Save, Check, PenLine, Bell,
   Users2, GraduationCap, Filter, Percent, Settings,
   Tag, Layers, Info, ClipboardPaste, Lock,
-  BookMarked, LockOpen, Send, XCircle, Baby, ListChecks,
+  BookMarked, LockOpen, Send, XCircle, Baby, ListChecks, History,
 } from 'lucide-react';
 import {
   exams as examsApi,
@@ -35,6 +35,7 @@ import CAConfigTab    from '../grades/components/ConfigTab.jsx';
 import IndicatorMarkbook from './components/IndicatorMarkbook.jsx';
 import MarkListTab from './components/MarkListTab.jsx';
 import RCTemplatesSection from './components/RCTemplatesSection.jsx';
+import PastResultsTab from './components/PastResultsTab.jsx';
 import { TypePill, Toast, Skeleton } from '../grades/components/GradesPrimitives.jsx';
 import { DEFAULT_CUSTOM_TYPES, _pct, _scoreColor } from '../grades/constants.js';
 import useAuthStore from '@/store/auth.js';
@@ -68,6 +69,8 @@ export default function ExamsPage() {
     { id: 'review',       label: 'Review',                  icon: Send,        adminOnly: true, visible: canReviewSubmissions },
     { id: 'reminders',    label: 'Reminders',                icon: Bell,        adminOnly: false },
     { id: 'kg-templates', label: 'Kindergarten Templates',  icon: Baby,        adminOnly: true  },
+    // Same rule as the server (past-results.js _canImport): admins, or full exam rights.
+    { id: 'past-results', label: 'Past Results',            icon: History,     adminOnly: true, visible: ['admin', 'superadmin'].includes(role) || can('grades', 'delete', 'enter_marks') },
     { id: 'config',       label: 'Configuration',           icon: Settings,    adminOnly: true  },
   ].filter(t => t.visible !== undefined ? t.visible : (!t.adminOnly || canCreate));
 
@@ -183,6 +186,9 @@ export default function ExamsPage() {
             <motion.div key="kg-templates" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
               <RCTemplatesSection />
             </motion.div>
+          )}
+          {tab === 'past-results' && (
+            <PastResultsTab key="past-results" years={years} />
           )}
           {tab === 'config' && canCreate && (
             <motion.div key="config" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} className="space-y-6">

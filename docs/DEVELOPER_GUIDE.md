@@ -7824,3 +7824,33 @@ Readers: non-editors read `timetable_published` only via `publishedReader()` →
 | `audit_log` (strict) | `audit.js` `_adminGuard` → admin/superadmin or `hasExplicitSubGrant(req, 'settings', 'audit_log', 'read')` |
 
 Still coarse `settings` read (reference data used elsewhere): `GET /settings/users`, `GET /settings/custom-roles`, `GET /academic-config`. `PUT /settings/school` keeps a coarse `rbac('settings','update')` floor, then `_schoolSectionsAllowed()` maps fields → sections (`SCHOOL_FIELD_SECTION`) and requires `update` on each. Client: `SettingsPage.jsx` `TABS[].sub`/`strict`, visible via `can('settings','read',sub)` (strict tabs read `perms['settings__<sub>']` directly).
+
+### Past results and class history (v5.278.0)
+
+**`server/routes/past-results.js`** (mounted at `/api/past-results`):
+- Endpoints: `GET /template`, `POST /preview`, `POST /commit`, `GET /batches`, `POST /batches/:id/undo`, `GET /class-history`.
+- Access: admin/superadmin, or `hasExplicitSubGrant(req,'grades','enter_marks','delete')`.
+- Body: `{ academicYearId, termNumber, assessmentType, instance, outOf, classId?, onExisting: 'skip'|'overwrite', csv | rows, fileName? }`.
+- One shared `_plan()` does every check for both preview and commit, so preview never writes and commit cannot skip a check.
+
+How the import writes:
+- **Marks** go to `assessment_marks` with `source: 'past_import'` and `importBatchId`. A replaced mark keeps its old values in `importPrev`, which undo restores.
+- **Matching is on the exact `academicYearId`.** It deliberately does not use `_yearFilterPart` or the Markbook's adoption of legacy null-year rows, so a past import can never touch this year's marks.
+- **Assessment types** are validated against the school-wide config (`getConfig(schoolId, null)`), the same config report cards use.
+- **Batches** are stored in `past_result_imports`.
+
+**`server/utils/class-history.js`:**
+- Collection `student_class_history`: one row per (schoolId, studentId, academicYearId), unique index.
+- `recordClassHistory()` never overwrites an existing row; a conflicting class is returned as `differs`.
+- `yearForClass()` chooses the year a class's students spent in it: the latest year with marks in that class, else the current year.
+- Written by `POST /api/students/promote` (before `classId` is overwritten) and by the import.
+- Read by the student profile and by report-card publish, which takes the past year's stream from it.
+- Included in `student-merge.js` (a year the kept record already has is dropped from the removed one first).
+
+**`server/utils/untagged-marks.js` `tagUntaggedMarks()`:**
+- Files null-year marks under the year they were created in: the latest year whose `startDate` is on or before `createdAt` (or the `_id` timestamp).
+- Run by the import's commit. `scripts/backfill-assessment-marks-academic-year.js` runs it for all schools.
+
+UI: `client/src/pages/exams/components/PastResultsTab.jsx` (Exams → Past Results) and `ClassHistoryCard` in `StudentProfile.jsx`.
+
+Tests: `server/__tests__/routes/past-results.test.js`, `server/__tests__/student-merge.test.js`.

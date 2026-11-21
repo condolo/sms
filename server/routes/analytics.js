@@ -170,7 +170,7 @@ async function _computeLeadershipSnapshot(schoolId, days) {
     // percentage and there's no per-row weight, so a student's average is the
     // mean of their present marks. createdAt >= since keeps the selector's window.
     tenantModel('assessment_marks', { schoolId }).aggregate([
-      { $match: { schoolId, isPublished: true, markState: 'present', rawScore: { $ne: null }, createdAt: { $gte: since } } },
+      { $match: { schoolId, isPublished: true, markState: 'present', rawScore: { $ne: null }, source: { $ne: 'past_import' }, createdAt: { $gte: since } } },
       {
         $group: {
           _id:    { classId: '$classId', studentId: '$studentId' },
@@ -429,7 +429,7 @@ async function _computeSeriesSnapshot(schoolId, sinceStr, untilStr, requestedBuc
     ]),
 
     tenantModel('assessment_marks', { schoolId }).aggregate([
-      { $match: { schoolId, isPublished: true, markState: 'present', rawScore: { $ne: null }, createdAt: { $gte: sinceDate, $lte: untilDate } } },
+      { $match: { schoolId, isPublished: true, markState: 'present', rawScore: { $ne: null }, source: { $ne: 'past_import' }, createdAt: { $gte: sinceDate, $lte: untilDate } } },
       { $group: {
         _id:   _dayKeyExpr('createdAt'),
         avg:   { $avg: '$rawScore' },

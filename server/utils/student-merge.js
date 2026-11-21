@@ -66,6 +66,7 @@ const REFERENCING_COLLECTIONS = [
   'report_card_snapshots',
   'weekly_snapshots',
   'assessment_marks',
+  'student_class_history',
   'invoices',
   'payments',
 ];
@@ -88,6 +89,14 @@ const REFERENCING_COLLECTIONS = [
 async function mergeStudentData(schoolId, ctx, oldStudent, newStudentId) {
   const oldForms = [oldStudent?.id, oldStudent?._id ? String(oldStudent._id) : null].filter(Boolean);
   if (oldForms.length === 0 || !newStudentId) return {};
+
+  // student_class_history is unique per student + year: where the kept
+  // record already has a year, the removed record's row for that year is
+  // dropped first so re-pointing cannot collide on the unique index.
+  const History = tenantModel('student_class_history', ctx);
+  const keptRows = await History.find({ schoolId, studentId: newStudentId }).lean();
+  const keptYears = [...new Set((keptRows || []).map(r => r.academicYearId).filter(Boolean))];
+  if (keptYears.length) await History.deleteMany({ schoolId, studentId: { $in: oldForms }, academicYearId: { $in: keptYears } });
 
   const counts = {};
   for (const collection of REFERENCING_COLLECTIONS) {

@@ -137,7 +137,7 @@ async function buildSnapshotsForSchool(ctx, weekStart, weekEnd, timezone, roster
     ...growthByCollection
   ] = await Promise.all([
     tenantModel('assessment_marks', ctx)
-      .find({ schoolId: ctx.schoolId, studentId: { $in: studentIds }, createdAt: instantRange })
+      .find({ schoolId: ctx.schoolId, studentId: { $in: studentIds }, createdAt: instantRange, source: { $ne: 'past_import' } }) // v5.278.0: imported past results are not "this week's marks"
       .select('studentId subjectId assessmentType instance rawScore label createdAt').lean(),
 
     tenantModel('attendance', ctx)

@@ -309,6 +309,7 @@ app.use('/api/academic-config', require('./routes/academic-config'));
 app.use('/api/assessment',      require('./routes/assessment'));
 app.use('/api/report-cards',   require('./routes/report-cards'));
 app.use('/api/import-export',  require('./routes/import-export'));
+app.use('/api/past-results',   require('./routes/past-results'));   // v5.278.0: past years' results + class history
 app.use('/api/settings',       require('./routes/settings'));
 app.use('/api/smart-reminders', require('./routes/smart-reminders'));
 app.use('/api/analytics',      require('./routes/analytics'));

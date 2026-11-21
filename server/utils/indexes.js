@@ -848,6 +848,20 @@ const INDEXES = [
       { key: { schoolId: 1, academicYearId: 1, isPublished: 1 },       name: 'am_year_published' },
       { key: { schoolId: 1, isLocked: 1 },                             name: 'am_locked', sparse: true },
       { key: { id: 1 },                                                 name: 'am_id', unique: true, sparse: true },
+      // Past-results import (v5.278.0): undo finds a batch's marks by this.
+      { key: { schoolId: 1, importBatchId: 1 },                         name: 'am_import_batch', sparse: true },
+    ],
+  },
+
+  /* ── student_class_history (v5.278.0) ───────────────────────
+     One row per student per academic year: the class they were in.
+     Written by promotion and the past-results import. */
+  {
+    col: 'student_class_history',
+    indexes: [
+      { key: { schoolId: 1, studentId: 1, academicYearId: 1 }, name: 'sch_student_year', unique: true },
+      { key: { schoolId: 1, academicYearId: 1, classId: 1 },   name: 'sch_year_class' },
+      { key: { id: 1 },                                         name: 'sch_id', unique: true, sparse: true },
     ],
   },
 

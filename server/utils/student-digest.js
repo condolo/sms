@@ -170,6 +170,7 @@ async function loadStudentDigest({ schoolId, student, days = 30, now = new Date(
       markState: 'present',
       rawScore: { $ne: null },
       createdAt: { $gte: since },
+      source: { $ne: 'past_import' },   // v5.278.0: imported past results are not recent marks
     }).select('rawScore assessmentId createdAt').lean(),
   ]);
 

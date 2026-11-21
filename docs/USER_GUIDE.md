@@ -959,6 +959,35 @@ Configure academic year dates, term boundaries, and set the current active term.
 
 > **Important**: changes to the grading schema or weights take effect on the **next publish run** only. Already-published report cards retain the config that was active when they were published — they are never retroactively recalculated.
 
+### Importing past years' results *(new in v5.278.0)*
+> **Admins, and roles with full exam rights** (Grades & Marks → Enter / Edit Marks with Delete).
+
+Use this when your school moves onto Msingi with earlier years' results kept in Excel.
+
+**Before you start**
+1. Add each past year with its terms under **Settings → Academics**. Don't archive it until its results are in, because archiving locks the year's marks.
+2. Make sure every student in the sheets is on the system. Import learners who have left with **Students → Import**, setting their status (graduated / transferred / withdrawn).
+3. Classes and subjects must exist with the names (or codes) used in your sheets.
+
+**Importing a sheet**
+1. Go to **Exams & Assessment → Past Results**.
+2. Choose the **academic year**, **term** and **assessment** (for example End-Term), and what the marks were **out of**.
+3. Pick the **class**, or leave it blank if your file has a `class` column. **Download template** gives a sheet with that class's subjects as columns.
+4. Save your Excel sheet as **CSV UTF-8**:
+   - columns: `admissionNumber`, then one column per subject (its name or code);
+   - optional columns: `name`, `class`, `stream`;
+   - each cell: a score, or ABS / MIS / EXM / INC, or empty.
+5. Click **Check file**. Nothing is saved yet. You see how many marks are new, already there or locked, and every row with a problem, with the reason.
+6. Click **Import**. Each student's class for that year is saved too (shown on their profile under Grades → Class history).
+
+If a mark is already there, it is kept unless you choose **Replace it**. Marks on a published report card are never changed. Every import appears under **Past imports** and can be **undone**.
+
+To issue report cards for a past year, open **Report Cards**, pick that year and class, then generate and publish as usual.
+
+- Publishing a past year's report cards does **not** notify parents. Only the current year does.
+- To **correct** a past mark, import the corrected sheet again with **Replace it**. The Markbook may refuse past marks for subjects the class or student no longer takes.
+- Past report cards use today's assessment types, weights and grade scale.
+
 ### Academic Year Close / Archive *(new in v4.6.1)*
 > **Admin / Superadmin only** — this action is **irreversible** without direct database access.
 

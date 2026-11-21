@@ -25,6 +25,8 @@ const AuditService            = require('../services/audit');
 const { provisionIdentityForUser } = require('../utils/provision-identities');
 const { revokeUserTokens, revokeIdentityTokens } = require('../utils/token-version');
 const { enqueueBatch } = require('../utils/email-queue');
+const { recordClassHistory, yearForClass, yearIdOf } = require('../utils/class-history');
+const { resolveCurrentPeriod } = require('./academic-config');
 
 const router = express.Router();
 const PLAN   = planGate('students');
@@ -2640,6 +2642,12 @@ router.post('/promote', authMiddleware, PLAN, MODGATE, rbac('students', 'update'
       }
     }
 
+    // Class history (v5.278.0): before a student's classId is overwritten,
+    // record the class they are leaving for the year they spent in it.
+    const historyYears = await tenantModel('academic_years', tenantContext(req)).find({ schoolId }).lean();
+    const historyCurrentYearId = yearIdOf(resolveCurrentPeriod(historyYears).year);
+    let historyRecorded = 0;
+
     const now = new Date().toISOString();
     let totalPromoted = 0;
     let totalGraduated = 0;
@@ -2665,6 +2673,18 @@ router.post('/promote', authMiddleware, PLAN, MODGATE, rbac('students', 'update'
 
       if (!dryRun && eligible.length > 0) {
         const eligibleIds = eligible.map(s => s.id);
+        const leftYearId = await yearForClass(tenantContext(req), schoolId, fromClassId, historyYears, historyCurrentYearId, eligibleIds);
+        if (leftYearId) {
+          const streamIds = [...new Set(eligible.map(s => s.streamId).filter(Boolean))];
+          const streamNames = streamIds.length
+            ? Object.fromEntries((await tenantModel('streams', tenantContext(req)).find({ schoolId, id: { $in: streamIds } }).select('id name').lean()).map(x => [x.id, x.name]))
+            : {};
+          const hist = await recordClassHistory(tenantContext(req), schoolId, eligible.map(s => ({
+            studentId: s.id, academicYearId: leftYearId, classId: fromClassId, className: fromName,
+            streamId: s.streamId || null, streamName: streamNames[s.streamId] || null,
+          })), { source: 'promotion', userId });
+          historyRecorded += hist.created;
+        }
 
         if (isGraduate) {
           // Mark as graduated
@@ -2736,6 +2756,7 @@ router.post('/promote', authMiddleware, PLAN, MODGATE, rbac('students', 'update'
       dryRun,
       summary,
       totals: { promoted: totalPromoted, graduated: totalGraduated, skipped: totalSkipped },
+      ...(dryRun ? {} : { classHistoryRecorded: historyRecorded }),
       ...(dryRun ? {} : { promotedBy: userId, promotedAt: now }),
     });
   } catch (err) {

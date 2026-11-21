@@ -675,6 +675,33 @@ export const announcements = {
   dismiss: (id) => _post(`/announcements/${id}/dismiss`),
 };
 
+// ─── Past results (v5.278.0) ─────────────────────────────────────────────────
+// Earlier academic years' mark sheets, plus each student's class per year.
+export const pastResults = {
+  preview:      (data)   => _post('/past-results/preview', data),
+  commit:       (data)   => _post('/past-results/commit', data),
+  batches:      ()       => _get('/past-results/batches'),
+  undo:         (id)     => _post(`/past-results/batches/${id}/undo`),
+  classHistory: (params) => _get('/past-results/class-history', params),
+  /** Download a blank mark sheet for a class (its subjects as columns). */
+  downloadTemplate: async ({ classId, academicYearId, fileName }) => {
+    const { slug } = detectSchool();
+    const headers = {};
+    if (slug) headers['X-School-Slug'] = slug;
+    const qs = new URLSearchParams(Object.fromEntries(Object.entries({ classId, academicYearId }).filter(([, v]) => v))).toString();
+    const res = await fetch(`${BASE}/past-results/template${qs ? `?${qs}` : ''}`, { headers, credentials: 'include' });
+    if (!res.ok) throw new APIError('TEMPLATE_FAILED', 'Could not download the template', res.status);
+    const blob = await res.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = fileName || 'past_results.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+  },
+};
+
 // ─── Import / Export ──────────────────────────────────────────────────────────
 
 export const importExport = {
@@ -1616,6 +1643,7 @@ const api = {
   rooms,
   teachingAssignments,
   importExport,
+  pastResults,
   growthProfile,
   weeklySnapshots,
   analytics,

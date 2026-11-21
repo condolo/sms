@@ -6,6 +6,65 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.278.0] - 2026-11-21 - feat(exams): import past years' results; class history per year
+
+Requested so schools moving onto Msingi (Trinitas and Trinity first) can bring in previous academic years. Built for every school, not those two.
+
+### Added
+- **Exams & Assessment → Past Results** (admins, and roles with full exam rights: Grades & Marks → Enter / Edit Marks with Delete). Import one mark sheet at a time: one academic year + term + assessment per file, one row per student, one column per subject. This is the shape schools already keep in Excel, saved as CSV.
+  - **Columns:** admission number, then subjects by name or code. Optional columns: name, class, stream. Columns such as name, total, mean, grade, position and remarks are ignored.
+  - **Cells:** a score, or ABS / MIS / EXM / INC, or nothing. "Marked out of" converts scores to the 0–100 the Markbook stores.
+  - **Students** match by admission number in any status, so learners who have left (graduated / transferred / withdrawn) keep their results. They must be on the system first (Students → Import with their status).
+  - **Check file** shows, before anything is written: new marks, marks that would be replaced, marks already there, locked marks, rows with problems (each with its row number and the reason) and columns that matched no subject. Existing marks are kept unless "Replace it" is chosen. Marks locked by a published report card are never changed.
+  - **Undo:** every import is listed under Past imports and can be undone. Marks it added are removed, marks it replaced go back to what they were, and the classes it recorded are removed. Audit-logged as `grades.past_results_imported` / `grades.past_results_import_undone`.
+  - **Download template:** gives a class's subjects as columns. Once that year's class list is known, it is prefilled with the students.
+  - **Report cards:** imported results feed past-year report cards. On Report Cards, pick the year, then generate and publish as usual.
+- **Class history: which class (and stream) each student was in, for each year** (`student_class_history`). Before this, promotion overwrote the class and nothing said a Grade 6 learner was in Grade 5 last year.
+  - **Promotion** now records the class each student is leaving, for the year they spent in it: the latest year with marks in that class, else the current year. So promoting after the new year has started is still filed correctly.
+  - **The past-results import** records each student's class for that year. A different class already on record for that year is kept, and the import reports it.
+  - **Shown** on the student profile under Grades → Class history. Past-year report cards use that year's stream.
+  - **Merging duplicate students** carries class history across.
+- `GET /api/past-results/class-history?studentId=` (or `?academicYearId=&classId=` for a past class's list).
+
+### Fixed
+- **Marks saved before the Markbook sent a year (stored with no year) counted in every year.** They would have appeared in past years' Markbook and report cards once a school had more than one year of marks. Before a past-results import writes, such marks are now filed under the year they were entered in: the latest year that started on or before the day the mark was created. Marks that already have a year are never touched, and the import itself only ever matches the exact year. `scripts/backfill-assessment-marks-academic-year.js` does the same for every school (`--dry-run` first).
+
+### Also changed, so past years can't disturb the current one
+Found in a pre-commit audit:
+- **Publishing a past year's report cards no longer emails or notifies guardians.** Only the current academic year notifies. Before this, publishing back-years would have sent every family a "new report card" message about 2024.
+- **Parent and student dashboards pick the "latest" report card by year and term, not by publish date** (`server/utils/report-order.js`). A 2024 report published today no longer replaces this term's report or its comparison.
+- **Parents' weekly snapshot and the teacher's student digest leave out imported past results.** Both pick marks by the date they were saved, so an import done this week would have shown 2024 marks to parents as "this week's marks".
+- **Analytics' recent-marks figures leave out imported past results.** These figures count marks entered in the chosen window, and imported marks would otherwise have counted as entered today.
+- **Undo leaves any mark changed after the import** (a Markbook save, or anything newer). It reports how many were kept, and those students keep their class for the year.
+- **Promotion picks the year from the promoted students' own marks in that class.** An earlier cohort's imported marks can no longer decide it.
+- **No silent guesses when matching.** An admission number or class name matching two records, or a heading matching two active subjects, is reported for that row or column. A second column for the same subject is reported too, and an assessment weighted 0% gets a warning, because its marks don't count on report cards.
+- Marks filed under a year automatically carry `academicYearFiledAt`, so they can be traced.
+- The Past Results tab shows only for admins and roles with full exam rights, the same rule the server applies.
+
+### Notes
+- Archiving a year locks its marks, so import a year's results before archiving it.
+- **Correcting a past mark: re-import it with "Replace it".** The Markbook checks today's curriculum, elective enrolment and teaching assignments, so it can refuse to edit a past mark: for example, an elective the student is no longer enrolled in, or a subject the class no longer takes.
+- Past report cards use today's assessment types, weights and grade scale. A past year that used a different structure has to be mapped onto today's assessments when importing.
+- The student profile's Grades summary covers the student's current class across all years, as before. Imported marks sit under the class of their year, so they don't mix in unless the student repeated the class.
+- Growth profile subject averages include all years' marks, now including imported ones.
+- Not covered yet: attendance history, full fee history (the Finance import brings opening balances only) and Kindergarten indicator scores.
+- Publishing a past year's report cards can log a duplicate-key message from the mark-submission lock step. Publishing itself completes. The cause is that `mark_submissions`' unique index has no year field. That index needs its own migration and is left for a follow-up.
+
+Tests: `past-results.test.js` (15) covers:
+- the sheet is read without writing; scores convert; leavers match; per-row problems are reported;
+- marks are written for the exact year only, and a legacy mark with no year is filed under its own year rather than overwritten;
+- existing marks are kept or replaced as chosen; locked marks are untouched;
+- undo restores everything and cannot run twice;
+- archived years and roles without full exam rights are refused;
+- an existing class history row is kept;
+- promotion picks the right year;
+- ambiguous matches are reported, 0% weight gets a warning, undo keeps a changed mark;
+- portal report order is by year and term.
+
+`student-merge.test.js` covers class history on merge. `report-cards-notify.test.js`: a past year's report cards notify nobody. `weekly-snapshot-aggregate.test.js`: an imported mark is not in this week's snapshot. Checked locally: a CSV import into a new 2024 year created 6 marks and 2 class-history rows and skipped 1 unknown student. A 2024 report for Form 6A then held only those 2 students, and this year's report was unchanged.
+
+---
+
 ## [v5.277.1] - 2026-11-20 - fix(timetable): doubles no longer lost in Subject allocation; teachers and exam admins can edit and delete indicators
 
 ### Fixed
