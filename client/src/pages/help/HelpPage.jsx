@@ -162,6 +162,18 @@ const SECTIONS = [
         a: 'Go to Subjects → Enrollment. Pick a class, then a subject from its curriculum. Add individual students by search, or enrol the whole class at once. Remove a student from a subject from the same screen.',
       },
       {
+        q: "Why does a subject show fewer (or zero) enrolled students than I expect?",
+        a: "The number counts active students only, each once. A student counts if their class has the subject on its curriculum as compulsory, or if they are enrolled in it (Enroll Class or one by one). The \"Compulsory\" badge on the Subjects list is only the Catalog default: what counts is each class's own setting in Subjects → Curriculum. Where a class has it as an elective, only enrolled students count; a class without it on its curriculum adds no one unless they are enrolled.",
+      },
+      {
+        q: "I enrolled students in a subject. Why can't teachers enter marks for it?",
+        a: "Enrolling students does not add the subject to the class's curriculum. The Markbook, Kindergarten indicators and report cards only accept subjects on the curriculum, so also add the subject to each class in Subjects → Curriculum.",
+      },
+      {
+        q: "A subject is compulsory in the Catalog but not in one class. Why?",
+        a: "The Catalog setting is the default for classes that add the subject later; each class keeps its own compulsory or elective setting. To make classes follow the Catalog, save the subject in the Catalog and accept the offer to update the classes, or use \"Match Catalog\" in Classes → Curriculum.",
+      },
+      {
         q: 'What do the Subjects Warnings mean?',
         a: 'Subjects → Warnings compares how many subjects each student is enrolled in against the minimum and maximum set for their class or section. The Timetabler sets these rules. A class with no rule shows "No rule configured", so no warning is given for it. Correct the enrolment, or ask the Timetabler to review the rule.',
       },
@@ -191,6 +203,10 @@ const SECTIONS = [
     Icon: GraduationCap,
     title: 'Students',
     articles: [
+      {
+        q: "Where can I see which class a student was in during past years?",
+        a: "Open the student's profile → Grades → Class history. It lists the class and stream for each academic year. Msingi records it when students are promoted at the end of a year, and when past results are imported.",
+      },
       {
         q: 'How do I add a new student?',
         a: 'Go to Students → "Add Student". Fill in the required fields (first name, last name, class, stream) and optional details like date of birth, guardian contacts, and photo. An admission number is generated automatically based on your school\'s configured format.',
@@ -547,7 +563,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Incidents & BPS\n• Record Incident / Award Points\n• Edit Records\n• Delete Records\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Incidents & BPS\n• Record Incident / Award Points\n• Edit Records (also opens the Categories tab)\n• Delete Records\n• Export Incident Log (PDF)\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -622,12 +638,16 @@ const SECTIONS = [
         a: 'An Exam Series groups related exams together, for example an End-of-Term 1 series. The series is for scheduling and organising. Marks for a report card come from the Markbook, not from the series.',
       },
       {
+        q: 'Who can move an exam to In progress, Completed or Cancelled?',
+        a: "Teachers, Exams Officers and admins, as before. Any other role can once its row is ticked in Settings → Roles & Permissions: \"Create / Edit Exam\" (Edit) to start or complete an exam, \"Delete Exam\" (Delete) to cancel one. Cancelled and Completed are final.",
+      },
+      {
         q: 'How are exam marks locked or approved now?',
         a: 'Through the Markbook. A teacher submits marks for a class and subject, a reviewer approves or rejects them, and approved marks are locked. Locked marks cannot be changed until an unlock is approved. Publishing a report card is blocked while any mark for that class and term is not yet approved, unless an administrator records a documented bypass. See the Grades help for the steps.',
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Exams\n• Create / Edit Exam\n• Delete Exam\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Exams\n• Create / Edit Exam (also moves an exam to In progress or Completed)\n• Delete Exam (also cancels an exam)\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -672,6 +692,18 @@ const SECTIONS = [
         a: 'Each section (for example KG, Primary, Secondary) can have its own grade scale, set in the Grades configuration under "Applies to". A class uses the scale for its section, then the school default. If neither exists, report cards for that class cannot be generated, and the message says which scale to add.',
       },
       {
+        q: "Why does the Markbook say \"none scheduled\" for Assessment?",
+        a: "The Assessment list shows what the school has added to Exams → Configuration → Assessment Schedule for the year and term you picked. If an admin sees assessments there but a teacher does not, check two things: that the entries belong to the current academic year (each entry is saved under the year that was current when it was added), and that the teacher's role or personal permissions include Assessment Scheduling → View.",
+      },
+      {
+        q: "How do I import results from previous academic years?",
+        a: "Go to Exams & Assessment → Past Results (admins, or roles with full exam rights). Import one CSV per year, term and assessment: admission number, then one column per subject. Click \"Check file\" to see exactly what will happen before anything is saved, then Import. Every import is listed under Past imports and can be undone. The step-by-step guide is in the user guide (\"Importing past years' results\").",
+      },
+      {
+        q: "Who can add, edit or delete Kindergarten indicators?",
+        a: "The subject teacher of that class, management roles, and anyone whose role has Grades & Marks → Enter / Edit Marks with Delete ticked. An indicator that already has scores asks first and deletes its scores with it. Indicators on a published (locked) report can't be changed.",
+      },
+      {
         q: 'Who can do what here? (Roles & Permissions)',
         a: '• View Grades & Marks\n• Enter / Edit Marks\n• Review / Approve Mark Submissions\n• Manage Comment Banks\n• Generate / Publish Report Cards\n• Export Grades (CSV)\n• Lock / Unlock Assessment Schedule\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
@@ -706,12 +738,24 @@ const SECTIONS = [
         a: 'Moderation checks that every mark for the class and term has been approved before publishing. If a subject has marks but no approved submission (still draft, submitted, rejected, or never submitted), publishing is blocked and the message lists the subjects. An administrator can record a documented bypass. The bypass is logged.',
       },
       {
+        q: 'How do I issue report cards for a previous year?',
+        a: "Import that year's results first (Exams & Assessment → Past Results). Then open Report Cards, pick that year, term and class, and generate and publish as usual.",
+      },
+      {
+        q: "Are parents notified when we publish an earlier year's report cards?",
+        a: "No. Only report cards for the current academic year send messages or emails. Parents can still open published past report cards in the parent portal, and the current term's report stays the one shown first.",
+      },
+      {
+        q: "A Kindergarten report lists subjects with no indicators. How do we remove them?",
+        a: "A Kindergarten report lists every subject on the class's Kindergarten template. Open Exams & Assessment → Kindergarten Templates, open the template used by that class, remove the subjects that shouldn't print, save, and generate the reports again. This changes every class using that template, and indicators already entered are kept.",
+      },
+      {
         q: 'Can parents download report cards as a PDF?',
         a: 'Yes. Once published, students and parents can download their report card PDF from their portal. The PDF includes the Report ID, QR code for verification, and the school stamp and signature.',
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• Manage Draft Comments\n• Configure Approval Workflow\n• Configure Publication Policy\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
+        a: '• Generate / Publish Report Cards\n• Manage Draft Comments\n• Configure Approval Workflow\n• Configure Publication Policy (also opens the Report Cards → Settings tab)\n• Write the Principal\'s Remark\n• Unlock Published Comments\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -736,6 +780,10 @@ const SECTIONS = [
         a: 'Yes, when it should be. If a subject is taught to each stream separately (e.g. a different pace or a different teacher per stream), your "My Classes" cards show one card per stream — e.g. "Standard 4A · 4A" and "Standard 4A · 4B" — each with its own topics and its own percentage. Marking a topic covered in one stream never affects the other. If instead the whole class is taught together with no stream split, there is just one shared card, same as it always was.',
       },
       {
+        q: 'Can I mark coverage for only some students?',
+        a: "Yes. In Lessons → Topics & Coverage, switch \"Mark coverage for\" to \"Selected students\" and pick them. Ticks then apply only to those students. Pick one student to see their own progress. Topics the whole class has covered count for everyone.",
+      },
+      {
         q: 'Where do students see curriculum coverage?',
         a: "Students see a per-subject coverage bar on their Student Dashboard showing the percentage of topics covered so far in the term — scoped to their own stream when the subject is taught separately per stream, so a student never sees a sibling stream's progress credited to them.",
       },
@@ -749,7 +797,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Lesson Plans\n• Create Lesson Plan\n• Edit Lesson Plan\n• Delete Lesson Plan\n• Mark Lesson Coverage\n• Configure Lesson Plan Template\n• Bulk Import Lesson Plans\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Lesson Plans\n• Create Lesson Plan\n• Edit Lesson Plan\n• Delete Lesson Plan\n• Mark Lesson Coverage\n• Configure Lesson Plan Template\n• Bulk Import Lesson Plans\n• Manage All Lesson Plans (every teacher\'s plans: View to see, Edit to change, Delete to delete)\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -821,7 +869,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Leave Requests\n• Approve / Reject Leave\n• View Payroll\n• Export Payroll (CSV)\n• Manage Staff Documents\n• Configure Leave/Payroll Approval Workflow\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Leave Requests\n• Approve / Reject Leave\n• View Payroll (also opens other staff members\' payslips)\n• Export Payroll (CSV)\n• Manage Staff Documents (with Edit: every staff member\'s documents)\n• Configure Leave/Payroll Approval Workflow\n• Staff Tab & HR Overview\n• Release Payroll (mark paid; edit or delete once confirmed)\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -1242,6 +1290,10 @@ const SECTIONS = [
         a: 'Yes. Go to Settings → Roles & Permissions. Choose which modules each role can read, create, update or delete, and set the finer sub-permissions where the grid shows them. Changes apply to everyone with that role.',
       },
       {
+        q: "How do I give one person different permissions from their role?",
+        a: "Go to Settings → Roles & Permissions → Per User. Search by name, email or role (for example \"principal\"), pick the person, and tick or untick rows. Their personal ticks apply on top of their role, only for them. Save when done; the person refreshes the page to see the change.",
+      },
+      {
         q: 'Why can I only see certain modules in the sidebar?',
         a: "The sidebar shows only modules your role has permission to access. If a module you expect to see is missing, ask your administrator to check your role's permissions in Settings → Roles & Permissions.",
       },
@@ -1252,6 +1304,28 @@ const SECTIONS = [
       {
         q: 'What can a student account see?',
         a: "Students access the Student Portal — showing today's timetable (with Join buttons during online learning), attendance %, curriculum coverage, fee balance, report cards, and behaviour history.",
+      },
+      {
+        q: "I ticked every box for a role. Why is something still refused?",
+        a: "Check these, in order. 1) The row was added after you saved the role: open the role again and tick the newer rows (for example HR → Staff Tab & HR Overview or Release Payroll, Report Cards → Write the Principal's Remark). 2) The person needs to refresh the page. 3) It's a rule that protects records and applies to everyone, admins included: a subject not on the class curriculum, a learner not enrolled in an elective, marks locked by a published report card, an archived year, confirmed payroll. 4) It's reserved: backups, granting the Admin role and resetting another admin's password are superadmin-only; choosing the attendance or behaviour officer, the subscription and full data export are admin-only.",
+      },
+      {
+        q: "Which actions used to be admin-only, and which row grants them now?",
+        a: "• HR Staff tab and overview: HR → Staff Tab & HR Overview\
+• Mark payroll paid, or change it once confirmed: HR → Release Payroll\
+• Academic years (add, edit, delete, archive, new year): Settings → Academic setup\
+• School profile and houses: Settings → School\
+• Register the M-Pesa paybill: Finance → Configure M-Pesa Integration\
+• Principal's remark; unlocking published comments: Report Cards rows of those names\
+• Exam Configuration and Kindergarten Templates tabs: Assessment Scheduling → Lock / Unlock Assessment Schedule (Edit)\
+• Export the behaviour incident log: Behaviour → Export Incident Log\
+• Every teacher's lesson plans: Lessons → Manage All Lesson Plans\
+• Group analytics: Analytics → Group Analytics\
+Roles that had these by name keep them. Rows that are new are only granted by ticking that exact row.",
+      },
+      {
+        q: "Someone has two roles. Which permissions apply?",
+        a: "Everything either role allows, plus any personal permissions set for that person. For example, a teacher who is also a parent can use both the teacher and parent sides with one account. A teacher who has a separate parent login under another email has two accounts, each with its own role.",
       },
     ],
   },
@@ -1277,7 +1351,11 @@ const SECTIONS = [
       },
       {
         q: 'Can I undo a bulk import?',
-        a: 'There is no automatic undo for bulk imports. For students: change their status to Inactive individually. For timetable slots: use the bulk-delete option. Always review your CSV before importing.',
+        a: 'Past results imports can be undone from Exams & Assessment → Past Results → Past imports. Other bulk imports have no automatic undo: for students, change their status to Inactive individually; for timetable slots, use the bulk-delete option. Always review your CSV before importing.',
+      },
+      {
+        q: 'Can we bring in results from previous years?',
+        a: "Yes, from Exams & Assessment → Past Results. Add the past academic years first (Settings → Academics) and import students who have left with their status (graduated, transferred or withdrawn). Then import one mark sheet per year, term and assessment. Each student's class for that year is saved too, so past report cards come out right.",
       },
       {
         q: 'Can I import opening fee balances for students?',

@@ -20,7 +20,7 @@ import {
   Upload, ImageIcon, KeyRound, RefreshCw,
   PlusCircle, ChevronRight, AlertCircle, Archive,
   MonitorPlay, WifiOff, ClipboardList,
-  Megaphone, Copy, ExternalLink, GraduationCap,
+  Megaphone, Copy, ExternalLink, GraduationCap, Search,
 } from 'lucide-react';
 import { sections as sectionsApi, teachers as teachersApi } from '@/api/client.js';
 import { settings as settingsApi } from '@/api/client.js';
@@ -3626,6 +3626,7 @@ export function RolesTab() {
   const [mode,           setMode]           = useState('role');   // 'role' | 'user'
   const [selRole,        setSelRole]        = useState('admin');
   const [selUser,        setSelUser]        = useState(null);
+  const [userQuery,      setUserQuery]      = useState('');      // Per User: search by name, email or role
   const [expanded,       setExpanded]       = useState({});
   const [perms,          setPerms]          = useState(null);
   const [dirty,          setDirty]          = useState(false);
@@ -3752,6 +3753,18 @@ export function RolesTab() {
     staleTime: 60_000,
   });
   const users = usersData?.data ?? [];
+  /* Per User search: name, email, or role (its key, or a custom role's label),
+     so "principal" or "head" finds everyone holding that role. */
+  const roleLabelOf = (key) => customRoles.find(cr => cr.key === key)?.label ?? String(key ?? '').replace(/_/g, ' ');
+  const shownUsers = (() => {
+    const q = userQuery.trim().toLowerCase();
+    if (!q) return users;
+    return users.filter(u => {
+      const roleKeys = [u.role, ...(Array.isArray(u.roles) ? u.roles : [])].filter(Boolean);
+      const hay = [u.name, u.email, ...roleKeys, ...roleKeys.map(roleLabelOf)].filter(Boolean).join(' ').toLowerCase();
+      return q.split(/s+/).every(w => hay.includes(w));
+    });
+  })();
 
   /* Initialise permission state once school data + module registry arrive */
   useEffect(() => {
@@ -3987,7 +4000,30 @@ export function RolesTab() {
           ) : users.length === 0 ? (
             <p className="text-xs text-slate-400 px-2 py-4 text-center">No users in school.</p>
           ) : (
-            users.map(u => {
+            <>
+            <div className="relative mb-1">
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                value={userQuery}
+                onChange={e => setUserQuery(e.target.value)}
+                placeholder="Search by name or role…"
+                aria-label="Search users by name or role"
+                className="w-full pl-8 pr-7 py-2 text-xs rounded-xl ring-1 ring-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+              />
+              {userQuery && (
+                <button onClick={() => setUserQuery('')} title="Clear search"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-600">
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+            {userQuery && (
+              <p className="text-[10px] text-slate-400 px-1">{shownUsers.length} of {users.length} user{users.length === 1 ? '' : 's'}</p>
+            )}
+            {shownUsers.length === 0 && (
+              <p className="text-xs text-slate-400 px-2 py-4 text-center">No users match “{userQuery}”.</p>
+            )}
+            {shownUsers.map(u => {
               const uid = u.id ?? u._id;
               const sel = selUser === uid;
               return (
@@ -3999,11 +4035,12 @@ export function RolesTab() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className={`text-xs font-medium truncate ${sel ? 'text-white' : 'text-slate-700'}`}>{u.name ?? u.email}</p>
-                    <p className={`text-[10px] truncate capitalize ${sel ? 'text-white/60' : 'text-slate-400'}`}>{u.role}</p>
+                    <p className={`text-[10px] truncate capitalize ${sel ? 'text-white/60' : 'text-slate-400'}`}>{roleLabelOf(u.role)}</p>
                   </div>
                 </button>
               );
-            })
+            })}
+            </>
           )}
         </div>
 

@@ -6,6 +6,29 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.279.1] - 2026-11-23 - feat(settings, help): search in Per User permissions; Help Centre brought up to date
+
+### Added
+- **Settings → Roles & Permissions → Per User: search by name, email or role.** Typing "principal", "head" or a custom role's name lists everyone holding that role. The list shows how many match, and roles show by their display name (a custom role's label, not its key).
+
+### Changed
+- **Help Centre** articles now cover the November releases:
+  - **Subjects:** why enrolment counts can be lower than expected; enrolling doesn't add a subject to the curriculum; the Catalog's compulsory setting versus a class's own setting.
+  - **Students:** class history per year.
+  - **Exams:** who can start, complete or cancel an exam.
+  - **Grades:** the Markbook's "none scheduled"; importing past years' results; who manages Kindergarten indicators.
+  - **Report Cards:** issuing a past year's report cards; parents are not notified for past years; removing empty subjects from Kindergarten reports; the full permission list.
+  - **Lessons:** per-student coverage; Manage All Lesson Plans.
+  - **HR and Behaviour:** their new rows.
+  - **Roles & Permissions:**
+    - "I ticked every box, why is something still refused?";
+    - the former admin-only actions and their rows;
+    - accounts with two roles;
+    - setting permissions for one person.
+  - **Data:** past results import and its undo.
+
+---
+
 ## [v5.279.0] - 2026-11-23 - fix(permissions): what Settings grants is what the system allows
 
 Asked directly: "if a role is assigned all the permissions in Roles & Permissions … they should be able to see everything that module allows. Sometimes you are the admin with full access, but it still says you have no permission."
