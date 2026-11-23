@@ -6,6 +6,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.279.2] - 2026-11-23 - feat(markbook): comment status colours, one Save for marks and comments, progress line
+
+### Changed
+- **Markbook comment boxes show their state:** orange when there is no comment yet, amber with "Not saved yet" after editing, green with a tick once saved. Green comes from the saved comment, so it stays after a reload. A characters-left count shows while typing.
+- **One button saves marks and comments** ("Save marks & comments"). A comment still saves on its own when the teacher leaves the box; a comment already saving is not sent twice.
+- **Progress line above the grid:** "Marks 12/19 · Comments 7/19".
+- **Unsaved comments are protected like unsaved marks:** they are saved before switching class, subject or assessment, and leaving the page warns first.
+
+Screen only: no server, data or permission changes. Comments save through the same endpoint as before.
+
+---
+
 ## [v5.279.1] - 2026-11-23 - feat(settings, help): search in Per User permissions; Help Centre brought up to date
 
 ### Added
