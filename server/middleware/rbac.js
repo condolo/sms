@@ -172,14 +172,43 @@ async function _loadUserPerms(schoolId, userId) {
  */
 /* Shared by rbac()'s middleware path and the standalone hasPermission()
    helper below — same subKey-falls-back-to-module-level rule either way. */
-async function _isAllowed(jwtUser, mod, action, subKey) {
+/* An account's effective permissions: every role it holds, combined (the
+   union of each role's actions per module), then its personal overrides.
+   v5.278.3 — the SAME rule sign-in and the sidebar already use
+   (auth.js _loadMergedPermissions). The server used to check only the
+   PRIMARY role, so an account with two roles saw a module on screen that
+   the server then refused. Reported 2026-11-23 (Trinity): a teacher whose
+   account also holds a parent role saw the Markbook, but every assessment
+   was refused, so it read "none scheduled". A single-role account is
+   unchanged: the combination of one role is that role. */
+async function _effectivePerms(jwtUser) {
   const { userId, schoolId, role, roles = [] } = jwtUser || {};
+  const keys = [...new Set([role, ...(Array.isArray(roles) ? roles : [])].filter(r => typeof r === 'string' && r))];
+  let rolePerms;
+  if (keys.length <= 1) {
+    rolePerms = await _loadPerms(schoolId, role);
+  } else {
+    const merged = {};
+    for (const key of keys) {
+      const perms = await _loadPerms(schoolId, key);
+      for (const [mod, actions] of Object.entries(perms || {})) {
+        if (!Array.isArray(actions)) continue;
+        if (!merged[mod]) merged[mod] = new Set();
+        actions.forEach(a => merged[mod].add(a));
+      }
+    }
+    rolePerms = Object.fromEntries(Object.entries(merged).map(([mod, set]) => [mod, [...set]]));
+  }
+  const userPerms = await _loadUserPerms(schoolId, userId);
+  return userPerms ? _mergeUserOverrides(rolePerms, userPerms) : rolePerms;
+}
+
+async function _isAllowed(jwtUser, mod, action, subKey) {
+  const { schoolId, role, roles = [] } = jwtUser || {};
   if (!schoolId || !role) return false;
   if (_isSuperRole(role, roles)) return true;
 
-  const rolePerms = await _loadPerms(schoolId, role);
-  const userPerms = await _loadUserPerms(schoolId, userId);
-  const perms = userPerms ? _mergeUserOverrides(rolePerms, userPerms) : rolePerms;
+  const perms = await _effectivePerms(jwtUser);
 
   const subFullKey = subKey ? `${mod}__${subKey}` : null;
   const hasSubGrant = subFullKey && Array.isArray(perms[subFullKey]);
@@ -235,13 +264,11 @@ async function hasPermission(req, mod, action, subKey) {
  */
 async function hasExplicitSubGrant(req, mod, subKey, action) {
   try {
-    const { userId, schoolId, role, roles = [] } = req.jwtUser || {};
+    const { schoolId, role, roles = [] } = req.jwtUser || {};
     if (!schoolId || !role) return false;
     if (_isSuperRole(role, roles)) return true;
 
-    const rolePerms = await _loadPerms(schoolId, role);
-    const userPerms = await _loadUserPerms(schoolId, userId);
-    const perms = userPerms ? _mergeUserOverrides(rolePerms, userPerms) : rolePerms;
+    const perms = await _effectivePerms(req.jwtUser);
 
     const subFullKey = `${mod}__${subKey}`;
     return Array.isArray(perms[subFullKey]) && perms[subFullKey].includes(action);

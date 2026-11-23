@@ -6,6 +6,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.278.3] - 2026-11-23 - fix(permissions): the server honours every role an account holds
+
+### Fixed
+- **An account with more than one role could see a page that the server then refused.**
+  - **Cause:** sign-in and the sidebar combine all of an account's roles (`auth.js _loadMergedPermissions`), but the server checked only the primary role.
+  - **Example:** a parent-first account that also teaches saw the Markbook, but its assessments were refused, so the list read "none scheduled".
+  - **Now:** `rbac()`, `hasPermission()` and `hasExplicitSubGrant()` use the same rule: what any of the account's roles allows, then the person's own overrides on top.
+  - **Single-role accounts:** unchanged, since the combination of one role is that role.
+  - **Multi-role accounts:** gain only what their own assigned roles already allow.
+- **Unchanged:** the Settings rule capping what an admin may grant still uses the actor's primary role.
+
+Raised while tracing a Trinity teacher's "none scheduled" Markbook. That teacher's account may hold a single role. If so, the cause there is her role or personal permissions lacking Assessment Scheduling → View, which the school's admin can check under Settings → Users.
+
+Tests: `rbac-multi-role.test.js` covers that:
+- single-role accounts are unchanged;
+- a two-role account gets either role's rights and nothing neither has;
+- personal overrides still apply;
+- `hasExplicitSubGrant` follows the same rule.
+
+---
+
 ## [v5.278.2] - 2026-11-23 - fix(subjects): enrolment counts include learners and classes saved without the standard id
 
 ### Fixed
