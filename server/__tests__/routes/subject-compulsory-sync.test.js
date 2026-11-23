@@ -85,6 +85,21 @@ describe('GET /student-subjects/counts follows rosters', () => {
     expect(res.body.data.fre).toBe(3);
   });
 
+  // v5.278.2: records without the standard `id` (onboarded irregularly) and a
+  // class referenced by its database id were silently left out of the count.
+  test('a learner with no id field, and a class referenced by its database id, are counted', async () => {
+    mockDb.data.classes.push({ _id: '6a1b2c3d4e5f6a7b8c9d0e1f', schoolId: S, name: 'Year 9' });            // no `id`
+    mockDb.data.students.push(
+      { _id: '5f0000000000000000000001', schoolId: S, classId: '6a1b2c3d4e5f6a7b8c9d0e1f', status: 'active', firstName: 'f' },   // no `id`
+      { id: 'g', schoolId: S, classId: '6a1b2c3d4e5f6a7b8c9d0e1f', status: 'active', firstName: 'g' },
+    );
+    mockDb.data.class_subjects.push({ id: 'l8', schoolId: S, classId: '6a1b2c3d4e5f6a7b8c9d0e1f', subjectId: 'math', isCompulsoryForClass: true });
+    mockDb.data.student_subjects.push({ id: 'r8', schoolId: S, studentId: '5f0000000000000000000001', subjectId: 'fre' });          // enrolled by _id
+    const res = await app().get('/api/student-subjects/counts');
+    expect(res.body.data.math).toBe(7);   // 5 as before + both Year 9 learners
+    expect(res.body.data.fre).toBe(4);    // 3 as before + the id-less learner enrolled directly
+  });
+
   // v5.278.1 (Trinity, 2026-11-23): enrolled through Enroll Class but not on the
   // class curriculum showed "0 enrolled" while the panel listed the learners.
   test('learners enrolled directly count even when the subject is not on their class curriculum', async () => {

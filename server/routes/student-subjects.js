@@ -32,21 +32,49 @@ const router = express.Router();
 router.get('/counts', authMiddleware, async (req, res) => { // rbac: intentionally open to every authenticated user — reference/count data
   try {
     const { schoolId } = req.jwtUser;
-    const [links, students, rows] = await Promise.all([
+    const [links, students, rows, classes] = await Promise.all([
       tenantModel('class_subjects', tenantContext(req)).find({ schoolId, isActive: { $ne: false } }).select('classId subjectId isCompulsoryForClass').lean(),
-      tenantModel('students', tenantContext(req)).find({ schoolId, status: 'active' }).select('id classId').lean(),
+      tenantModel('students', tenantContext(req)).find({ schoolId, status: 'active' }).select('id _id classId').lean(),
       tenantModel('student_subjects', tenantContext(req)).find({ schoolId }).select('studentId subjectId').lean(),
+      tenantModel('classes', tenantContext(req)).find({ schoolId }).select('id _id').lean(),
     ]);
+    // Every id form (v5.278.2): records onboarded through irregular paths can
+    // lack the `id` field (the Mongo _id is then their id), and a class may be
+    // referenced by either form. Both forms map to one key, so such learners
+    // and classes are counted instead of silently skipped.
+    const classKey = new Map();
+    for (const c of classes) {
+      const key = c.id || (c._id != null ? String(c._id) : null);
+      if (!key) continue;
+      if (c.id) classKey.set(c.id, key);
+      if (c._id != null) classKey.set(String(c._id), key);
+    }
+    const toClass = (v) => (v == null || v === '' ? null : (classKey.get(String(v)) || String(v)));
+    const studentKey = new Map();
+    for (const st of students) {
+      const key = st.id || (st._id != null ? String(st._id) : null);
+      if (!key) continue;
+      if (st.id) studentKey.set(st.id, key);
+      if (st._id != null) studentKey.set(String(st._id), key);
+    }
+    const toStudent = (v) => (v == null ? null : studentKey.get(String(v)) || null);   // null = not an active learner
+
     const byClass = new Map();
     for (const st of students) {
-      if (!st.classId || !st.id) continue;
-      if (!byClass.has(st.classId)) byClass.set(st.classId, []);
-      byClass.get(st.classId).push(st.id);
+      const sid = toStudent(st.id || st._id);
+      const cid = toClass(st.classId);
+      if (!cid || !sid) continue;
+      if (!byClass.has(cid)) byClass.set(cid, []);
+      byClass.get(cid).push(sid);
     }
-    const enrolled = new Set(rows.map(r => `${r.subjectId}|${r.studentId}`));
-    const takers = new Map();   // subjectId -> Set(studentId)
+    const enrolled = new Set();
+    for (const r of rows) {
+      const sid = toStudent(r.studentId);
+      if (sid && r.subjectId) enrolled.add(`${r.subjectId}|${sid}`);
+    }
+    const takers = new Map();   // subjectId -> Set(student key)
     for (const l of links) {
-      const roster = byClass.get(l.classId) || [];
+      const roster = byClass.get(toClass(l.classId)) || [];
       if (!roster.length || !l.subjectId) continue;
       if (!takers.has(l.subjectId)) takers.set(l.subjectId, new Set());
       const set = takers.get(l.subjectId);
@@ -59,11 +87,10 @@ router.get('/counts', authMiddleware, async (req, res) => { // rbac: intentional
     // (v5.278.1). Reported 2026-11-23 (Trinity): "Personal development" had
     // 23 KG1 learners enrolled but showed 0, because only curriculum-linked
     // classes were counted. Active learners only, each once.
-    const active = new Set(students.map(st => st.id).filter(Boolean));
-    for (const r of rows) {
-      if (!r.subjectId || !active.has(r.studentId)) continue;
-      if (!takers.has(r.subjectId)) takers.set(r.subjectId, new Set());
-      takers.get(r.subjectId).add(r.studentId);
+    for (const key of enrolled) {
+      const [subjectId, sid] = key.split('|');
+      if (!takers.has(subjectId)) takers.set(subjectId, new Set());
+      takers.get(subjectId).add(sid);
     }
     const map = {};
     for (const [subjectId, set] of takers) map[subjectId] = set.size;

@@ -6,6 +6,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.278.2] - 2026-11-23 - fix(subjects): enrolment counts include learners and classes saved without the standard id
+
+### Fixed
+- **Some learners were silently left out of subject enrolment totals.** Asked in context: "compulsory subjects are not showing total enrolled students".
+  - **Cause:** the count matched records only by their `id` field. Records created through irregular onboarding can lack it, with the database `_id` acting as their id. A learner without `id` was skipped, and so was a class referenced by its `_id` on one side and its `id` on the other.
+  - **Now:** learners and classes are matched by either form, so they count.
+  - **Unchanged:** the counting rules themselves (compulsory per class curriculum, enrolled learners, active only, each learner once).
+
+Tests: `subject-compulsory-sync.test.js` covers a learner with no `id` field, and a class referenced by its database id, being counted.
+
+---
+
 ## [v5.278.1] - 2026-11-23 - fix(subjects): learners enrolled directly count again on the subject list
 
 ### Fixed
