@@ -6,6 +6,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.278.1] - 2026-11-23 - fix(subjects): learners enrolled directly count again on the subject list
+
+### Fixed
+- **Subjects list showed "0 enrolled" for a subject with learners enrolled.** Reported by Trinity: "Personal development" had 23 KG1 learners enrolled through Enroll Class, and its panel listed them, but the list said 0.
+  - **Cause:** since v5.276.4 the count only included classes whose curriculum has the subject, and this subject is not on KG1's curriculum.
+  - **Now:** active learners enrolled directly count too, each learner once.
+  - **Unchanged:** compulsory and elective counts on curriculum classes; leavers still never count.
+
+Enroll Class itself is unchanged, by decision: it enrols learners and does not add the subject to the class curriculum. A subject must still be added under Classes → Curriculum before the Markbook, indicators and report cards accept it.
+
+Tests: `subject-compulsory-sync.test.js` covers learners enrolled directly being counted when the subject is not on their curriculum.
+
+---
+
 ## [v5.278.0] - 2026-11-21 - feat(exams): import past years' results; class history per year
 
 Requested so schools moving onto Msingi (Trinitas and Trinity first) can bring in previous academic years. Built for every school, not those two.

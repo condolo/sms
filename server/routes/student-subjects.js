@@ -19,7 +19,9 @@ const router = express.Router();
    subject, counted the way every roster in the system is built (v5.276.4):
      • a class where the subject is compulsory → every active student in it;
      • a class where it is an elective → that class's active students
-       enrolled in it (student_subjects).
+       enrolled in it (student_subjects);
+     • any other active student enrolled in it directly, even where it is
+       not on their class's curriculum (v5.278.1).
    Reported (2026-11-18): "if enrollment for maths is 309, it should be the
    same for any compulsory subject". This used to count raw student_subjects
    rows: students who left still counted, and students in a class where the
@@ -51,6 +53,17 @@ router.get('/counts', authMiddleware, async (req, res) => { // rbac: intentional
       for (const sid of roster) {
         if (l.isCompulsoryForClass || enrolled.has(`${l.subjectId}|${sid}`)) set.add(sid);
       }
+    }
+    // Learners enrolled directly (Subjects → Enroll Class / Enroll individual)
+    // count too, even where the subject is not on their class's curriculum
+    // (v5.278.1). Reported 2026-11-23 (Trinity): "Personal development" had
+    // 23 KG1 learners enrolled but showed 0, because only curriculum-linked
+    // classes were counted. Active learners only, each once.
+    const active = new Set(students.map(st => st.id).filter(Boolean));
+    for (const r of rows) {
+      if (!r.subjectId || !active.has(r.studentId)) continue;
+      if (!takers.has(r.subjectId)) takers.set(r.subjectId, new Set());
+      takers.get(r.subjectId).add(r.studentId);
     }
     const map = {};
     for (const [subjectId, set] of takers) map[subjectId] = set.size;

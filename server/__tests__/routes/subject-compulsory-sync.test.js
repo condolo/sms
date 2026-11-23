@@ -67,6 +67,9 @@ function seed() {
       { id: 'r2', schoolId: S, studentId: 'gone', subjectId: 'math' },    // a leaver never counts
       { id: 'r3', schoolId: S, studentId: 'd',    subjectId: 'kis' },     // elective in Year 8: counts
       { id: 'r4', schoolId: S, studentId: 'a',    subjectId: 'kis' },     // compulsory in Year 7 anyway: once
+      { id: 'r5', schoolId: S, studentId: 'd',    subjectId: 'pd' },      // enrolled directly; not on Year 8's curriculum
+      { id: 'r6', schoolId: S, studentId: 'e',    subjectId: 'pd' },
+      { id: 'r7', schoolId: S, studentId: 'gone', subjectId: 'pd' },      // a leaver still never counts
     ],
   });
 }
@@ -80,6 +83,14 @@ describe('GET /student-subjects/counts follows rosters', () => {
     expect(res.body.data.eng).toBe(5);    // same classes, same number as Maths
     expect(res.body.data.kis).toBe(4);    // Year 7's 3 + Year 8's 1 enrolled
     expect(res.body.data.fre).toBe(3);
+  });
+
+  // v5.278.1 (Trinity, 2026-11-23): enrolled through Enroll Class but not on the
+  // class curriculum showed "0 enrolled" while the panel listed the learners.
+  test('learners enrolled directly count even when the subject is not on their class curriculum', async () => {
+    const res = await app().get('/api/student-subjects/counts');
+    expect(res.body.data.pd).toBe(2);
+    expect(res.body.data.math).toBe(5);   // compulsory counts unchanged
   });
 });
 
