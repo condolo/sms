@@ -20,7 +20,7 @@ const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware } = require('../middleware/auth');
 const { moduleGate }     = require('../middleware/module-gate');
-const { rbac }           = require('../middleware/rbac');
+const { rbac, hasExplicitSubGrant } = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E, strParam } = require('../utils/response');
@@ -146,7 +146,10 @@ router.get('/config', authMiddleware, PLAN, MODGATE, rbac('resources', 'read'), 
 router.put('/config', authMiddleware, PLAN, MODGATE, async (req, res) => { // rbac: FULL_ACCESS_ROLES check below — see comment above
   try {
     const { schoolId, userId, role } = req.jwtUser;
-    if (!FULL_ACCESS_ROLES.has(role)) return E.forbidden(res, 'Admin access required to manage resource categories');
+    // v5.279.0: leadership roles, or Edit on Resources → "update" ticked (strict).
+    if (!FULL_ACCESS_ROLES.has(role) && !(await hasExplicitSubGrant(req, 'resources', 'update', 'update'))) {
+      return E.forbidden(res, 'Needs a leadership role, or Edit on Resources to manage categories.');
+    }
 
     const { data, error } = _validate(ResourceConfigSchema, req.body);
     if (error) return E.validation(res, error);

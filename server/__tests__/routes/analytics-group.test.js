@@ -10,7 +10,7 @@
    ============================================================ */
 
 jest.mock('../../middleware/auth', () => ({ authMiddleware: (_r, _s, n) => n() }));
-jest.mock('../../middleware/rbac',  () => ({ rbac: () => (_r, _s, n) => n() }));
+jest.mock('../../middleware/rbac',  () => ({ rbac: () => (_r, _s, n) => n(), hasPermission: async () => true, hasExplicitSubGrant: async () => false }));
 jest.mock('../../middleware/plan',  () => ({ planGate: () => (_r, _s, n) => n() }));
 
 let mockSchoolsById = {};   // id -> { id, name, organizationId, isActive }

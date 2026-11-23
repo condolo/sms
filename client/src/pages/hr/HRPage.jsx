@@ -749,7 +749,10 @@ export default function HRPage() {
      zero dependency on what its coarse array happens to contain. Each of
      the 6 Settings sub-permissions now ADDITIONALLY, independently unlocks
      only its own specific capability below — never the whole page. */
-  const isHR   = isAdminLevel || user?.role === 'hr';
+  // v5.279.0: or "Staff Tab & HR Overview" ticked (strict, as on the server).
+  const isHR   = isAdminLevel || user?.role === 'hr' || can('hr__staff_overview', 'read');
+  // Mark as paid: Admin, or "Release Payroll" ticked (hr.js _canReleasePayroll).
+  const canReleasePayroll = isAdminLevel || can('hr__payroll_release', 'update');
   const canApproveLeave   = isHR || can('hr', 'update', 'leave_approve');
   const canManageWorkflow = isHR || can('hr', 'manage_workflow');
   const canViewPayroll    = isHR || can('hr', 'read',   'payroll_view');
@@ -1706,7 +1709,6 @@ export default function HRPage() {
                       const isConfirmed  = status === 'confirmed';
                       const isPaid       = status === 'paid';
                       const canEdit      = isDraft;    // only draft records can be edited
-                      const isAdminUser  = ['superadmin','admin'].includes(user?.role);
 
                       return (
                         <tr key={p.id ?? p.staffId} className="hover:bg-slate-50/70 transition group">
@@ -1743,7 +1745,7 @@ export default function HRPage() {
                                 </button>
                               )}
                               {/* Mark as Paid — confirmed → paid (admin only) */}
-                              {isConfirmed && isAdminUser && (
+                              {isConfirmed && canReleasePayroll && (
                                 <button
                                   disabled={isSettingStatus}
                                   onClick={() => setPayrollStatus.mutate({ id: p.id, status: 'paid' })}

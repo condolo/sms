@@ -44,7 +44,8 @@ let lastHtmlArgs = null;
 jest.mock('../../middleware/auth', () => ({
   authMiddleware: (req, _res, next) => { req.jwtUser = mockCurrentUser; next(); },
 }));
-jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => next() }));
+let mockTicked = new Set();   // v5.279.0
+jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => next(), hasExplicitSubGrant: async (_req, mod, sub, action) => mockTicked.has(`${mod}__${sub}:${action}`) }));
 jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) => next() }));
 jest.mock('../../middleware/module-gate', () => ({ moduleGate: () => (_req, _res, next) => next() }));
 jest.mock('../../utils/notify-students', () => ({ notifyGuardiansForStudents: jest.fn() }));
@@ -129,6 +130,14 @@ describe('GET /api/behaviour/incidents/export-pdf — management-only gate', () 
     mockCurrentUser = { userId: 'usr_teacher_a', schoolId: SCHOOL, role: 'teacher', roles: ['teacher'] };
     const res = await supertest(buildApp()).get('/api/behaviour/incidents/export-pdf');
     expect(res.status).toBe(403);
+  });
+
+  test('v5.279.0: a role with "Export Incident Log" ticked may export', async () => {
+    mockCurrentUser = { userId: 'usr_c', schoolId: SCHOOL, role: 'counsellor', roles: ['counsellor'] };
+    mockTicked = new Set(['behaviour__export:read']);
+    const res = await supertest(buildApp()).get('/api/behaviour/incidents/export-pdf');
+    mockTicked = new Set();
+    expect(res.status).toBe(200);
   });
 
   test('admin, principal, deputy_principal, hod, and discipline_committee all pass the gate', async () => {

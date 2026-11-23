@@ -73,4 +73,17 @@ function withFinanceSubGrants(permissions) {
   return out;
 }
 
-module.exports = { explicitSub, withFinanceSubGrants, EXPLICIT_SUB_KEYS, FINANCE_SUB_GRANTS };
+/* Rows added in v5.279.0 for capabilities that used to be decided by role
+   name only. Each route keeps the roles that had the capability (a floor)
+   and ALSO accepts an explicit tick on its row (hasExplicitSubGrant, no
+   module-level fallback). ROLE_FLOOR_SUB_KEYS lists those rows so the grant
+   ceiling in settings.js treats them as explicit (a general HR grant can't
+   hand on "Release Payroll"), while an admin, who holds them all by role,
+   can still grant them. */
+const ROLE_FLOOR_SUB_KEYS = new Set([
+  'hr__staff_overview', 'hr__payroll_release',
+  'report_cards__principal_remark', 'report_cards__unlock_comments',
+  'behaviour__export', 'lessons__plans_all', 'analytics__group',
+]);
+
+module.exports = { explicitSub, withFinanceSubGrants, EXPLICIT_SUB_KEYS, FINANCE_SUB_GRANTS, ROLE_FLOOR_SUB_KEYS };

@@ -72,9 +72,20 @@ const ADMIN_ROLES = new Set(['superadmin', 'admin']);
    via rbac('hr', action, 'documents')). Both are additive to the
    HR_ROLES floor, never a replacement — identical shape to the
    hr__leave_view fix above. */
-function hrFloorOnly(req, res, next) {
-  if (HR_ROLES.has(req.jwtUser?.role)) return next();
-  return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: "Your role does not have 'read' permission on 'hr'" } });
+/* v5.279.0: the HR floor, or an explicit "Staff Tab & HR Overview" tick
+   (hr__staff_overview). Strict, so a general HR grant never implies it. */
+async function hrFloorOnly(req, res, next) {
+  try {
+    if (HR_ROLES.has(req.jwtUser?.role)) return next();
+    if (await hasExplicitSubGrant(req, 'hr', 'staff_overview', 'read')) return next();
+  } catch (err) { console.error('[hr] staff-overview check failed:', err.message); }
+  return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: "Your role does not have the 'Staff Tab & HR Overview' permission under HR." } });
+}
+/* v5.279.0: releasing payroll (mark paid; edit or delete once confirmed) —
+   Admin by role, or an explicit "Release Payroll" tick (hr__payroll_release). */
+async function _canReleasePayroll(req, action) {
+  if (ADMIN_ROLES.has(req.jwtUser?.role)) return true;
+  return hasExplicitSubGrant(req, 'hr', 'payroll_release', action);
 }
 function payrollManageAccess(action) {
   return async (req, res, next) => {
@@ -761,8 +772,8 @@ router.post('/payroll', payrollManageAccess('create'), async (req, res) => {
     // doesn't quietly coexist with it.
     const existing = await tenantModel('payroll', tenantContext(req))
       .findOne({ schoolId, staffId: data.staffId, payPeriod: data.payPeriod }).lean();
-    if (existing && ['confirmed', 'paid'].includes(existing.status) && !ADMIN_ROLES.has(role)) {
-      return E.forbidden(res, 'Only Admin can edit a confirmed or paid payroll record');
+    if (existing && ['confirmed', 'paid'].includes(existing.status) && !(await _canReleasePayroll(req, 'update'))) {
+      return E.forbidden(res, 'Only Admin, or a role with "Release Payroll" (HR), can edit a confirmed or paid payroll record');
     }
 
     // Step 5 — an omitted basicSalary defaults from this staff member's
@@ -922,8 +933,8 @@ router.patch('/payroll/:id/status', payrollManageAccess('update'), async (req, r
     /* Only admins can mark as "paid" — a separate, deliberately simpler
        gate from the approval chain below (Step 6): "who actually
        releases money" is not another configurable chain step. */
-    if (status === 'paid' && !ADMIN_ROLES.has(role)) {
-      return E.forbidden(res, 'Only Admin can mark payroll as paid');
+    if (status === 'paid' && !(await _canReleasePayroll(req, 'update'))) {
+      return E.forbidden(res, 'Only Admin, or a role with "Release Payroll" (HR), can mark payroll as paid');
     }
 
     const Payroll  = tenantModel('payroll', tenantContext(req));
@@ -1188,8 +1199,8 @@ router.delete('/payroll/:id', payrollManageAccess('delete'), async (req, res) =>
 
     /* Only admins can delete confirmed/paid records */
     const isLocked = ['confirmed', 'paid'].includes(doc.status);
-    if (isLocked && !ADMIN_ROLES.has(role)) {
-      return E.forbidden(res, 'Only Admin can delete confirmed or paid payroll records');
+    if (isLocked && !(await _canReleasePayroll(req, 'delete'))) {
+      return E.forbidden(res, 'Only Admin, or a role with "Release Payroll" (HR), can delete confirmed or paid payroll records');
     }
 
     await tenantModel('payroll', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId });
@@ -1224,7 +1235,8 @@ router.get('/payroll/:id/pdf', async (req, res) => { // rbac: self-scoped to own
     const doc = await tenantModel('payroll', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!doc) return E.notFound(res, 'Payroll record not found');
 
-    if (doc.staffId !== userId && !HR_ROLES.has(role)) {
+    // v5.279.0: anyone with View Payroll ticked may open others' payslips too, as they can list them.
+    if (doc.staffId !== userId && !HR_ROLES.has(role) && !(await hasExplicitSubGrant(req, 'hr', 'payroll_view', 'read'))) {
       return E.forbidden(res, 'You are not authorised to download this payslip');
     }
 
@@ -1324,7 +1336,10 @@ router.get('/documents', async (req, res) => { // rbac: self-scoped to own staff
     const { page, limit, skip } = parsePagination(req.query);
 
     const filter = { schoolId };
-    if (HR_ROLES.has(role)) {
+    // v5.279.0: Edit on "Manage Staff Documents" = every staff member's documents,
+    // the same ones that role can already change. Edit, not View: a school may
+    // have ticked View meaning "their own", and staff files are sensitive.
+    if (HR_ROLES.has(role) || await hasExplicitSubGrant(req, 'hr', 'documents', 'update')) {
       if (staffId) filter.staffId = staffId;
     } else {
       /* Non-HR staff can only see their own documents */

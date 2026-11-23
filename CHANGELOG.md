@@ -6,6 +6,70 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.279.0] - 2026-11-23 - fix(permissions): what Settings grants is what the system allows
+
+Asked directly: "if a role is assigned all the permissions in Roles & Permissions … they should be able to see everything that module allows. Sometimes you are the admin with full access, but it still says you have no permission."
+
+**Audit, against the live code:**
+- **Settings rows:** a role with every box ticked passed 524 of the 527 server permission checks.
+- **What refused people:** about 20 checks that decided by role name (admin, superadmin, hr, principal …) and ignored Settings, plus screens that hid buttons and tabs the same way.
+- **Admins, specifically:** they were refused mainly by data rules that apply to everyone (subject not on the curriculum, learner not enrolled, locked or published marks, archived year, confirmed payroll) or by deliberate superadmin-only actions.
+
+### Changed: these now follow Settings
+Every role that had a capability by name keeps it. Every other role gets it by ticking the row.
+
+New rows are checked **strictly**:
+- only an explicit tick grants them, never a general module grant;
+- an admin, who holds them by role, can grant them;
+- someone holding only general access to the module cannot pass them on (the grant safeguard treats them as explicit).
+
+| Area | Before | Now also allowed by |
+|---|---|---|
+| HR: Staff tab and HR overview (`/hr/summary`) | admin, superadmin, hr | new row **HR → Staff Tab & HR Overview** |
+| HR: every staff member's documents | admin, superadmin, hr (others saw only their own, though they could edit any) | **Edit** on the existing row **Manage Staff Documents** (View alone still shows only their own: staff files are sensitive) |
+| HR: another staff member's payslip PDF | admin, superadmin, hr | existing row **View Payroll** (which already lists them) |
+| HR: mark paid; edit or delete once confirmed | admin, superadmin | new row **Release Payroll**: Edit to mark paid or edit, Delete to delete |
+| Academic years: add, edit, delete, move to a new year, archive | admin, superadmin | existing row **Settings → Academic setup** (View/Edit/Delete) |
+| School profile | admin, superadmin | existing row **Settings → School** |
+| M-Pesa paybill registration | admin, superadmin | existing row **Finance → Configure M-Pesa Integration** |
+| Principal's remark on report cards | admin, superadmin | new row **Report Cards → Write the Principal's Remark** |
+| Unlock published report-card comments | admin, superadmin | new row **Report Cards → Unlock Published Comments** |
+| Export behaviour incident log | leadership roles | new row **Behaviour → Export Incident Log** |
+| Verify growth-profile records | teaching and leadership roles | existing row **Growth Profile → Verify** (it was in Settings but never checked) |
+| Every teacher's lesson plans | admin, superadmin, principal, head teacher | new row **Lessons → Manage All Lesson Plans**: View to see all, Edit to change or deliver, Delete to delete |
+| Group analytics (all schools in an organisation) | a grant with no row in Settings | new row **Analytics → Group Analytics** |
+| Exam status: in progress, completed, cancelled | teacher, exams officer, admin, superadmin (principals could not) | existing rows **Exams → Create / Edit Exam** (Edit) for in progress or completed; **Delete Exam** (Delete) to cancel |
+| Growth Profile: add, edit, delete records; projects; recommendations | teaching and leadership roles by name (principals could not) | existing rows **Add / Edit / Delete Records**, **Projects**, **Recommendations** |
+| Principal fields in report-card settings | admin, superadmin | new row **Write the Principal's Remark** |
+| Resource categories | leadership roles | existing row **Resources** (Edit) |
+| Delete anyone's growth-profile recommendation | admin, superadmin (or the author) | existing row **Recommendations** (Delete) |
+
+**Screens follow the same rows:**
+- **HR:** Staff tab, and Mark as Paid.
+- **Exams:** Create Exam ("Create / Edit Exam" row), Configuration and Kindergarten Templates ("Lock / Unlock Assessment Schedule" row, since there is no separate configuration row).
+- **Report Cards:** Settings tab.
+- **Growth Profile:** add, delete, verify, recommendations.
+- **Behaviour:** Categories tab, and Houses.
+- **Exams → Past Results:** the tab now uses exactly the server's rule.
+
+Screens read the specific row, never the general module grant: teachers hold Assessment edit by default, and a general check would have shown every teacher the Exams Configuration tab. So a role that has never been re-saved in Settings looks exactly as before.
+
+**Refusal messages** for these actions now say which row to tick.
+
+Still decided by role name: the assessment reminders' all-teachers view (in a file with someone else's uncommitted edits); Google Classroom sync of every teacher's courses; staff birthday lists; the report-card fee-block override.
+
+### Unchanged, by design
+- **Superadmin only:** backups, granting the Admin role, resetting another admin's password, platform consoles.
+- **Admin only:**
+  - choosing who resolves attendance conflicts or acts as behaviour officer;
+  - platform billing;
+  - full data export.
+- **Rules that protect records apply to everyone, admins included:** curriculum, elective enrolment, locks, archived years.
+
+Tests: new tests in `hr-payroll.test.js` (Release Payroll; payslips with View Payroll), `settings-permission-escalation.test.js` (an admin can grant a new row; a general-HR actor cannot), `academic-config-year-lookup.test.js` (year delete needs the Delete tick), `behaviour-incidents-export-pdf.test.js` (export by row), and the new `lesson-plans-oversight.test.js` (View vs Edit; teachers and leadership unchanged), `growth-write-guard.test.js` (a principal writes growth records and projects once the row is ticked), `exams-scheduling-states.test.js` (a principal starts an exam with Create / Edit Exam; cancelling needs Delete Exam). User guide: new section "What used to be admin only". `hr-coarse-permission-leak.test.js` now pins that no other HR row opens the HR overview. CI scanners: RBAC coverage 100%, tenant ratchet held at 35.
+
+---
+
 ## [v5.278.3] - 2026-11-23 - fix(permissions): the server honours every role an account holds
 
 ### Fixed

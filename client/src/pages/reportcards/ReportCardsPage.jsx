@@ -29,7 +29,10 @@ import useAuthStore from '@/store/auth.js';
 export default function ReportCardsPage() {
   const [tab, setTab] = useState('generate');
   const role = useAuthStore(s => s.session?.user?.role ?? '');
-  const canConfigure = ['admin', 'superadmin'].includes(role);
+  // v5.279.0: role floor, or its own Settings row ticked (the row itself, never the general module grant, so roles never re-saved in Settings look exactly as before). Report card settings
+  // save through rbac('report_cards','update') (report-cards.js).
+  const can = useAuthStore(s => s.can);
+  const canConfigure = ['admin', 'superadmin'].includes(role) || can('report_cards__workflow', 'update') || can('report_cards__publication_policy', 'update');
 
   const TABS = [
     { id: 'generate', label: 'Generate & Publish', icon: FileBarChart2, adminOnly: false },

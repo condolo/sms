@@ -15,7 +15,7 @@ const { z }   = require('zod');
 const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware } = require('../middleware/auth');
-const { rbac }           = require('../middleware/rbac');
+const { rbac, hasExplicitSubGrant } = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
@@ -101,8 +101,9 @@ router.post('/', authMiddleware, PLAN, rbac('growth_profile', 'create'), async (
     const { schoolId, userId, role } = req.jwtUser;
 
     // Only staff can write recommendations
-    if (!GROWTH_PROFILE_STAFF_ROLES.includes(role)) {
-      return E.forbidden(res, 'Only teaching staff can write recommendations');
+    // v5.279.0: or "Recommendations" ticked under Growth Profile (strict).
+    if (!GROWTH_PROFILE_STAFF_ROLES.includes(role) && !(await hasExplicitSubGrant(req, 'growth_profile', 'recommendations', 'create'))) {
+      return E.forbidden(res, 'Needs a teaching role, or Edit on Growth Profile → Recommendations.');
     }
 
     const { data, error } = _validate(RecommendationSchema, req.body);
@@ -131,7 +132,8 @@ router.delete('/:id', authMiddleware, PLAN, rbac('growth_profile', 'delete'), as
     const doc = await tenantModel('growth_recommendations', tenantContext(req)).findOne({ id: req.params.id, schoolId, deletedAt: { $exists: false } }).lean();
     if (!doc) return E.notFound(res, 'Recommendation not found');
 
-    const isAdmin  = ['admin', 'superadmin'].includes(role);
+    // v5.279.0: Admin, or Delete on "Recommendations" ticked (strict), may delete anyone's.
+    const isAdmin  = ['admin', 'superadmin'].includes(role) || await hasExplicitSubGrant(req, 'growth_profile', 'recommendations', 'delete');
     const isAuthor = doc.authorId === userId || doc.createdBy === userId;
     if (!isAdmin && !isAuthor) {
       return E.forbidden(res, 'You can only delete recommendations you wrote');

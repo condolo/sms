@@ -936,6 +936,42 @@ Each Settings tab is its own row under **Settings → Roles & Permissions → Se
 | **View Audit Log** | Audit Log tab. Only given deliberately |
 
 **Subscription** stays with admins (it's the school's contract), and everyone has **Account**. Roles that existed before these rows keep exactly the Settings access they had until you edit and save them.
+#### What used to be "admin only" *(v5.279.0)*
+Some actions used to depend on the role's **name** (Admin, HR, Principal and so on), so a custom role with every box ticked was still refused. They now follow these rows. Roles that had the action by name keep it, and any other role gets it by ticking the row. Rows marked *new* are checked strictly: only a tick on that row grants them, never general access to the module.
+
+| Action | Row to tick |
+|---|---|
+| HR Staff tab and HR overview | HR → **Staff Tab & HR Overview** *(new)* |
+| Mark payroll paid; edit or delete it once confirmed | HR → **Release Payroll** *(new)*: Edit to mark paid or edit, Delete to delete |
+| See every staff member's documents | HR → **Manage Staff Documents**, with **Edit** (View alone shows only their own) |
+| Open another staff member's payslip | HR → **View Payroll** |
+| Add, edit, delete, archive academic years; move to a new year | Settings → **Academic setup** |
+| School profile | Settings → **School** |
+| Register the M-Pesa paybill | Finance → **Configure M-Pesa Integration** |
+| Principal's remark on report cards and in report settings | Report Cards → **Write the Principal's Remark** *(new)* |
+| Unlock published report-card comments | Report Cards → **Unlock Published Comments** *(new)* |
+| Report Cards → Settings tab | Report Cards → **Configure Approval Workflow** or **Configure Publication Policy** |
+| Create exams; move an exam to in progress or completed | Exams → **Create / Edit Exam** |
+| Cancel an exam | Exams → **Delete Exam** |
+| Exams → Configuration and Kindergarten Templates tabs | Assessment Scheduling → **Lock / Unlock Assessment Schedule**, with Edit |
+| Export the behaviour incident log | Behaviour → **Export Incident Log** *(new)* |
+| Behaviour → Categories tab | Behaviour → **Edit Records** |
+| Edit school houses | Settings → **School** |
+| Growth Profile records, projects, recommendations, verification | Growth Profile → **Add / Edit / Delete Records**, **Projects**, **Recommendations**, **Verify** |
+| Every teacher's lesson plans | Lessons → **Manage All Lesson Plans** *(new)*: View to see, Edit to change, Delete to delete |
+| Group analytics (all schools in your organisation) | Analytics → **Group Analytics** *(new)* |
+
+**If you ticked "everything" for a role before v5.279.0,** open it again and tick the rows marked *new*: they didn't exist yet. Users then refresh the page.
+
+**Still reserved:**
+- **Superadmin:** backups, granting the Admin role, resetting another admin's password.
+- **Admin:** choosing the attendance and behaviour officers, subscription, full data export, overriding the fee block on report cards.
+
+**These stop everyone, including admins, because they protect records:**
+- a subject not on the class curriculum;
+- a learner not enrolled in the elective;
+- marks locked by a published report card;
+- an archived year.
 
 ### School Profile
 Update school name, short name, code, type, address, contact details, timezone, currency, and active curriculum tracks.

@@ -11,7 +11,18 @@ const express = require('express');
 const { z }   = require('zod');
 
 const { authMiddleware } = require('../middleware/auth');
-const { rbac }           = require('../middleware/rbac');
+const { rbac, hasExplicitSubGrant } = require('../middleware/rbac');
+
+/* v5.279.0: these year/profile actions were admin-by-role only, so a role
+   given every Settings tick still got "Admin access required". Admin and
+   superadmin keep them by role; any other role needs the matching Settings
+   row ticked explicitly (Settings → Academic setup / School). Strict, so a
+   role's general Settings access never implies them. */
+async function _settingsAdmin(req, sub, action) {
+  const { role, roles = [] } = req.jwtUser || {};
+  if ([role, ...roles].some(r => r === 'admin' || r === 'superadmin')) return true;
+  return hasExplicitSubGrant(req, 'settings', sub, action);
+}
 const { planGate }       = require('../middleware/plan');
 const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
@@ -282,8 +293,8 @@ router.get('/grade', authMiddleware, PLAN, rbac('grades', 'read'), async (req, r
 router.post('/archive-year', authMiddleware, PLAN, rbac('settings', 'update', 'academics'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
-    if (!['admin', 'superadmin'].includes(role)) {
-      return E.forbidden(res, 'Only admins can archive an academic year');
+    if (!(await _settingsAdmin(req, 'academics', 'update'))) {
+      return E.forbidden(res, 'Archiving a year needs Admin, or Edit on Settings → Academic setup.');
     }
 
     const { academicYearId, reason } = req.body;
@@ -527,8 +538,8 @@ router.get('/years', authMiddleware, async (req, res) => { // rbac: all-authenti
 router.post('/years', authMiddleware, async (req, res) => { // rbac: admin-only (inline role check)
   try {
     const { schoolId, role, userId } = req.jwtUser;
-    if (!['superadmin', 'admin'].includes(role)) {
-      return E.forbidden(res, 'Admin access required');
+    if (!(await _settingsAdmin(req, 'academics', 'create'))) {
+      return E.forbidden(res, 'Needs Admin, or Edit on Settings → Academic setup.');
     }
 
     const { name, startDate, endDate, terms } = req.body;
@@ -573,8 +584,8 @@ router.post('/years', authMiddleware, async (req, res) => { // rbac: admin-only 
 router.put('/years/:id', authMiddleware, async (req, res) => { // rbac: admin-only (inline role check)
   try {
     const { schoolId, role, userId } = req.jwtUser;
-    if (!['superadmin', 'admin'].includes(role)) {
-      return E.forbidden(res, 'Admin access required');
+    if (!(await _settingsAdmin(req, 'academics', 'update'))) {
+      return E.forbidden(res, 'Needs Admin, or Edit on Settings → Academic setup.');
     }
 
     const yearId = req.params.id;
@@ -627,8 +638,8 @@ router.put('/years/:id', authMiddleware, async (req, res) => { // rbac: admin-on
 router.delete('/years/:id', authMiddleware, async (req, res) => { // rbac: admin-only (inline role check)
   try {
     const { schoolId, role, userId } = req.jwtUser;
-    if (!['superadmin', 'admin'].includes(role)) {
-      return E.forbidden(res, 'Admin access required');
+    if (!(await _settingsAdmin(req, 'academics', 'delete'))) {
+      return E.forbidden(res, 'Needs Admin, or Delete on Settings → Academic setup.');
     }
 
     const yearId = req.params.id;
@@ -667,8 +678,8 @@ router.delete('/years/:id', authMiddleware, async (req, res) => { // rbac: admin
 router.post('/transition-year', authMiddleware, async (req, res) => { // rbac: superadmin/admin only (inline role check)
   try {
     const { schoolId, role, userId } = req.jwtUser;
-    if (!['superadmin', 'admin'].includes(role)) {
-      return E.forbidden(res, 'Admin access required — only superadmin or admin may transition academic years');
+    if (!(await _settingsAdmin(req, 'academics', 'update'))) {
+      return E.forbidden(res, 'Moving to a new academic year needs Admin, or Edit on Settings → Academic setup.');
     }
 
     const { targetYearId, reason = 'Academic year transition' } = req.body;
@@ -849,8 +860,8 @@ const SCHOOL_PROFILE_FIELDS = [
 router.get('/school-profile', authMiddleware, async (req, res) => { // rbac: admin-only (inline role check)
   try {
     const { schoolId, role } = req.jwtUser;
-    if (!['superadmin', 'admin'].includes(role)) {
-      return E.forbidden(res, 'Admin access required');
+    if (!(await _settingsAdmin(req, 'school', 'read'))) {
+      return E.forbidden(res, 'Needs Admin, or View on Settings → School.');
     }
     const School = _model('schools');
     const school = await School.findOne({ id: schoolId }).lean();
@@ -869,8 +880,8 @@ router.get('/school-profile', authMiddleware, async (req, res) => { // rbac: adm
 router.patch('/school-profile', authMiddleware, async (req, res) => { // rbac: admin-only (inline role check)
   try {
     const { schoolId, role } = req.jwtUser;
-    if (!['superadmin', 'admin'].includes(role)) {
-      return E.forbidden(res, 'Admin access required');
+    if (!(await _settingsAdmin(req, 'school', 'update'))) {
+      return E.forbidden(res, 'Needs Admin, or Edit on Settings → School.');
     }
 
     // Validate systemEmail if provided

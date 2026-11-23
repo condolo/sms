@@ -15,7 +15,7 @@ const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware } = require('../middleware/auth');
 const { moduleGate }     = require('../middleware/module-gate');
-const { rbac }           = require('../middleware/rbac');
+const { rbac, hasExplicitSubGrant } = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E, strParam } = require('../utils/response');
@@ -610,8 +610,10 @@ router.get('/incidents/export-pdf', authMiddleware, PLAN, MODGATE, rbac('behavio
     // school's designated behaviour-oversight role — same leadership
     // posture as isManagement() here, just scoped to this one module
     // rather than the whole school.
-    if (!isManagement(req) && req.jwtUser.role !== 'discipline_committee') {
-      return E.forbidden(res, 'Exporting the incident log is for school leadership.');
+    // v5.279.0: leadership by role, or "Export Incident Log" ticked under Behaviour (strict).
+    if (!isManagement(req) && req.jwtUser.role !== 'discipline_committee'
+        && !(await hasExplicitSubGrant(req, 'behaviour', 'export', 'read'))) {
+      return E.forbidden(res, 'Needs a leadership role, or View on Behaviour → Export Incident Log.');
     }
 
     const ctx = tenantContext(req);

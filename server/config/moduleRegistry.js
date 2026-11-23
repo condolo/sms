@@ -202,6 +202,10 @@ const MODULE_REGISTRY = [
     // bypass as 'template' above (this school is mid historical-import
     // project — admin importing on a teacher's behalf is a real case).
     { key: 'import', label: 'Bulk Import Lesson Plans' },
+    // v5.279.0: rows for things that used to be decided by role name only.
+    // Checked strictly (hasExplicitSubGrant): only an explicit tick grants
+    // them; the roles that had them before keep them by role.
+    { key: 'plans_all', label: 'Manage All Lesson Plans (any teacher)' },
   ]},
   { key: 'grades', label: 'Grades & Marks', section: 'Academic Management', icon: 'FileText', navRoute: '/exams', navLabel: 'Exams', navOrder: 5, subs: [
     { key: 'view_grades',      label: 'View Grades & Marks' },
@@ -235,6 +239,11 @@ const MODULE_REGISTRY = [
     { key: 'draft_comments',      label: 'Manage Draft Comments' },
     { key: 'workflow',            label: 'Configure Approval Workflow' },
     { key: 'publication_policy',  label: 'Configure Publication Policy' },
+    // v5.279.0: rows for things that used to be decided by role name only.
+    // Checked strictly (hasExplicitSubGrant): only an explicit tick grants
+    // them; the roles that had them before keep them by role.
+    { key: 'principal_remark',    label: "Write the Principal's Remark" },
+    { key: 'unlock_comments',     label: 'Unlock Published Comments' },
   ]},
   { key: 'elearning', label: 'eLearning', section: 'Academic Management', icon: 'MonitorPlay', navRoute: '/elearning', navOrder: 15, subs: [
     { key: 'view',   label: 'View Courses & Resources' },
@@ -258,6 +267,10 @@ const MODULE_REGISTRY = [
     { key: 'create', label: 'Record Incident / Award Points' },
     { key: 'edit',   label: 'Edit Records' },
     { key: 'delete', label: 'Delete Records' },
+    // v5.279.0: rows for things that used to be decided by role name only.
+    // Checked strictly (hasExplicitSubGrant): only an explicit tick grants
+    // them; the roles that had them before keep them by role.
+    { key: 'export', label: 'Export Incident Log (PDF)' },
   ]},
   /* Student Council — grievances and suggestions filed by students, triaged
      by elected/appointed council members, overseen by a staff patron.
@@ -335,6 +348,11 @@ const MODULE_REGISTRY = [
     // individually re-saved. See settings.js's _deriveApiPerms for the
     // exact (narrow, deliberate) special case this sub triggers.
     { key: 'workflow',      label: 'Configure Leave/Payroll Approval Workflow' },
+    // v5.279.0: rows for things that used to be decided by role name only.
+    // Checked strictly (hasExplicitSubGrant): only an explicit tick grants
+    // them; the roles that had them before keep them by role.
+    { key: 'staff_overview',  label: 'Staff Tab & HR Overview (all staff)' },
+    { key: 'payroll_release', label: 'Release Payroll (mark paid; edit or delete once confirmed)' },
   ]},
   { key: 'resources', label: 'Resources', section: 'Communication', icon: 'Link2', navRoute: '/resources', navOrder: 17, subs: [
     { key: 'read',   label: 'View Resources' },
@@ -432,6 +450,10 @@ const MODULE_REGISTRY = [
   ]},
   { key: 'analytics', label: 'Analytics Dashboard', section: 'Analytics', subs: [
     { key: 'view', label: 'View Leadership Analytics' },
+    // v5.279.0: rows for things that used to be decided by role name only.
+    // Checked strictly (hasExplicitSubGrant): only an explicit tick grants
+    // them; the roles that had them before keep them by role.
+    { key: 'group', label: 'Group Analytics (all schools in the organisation)' },
   ]},
 
   /* ── System ───────────────────────────────────────────── */

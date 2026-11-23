@@ -13,6 +13,7 @@
 const express = require('express');
 const crypto  = require('crypto');
 const { authMiddleware } = require('../middleware/auth');
+const { hasExplicitSubGrant } = require('../middleware/rbac');
 const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { nextReceiptNumber } = require('../utils/counters');
@@ -445,8 +446,9 @@ router.post('/callback', async (req, res) => {
 /* Register C2B callback URLs with Safaricom (admin only) */
 router.post('/c2b/register', authMiddleware, async (req, res) => {
   try {
-    if (!_isAdmin(req)) {
-      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Admin access required.' } });
+    // v5.279.0: Admin, or "Configure M-Pesa Integration" ticked under Finance (strict).
+    if (!_isAdmin(req) && !(await hasExplicitSubGrant(req, 'finance', 'mpesa', 'update'))) {
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Needs Admin, or Edit on Finance → Configure M-Pesa Integration.' } });
     }
     const { schoolId } = req.jwtUser;
     const Schools = _model('schools');

@@ -120,12 +120,20 @@ beforeEach(() => {
   };
 });
 
-describe('GET /api/hr/summary — no sub-grant escape hatch', () => {
-  test('a non-HR-floor role is denied even if hasExplicitSubGrant would say yes for something else', async () => {
-    mockHasExplicitSubGrant.mockResolvedValue(true); // proves the route never even asks
+describe('GET /api/hr/summary — only its own row, never another HR row', () => {
+  // v5.279.0: the summary now has its own Settings row (hr__staff_overview).
+  // Any OTHER HR row — leave, payroll, documents — still never opens it.
+  test('a non-HR-floor role holding every other HR row is still denied', async () => {
+    mockHasExplicitSubGrant.mockImplementation(async (_req, mod, sub) => !(mod === 'hr' && sub === 'staff_overview'));
     const res = await supertest(buildApp()).get('/api/hr/summary');
     expect(res.status).toBe(403);
-    expect(mockHasExplicitSubGrant).not.toHaveBeenCalled();
+    expect(mockHasExplicitSubGrant).toHaveBeenCalledWith(expect.anything(), 'hr', 'staff_overview', 'read');
+  });
+
+  test('"Staff Tab & HR Overview" ticked explicitly opens it', async () => {
+    mockHasExplicitSubGrant.mockImplementation(async (_req, mod, sub, action) => mod === 'hr' && sub === 'staff_overview' && action === 'read');
+    const res = await supertest(buildApp()).get('/api/hr/summary');
+    expect(res.status).toBe(200);
   });
 
   test('the HR_ROLES floor still works with no sub-grant at all', async () => {

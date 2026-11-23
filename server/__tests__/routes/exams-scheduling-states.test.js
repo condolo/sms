@@ -19,7 +19,8 @@ const mockExamUpdate = jest.fn((filter, update) => mockChain({ ...mockExisting, 
 jest.mock('../../middleware/auth', () => ({
   authMiddleware: (req, _res, next) => { req.jwtUser = mockCurrentUser; next(); },
 }));
-jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => next(), hasExplicitSubGrant: jest.fn().mockResolvedValue(false) }));
+let mockTicked = new Set();   // v5.279.0: strict Exams rows ticked for the current user
+jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => next(), hasExplicitSubGrant: jest.fn(async (_req, mod, sub, action) => mockTicked.has(`${mod}__${sub}:${action}`)) }));
 jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) => next() }));
 jest.mock('../../middleware/module-gate', () => ({ moduleGate: () => (_req, _res, next) => next() }));
 jest.mock('../../utils/archival', () => ({ isYearArchived: jest.fn().mockResolvedValue(false) }));
@@ -74,6 +75,24 @@ describe('PUT /api/exams/:id — four-state scheduling tracker', () => {
 
   test('scheduled -> cancelled is allowed for an exams officer', async () => {
     const res = await putStatus('cancelled', 'exams_officer');
+    expect(res.status).toBe(200);
+  });
+
+  // v5.279.0: other roles follow the Exams rows.
+  test('a principal needs Edit on "Create / Edit Exam" to start an exam', async () => {
+    expect((await putStatus('in_progress', 'principal')).status).toBe(400);
+    mockTicked = new Set(['exams__create:update']);
+    const res = await putStatus('in_progress', 'principal');
+    mockTicked = new Set();
+    expect(res.status).toBe(200);
+  });
+
+  test('cancelling needs Delete on "Delete Exam" — Create / Edit alone is not enough', async () => {
+    mockTicked = new Set(['exams__create:update']);
+    expect((await putStatus('cancelled', 'principal')).status).toBe(400);
+    mockTicked.add('exams__delete:delete');
+    const res = await putStatus('cancelled', 'principal');
+    mockTicked = new Set();
     expect(res.status).toBe(200);
   });
 

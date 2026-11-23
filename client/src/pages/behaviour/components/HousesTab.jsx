@@ -14,7 +14,10 @@ const MEDALS = ['🥇', '🥈', '🥉'];
 export default function HousesTab() {
   const qc      = useQueryClient();
   const role    = useAuthStore(s => s.session?.user?.role ?? '');
-  const isAdmin = role === 'admin' || role === 'superadmin';
+  // v5.279.0: role floor, or its own Settings row ticked (the row itself, never the general module grant, so roles never re-saved in Settings look exactly as before). Houses are saved in
+  // the school settings (PUT /settings/school, the School section).
+  const can     = useAuthStore(s => s.can);
+  const isAdmin = role === 'admin' || role === 'superadmin' || can('settings__school', 'update');
 
   /* School settings (houses stored here) */
   const { data: settingsData, isLoading: settingsLoading } = useQuery({

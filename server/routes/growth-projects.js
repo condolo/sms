@@ -14,7 +14,13 @@ const { z }   = require('zod');
 const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware } = require('../middleware/auth');
-const { rbac }           = require('../middleware/rbac');
+const { rbac, hasExplicitSubGrant } = require('../middleware/rbac');
+
+/* v5.279.0: staff roles as before, or the matching Growth Profile row ticked
+   explicitly (Projects; Verify). */
+async function _staffOr(req, sub, action) {
+  return GROWTH_PROFILE_STAFF_ROLES.includes(req.jwtUser?.role) || hasExplicitSubGrant(req, 'growth_profile', sub, action);
+}
 const { planGate }       = require('../middleware/plan');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
@@ -87,7 +93,7 @@ router.post('/', authMiddleware, PLAN, rbac('growth_profile', 'create'), async (
     const { schoolId, userId, role } = req.jwtUser;
     // In-route staff guard, independent of the flat RBAC array — see
     // GROWTH_PROFILE_STAFF_ROLES's own doc comment in self-service-scope.js.
-    if (!GROWTH_PROFILE_STAFF_ROLES.includes(role)) {
+    if (!(await _staffOr(req, 'projects', 'create'))) {
       return E.forbidden(res, 'Only teaching staff can add Growth Profile projects.');
     }
     const { data, error } = _validate(ProjectSchema, req.body);
@@ -109,7 +115,7 @@ router.post('/', authMiddleware, PLAN, rbac('growth_profile', 'create'), async (
 router.put('/:id', authMiddleware, PLAN, rbac('growth_profile', 'update'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
-    if (!GROWTH_PROFILE_STAFF_ROLES.includes(role)) {
+    if (!(await _staffOr(req, 'projects', 'update'))) {
       return E.forbidden(res, 'Only teaching staff can edit Growth Profile projects.');
     }
     const { data, error } = _validate(ProjectSchema.partial().omit({ studentId: true }), req.body);
@@ -134,7 +140,7 @@ router.put('/:id', authMiddleware, PLAN, rbac('growth_profile', 'update'), async
 router.delete('/:id', authMiddleware, PLAN, rbac('growth_profile', 'delete'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
-    if (!GROWTH_PROFILE_STAFF_ROLES.includes(role)) {
+    if (!(await _staffOr(req, 'projects', 'delete'))) {
       return E.forbidden(res, 'Only teaching staff can delete Growth Profile projects.');
     }
     const doc = await tenantModel('growth_projects', tenantContext(req)).findOneAndUpdate(
@@ -152,7 +158,7 @@ router.patch('/:id/verify', authMiddleware, PLAN, async (req, res) => { // rbac:
   try {
     const { schoolId, userId, role } = req.jwtUser;
 
-    if (!GROWTH_PROFILE_STAFF_ROLES.includes(role)) {
+    if (!(await _staffOr(req, 'verify', 'update'))) {
       return E.forbidden(res, 'Only admin or teaching staff can verify project records');
     }
 

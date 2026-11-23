@@ -14,6 +14,7 @@
 
 const express            = require('express');
 const { authMiddleware } = require('../middleware/auth');
+const { hasExplicitSubGrant } = require('../middleware/rbac');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, E }          = require('../utils/response');
 const { v4: uuidv4 }     = require('uuid');
@@ -24,14 +25,30 @@ const router = express.Router();
 const ADMIN_ROLES = ['superadmin', 'admin', 'principal', 'head_teacher'];
 
 /* ── helpers ── */
-function _isAdmin(req) { return ADMIN_ROLES.includes(req.jwtUser?.role); }
+/* Oversight of every teacher's plans: the leadership roles above, or (v5.279.0)
+   "Manage All Lesson Plans" ticked under Lessons — View to see them all, Edit
+   to change or deliver any, Delete to remove any. Strict: resolved once per
+   request by _plansAll below, never implied by general Lessons access. */
+function _isAdmin(req, action = 'read') {
+  return ADMIN_ROLES.includes(req.jwtUser?.role) || !!req._plansAll?.[action];
+}
+async function _plansAll(req, _res, next) {
+  try {
+    if (!ADMIN_ROLES.includes(req.jwtUser?.role)) {
+      const [read, update, del] = await Promise.all(['read', 'update', 'delete']
+        .map(a => hasExplicitSubGrant(req, 'lessons', 'plans_all', a)));
+      req._plansAll = { read: read || update || del, update, delete: del };
+    }
+  } catch (err) { console.error('[lesson-plans] plans_all check failed:', err.message); }
+  next();
+}
 function _isTeacher(req) {
   const r = req.jwtUser?.role;
   return r === 'teacher' || r === 'staff';
 }
 function _can(req, res) {
   if (!_isTeacher(req) && !_isAdmin(req)) {
-    E.forbidden(res, 'Lesson plans require a teacher or admin account.');
+    E.forbidden(res, 'Lesson plans need a teacher or leadership account, or View on Lessons → Manage All Lesson Plans.');
     return false;
   }
   return true;
@@ -44,7 +61,7 @@ const _resolveTeacher = (userId, email, schoolId) =>
    GET /api/lesson-plans
    Query params: classId, subjectId, from (ISO date), to (ISO date), status
    ══════════════════════════════════════════════════════════════ */
-router.get('/', authMiddleware, async (req, res) => {
+router.get('/', authMiddleware, _plansAll, async (req, res) => {
   if (!_can(req, res)) return;
   try {
     const { schoolId, userId } = req.jwtUser;
@@ -86,7 +103,7 @@ router.get('/', authMiddleware, async (req, res) => {
    Body: { classId, subjectId, topicId?, topicTitle, date,
            startTime?, objectives?, activities?, notes? }
    ══════════════════════════════════════════════════════════════ */
-router.post('/', authMiddleware, async (req, res) => {
+router.post('/', authMiddleware, _plansAll, async (req, res) => {
   if (!_can(req, res)) return;
   try {
     const { schoolId, userId } = req.jwtUser;
@@ -101,12 +118,12 @@ router.post('/', authMiddleware, async (req, res) => {
     if (!teacher) {
       // Admin accounts without a staff profile cannot create plans — teacherId
       // would fall back to the auth userId (wrong namespace), corrupting teacher lookups.
-      if (!_isAdmin(req)) return E.forbidden(res, 'Teacher record not found.');
+      if (!_isAdmin(req, 'update')) return E.forbidden(res, 'Teacher record not found.');
       return E.badRequest(res, 'Add a staff profile for your account before creating lesson plans, or use a teacher account.');
     }
 
     // Verify teacher is assigned to this class+subject (skip for admins)
-    if (!_isAdmin(req)) {
+    if (!_isAdmin(req, 'update')) {
       const Assignments = tenantModel('teaching_assignments', tenantContext(req));
       const assigned = await Assignments.findOne({ schoolId, teacherId: teacher.id, classId, subjectId }).lean();
       if (!assigned) {
@@ -154,7 +171,7 @@ router.post('/', authMiddleware, async (req, res) => {
 /* ══════════════════════════════════════════════════════════════
    PUT /api/lesson-plans/:id
    ══════════════════════════════════════════════════════════════ */
-router.put('/:id', authMiddleware, async (req, res) => {
+router.put('/:id', authMiddleware, _plansAll, async (req, res) => {
   if (!_can(req, res)) return;
   try {
     const { schoolId, userId } = req.jwtUser;
@@ -162,7 +179,7 @@ router.put('/:id', authMiddleware, async (req, res) => {
     const plan = await LessonPlans.findOne({ id: req.params.id, schoolId }).lean();
     if (!plan) return E.notFound(res, 'Lesson plan not found.');
 
-    if (!_isAdmin(req)) {
+    if (!_isAdmin(req, 'update')) {
       const teacher = await _resolveTeacher(userId, req.jwtUser.email, schoolId);
       if (!teacher || plan.teacherId !== teacher.id) {
         return E.forbidden(res, 'You can only edit your own lesson plans.');
@@ -193,7 +210,7 @@ router.put('/:id', authMiddleware, async (req, res) => {
    Marks the plan as delivered and creates a lesson_coverage record
    so the syllabus tracker stays in sync.
    ══════════════════════════════════════════════════════════════ */
-router.patch('/:id/deliver', authMiddleware, async (req, res) => {
+router.patch('/:id/deliver', authMiddleware, _plansAll, async (req, res) => {
   if (!_can(req, res)) return;
   try {
     const { schoolId, userId } = req.jwtUser;
@@ -201,7 +218,7 @@ router.patch('/:id/deliver', authMiddleware, async (req, res) => {
     const plan = await LessonPlans.findOne({ id: req.params.id, schoolId }).lean();
     if (!plan) return E.notFound(res, 'Lesson plan not found.');
 
-    if (!_isAdmin(req)) {
+    if (!_isAdmin(req, 'update')) {
       const teacher = await _resolveTeacher(userId, req.jwtUser.email, schoolId);
       if (!teacher || plan.teacherId !== teacher.id) {
         return E.forbidden(res, 'You can only deliver your own lesson plans.');
@@ -261,7 +278,7 @@ router.patch('/:id/deliver', authMiddleware, async (req, res) => {
 /* ══════════════════════════════════════════════════════════════
    DELETE /api/lesson-plans/:id
    ══════════════════════════════════════════════════════════════ */
-router.delete('/:id', authMiddleware, async (req, res) => {
+router.delete('/:id', authMiddleware, _plansAll, async (req, res) => {
   if (!_can(req, res)) return;
   try {
     const { schoolId, userId } = req.jwtUser;
@@ -269,7 +286,7 @@ router.delete('/:id', authMiddleware, async (req, res) => {
     const plan = await LessonPlans.findOne({ id: req.params.id, schoolId }).lean();
     if (!plan) return E.notFound(res, 'Lesson plan not found.');
 
-    if (!_isAdmin(req)) {
+    if (!_isAdmin(req, 'delete')) {
       const teacher = await _resolveTeacher(userId, req.jwtUser.email, schoolId);
       if (!teacher || plan.teacherId !== teacher.id) {
         return E.forbidden(res, 'You can only delete your own lesson plans.');

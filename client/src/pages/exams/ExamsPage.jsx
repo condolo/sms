@@ -48,7 +48,11 @@ export default function ExamsPage() {
   const [tab, setTab] = useState('exams');
   const role = useAuthStore(s => s.session?.user?.role ?? '');
   const can  = useAuthStore(s => s.can);
-  const canCreate = ['admin', 'superadmin', 'deputy_principal', 'exams_officer'].includes(role);
+  // v5.279.0: role floor, or its own Settings row ticked (the row itself, never the general module grant, so roles never re-saved in Settings look exactly as before).
+  const isExamFloor = ['admin', 'superadmin', 'deputy_principal', 'exams_officer'].includes(role);
+  const canCreate   = isExamFloor || can('exams__create', 'create');       // "Create / Edit Exam" row ticked
+  // The row, never the general Assessment grant: teachers hold that by default.
+  const canConfigure = isExamFloor || can('assessment__lock', 'update');  // Configuration + Kindergarten templates
   // Reported directly 2026-10-26 (same audit that found the Report Cards
   // publish-button bug): the Review tab (mark_submissions moderation
   // queue) was gated by canCreate — a hardcoded role list for EXAM
@@ -70,9 +74,9 @@ export default function ExamsPage() {
     { id: 'reminders',    label: 'Reminders',                icon: Bell,        adminOnly: false },
     { id: 'kg-templates', label: 'Kindergarten Templates',  icon: Baby,        adminOnly: true  },
     // Same rule as the server (past-results.js _canImport): admins, or full exam rights.
-    { id: 'past-results', label: 'Past Results',            icon: History,     adminOnly: true, visible: ['admin', 'superadmin'].includes(role) || can('grades', 'delete', 'enter_marks') },
+    { id: 'past-results', label: 'Past Results',            icon: History,     adminOnly: true, visible: ['admin', 'superadmin'].includes(role) || can('grades__enter_marks', 'delete') },
     { id: 'config',       label: 'Configuration',           icon: Settings,    adminOnly: true  },
-  ].filter(t => t.visible !== undefined ? t.visible : (!t.adminOnly || canCreate));
+  ].filter(t => t.visible !== undefined ? t.visible : (!t.adminOnly || canConfigure));
 
   /* ── Shared data loaded once at page level ── */
   const { data: yearsRaw } = useQuery({
@@ -182,7 +186,7 @@ export default function ExamsPage() {
               <RemindersTab />
             </motion.div>
           )}
-          {tab === 'kg-templates' && canCreate && (
+          {tab === 'kg-templates' && canConfigure && (
             <motion.div key="kg-templates" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
               <RCTemplatesSection />
             </motion.div>
@@ -190,7 +194,7 @@ export default function ExamsPage() {
           {tab === 'past-results' && (
             <PastResultsTab key="past-results" years={years} />
           )}
-          {tab === 'config' && canCreate && (
+          {tab === 'config' && canConfigure && (
             <motion.div key="config" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} className="space-y-6">
               <CAConfigTab />
             </motion.div>

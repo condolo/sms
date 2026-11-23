@@ -2460,7 +2460,10 @@ router.put('/:id/comments', authMiddleware, PLAN, MODGATE, rbac('grades', 'updat
       merged.classTeacherCommentAt = now;
     }
     if (data.principalRemark != null) {
-      if (!['admin', 'superadmin'].includes(role)) return E.forbidden(res, 'Only admins can set the principal remark');
+      // v5.279.0: Admin, or "Write the Principal's Remark" ticked under Report Cards (strict).
+      if (!['admin', 'superadmin'].includes(role) && !(await hasExplicitSubGrant(req, 'report_cards', 'principal_remark', 'update'))) {
+        return E.forbidden(res, "Needs Admin, or Edit on Report Cards → Write the Principal's Remark.");
+      }
       merged.principalRemark   = data.principalRemark;
       merged.principalRemarkBy = userId;
       merged.principalRemarkAt = now;
@@ -2513,8 +2516,9 @@ router.post('/:id/comments/unlock', authMiddleware, PLAN, MODGATE, rbac('grades'
     const { schoolId, userId, role, email } = req.jwtUser;
     const reason = (req.body.reason || '').trim();
     if (!reason) return E.badRequest(res, 'A reason is required to unlock comments.');
-    if (!['admin', 'superadmin'].includes(role)) {
-      return E.forbidden(res, 'Only admins can unlock comments.');
+    // v5.279.0: Admin, or "Unlock Published Comments" ticked under Report Cards (strict).
+    if (!['admin', 'superadmin'].includes(role) && !(await hasExplicitSubGrant(req, 'report_cards', 'unlock_comments', 'update'))) {
+      return E.forbidden(res, 'Needs Admin, or Edit on Report Cards → Unlock Published Comments.');
     }
 
     const snap = await tenantModel('report_card_snapshots', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
@@ -3788,8 +3792,10 @@ router.put('/draft-comments/:studentId', authMiddleware, PLAN, MODGATE, rbac('re
     const principalFieldsChanged =
       (principalName   !== undefined && (principalName   ?? '') !== (existing?.principalName   ?? '')) ||
       (principalRemark !== undefined && (principalRemark ?? '') !== (existing?.principalRemark ?? ''));
-    if (principalFieldsChanged && !['admin', 'superadmin'].includes(req.jwtUser.role)) {
-      return E.forbidden(res, 'Only admins can set the principal fields');
+    // v5.279.0: Admin, or "Write the Principal's Remark" ticked (strict).
+    if (principalFieldsChanged && !['admin', 'superadmin'].includes(req.jwtUser.role)
+        && !(await hasExplicitSubGrant(req, 'report_cards', 'principal_remark', 'update'))) {
+      return E.forbidden(res, "Needs Admin, or Edit on Report Cards → Write the Principal's Remark.");
     }
 
     // Class-teacher observation ratings — validated against THIS school's

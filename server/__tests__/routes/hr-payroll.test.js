@@ -80,7 +80,12 @@ let mockCurrentUser;
 jest.mock('../../middleware/auth', () => ({
   authMiddleware: (req, _res, next) => { req.jwtUser = mockCurrentUser; next(); },
 }));
-jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => next() }));
+// v5.279.0: strict rows are controllable per test (default: none ticked).
+let mockTicked = new Set();
+jest.mock('../../middleware/rbac', () => ({
+  rbac: () => (_req, _res, next) => next(),
+  hasExplicitSubGrant: async (_req, mod, sub, action) => mockTicked.has(`${mod}__${sub}:${action}`),
+}));
 jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) => next() }));
 jest.mock('../../utils/model', () => ({ _model: jest.fn((col) => mockStores[col]) }));
 
@@ -873,5 +878,56 @@ describe('Payslips (Payroll Phase 1, Step 7)', () => {
       const res = await supertest(app).get('/api/hr/payroll-history/payh_nonexistent/pdf');
       expect(res.status).toBe(404);
     });
+  });
+});
+
+/* v5.279.0 — payroll release and payslips follow Settings rows too, not
+   only the admin / hr role names. A custom role with the row ticked may act;
+   without it, it is still refused; admins are unaffected. */
+describe('Settings rows for payroll (v5.279.0)', () => {
+  const CUSTOM = { userId: 'u_mgr', schoolId: SCHOOL, role: 'hr_manager', roles: [], name: 'HR Manager', email: 'm@x.io' };
+  async function confirmed(app) {
+    const createRes = await supertest(app).post('/api/hr/payroll').send({ staffId: 'u_staff_1', payPeriod: '2026-07', basicSalary: 50000 });
+    const id = createRes.body.data.id;
+    mockCurrentUser = { ...mockCurrentUser, role: 'admin' };
+    await supertest(app).patch(`/api/hr/payroll/${id}/status`).send({ status: 'confirmed' });
+    return id;
+  }
+  afterEach(() => { mockTicked = new Set(); });
+
+  test('mark paid: refused without "Release Payroll", allowed with it', async () => {
+    const app = buildApp();
+    const id = await confirmed(app);
+    mockTicked = new Set(['hr__payroll_view:update']);           // general payroll rights only
+    mockCurrentUser = CUSTOM;
+    expect((await supertest(app).patch(`/api/hr/payroll/${id}/status`).send({ status: 'paid' })).status).toBe(403);
+    mockTicked.add('hr__payroll_release:update');
+    expect((await supertest(app).patch(`/api/hr/payroll/${id}/status`).send({ status: 'paid' })).status).toBe(200);
+  });
+
+  test('deleting a confirmed record needs Delete on "Release Payroll"', async () => {
+    const app = buildApp();
+    const id = await confirmed(app);
+    mockTicked = new Set(['hr__payroll_view:delete', 'hr__payroll_release:update']);
+    mockCurrentUser = CUSTOM;
+    expect((await supertest(app).delete(`/api/hr/payroll/${id}`)).status).toBe(403);
+    mockTicked.add('hr__payroll_release:delete');
+    expect((await supertest(app).delete(`/api/hr/payroll/${id}`)).status).toBe(200);
+  });
+
+  test('another staff member\'s payslip opens with "View Payroll" ticked', async () => {
+    const app = buildApp();
+    const id = await confirmed(app);
+    mockCurrentUser = CUSTOM;
+    expect((await supertest(app).get(`/api/hr/payroll/${id}/pdf`)).status).toBe(403);
+    mockTicked = new Set(['hr__payroll_view:read']);
+    expect((await supertest(app).get(`/api/hr/payroll/${id}/pdf`)).status).toBe(200);
+  });
+
+  test('admins need no row', async () => {
+    const app = buildApp();
+    const id = await confirmed(app);
+    mockCurrentUser = { ...CUSTOM, role: 'admin' };
+    expect((await supertest(app).patch(`/api/hr/payroll/${id}/status`).send({ status: 'paid' })).status).toBe(200);
   });
 });

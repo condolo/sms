@@ -400,3 +400,29 @@ describe('POST /api/settings/custom-roles — baseRole cannot be used to escalat
     expect(res.status).toBe(403);
   });
 });
+
+/* v5.279.0 — the new role-floor rows (e.g. hr__payroll_release) are checked
+   strictly. An admin holds them by role, so may grant them; an actor whose
+   role only has general HR access may not pass one on. */
+describe('PUT /api/settings/school — v5.279.0 role-floor rows', () => {
+  test('admin can grant "Release Payroll" although its own doc has no such row', async () => {
+    const res = await supertest(buildApp())
+      .put('/api/settings/school')
+      .set('Cookie', cookieFor({ userId: 'u_admin', schoolId: SCHOOL_A, role: 'admin' }))
+      .send({ modulePermissions: { byRole: { teacher: { 'hr__payroll_release': { v: true, e: false, d: false } } } } });
+    expect(res.status).toBe(200);
+    const teacherDoc = mockRolePerms.docs.find(d => d.roleKey === 'teacher');
+    expect(teacherDoc.permissions['hr__payroll_release']).toEqual(['read']);
+  });
+
+  test('an hr actor with general HR access cannot pass it on', async () => {
+    mockHasExplicitSubGrant = jest.fn(async (_req, mod, sub) => mod === 'settings' && sub === 'permissions');
+    const res = await supertest(buildApp())
+      .put('/api/settings/school')
+      .set('Cookie', cookieFor({ userId: 'u_hr1', schoolId: SCHOOL_A, role: 'hr' }))
+      .send({ modulePermissions: { byRole: { teacher: { 'hr__payroll_release': { v: true, e: false, d: false } } } } });
+    expect(res.status).toBe(422);
+    const teacherDoc = mockRolePerms.docs.find(d => d.roleKey === 'teacher');
+    expect(teacherDoc.permissions['hr__payroll_release']).toBeUndefined();
+  });
+});

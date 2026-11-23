@@ -21,7 +21,10 @@ import ParentRepliesTab from './components/ParentRepliesTab.jsx';
 export default function BehaviourPage() {
   const [tab, setTab] = useState('overview');
   const role    = useAuthStore(s => s.session?.user?.role ?? '');
-  const isAdmin = role === 'admin' || role === 'superadmin';
+  // v5.279.0: role floor, or its own Settings row ticked (the row itself, never the general module grant, so roles never re-saved in Settings look exactly as before). Categories save through
+  // behaviourAccess('create'|'update'|'delete') (behaviour.js).
+  const can     = useAuthStore(s => s.can);
+  const isAdmin = role === 'admin' || role === 'superadmin' || can('behaviour__edit', 'update');
 
   // Unread parent replies (v5.266.0) — badge on the Parent Replies tab.
   const { data: repliesData } = useQuery({

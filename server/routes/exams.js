@@ -11,7 +11,7 @@ const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware } = require('../middleware/auth');
 const { moduleGate }     = require('../middleware/module-gate');
-const { rbac } = require('../middleware/rbac');
+const { rbac, hasExplicitSubGrant } = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { scopeMiddleware } = require('../middleware/scopeMiddleware');
 const ScopeEngine        = require('../utils/scopeEngine');
@@ -174,14 +174,14 @@ async function _resolveAssessmentType(schoolId, data) {
 }
 
 /** Validate an exam status transition — returns an error string, or null when allowed. */
-function _checkTransition(fromStatus, toStatus, userRole) {
+function _checkTransition(fromStatus, toStatus, userRole, rowGranted = false) {
   const allowed = EXAM_TRANSITIONS[fromStatus] || [];
   if (!allowed.includes(toStatus)) {
     return `Cannot transition from "${fromStatus}" to "${toStatus}". Allowed next states: [${allowed.join(', ')}]`;
   }
   const roleOk = TRANSITION_ROLES[toStatus] || [];
-  if (roleOk.length && !roleOk.includes(userRole)) {
-    return `Your role ("${userRole}") cannot set status to "${toStatus}"`;
+  if (roleOk.length && !roleOk.includes(userRole) && !rowGranted) {
+    return `Your role ("${userRole}") cannot set status to "${toStatus}". Needs ${toStatus === 'cancelled' ? 'Delete on Exams → Delete Exam' : 'Edit on Exams → Create / Edit Exam'}.`;
   }
   return null;
 }
@@ -499,7 +499,14 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('exams', 'update'), async
 
     // Validate status transition if status is being changed
     if (data.status && data.status !== existing.status) {
-      const transitionError = _checkTransition(existing.status, data.status, role);
+      // v5.279.0: the roles above, or the matching Exams row ticked (strict):
+      // in progress / completed → Edit on "Create / Edit Exam"; cancelled (final) →
+      // Delete on "Delete Exam", so a school letting teachers create exams
+      // doesn't thereby let them cancel one.
+      const statusRow = data.status === 'cancelled'
+        ? await hasExplicitSubGrant(req, 'exams', 'delete', 'delete')
+        : await hasExplicitSubGrant(req, 'exams', 'create', 'update');
+      const transitionError = _checkTransition(existing.status, data.status, role, statusRow);
       if (transitionError) return E.badRequest(res, transitionError);
 
       data.statusChangedBy = userId;

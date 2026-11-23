@@ -131,7 +131,11 @@ export default function RecommendationsSection({ studentId, canEdit, isAdmin }) 
   const role   = user?.role ?? '';
   const userId = user?.id ?? '';
 
-  const canWrite = ['admin', 'superadmin', 'teacher', 'section_head', 'deputy_principal'].includes(role);
+  // v5.279.0: role floor, or its own Settings row ticked (the row itself, never the general module grant, so roles never re-saved in Settings look exactly as before).
+  const can      = useAuthStore(s => s.can);
+  const canWrite = ['admin', 'superadmin', 'teacher', 'section_head', 'deputy_principal'].includes(role) || can('growth_profile__recommendations', 'create');
+  // Delete anyone's: Admin, or Delete on "Recommendations" (same rule as growth-recommendations.js).
+  const canDeleteAny = ['admin', 'superadmin'].includes(role) || can('growth_profile__recommendations', 'delete');
 
   const { data, isLoading } = useQuery({
     queryKey: ['growth-recommendations', studentId],
@@ -175,7 +179,7 @@ export default function RecommendationsSection({ studentId, canEdit, isAdmin }) 
             <RecommendationCard
               key={r.id ?? r._id}
               rec={r}
-              canDelete={isAdmin || r.authorId === userId || r.createdBy === userId}
+              canDelete={canDeleteAny || r.authorId === userId || r.createdBy === userId}
               onDelete={(rec) => deleteRec(rec.id)}
               isDeleting={isDeleting && deleting === r.id}
             />

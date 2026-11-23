@@ -54,7 +54,8 @@ jest.mock('../../middleware/auth', () => ({
   authMiddleware: (req, _res, next) => { req.jwtUser = mockCurrentUser; next(); },
 }));
 // Always-allow — isolates the in-route staff guard from RBAC entirely.
-jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => next() }));
+let mockTicked = new Set();   // v5.279.0: strict Growth Profile rows ticked
+jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => next(), hasExplicitSubGrant: async (_req, mod, sub, action) => mockTicked.has(`${mod}__${sub}:${action}`) }));
 jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) => next() }));
 jest.mock('../../utils/model', () => ({ _model: jest.fn((col) => mockStores[col]) }));
 
@@ -101,6 +102,16 @@ describe.each([
     mockCurrentUser = { userId: 'usr_1', schoolId: SCHOOL, role: 'parent', studentIds: ['stu_2'] };
     const res = await doPost();
     expect(res.status).toBe(403);
+  });
+
+  test('v5.279.0: a non-staff role (e.g. principal) passes with its row ticked, not without', async () => {
+    mockCurrentUser = { userId: 'usr_p', schoolId: SCHOOL, role: 'principal' };
+    expect((await doPost()).status).toBe(403);
+    // records → "Add Records"; projects → "Projects"
+    mockTicked = new Set([_label === 'growth-records.js' ? 'growth_profile__add_records:create' : 'growth_profile__projects:create']);
+    const res = await doPost();
+    mockTicked = new Set();
+    expect(res.status).not.toBe(403);
   });
 
   test('a teacher (legitimate staff) succeeds', async () => {

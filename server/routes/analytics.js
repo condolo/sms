@@ -24,7 +24,7 @@ const express = require('express');
 
 const { authMiddleware } = require('../middleware/auth');
 const { moduleGate }     = require('../middleware/module-gate');
-const { rbac }           = require('../middleware/rbac');
+const { rbac, hasPermission, hasExplicitSubGrant } = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { tenantModel }    = require('../utils/tenant-model');
 const { _model }         = require('../utils/model');
@@ -638,7 +638,17 @@ router.get('/series', authMiddleware, PLAN, MODGATE, rbac('analytics', 'read'), 
    of the whole platform. tenantModel() still isolates each school's
    query from every other's; rbac() is what limits who can reach here.
    ─────────────────────────────────────────────────────────── */
-router.get('/group', authMiddleware, PLAN, MODGATE, rbac('group_analytics', 'read'), async (req, res) => {
+/* v5.279.0: the existing group_analytics grant (never shown in Settings, so
+   only settable outside the app), or "Group Analytics" ticked under
+   Analytics (strict). Superadmin passes either way. */
+async function groupAnalyticsAccess(req, res, next) {
+  try {
+    if (await hasPermission(req, 'group_analytics', 'read')) return next();
+    if (await hasExplicitSubGrant(req, 'analytics', 'group', 'read')) return next();
+  } catch (err) { console.error('[analytics/group] access check failed:', err.message); }
+  return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Needs View on Analytics → Group Analytics.' } });
+}
+router.get('/group', authMiddleware, PLAN, MODGATE, groupAnalyticsAccess, async (req, res) => { // rbac: groupAnalyticsAccess — group_analytics grant or the strict analytics__group row
   try {
     const rawDays = parseInt(req.query.days) || 30;
     const days    = [7, 30, 90].includes(rawDays) ? rawDays : 30;

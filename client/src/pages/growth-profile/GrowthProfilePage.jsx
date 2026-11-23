@@ -131,9 +131,12 @@ export default function GrowthProfilePage() {
   const [activeSection, setActiveSection] = useState('academic');
 
   const role    = useAuthStore(s => s.session?.user?.role ?? '');
-  const canEdit   = ['admin', 'superadmin', 'teacher', 'section_head', 'deputy_principal'].includes(role);
-  const isAdmin   = ['admin', 'superadmin', 'deputy_principal'].includes(role);
-  const canVerify = canEdit;
+  // v5.279.0: role floor, or its own Settings row ticked (the row itself, never the general module grant, so roles never re-saved in Settings look exactly as before).
+  const can       = useAuthStore(s => s.can);
+  const isStaff   = ['admin', 'superadmin', 'teacher', 'section_head', 'deputy_principal'].includes(role);
+  const canEdit   = isStaff || can('growth_profile__add_records', 'create');
+  const isAdmin   = ['admin', 'superadmin', 'deputy_principal'].includes(role) || can('growth_profile__delete_records', 'delete');
+  const canVerify = isStaff || can('growth_profile__verify', 'update');            // growth-records.js verify
 
   /* Profile meta + section counts */
   const { data: profileRes, isLoading, isError } = useQuery({

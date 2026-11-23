@@ -29,7 +29,7 @@ const { DEFAULTS: NOTIF_DEFAULTS, EVENT_REGISTRY, GROUPS: NOTIF_GROUPS } = requi
 const { listTemplatesForSchool, setTemplateOverride, resetTemplateOverride } = require('../utils/notificationTemplates');
 const { CATEGORIES: MESSAGE_TEMPLATE_CATEGORIES, CATEGORY_ORDER: MESSAGE_TEMPLATE_CATEGORY_ORDER } = require('../config/notificationTemplates');
 const { rbac, hasPermission, invalidatePermCache, hasExplicitSubGrant, _mergeUserOverrides, _loadPerms, _loadUserPerms } = require('../middleware/rbac');
-const { EXPLICIT_SUB_KEYS, FINANCE_SUB_GRANTS } = require('../middleware/explicit-sub');
+const { EXPLICIT_SUB_KEYS, FINANCE_SUB_GRANTS, ROLE_FLOOR_SUB_KEYS } = require('../middleware/explicit-sub');
 const { invalidateModuleConfigCache } = require('../middleware/module-gate');
 const { invalidateScopeCache, invalidateScopeCacheForRole } = require('../middleware/scopeMiddleware');
 const AuditService           = require('../services/audit');
@@ -96,17 +96,23 @@ async function _canManagePermissions(req) {
    Superadmin is exempt — same unconditional authority _isSuperRole()
    gives it everywhere else in this codebase. */
 async function _actorEffectivePerms(req) {
-  const { schoolId, userId, role } = req.jwtUser;
+  const { schoolId, userId, role, roles = [] } = req.jwtUser;
   const rolePerms = await _loadPerms(schoolId, role);
   const userPerms = await _loadUserPerms(schoolId, userId);
-  return userPerms ? _mergeUserOverrides(rolePerms, userPerms) : rolePerms;
+  const perms = userPerms ? _mergeUserOverrides(rolePerms, userPerms) : { ...rolePerms };
+  // An admin holds every v5.279.0 role-floor row by role (see explicit-sub.js),
+  // so may grant them; nobody else can pass one on without holding it explicitly.
+  if ([role, ...roles].includes('admin')) {
+    for (const key of ROLE_FLOOR_SUB_KEYS) perms[key] = ['read', 'create', 'update', 'delete'];
+  }
+  return perms;
 }
 function _actorEffectiveAllows(actorPerms, key, action) {
   if (Array.isArray(actorPerms[key])) return actorPerms[key].includes(action);
   // An explicit finance sub-permission is never inherited from the general
   // finance grant (hasExplicitSubGrant has no fallback either), so a user
   // can't hand on a right they don't explicitly hold.
-  if (EXPLICIT_SUB_KEYS.has(key)) return false;
+  if (EXPLICIT_SUB_KEYS.has(key) || ROLE_FLOOR_SUB_KEYS.has(key)) return false;
   const mod = key.includes('__') ? key.split('__')[0] : key;
   return Array.isArray(actorPerms[mod]) && actorPerms[mod].includes(action);
 }

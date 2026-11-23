@@ -70,7 +70,11 @@ const mockJwtUser = { userId: 'u_admin', schoolId: SCHOOL, role: 'admin', roles:
 jest.mock('../../middleware/auth', () => ({
   authMiddleware: (req, _res, next) => { req.jwtUser = mockJwtUser; next(); },
 }));
-jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => next() }));
+let mockTicked = new Set();   // v5.279.0: strict Settings rows ticked for the current user
+jest.mock('../../middleware/rbac', () => ({
+  rbac: () => (_req, _res, next) => next(),
+  hasExplicitSubGrant: async (_req, mod, sub, action) => mockTicked.has(`${mod}__${sub}:${action}`),
+}));
 jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) => next() }));
 jest.mock('../../services/audit', () => ({ log: jest.fn().mockResolvedValue(undefined) }));
 
@@ -150,5 +154,18 @@ describe('academic year lookups no longer break on a UUID id (real Mongoose Cast
   test('a genuinely nonexistent id still 404s cleanly, not 500s', async () => {
     const res = await supertest(buildApp()).delete(`/api/academic-config/years/${UUID_ID}-does-not-exist`);
     expect(res.status).toBe(404);
+  });
+});
+
+/* v5.279.0 — year management was admin-by-role only. A non-admin role now
+   needs the matching action ticked on Settings → Academic setup. */
+describe('year management by Settings row (v5.279.0)', () => {
+  afterEach(() => { mockJwtUser.role = 'admin'; mockJwtUser.roles = ['admin']; mockTicked = new Set(); });
+  test('a non-admin role is refused without the row and allowed with it', async () => {
+    mockJwtUser.role = 'registrar'; mockJwtUser.roles = ['registrar'];
+    mockTicked = new Set(['settings__academics:update']);           // Edit only — not Delete
+    expect((await supertest(buildApp()).delete(`/api/academic-config/years/${UUID_ID}`)).status).toBe(403);
+    mockTicked.add('settings__academics:delete');
+    expect((await supertest(buildApp()).delete(`/api/academic-config/years/${UUID_ID}`)).status).toBe(200);
   });
 });
