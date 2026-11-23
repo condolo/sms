@@ -20,6 +20,7 @@ import PublicFooter from '@/components/landing/PublicFooter';
 import DeviceMockup from '@/components/landing/DeviceMockup';
 import LogoMarquee  from '@/components/landing/LogoMarquee';
 import PlansSection    from '@/components/landing/PlansSection';
+import ReferAndEarnSection from '@/components/landing/ReferAndEarnSection';
 import FloatingActions from '@/components/landing/FloatingActions';
 import ModulePreviewPanel from '@/components/landing/ModulePreviewPanel';
 
@@ -417,7 +418,10 @@ export default function Landing() {
                duplicate) ══════════════════════════════════════════════════ */}
         <PlansSection />
 
-        {/* ══ 8. TRUST / INFRASTRUCTURE ══════════════════════════════════════ */}
+        {/* ══ 8. REFER & EARN ═══════════════════════════════════════════════ */}
+        <ReferAndEarnSection />
+
+        {/* ══ 9. TRUST / INFRASTRUCTURE ══════════════════════════════════════ */}
         <section id="security" className="py-24 sm:py-32 bg-slate-950">
           <div className="max-w-7xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
@@ -462,7 +466,7 @@ export default function Landing() {
           </div>
         </section>
 
-        {/* ══ 9. HONEST SOCIAL PROOF ════════════════════════════════════════ */}
+        {/* ══ 10. HONEST SOCIAL PROOF ════════════════════════════════════════ */}
         <section className="relative py-16 bg-white border-b border-slate-100 overflow-hidden">
           <div className="absolute inset-0 pointer-events-none">
             <div className="absolute top-0 left-1/3 w-80 h-80 bg-slate-100/50 rounded-full blur-3xl" />
@@ -493,7 +497,7 @@ export default function Landing() {
           </div>
         </section>
 
-        {/* ══ 10. FINAL CTA ═════════════════════════════════════════════════ */}
+        {/* ══ 11. FINAL CTA ═════════════════════════════════════════════════ */}
         <section className="relative py-24 sm:py-32 bg-slate-50 overflow-hidden">
           <div className="absolute inset-0 pointer-events-none">
             <div className="absolute top-0 left-1/4 w-96 h-96 bg-slate-200/60 rounded-full blur-3xl" />
