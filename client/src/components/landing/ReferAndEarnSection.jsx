@@ -58,7 +58,8 @@ export default function ReferAndEarnSection() {
 
   const bounty = Number(program?.bountyAmount ?? 5000);
   const currency = program?.currency || 'KES';
-  const perk = perkLine(program);
+  const paused = program?.enabled === false;
+  const perk = paused ? '' : perkLine(program);
 
   return (
     <section id="refer" aria-labelledby="refer-heading" className="relative py-24 sm:py-32 overflow-hidden" style={{ backgroundColor: INK }}>
@@ -72,7 +73,7 @@ export default function ReferAndEarnSection() {
           <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
             <motion.div variants={fadeUp} className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.16em]" style={{ color: LIME }}>
               <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: LIME }} />
-              Refer &amp; earn
+              Refer &amp; earn{paused ? ' · opening soon' : ''}
             </motion.div>
 
             <motion.h2
@@ -98,11 +99,11 @@ export default function ReferAndEarnSection() {
 
             <motion.div variants={fadeUp} className="mt-8 flex flex-col sm:flex-row sm:items-center gap-4">
               <Link
-                to="/refer"
+                to={paused ? '/contact' : '/refer'}
                 className="group inline-flex items-center justify-center gap-2 rounded-xl px-7 py-3.5 text-sm font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2"
                 style={{ backgroundColor: LIME, color: INK }}
               >
-                Join the creator program
+                {paused ? 'Register your interest' : 'Join the creator program'}
                 <ArrowRight size={16} className="group-hover:translate-x-0.5 transition-transform" />
               </Link>
               <span className="inline-flex items-center gap-2 text-xs font-medium" style={{ color: '#A49FC0' }}>
@@ -112,8 +113,9 @@ export default function ReferAndEarnSection() {
             </motion.div>
 
             <motion.p variants={fadeUp} className="mt-5 max-w-md text-[11px] leading-relaxed" style={{ color: '#8F89AC' }}>
-              Open to education creators, consultants, teachers and anyone who knows a school.
-              Rewards are paid after the referred school's first subscription payment.
+              {paused
+                ? "The creator program is paused right now. Register your interest and we'll let you know when it reopens."
+                : "Open to education creators, consultants, teachers and anyone who knows a school. Rewards are paid after the referred school's first subscription payment."}
             </motion.p>
           </motion.div>
 
