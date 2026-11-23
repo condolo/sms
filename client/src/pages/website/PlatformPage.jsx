@@ -45,12 +45,13 @@ const MODULES = {
   'Events':          'School calendar with audience targeting — notices to parents, staff, or the whole school. Links to Messages and Finance for fee deadlines.',
   'Messages':        'Structured institutional messaging between staff. Replaces informal WhatsApp for school communications with a permanent audit trail.',
   'Behaviour':       'Incident logging and merit/demerit points (BPS) with configurable categories and House standings — a permanent, attributable record for every entry.',
+  'Student Council': 'A student feedback desk overseen by a staff patron: suggestions and grievances (with anonymous posting), safety concerns escalated straight to staff, and council elections counted automatically.',
   'Resources':       "Shared links, policies, and downloads staff and parents can reach in one place — the school's own quick-reference library.",
   'Medical Centre':  'Student medical profiles, clinic visit history, and teacher-visible condition alerts — allergies, asthma, epilepsy — without exposing the full record.',
   'Inventory':       'Stock tracking with a full movement ledger and a configurable requisition-to-procurement approval chain, from ICT equipment to cleaning supplies.',
   // Insights
   'Analytics':       'Live director dashboard: attendance rates, fee collection velocity, academic performance trends, and staff metrics — no spreadsheet required.',
-  'Reports':         'Governed report publishing with full attribution. Every report generation logged. Finance, academic, and HR reports in one place.',
+  'Reports':         'School-wide reports with separate attendance, finance, behaviour and enrolment tabs — each granted by role — exportable to CSV.',
   // Portals
   'Student Portal':  'Student access to timetable, grades, assignments, fee balance, and school notices. Available on any device.',
   'Parent Portal':   'Live attendance, grades, fee statements, M-Pesa receipts, and school announcements — updated as data is entered, not at end of term.',
@@ -58,7 +59,7 @@ const MODULES = {
 
 const GROUPS = [
   { label: 'Academic',   nodes: ['Students', 'Teachers', 'Classes', 'Attendance', 'Grades & Exams', 'Report Cards', 'Timetable', 'Subjects', 'Lessons', 'E-Learning', 'Growth Profile', 'Weekly Snapshot', 'Admissions'] },
-  { label: 'Operations', nodes: ['Finance', 'HR', 'Library', 'Hostel', 'Transport', 'Events', 'Messages', 'Behaviour', 'Resources', 'Medical Centre', 'Inventory'] },
+  { label: 'Operations', nodes: ['Finance', 'HR', 'Library', 'Hostel', 'Transport', 'Events', 'Messages', 'Behaviour', 'Student Council', 'Resources', 'Medical Centre', 'Inventory'] },
   { label: 'Insights',   nodes: ['Analytics', 'Reports'] },
   { label: 'Portals',    nodes: ['Student Portal', 'Parent Portal'] },
 ];

@@ -1,7 +1,7 @@
 import {
   Activity, BarChart3, BookCheck, BookMarked, BookOpen, Boxes, Building2, Bus,
   Calendar, CalendarCheck, CalendarDays, CheckCircle, ClipboardList, DollarSign,
-  FileBarChart2, FileText, GraduationCap, HeartPulse, Layers, Link2, MessageSquare, MonitorPlay,
+  FileBarChart2, FileText, GraduationCap, HeartPulse, Layers, Link2, Megaphone, MessageSquare, MonitorPlay,
   ShieldCheck, TrendingUp, UserCheck, UserCog, Users,
 } from 'lucide-react';
 
@@ -27,6 +27,7 @@ export const ECOSYSTEM_NODES = [
   { label: 'eLearning',       Icon: MonitorPlay,   color: 'bg-purple-600',  desc: 'Online learning'    },
   // Operations
   { label: 'Behaviour',       Icon: ShieldCheck,   color: 'bg-orange-500',  desc: 'Incidents logged'   },
+  { label: 'Student Council', Icon: Megaphone,     color: 'bg-rose-600',    desc: 'Student voice heard' },
   { label: 'Finance',         Icon: DollarSign,    color: 'bg-amber-500',   desc: 'Fees collected'     },
   { label: 'Messages',        Icon: MessageSquare, color: 'bg-sky-600',     desc: 'Staff connected'    },
   { label: 'Events',          Icon: CalendarDays,  color: 'bg-yellow-500',  desc: 'School calendar'    },
@@ -36,7 +37,7 @@ export const ECOSYSTEM_NODES = [
   { label: 'Medical Centre',  Icon: HeartPulse,    color: 'bg-red-500',     desc: 'Clinic visits logged' },
   { label: 'Inventory',       Icon: Boxes,         color: 'bg-orange-600',  desc: 'Stock tracked'      },
   // Insights
-  { label: 'Reports',         Icon: FileText,      color: 'bg-purple-500',  desc: 'Governed publish'   },
+  { label: 'Reports',         Icon: FileText,      color: 'bg-purple-500',  desc: 'School-wide reports' },
   { label: 'Analytics',       Icon: TrendingUp,    color: 'bg-teal-500',    desc: 'Director insight'   },
   // Support services — last as requested
   { label: 'Transport',       Icon: Bus,           color: 'bg-rose-500',    desc: 'Routes tracked'     },
@@ -280,6 +281,7 @@ export const MODULE_PREVIEWS = {
     outcomes: [
       'Admin defines the syllabus once — all teachers of a subject work from the same topic list',
       "Co-teachers of the same class share one coverage pool — no duplication or conflict",
+      'Lesson plans written against the same topics, and coverage can be marked for selected students when only some were taught',
       'HODs see every subject\'s coverage across all classes in a single dashboard view',
       'Parents see real-time curriculum progress for their child\'s subjects in their portal',
     ],
@@ -313,10 +315,11 @@ export const MODULE_PREVIEWS = {
       'No grade entry errors from copying between registers, exam sheets and report templates',
       'Subject totals, class averages and rank positions calculated in real time, the day results are entered',
       'Historic exam and grade performance retrievable for any student at any time',
+      'Results from earlier academic years can be imported, so past report cards can be issued from the same system',
     ],
     badge: 'Auto-Calculated',
-    connectedModules: ['Reports', 'Analytics', 'Attendance', 'Student Records'],
-    demoPath: '/grades',
+    connectedModules: ['Report Cards', 'Analytics', 'Attendance', 'Student Records'],
+    demoPath: '/exams',
     mockup: {
       type: 'list',
       headers: ['Student', 'CA', 'MT', 'ET', 'Total'],
@@ -369,8 +372,8 @@ export const MODULE_PREVIEWS = {
       'Every entry verified and attributed — a credible record, not a self-reported list',
     ],
     badge: 'Verified Record',
-    connectedModules: ['Student Records', 'Behaviour', 'Reports'],
-    demoPath: '/students',
+    connectedModules: ['Student Records', 'Behaviour', 'Weekly Snapshot', 'Reports'],
+    demoPath: '/growth-profile',
     mockup: {
       type: 'stats',
       items: [
@@ -381,22 +384,22 @@ export const MODULE_PREVIEWS = {
       ],
     },
   },
-  'Reports': {
+  'Report Cards': {
     tagline: 'Governed publishing — no report card leaves without review and approval.',
     outcomes: [
-      'Teacher submits marks → an eligible reviewer approves → Principal publishes to the parent portal',
-      "Publication is blocked while any subject's marks are still unreviewed — a report previews as provisional until then",
-      'Every action timestamped and attributed — a permanently auditable chain of custody',
-      "Parents receive an in-portal notification the moment their child's report card is published",
+      'Report cards generated per class and term from approved marks, attendance and behaviour records',
+      "Publication is blocked while any subject's marks are still unapproved — the subjects holding it up are listed",
+      'Teacher comments, an approval workflow you configure, and the principal\'s remark — all on the card',
+      'Every published card carries a unique Report ID and a QR code anyone can use to confirm it is genuine',
     ],
     results: [
-      'Report cards published once marks are approved, not days later chasing signatures',
       'No unreviewed or incorrect report card reaches a parent',
-      'Full audit trail protects the school in the event of a grade dispute',
+      'Parents and students download the PDF from their portal the moment it is published',
+      'Report cards for earlier years can be issued from imported results — without notifying parents again',
     ],
-    badge: 'Reviewed & Approved',
-    connectedModules: ['Grades & Exams', 'Analytics', 'Finance', 'Student Records'],
-    demoPath: '/reports',
+    badge: 'Reviewed & Verifiable',
+    connectedModules: ['Grades & Exams', 'Attendance', 'Behaviour', 'Student Records'],
+    demoPath: '/report-cards',
     mockup: {
       type: 'pipeline',
       rows: [
@@ -404,6 +407,84 @@ export const MODULE_PREVIEWS = {
         { stage: 'Submitted', count: 3,  color: 'bg-blue-500'   },
         { stage: 'Approved',  count: 2,  color: 'bg-amber-500'  },
         { stage: 'Published', count: 8,  color: 'bg-emerald-500'},
+      ],
+    },
+  },
+  'Reports': {
+    tagline: 'School-wide reports across attendance, finance, behaviour and enrolment — in one place.',
+    outcomes: [
+      'An overview of the whole school, with separate tabs for attendance, finance, behaviour and enrolment',
+      'Each tab can be granted on its own — a bursar can see finance figures without behaviour records',
+      'Reports exported to CSV for board packs and audits',
+      'Figures come from the live records — the same data every other module uses',
+    ],
+    results: [
+      'No end-of-term report assembly from separate spreadsheets',
+      'Each person sees only the reports their role allows',
+      'One set of figures for leadership, the board and auditors',
+    ],
+    badge: 'Role-Scoped',
+    connectedModules: ['Analytics', 'Attendance', 'Finance', 'Behaviour'],
+    demoPath: '/reports',
+    mockup: {
+      type: 'stats',
+      items: [
+        { label: 'Enrolment',     value: '642',  trend: '+18',  up: true  },
+        { label: 'Attendance',    value: '94%',  trend: '+2%',  up: true  },
+        { label: 'Fees Collected', value: '78%', trend: '+6%',  up: true  },
+        { label: 'Incidents',     value: '11',   trend: '−3',   up: true  },
+      ],
+    },
+  },
+  'Student Council': {
+    tagline: 'A feedback desk run by students and overseen by a staff patron.',
+    outcomes: [
+      "Students file suggestions and grievances, upvote each other's ideas and follow the council's replies",
+      'Students can post anonymously — hidden from other students and the council, never from the staff patron',
+      'Safety concerns go straight to staff: council members cannot close them and they never reach the student queue',
+      'Council elections run in the platform: nominations, vetting, one secret ballot per seat, results counted automatically',
+    ],
+    results: [
+      'Student concerns are recorded and answered, not lost in a suggestion box',
+      'Safeguarding disclosures reach staff immediately',
+      'Elections counted by the system, with winners seated as council members automatically',
+    ],
+    badge: 'Student Voice',
+    connectedModules: ['Student Records', 'Behaviour', 'Growth Profile'],
+    demoPath: '/council',
+    mockup: {
+      type: 'list',
+      headers: ['Case', 'Type', 'Status'],
+      rows: [
+        ['Longer library hours',     'Suggestion', 'Under review'],
+        ['Water dispenser broken',   'Grievance',  'Resolved'],
+        ['More football fixtures',   'Suggestion', 'Open'],
+      ],
+    },
+  },
+  'Weekly Snapshot': {
+    tagline: "Every student's week in one digest — generated automatically, no work for teachers.",
+    outcomes: [
+      'Topics covered, assignments and scores, attendance, behaviour, library activity and new Growth Profile entries for the week',
+      'Generated automatically every Saturday afternoon — no approval step and nothing for class teachers to do',
+      'Parents are notified by email and in the app when it is ready; past weeks stay available',
+      'Any week downloads as a PDF — for staff, parents and students',
+    ],
+    results: [
+      'Parents hear about the week every week, not only at report time',
+      'Class teachers step through their class without compiling anything',
+      "Medical details shown only where the school's settings and the viewer's role allow",
+    ],
+    badge: 'Automatic',
+    connectedModules: ['Attendance', 'Lessons', 'Behaviour', 'Growth Profile'],
+    demoPath: '/weekly-snapshot',
+    mockup: {
+      type: 'stats',
+      items: [
+        { label: 'Attendance',     value: '5 / 5', trend: 'Full week',     up: true  },
+        { label: 'Topics covered', value: '9',     trend: '+3 subjects',   up: true  },
+        { label: 'Assignments',    value: '4',     trend: '1 pending',     up: false },
+        { label: 'Merits',         value: '+6',    trend: 'This week',     up: true  },
       ],
     },
   },
