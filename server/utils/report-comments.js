@@ -37,7 +37,14 @@
       itself (its subjects' breakdown), not only from dates — a Mid-Term
       report published or re-published after End-Term started contains no
       End-Term marks, so End-Term comments stay open (v5.280.1). With nothing
-      later it stays locked, as before (admin unlock unchanged).
+      later it stays locked, as before.
+
+   5. Comments open WITH THE MARKS (v5.280.2, decided 2026-11-24: no separate
+      unlock for comments). The Markbook sends the assessment it is on: if that
+      assessment takes comments and its marks are open for this learner and
+      subject, the comment is open too. Marks unlocked after a report was
+      published (Review tab) open the comments of that report, until the marks
+      lock again. Neither rule ever closes a comment that is open otherwise.
    ============================================================ */
 'use strict';
 
@@ -194,12 +201,45 @@ async function boxLock(ctx, schoolId, { studentId, termNumber, snaps }, scope, t
   return { locked: false, opensOn: null };
 }
 
+const _yearOr = (scope) => (scope.yearId ? { $or: [{ academicYearId: scope.yearId }, { academicYearId: null }] } : {});
+
+/* Can this learner's mark be entered for this assessment? Same locks as the
+   marks grid: the mark itself, or the class's marks for that subject. */
+async function marksOpen(ctx, schoolId, { studentId, classId, subjectId, termNumber, assessmentType, instance }, scope) {
+  const at = (r) => (r.instance || 1) === (Number(instance) || 1);
+  const windows = await termWindows(ctx, schoolId, termNumber, scope.yearId);
+  const w = windows.find(x => x.assessmentType === assessmentType && at(x));
+  if (!w || w.commentsEnabled === false) return false;
+  const key = { schoolId, subjectId, termNumber: Number(termNumber), assessmentType, ..._yearOr(scope) };
+  const mine = (r) => at(r) && inYear(r.academicYearId, r.lockedAt || r.updatedAt || r.createdAt, scope);
+  const marks = await tenantModel('assessment_marks', ctx).find({ ...key, studentId, isLocked: true })
+    .select('instance academicYearId lockedAt updatedAt createdAt').lean();
+  if ((marks || []).some(mine)) return false;
+  const subs = await tenantModel('mark_submissions', ctx).find({ ...key, classId, status: 'locked' })
+    .select('instance academicYearId lockedAt updatedAt createdAt').lean();
+  return !(subs || []).some(mine);
+}
+
+/* Were marks these published reports cover unlocked since they were published
+   (and not locked again)? With a subject, only that subject's marks. */
+async function reopenedWithMarks(ctx, schoolId, { studentId, subjectId, termNumber, cycle, snaps }, scope) {
+  const base = { schoolId, studentId, termNumber: Number(termNumber), isLocked: false, unlockedAt: { $ne: null }, ...(subjectId ? { subjectId } : {}), ..._yearOr(scope) };
+  const rows = [
+    ...((await tenantModel('assessment_marks', ctx).find(base).select('assessmentType instance academicYearId unlockedAt').lean()) || []),
+    ...((await tenantModel('indicator_marks', ctx).find({ ...base, cycle: cycle || null }).select('academicYearId unlockedAt').lean()) || []),
+  ].filter(r => inYear(r.academicYearId, r.unlockedAt, scope));
+  return snaps.every(s => rows.some(r => {
+    const keys = s.coverage?.includedKeys;
+    if (keys && r.assessmentType && !keys.includes(`${r.assessmentType}|${r.instance || 1}`)) return false;
+    return new Date(r.unlockedAt) >= new Date(s.publishedAt);
+  }));
+}
+
 /* Marks can be entered before an assessment's start date; its comment then
    goes with them. A mark locked by a publish is part of a report already. */
 async function _hasOpenMark(ctx, schoolId, { studentId, termNumber, stages }, scope) {
-  const year = scope.yearId ? { $or: [{ academicYearId: scope.yearId }, { academicYearId: null }] } : {};
   const marks = await tenantModel('assessment_marks', ctx)
-    .find({ schoolId, studentId, termNumber: Number(termNumber), assessmentType: { $in: stages.map(w => w.assessmentType) }, isLocked: { $ne: true }, ...year })
+    .find({ schoolId, studentId, termNumber: Number(termNumber), assessmentType: { $in: stages.map(w => w.assessmentType) }, isLocked: { $ne: true }, ..._yearOr(scope) })
     .select('assessmentType instance academicYearId updatedAt createdAt').lean();
   return (marks || []).some(m => inYear(m.academicYearId, m.updatedAt || m.createdAt, scope)
     && stages.some(w => w.assessmentType === m.assessmentType && (w.instance || 1) === (m.instance || 1)));
@@ -245,5 +285,5 @@ async function effectiveDrafts(ctx, schoolId, { studentIds, termNumber, cycle, p
 
 module.exports = {
   COLLECTION, commentYear, inYear, untaggedBelongsTo, draftsByStudent, draftForWrite,
-  termWindows, nextStageStart, unreportedStages, boxLock, cycleSubjectComments, effectiveDrafts,
+  termWindows, nextStageStart, unreportedStages, boxLock, marksOpen, reopenedWithMarks, cycleSubjectComments, effectiveDrafts,
 };

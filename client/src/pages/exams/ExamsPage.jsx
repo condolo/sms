@@ -1111,8 +1111,9 @@ function MarkbookTab({ years }) {
   const [commentErrors, setCommentErrors] = useState({});
   const [savingIds, setSavingIds] = useState({});
   const { mutateAsync: saveCommentAsync, isPending: savingComments } = useMutation({
-    mutationFn: ({ studentId, subjectId: subj, classId: cls, termNumber: term, academicYearId, text }) =>
-      reportCardsApi.draftComments.saveSubject(studentId, subj, { classId: cls, termNumber: term, academicYearId, comment: text }),
+    // The assessment goes along so the comment opens whenever its marks do.
+    mutationFn: ({ studentId, subjectId: subj, classId: cls, termNumber: term, academicYearId, assessmentType, instance, text }) =>
+      reportCardsApi.draftComments.saveSubject(studentId, subj, { classId: cls, termNumber: term, academicYearId, assessmentType, instance, comment: text }),
     onSuccess: (_data, { studentId, subjectId: subj, classId: cls, termNumber: term, academicYearId, text }) => {
       // Show it saved now; the class list is refreshed behind it. Waiting for
       // that refresh made each box wait for every other box's save.
@@ -1147,7 +1148,8 @@ function MarkbookTab({ years }) {
     setSavingIds(prev => ({ ...prev, [studentId]: key }));
     const p = saveCommentAsync({
       studentId, subjectId, classId, termNumber: Number(selectedEntry.termNumber),
-      academicYearId: selectedEntry.academicYearId || undefined, text,
+      academicYearId: selectedEntry.academicYearId || undefined,
+      assessmentType: selectedEntry.assessmentType, instance: selectedEntry.instance ?? 1, text,
     }).finally(() => {
       commentSavesRef.current.delete(key);
       setSavingIds(prev => { if (prev[studentId] !== key) return prev; const next = { ...prev }; delete next[studentId]; return next; });
@@ -1310,7 +1312,7 @@ function MarkbookTab({ years }) {
 
   /* ── One Save for marks and comments ──
      Marks go through the same bulk save as before (skipped when the
-     assessment is locked — comments are never locked). Comments go through
+     assessment is locked; comments open with the marks). Comments go through
      the same per-student save the comment box already uses on its own. */
   async function saveEverything() {
     const marksLocked = selectedEntry?.isLocked ?? false;

@@ -6,6 +6,17 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.280.2] - 2026-11-24 - feat(markbook): comments open with the marks
+
+### Changed
+- **No separate lock to open for comments.** In the Markbook, if an assessment takes comments and its marks can be entered for a learner, the comment can be too, whatever was published before.
+- **Unlocking marks opens their comments.** When marks are unlocked after a report was published (Exams & Assessment → Review), that report's comments open with them, and lock again when the marks do.
+- The refusal now points to unlocking the marks.
+
+No comment that could be written before is locked by this. No data changes; published reports do not change.
+
+---
+
 ## [v5.280.1] - 2026-11-24 - fix(markbook): End-Term comments stayed locked for some learners
 
 ### Fixed

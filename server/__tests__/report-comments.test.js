@@ -280,6 +280,68 @@ describe('the box follows what the published report contains, not only its date 
   });
 });
 
+describe('comments open with the marks — no separate unlock (v5.280.2)', () => {
+  const ET = { assessmentType: 'ET', instance: 1 };
+  const publish = (o = {}) => mockDb.data.report_card_snapshots.push({ id: 's1', schoolId: SCHOOL, studentId: 'stu_1', termNumber: 1, academicYearId: 'y26', commentsLocked: true, publishedAt: `${day(-2)}T08:00:00Z`, subjects: { math: { breakdown: { MT: 60, ET: 70 } } }, ...o });
+  const mark = (o = {}) => ({ schoolId: SCHOOL, studentId: 'stu_1', classId: 'cls_1', subjectId: 'math', termNumber: 1, assessmentType: 'ET', instance: 1, academicYearId: 'y26', rawScore: 70, isLocked: true, lockedAt: `${day(-2)}T08:00:00Z`, ...o });
+  beforeEach(() => { mockDb.data.assessment_schedule.push(win('MT', day(-30), day(-25)), win('ET', day(4), day(9))); });
+
+  test('End-Term marks open, nothing entered, not started → the comment saves', async () => {
+    publish({ subjects: { math: { breakdown: { MT: 60 } } } });
+    expect((await save('x')).status).toBe(403);            // an older browser tab names no assessment
+    expect((await save('End-Term', ET)).status).toBe(200);
+  });
+  test('marks locked by the publish → the comment is locked too', async () => {
+    publish(); mockDb.data.assessment_marks = [mark()];
+    expect((await save('x', ET)).status).toBe(403);
+  });
+  test('learner has no mark but the class’s marks are locked → locked', async () => {
+    publish(); mockDb.data.mark_submissions = [{ schoolId: SCHOOL, classId: 'cls_1', subjectId: 'math', termNumber: 1, assessmentType: 'ET', instance: 1, academicYearId: 'y26', status: 'locked' }];
+    expect((await save('x', ET)).status).toBe(403);
+    mockDb.data.mark_submissions[0].status = 'approved';   // unlocked in the Review tab
+    expect((await save('x', ET)).status).toBe(200);
+  });
+  test('marks unlocked → Markbook, Report Cards and the class teacher remark open; locked again → closed', async () => {
+    publish(); mockDb.data.assessment_marks = [mark({ isLocked: false, unlockedAt: `${day(-1)}T08:00:00Z` })];
+    const remark = () => supertest(app).put('/rc/draft-comments/stu_1').send({ termNumber: 1, classTeacherRemark: 'R' });
+    expect((await save('a', ET)).status).toBe(200);
+    expect((await save('b')).status).toBe(200);
+    expect((await remark()).status).toBe(200);
+    mockDb.data.assessment_marks[0].isLocked = true;
+    expect((await save('c')).status).toBe(403);
+    expect((await remark()).status).toBe(403);
+  });
+  test('an unlock before the report was published, or of another subject, does not count', async () => {
+    publish(); mockDb.data.assessment_marks = [mark({ isLocked: false, unlockedAt: `${day(-5)}T08:00:00Z` }), mark({ subjectId: 'eng', isLocked: false, unlockedAt: `${day(-1)}T08:00:00Z` })];
+    expect((await save('x')).status).toBe(403);
+  });
+  test('a published End-Term cycle report opens with its marks; unlocking End-Term does not open Mid-Term', async () => {
+    publish({ cycle: 'ET', coverage: { includedKeys: ['MT|1', 'ET|1'] } });
+    publish({ id: 's2', cycle: 'MT', coverage: { includedKeys: ['MT|1'] } });
+    mockDb.data.assessment_marks = [mark({ isLocked: false, unlockedAt: `${day(-1)}T08:00:00Z` })];
+    expect((await save('x', { cycle: 'ET' })).status).toBe(200);
+    expect((await save('x', { cycle: 'MT' })).status).toBe(403);
+  });
+  test('an assessment set to take no comments, or not in the schedule, opens nothing', async () => {
+    publish();
+    expect((await save('x', { assessmentType: 'HW', instance: 1 })).status).toBe(403);
+    mockDb.data.assessment_schedule[1].commentsEnabled = false;
+    expect((await save('x', ET)).status).toBe(403);
+  });
+  test('another school’s marks or unlocks open nothing', async () => {
+    publish(); mockDb.data.assessment_marks = [mark(), mark({ schoolId: 'sch_2', isLocked: false, unlockedAt: `${day(-1)}T08:00:00Z` })];
+    expect((await save('x', ET)).status).toBe(403);
+  });
+  test('locking marks never closes a comment that is open today (nothing published)', async () => {
+    mockDb.data.assessment_marks = [mark()];
+    expect((await save('x', ET)).status).toBe(200);
+  });
+  test('a malformed assessment is refused', async () => {
+    expect((await save('x', { assessmentType: { $ne: null } })).status).toBe(400);
+    expect((await save('x', { assessmentType: 'ET', instance: 'a' })).status).toBe(400);
+  });
+});
+
 describe('publishing Term 2 never hides Term 1', () => {
   test('terms without ids are told apart by term number', () => {
     expect(router._termNumberWhenNoTermId({ termId: null }, 2)).toEqual({ termNumber: 2 });

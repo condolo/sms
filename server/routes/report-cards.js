@@ -3784,22 +3784,28 @@ router.post('/preview-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'
    and the Markbook box (no cycle) reopens for a scheduled assessment the
    published report does not contain (report-comments.js boxLock), so a
    report published at Mid-Term does not keep teachers from writing the
-   End-Term comment. Returns { locked, opensOn }. */
-async function _publishedCommentsLock(schoolId, ctx, studentId, termNumber, cycle = null, scope = null) {
+   End-Term comment. v5.280.2: it also opens with the marks — `on` carries
+   the subject, and from the Markbook the assessment it is on.
+   Returns { locked, opensOn }. */
+async function _publishedCommentsLock(schoolId, ctx, studentId, termNumber, cycle = null, scope = null, on = {}) {
   const filter = { schoolId, studentId, termNumber: Number(termNumber), cycle: cycle || null, superseded: { $ne: true }, commentsLocked: true };
   const Snaps = tenantModel('report_card_snapshots', ctx);
   if (!scope) return { locked: !!(await Snaps.findOne(filter).select('id').lean()), opensOn: null };
-  const snaps = (await Snaps.find(filter).select(cycle ? 'id publishedAt academicYearId' : 'id publishedAt academicYearId subjects').lean())
+  const snaps = (await Snaps.find(filter).select(`id publishedAt academicYearId coverage${cycle ? '' : ' subjects'}`).lean())
     .filter(s => reportComments.inYear(s.academicYearId, s.publishedAt, scope));
   if (!snaps.length) return { locked: false, opensOn: null };
-  if (cycle) return { locked: true, opensOn: null };
-  return reportComments.boxLock(ctx, schoolId, { studentId, termNumber, snaps }, scope);
+  const lock = cycle ? { locked: true, opensOn: null }
+    : await reportComments.boxLock(ctx, schoolId, { studentId, termNumber, snaps }, scope);
+  if (!lock.locked) return lock;
+  const open = (!cycle && on.assessmentType && await reportComments.marksOpen(ctx, schoolId, { ...on, studentId, termNumber }, scope))
+    || await reportComments.reopenedWithMarks(ctx, schoolId, { studentId, subjectId: on.subjectId, termNumber, cycle, snaps }, scope);
+  return open ? { locked: false, opensOn: null } : lock;
 }
 async function _publishedCommentsLockFor(...args) {
   return (await _publishedCommentsLock(...args)).locked;
 }
 function _commentsLockedMessage({ opensOn }) {
-  return 'Comments are locked — the report card for this term has been published. Ask an admin to unlock it for a correction.'
+  return 'Comments are locked with the marks — the report card for this term has been published. For a correction, ask an admin to unlock the marks (Exams & Assessment → Review); the comments open with them.'
     + (opensOn ? ` They open again on ${opensOn.date}, when ${opensOn.label} starts in the assessment schedule.` : '');
 }
 
@@ -3943,7 +3949,7 @@ router.put('/draft-comments/:studentId/subject/:subjectId', authMiddleware, PLAN
   try {
     const { schoolId, userId: updatedBy } = req.jwtUser;
     const { studentId, subjectId } = req.params;
-    const { termNumber, comment, cycle, academicYearId } = req.body;
+    const { termNumber, comment, cycle, academicYearId, assessmentType, instance } = req.body;
     if (!termNumber) return E.badRequest(res, 'termNumber is required');
     if (typeof comment !== 'string') return E.badRequest(res, 'comment must be a string');
     if (comment.length > 1000) return E.badRequest(res, 'comment must be 1000 characters or fewer');
@@ -3954,6 +3960,12 @@ router.put('/draft-comments/:studentId/subject/:subjectId', authMiddleware, PLAN
     if (academicYearId != null && (typeof academicYearId !== 'string' || academicYearId.length > 100)) {
       return E.badRequest(res, 'academicYearId must be a string of 100 characters or fewer');
     }
+    // The assessment the Markbook is on (optional): decides only whether the
+    // comment is open, never where it is stored — one box per term.
+    if (assessmentType != null && (typeof assessmentType !== 'string' || assessmentType.length > 50)) {
+      return E.badRequest(res, 'assessmentType must be a string of 50 characters or fewer');
+    }
+    if (instance != null && !Number.isInteger(Number(instance))) return E.badRequest(res, 'instance must be a whole number');
 
     // Same rights as marks: the caller must teach this subject in this student's stream.
     // Class and stream come from the student record, never from the request body.
@@ -3999,7 +4011,8 @@ router.put('/draft-comments/:studentId/subject/:subjectId', authMiddleware, PLAN
     const ctx = tenantContext(req);
     const scope = await _commentScope(ctx, schoolId, academicYearId);
     if (await isYearArchived(schoolId, scope.yearId)) return E.forbidden(res, ARCHIVED_COMMENTS);
-    const lock = await _publishedCommentsLock(schoolId, ctx, studentId, termNumber, cycle, scope);
+    const lock = await _publishedCommentsLock(schoolId, ctx, studentId, termNumber, cycle, scope,
+      { classId, subjectId, assessmentType, instance });
     if (lock.locked) return E.forbidden(res, _commentsLockedMessage(lock));
 
     const target = await reportComments.draftForWrite(ctx, schoolId, { studentId, termNumber, cycle }, scope);

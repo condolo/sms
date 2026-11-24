@@ -107,6 +107,8 @@ beforeEach(() => {
     // v5.280.0: comments belong to an academic year; no year or schedule set up here.
     academic_years: makeStore([]),
     assessment_schedule: makeStore([]),
+    assessment_marks: makeStore([]),
+    indicator_marks: makeStore([]),
     report_card_snapshots: makeStore([]),
   };
 });
