@@ -1,6 +1,12 @@
 /* ============================================================
    Generic CRUD router — handles all collections
    Every operation is automatically scoped to req.school.id
+
+   Admin and super admin only (v5.281.1). It is an escape hatch that returns
+   whole collections; the per-person rules (a parent's own child, a teacher's
+   own classes, your own messages) live in the dedicated routes and can't be
+   applied here. Nothing in the web app calls it. Refusals are audit-logged so
+   anything that still uses it shows up.
    ============================================================ */
 const express  = require('express');
 const crypto   = require('crypto');
@@ -11,6 +17,7 @@ const { rbac }             = require('../middleware/rbac');
 const { tenantModel, tenantContext, PLATFORM_COLLECTIONS } = require('../utils/tenant-model');
 const { moduleGate } = require('../middleware/module-gate');
 const email    = require('../utils/email');
+const AuditService = require('../services/audit');
 
 const router = express.Router();
 
@@ -91,6 +98,34 @@ function _isSuperAdmin(req) {
   const role = req.jwtUser?.role || '';
   const roles = req.jwtUser?.roles || [];
   return role === 'superadmin' || roles.includes('superadmin');
+}
+
+/* One log entry per person, collection and action in 10 minutes: enough to
+   see who is using the route, without letting a script fill the audit log. */
+const REFUSAL_LOG_EVERY_MS = 10 * 60_000;
+const REFUSAL_LOG_MAX = 5000;
+const _refusalsLogged = new Map();
+
+function _logRefusal(req) {
+  const { schoolId, userId, role } = req.jwtUser || {};
+  const col = ALLOWED.has(req.params.col) ? req.params.col : 'unknown';
+  const key = `${schoolId}|${userId}|${col}|${req.method}`;
+  const now = Date.now();
+  if (now - (_refusalsLogged.get(key) || 0) < REFUSAL_LOG_EVERY_MS) return;
+  if (_refusalsLogged.size >= REFUSAL_LOG_MAX) _refusalsLogged.clear();
+  _refusalsLogged.set(key, now);
+  console.warn(`[collections] refused ${req.method} ${col} for role ${role} in school ${schoolId}`);
+  AuditService.log({
+    action: 'collections.refused', actor: req.jwtUser, schoolId,
+    target: { type: 'collection', id: col, label: col },
+    details: { method: req.method }, severity: 'warn', req,
+  }).catch(() => {});
+}
+
+function adminOnly(req, res, next) {
+  if (_isAdmin(req)) return next();
+  _logRefusal(req);
+  return res.status(403).json({ error: 'Admin access required' });
 }
 
 /* Collections that must stay admin-only on READ too, not just write —
@@ -179,6 +214,7 @@ function _runGate(middleware, req, res) {
    false means a gate already returned the appropriate response. */
 async function _canAccess(req, res, col, action) {
   if (PRIVATE_COLLECTIONS.has(col)) {
+    _logRefusal(req);
     res.status(403).json({ error: 'Messages are private to the people in them.' });
     return false;
   }
@@ -236,7 +272,7 @@ function _accessor(col, req) {
 }
 
 /* ── GET /api/collections/:col  — list all docs for this school ── */
-router.get('/:col', authMiddleware, async (req, res) => { // rbac: _canRead() below — dynamic per-collection module, see READ_MODULE
+router.get('/:col', authMiddleware, adminOnly, async (req, res) => { // rbac: _canRead() below — dynamic per-collection module, see READ_MODULE
   const { col } = req.params;
   if (!ALLOWED.has(col)) return res.status(400).json({ error: `Unknown collection: ${col}` });
   if (!(await _canAccess(req, res, col, 'read'))) return;
@@ -254,7 +290,7 @@ router.get('/:col', authMiddleware, async (req, res) => { // rbac: _canRead() be
 });
 
 /* ── POST /api/collections/:col  — insert a document ── */
-router.post('/:col', authMiddleware, async (req, res) => { // rbac: ADMIN_WRITE/SUPERADMIN_WRITE checks below — dynamic per-collection
+router.post('/:col', authMiddleware, adminOnly, async (req, res) => { // rbac: ADMIN_WRITE/SUPERADMIN_WRITE checks below — dynamic per-collection
   const { col } = req.params;
   if (!ALLOWED.has(col)) return res.status(400).json({ error: `Unknown collection: ${col}` });
   if (READ_ONLY.has(col)) return res.status(403).json({ error: 'This collection is read-only' });
@@ -285,7 +321,7 @@ router.post('/:col', authMiddleware, async (req, res) => { // rbac: ADMIN_WRITE/
 });
 
 /* ── PUT /api/collections/:col/:id  — update a document ── */
-router.put('/:col/:id', authMiddleware, async (req, res) => { // rbac: ADMIN_WRITE/SUPERADMIN_WRITE checks below — dynamic per-collection
+router.put('/:col/:id', authMiddleware, adminOnly, async (req, res) => { // rbac: ADMIN_WRITE/SUPERADMIN_WRITE checks below — dynamic per-collection
   const { col, id } = req.params;
   if (!ALLOWED.has(col)) return res.status(400).json({ error: `Unknown collection: ${col}` });
   if (READ_ONLY.has(col)) return res.status(403).json({ error: 'This collection is read-only' });
@@ -341,7 +377,7 @@ router.put('/:col/:id', authMiddleware, async (req, res) => { // rbac: ADMIN_WRI
 });
 
 /* ── DELETE /api/collections/:col/:id  — delete a document ── */
-router.delete('/:col/:id', authMiddleware, async (req, res) => { // rbac: ADMIN_WRITE/SUPERADMIN_WRITE checks below — dynamic per-collection
+router.delete('/:col/:id', authMiddleware, adminOnly, async (req, res) => { // rbac: ADMIN_WRITE/SUPERADMIN_WRITE checks below — dynamic per-collection
   const { col, id } = req.params;
   if (!ALLOWED.has(col)) return res.status(400).json({ error: `Unknown collection: ${col}` });
   if (READ_ONLY.has(col)) return res.status(403).json({ error: 'This collection is read-only' });
@@ -360,7 +396,7 @@ router.delete('/:col/:id', authMiddleware, async (req, res) => { // rbac: ADMIN_
 });
 
 /* ── POST /api/collections/:col/bulk  — bulk upsert (used by sync) ── */
-router.post('/:col/bulk', authMiddleware, async (req, res) => { // rbac: ADMIN_WRITE/SUPERADMIN_WRITE checks below — dynamic per-collection
+router.post('/:col/bulk', authMiddleware, adminOnly, async (req, res) => { // rbac: ADMIN_WRITE/SUPERADMIN_WRITE checks below — dynamic per-collection
   const { col } = req.params;
   if (!ALLOWED.has(col)) return res.status(400).json({ error: `Unknown collection: ${col}` });
   if (READ_ONLY.has(col)) return res.status(403).json({ error: 'This collection is read-only' });

@@ -6,6 +6,16 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.281.1] - 2026-11-24 - fix(security): the generic collections route is admin only
+
+### Security
+- `/api/collections/*` is now limited to admin and super admin, for reading and writing. It returned whole collections and checked only the module grant, so other roles could reach more than their own screens show. Nothing in the web app uses it; messages stay refused for everyone.
+- Refusals are written to the audit log (`collections.refused`), once per person, collection and action in 10 minutes.
+
+No data or permissions change.
+
+---
+
 ## [v5.281.0] - 2026-11-24 - feat(messages): Read All Messages (Oversight) with reply reminders; fix(security): messages on the generic route
 
 ### Security

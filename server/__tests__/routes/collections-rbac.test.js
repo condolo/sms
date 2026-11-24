@@ -13,10 +13,11 @@
    Pins three things at once:
    1. The real leak is closed — a role without the owning module's
       grant can no longer read leave_requests/behaviour_incidents here.
-   2. The fix doesn't regress — a teacher's real attendance/grades
-      access (which ADMIN_WRITE restricts on WRITE only) still works
-      on READ, since gating reads to admin-only would have broken it.
-   3. Reference/curriculum collections with no dedicated gate stay open.
+   2. Until v5.281.1 other roles kept READ access here to match their
+      module grants. That returned whole collections (a parent could list
+      every report card), so it was closed; nothing in the web app uses it.
+   3. (v5.281.1) The whole route is admin/superadmin only, reference data
+      included; a refusal is audit-logged once per person and collection.
 
    rbac is NOT mocked — role_permissions is seeded with realistic
    grants matching repairPermissions.js's real defaults.
@@ -64,6 +65,8 @@ let mockJwtUser = { userId: 'usr_admin', schoolId: SCHOOL_A, role: 'admin', role
 jest.mock('../../middleware/auth', () => ({
   authMiddleware: (req, _res, next) => { req.jwtUser = mockJwtUser; next(); },
 }));
+const mockAudit = jest.fn().mockResolvedValue(undefined);
+jest.mock('../../services/audit', () => ({ log: (...a) => mockAudit(...a) }));
 jest.mock('../../middleware/tenant', () => ({ tenantMiddleware: (_req, _res, next) => next() }));
 
 const mockRolePerms = {
@@ -196,24 +199,48 @@ describe('the real leak this fix closes', () => {
   });
 });
 
-describe('the fix does not regress legitimate read access', () => {
-  test('a teacher\'s real attendance:read grant still works — ADMIN_WRITE restricts writes, not reads', async () => {
-    mockJwtUser = { userId: 'usr_teacher', schoolId: SCHOOL_A, role: 'teacher', roles: ['teacher'] };
-    const res = await supertest(buildApp()).get('/api/collections/attendance');
-    expect(res.status).toBe(200);
+describe('admin and superadmin only (v5.281.1)', () => {
+  const as = (role, roles = [role]) => { mockJwtUser = { userId: `usr_${role}`, schoolId: SCHOOL_A, role, roles }; };
+  const ROLES = ['parent', 'guardian', 'student', 'teacher', 'finance', 'hr', 'principal', 'deputy_principal', 'section_head', 'exams_officer', 'custom_role'];
+  const COLS  = ['report_card_snapshots', 'assessment_marks', 'attendance', 'grades', 'subjects', 'students', 'invoices', 'messages'];
+
+  test.each(ROLES)('%s can neither read, add, change, delete nor bulk-write', async (role) => {
+    as(role);
+    for (const col of COLS) {
+      expect((await supertest(buildApp()).get(`/api/collections/${col}`)).status).toBe(403);
+      expect((await supertest(buildApp()).post(`/api/collections/${col}`).send({ a: 1 })).status).toBe(403);
+      expect((await supertest(buildApp()).put(`/api/collections/${col}/x`).send({ a: 1 })).status).toBe(403);
+      expect((await supertest(buildApp()).delete(`/api/collections/${col}/x`)).status).toBe(403);
+      expect((await supertest(buildApp()).post(`/api/collections/${col}/bulk`).send([{ id: 'x' }])).status).toBe(403);
+    }
+    expect(mockTenantData.attendance.find).not.toHaveBeenCalled();
+    expect(mockTenantData.attendance._docs).toHaveLength(1);
   });
 
-  test('a teacher\'s real grades:read grant still works', async () => {
-    mockJwtUser = { userId: 'usr_teacher', schoolId: SCHOOL_A, role: 'teacher', roles: ['teacher'] };
-    const res = await supertest(buildApp()).get('/api/collections/grades');
-    expect(res.status).toBe(200);
+  test('a refusal is logged once per person, collection and action', async () => {
+    as('parent_log_test');
+    for (let n = 0; n < 3; n++) await supertest(buildApp()).get('/api/collections/report_card_snapshots');
+    await supertest(buildApp()).put('/api/collections/report_card_snapshots/x').send({ a: 1 });
+    expect(mockAudit).toHaveBeenCalledTimes(2);
+    expect(mockAudit).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'collections.refused', schoolId: SCHOOL_A, severity: 'warn',
+      target: expect.objectContaining({ id: 'report_card_snapshots' }),
+    }));
   });
-});
 
-describe('unmapped reference/curriculum collections stay open', () => {
-  test('a teacher can read subjects (no dedicated gate to bypass)', async () => {
-    mockJwtUser = { userId: 'usr_teacher', schoolId: SCHOOL_A, role: 'teacher', roles: ['teacher'] };
-    const res = await supertest(buildApp()).get('/api/collections/subjects');
-    expect(res.status).toBe(200);
+  test('a made-up collection name never reaches the log', async () => {
+    as('parent_log_test2');
+    await supertest(buildApp()).get('/api/collections/evil%0Aname');
+    expect(mockAudit.mock.calls[0][0].target.id).toBe('unknown');
+  });
+
+  test('an account that is admin as well as another role keeps access', async () => {
+    as('teacher', ['teacher', 'admin']);
+    expect((await supertest(buildApp()).get('/api/collections/attendance')).status).toBe(200);
+  });
+
+  test('admin still reads what the module grant allows; messages stay refused', async () => {
+    expect((await supertest(buildApp()).get('/api/collections/attendance')).status).toBe(200);
+    expect((await supertest(buildApp()).get('/api/collections/messages')).status).toBe(403);
   });
 });
