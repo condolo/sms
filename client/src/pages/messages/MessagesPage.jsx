@@ -13,7 +13,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
-  Check, ChevronRight, Inbox, Mail, MessageCircle, MessageSquare,
+  Check, ChevronRight, Eye, Inbox, Mail, MessageCircle, MessageSquare,
   Plus, Search, Send, Sparkles, UserPlus, Users, X,
 } from 'lucide-react';
 import clsx from 'clsx';
@@ -27,6 +27,8 @@ import ComposePanel from './components/ComposePanel.jsx';
 import GroupDetail from './components/GroupDetail.jsx';
 import MessageDetail from './components/MessageDetail.jsx';
 import MessageRow from './components/MessageRow.jsx';
+import OversightNotice, { useOversightStatus } from './components/OversightNotice.jsx';
+import OversightPanel from './components/OversightPanel.jsx';
 import ThreadView from './components/ThreadView.jsx';
 
 /* A conversation is the pair (this user, one counterpart). The pairing
@@ -180,6 +182,7 @@ export default function MessagesPage() {
   const qc = useQueryClient();
 
   const [tab, setTab] = useState('inbox');
+  const { canRead: canOversee } = useOversightStatus();
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState(null);
@@ -210,7 +213,7 @@ export default function MessagesPage() {
   const messageQuery = useInfiniteQuery({
     queryKey: ['messages', tab],
     queryFn: ({ pageParam = 1 }) => msgsApi.list({ tab, limit: PAGE_SIZE, page: pageParam }),
-    enabled: tab !== 'groups' && tab !== 'chats',
+    enabled: tab !== 'groups' && tab !== 'chats' && tab !== 'oversight',
     initialPageParam: 1,
     getNextPageParam: (last) => {
       const p = last?.pagination;
@@ -720,6 +723,17 @@ export default function MessagesPage() {
               )}>
                 {unreadCount > 0 ? `${unreadCount} unread` : 'All caught up'}
               </span>
+              {canOversee && (
+                <button
+                  onClick={() => switchTab(tab === 'oversight' ? 'inbox' : 'oversight')}
+                  className={clsx(
+                    'inline-flex items-center gap-1.5 rounded-xl border px-3 py-2.5 text-xs font-semibold transition',
+                    tab === 'oversight' ? 'border-violet-300 bg-violet-50 text-violet-700' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50',
+                  )}
+                >
+                  <Eye size={14} /> Oversight
+                </button>
+              )}
               <button
                 onClick={() => openCompose({})}
                 className="inline-flex items-center gap-1.5 rounded-xl bg-violet-600 px-3.5 py-2.5 text-xs font-semibold text-white shadow-sm shadow-violet-200 transition hover:bg-violet-700 active:scale-[0.98]"
@@ -731,8 +745,12 @@ export default function MessagesPage() {
         </div>
       </div>
 
+      <OversightNotice className="shrink-0 px-5 pt-2 sm:px-7" />
+
+      {tab === 'oversight' && canOversee && <OversightPanel onBack={() => switchTab('inbox')} onToast={flash} />}
+
       {/* Two-panel workspace */}
-      <div className="flex min-h-0 flex-1 gap-4 px-4 pb-4 pt-4 sm:px-6 sm:pb-5">
+      <div className={clsx('min-h-0 flex-1 gap-4 px-4 pb-4 pt-4 sm:px-6 sm:pb-5', tab === 'oversight' && canOversee ? 'hidden' : 'flex')}>
         {/* Left column */}
         <div className={clsx(
           'min-h-0 w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm',

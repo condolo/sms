@@ -140,6 +140,13 @@ const COLLECTION_MODULE = {
   elearning_sessions: 'elearning', billing_snapshots: 'finance', user_photos: 'students',
 };
 
+/* Private between the people in them: never through this generic route, for
+   any role (v5.281.0). It checked the Messages module grant only, so anyone
+   with View Messages — parents and students included — could list every
+   message in the school. routes/messages.js and message-oversight.js decide
+   who may read what. */
+const PRIVATE_COLLECTIONS = new Set(['messages']);
+
 // Shared behavior matrix is reference configuration, not tenant-editable data.
 const READ_ONLY = new Set(['behaviour_matrix']);
 
@@ -171,6 +178,10 @@ function _runGate(middleware, req, res) {
 /* Check the module switch and the caller's RBAC grant for this operation.
    false means a gate already returned the appropriate response. */
 async function _canAccess(req, res, col, action) {
+  if (PRIVATE_COLLECTIONS.has(col)) {
+    res.status(403).json({ error: 'Messages are private to the people in them.' });
+    return false;
+  }
   const mod = COLLECTION_MODULE[col];
   if (!mod) {
     res.status(403).json({ error: `Generic access is not configured for collection: ${col}` });

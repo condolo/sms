@@ -895,7 +895,11 @@ const SECTIONS = [
       },
       {
         q: 'Are messages private?',
-        a: 'Messages are sent to the recipients you chose, and a message to a group is visible to everyone in that group. Staff with the Delete Any Message (Moderation) permission can remove someone else\'s message, for safeguarding or compliance. Ask your school admin if you need that permission.',
+        a: 'Messages are sent to the recipients you chose, and a message to a group is visible to everyone in that group. Staff with the Delete Any Message (Moderation) permission can remove someone else\'s message, for safeguarding or compliance. If your school has given someone Read All Messages (Oversight), they can read conversations between families and staff; a note on your Messages screen tells you when that is on. Ask your school admin if you need either permission.',
+      },
+      {
+        q: 'Can someone check that teachers reply to parents?',
+        a: 'Yes. In Settings → Roles & Permissions → Messages, tick View on Read All Messages (Oversight) for a role or one person (for example, the Admissions Officer). They get an Oversight button on the Messages page that shows conversations between families and staff, who is waiting for a reply, and Remind to reply.\nThey can read and remind, not reply, edit or delete. Opening a conversation is recorded in the audit log and marks nothing as read.\nIt leaves out staff-to-staff messages, announcements, group messages, replies on behaviour entries, conversations with a counsellor or nurse, and conversations with school leadership unless the reader is an admin or the principal.\nWhile it is on, staff, parents and students see a note on their Messages screen.',
       },
       {
         q: 'Can I message a whole group at once?',
@@ -903,7 +907,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Messages\n• Send Messages\n• Delete Own Messages\n• Delete Any Message (Moderation)\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Messages\n• Send Messages\n• Delete Own Messages\n• Delete Any Message (Moderation)\n• Read All Messages (Oversight): off for everyone until ticked (View only)\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },

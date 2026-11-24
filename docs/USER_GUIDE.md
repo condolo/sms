@@ -647,6 +647,11 @@ Open a message and scroll to the **Reply** box at the bottom. Type your reply an
 ### Parent Portal — Weekly Snapshot email link *(2026-11)*
 The **Weekly Snapshot Ready** email's **View Snapshot** button opens your school's own Msingi address. If you are not signed in you will see your school's login page; after signing in you go straight to that child's Overview with **This Week's Snapshot** in view (tap **PDF** there to download it). If you are already signed in, the snapshot opens directly.
 
+### Messages — Oversight *(2026-11)*
+If your school has given you **Read All Messages (Oversight)**, the **Messages** page has an **Oversight** button. It lists conversations between families and staff and shows who is waiting for a reply. Open one to read it, and click **Remind to reply** to send the staff member a reminder (once per conversation in 12 hours). You can't reply, and opening a conversation is recorded and doesn't mark it as read.
+
+While a school uses this, everyone sees a line on their Messages screen saying that authorised staff can read messages between families and staff.
+
 ### Parent Portal — Messaging the School
 Parents and guardians can now send a message directly from the **Messages** page of their Parent Portal (also reachable via the **Message School** button on Overview):
 1. Click **New Message**.

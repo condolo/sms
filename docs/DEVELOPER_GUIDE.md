@@ -2510,6 +2510,19 @@ await email.sendMessageNotification({
 
 Emails are fired with `Promise.allSettled()` — individual failures are logged but do not block the API response or affect other recipients.
 
+### Message oversight — `server/routes/message-oversight.js` (v5.281.0)
+
+Mounted inside messages.js at `/api/messages/oversight` (before `/:id`).
+
+| Method | Path | Who |
+|--------|------|-----|
+| `GET` | `/status` | any signed-in user: `{ enabled, canRead }` (drives the notice) |
+| `GET` | `/conversations?status=waiting\|all&days&search&page` | explicit `messages__oversight: read` |
+| `GET` | `/conversations/:staffId/:familyId` | same; audit `messages.oversight_read` |
+| `POST` | `/conversations/:staffId/:familyId/remind` | same; audit `messages.oversight_reminder`; 12 h per conversation |
+
+Deliberately NOT `hasExplicitSubGrant`: that always passes a super admin and merges a portal role's grant on a two-role account. `_mayOversee` needs a grant on a staff role or the person, and the school to have ticked someone. No new collection: conversations are paired from `messages` at read time, and a reminder is a system message (`systemEventKey: 'message_reply_reminder'`, `reminderFamilyId`). Settings defaults force the row off for every role (`_makeDefaultPerms`). `messages` is refused on `/api/collections` (`PRIVATE_COLLECTIONS`).
+
 ### Frontend Integration (`js/modules/communication.js`)
 
 The communication module uses `API.messages.*` with a full localStorage fallback:

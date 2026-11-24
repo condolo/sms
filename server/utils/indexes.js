@@ -385,6 +385,8 @@ const INDEXES = [
          scan. Kept out of the way of the sent-tab index below. */
       { key: { schoolId: 1, recipients: 1, createdAt: -1 }, name: 'messages_recipients_date' },
       { key: { schoolId: 1, senderId: 1, createdAt: -1 },    name: 'messages_sent' },
+      // Oversight list (message-oversight.js): a school's recent messages.
+      { key: { schoolId: 1, createdAt: -1 },                 name: 'messages_school_date' },
       { key: { id: 1 },                                       name: 'messages_id', unique: true, sparse: true },
     ],
   },

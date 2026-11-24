@@ -315,6 +315,8 @@ const MODULE_REGISTRY = [
     // students__promote — holding 'Delete Own Messages' must not silently
     // imply moderation power over everyone else's messages.
     { key: 'moderate', label: 'Delete Any Message (Moderation)' },
+    // View only, strict, off for everyone until ticked — message-oversight.js.
+    { key: 'oversight', label: 'Read All Messages (Oversight)' },
   ]},
   { key: 'events', label: 'Events & Calendar', section: 'Communication', icon: 'Calendar', navRoute: '/events', navLabel: 'Events', navOrder: 12, subs: [
     { key: 'view',   label: 'View Events' },

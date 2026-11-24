@@ -86,6 +86,9 @@ const ROLE_FLOOR_SUB_KEYS = new Set([
   'behaviour__export', 'lessons__plans_all', 'analytics__group',
   // v5.279.3: report card settings now checked on their own rows.
   'report_cards__workflow', 'report_cards__publication_policy',
+  // v5.281.0: no role floor at all (routes/message-oversight.js). Listed so a
+  // general Messages grant can't hand it on, while an admin can tick it.
+  'messages__oversight',
 ]);
 
 module.exports = { explicitSub, withFinanceSubGrants, EXPLICIT_SUB_KEYS, FINANCE_SUB_GRANTS, ROLE_FLOOR_SUB_KEYS };

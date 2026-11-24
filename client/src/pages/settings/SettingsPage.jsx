@@ -3086,6 +3086,7 @@ const PERM_MODULES = [
     { key: 'send',   label: 'Send Messages' },
     { key: 'delete', label: 'Delete Own Messages' },
     { key: 'moderate', label: 'Delete Any Message (Moderation)' },
+    { key: 'oversight', label: 'Read All Messages (Oversight)' },
   ]},
   { key: 'events',     label: 'Events & Calendar', subs: [
     { key: 'view',   label: 'View Events' },
@@ -3574,7 +3575,10 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
     perms.byRole[role] = {};
     modules.forEach(mod => mod.subs.forEach(sub => {
       const key  = `${mod.key}__${sub.key}`;
-      const cell = DEFS[role](mod.key, sub.key);
+      let cell = DEFS[role](mod.key, sub.key);
+      // Reading other people's messages is never a role's default, admin
+      // included: off until someone ticks it (routes/message-oversight.js).
+      if (key === 'messages__oversight') cell = N;
       const mask = FINANCE_SUB_MASK[key];
       perms.byRole[role][key] = mask
         ? { v: cell.v && mask.v, e: cell.e && mask.e, d: cell.d && mask.d }

@@ -21,6 +21,7 @@ import {
 import NotificationBell from '@/components/layout/NotificationBell.jsx';
 import FloatingHelp from '@/components/help/FloatingHelp.jsx';
 import TransportRideCard from '@/components/transport/TransportRideCard.jsx';
+import OversightNotice from '@/pages/messages/components/OversightNotice.jsx';
 import { useDialogBehavior, trapTabKey } from '@/ui/Dialog.jsx';
 import { auth as authApi, studentMessaging, studentPortalApi } from '@/api/client.js';
 import { lessonTeachers, lessonIsForStream, isCombined } from '@/utils/lessonLabels.js';
@@ -1641,6 +1642,7 @@ export default function StudentDashboard() {
                 New Message
               </button>
             </div>
+            <OversightNotice className="px-[18px] pt-2" />
 
             <div className="px-[18px] pt-2 border-b border-slate-100 flex items-center gap-1">
               <button

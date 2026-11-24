@@ -1003,6 +1003,14 @@ export const messages = {
      inbox is the only authorisation — no rbac() on this route. */
   attachment:  (id) => _downloadAttachment(`/messages/attachments/${id}`),
 
+  // Read All Messages (Oversight) — strict permission, checked on the server.
+  oversight: {
+    status: ()                    => _get('/messages/oversight/status'),
+    list:   (params)              => _get('/messages/oversight/conversations', params),
+    get:    (staffId, familyId)   => _get(`/messages/oversight/conversations/${encodeURIComponent(staffId)}/${encodeURIComponent(familyId)}`),
+    remind: (staffId, familyId)   => _post(`/messages/oversight/conversations/${encodeURIComponent(staffId)}/${encodeURIComponent(familyId)}/remind`, {}),
+  },
+
   groups: {
     list:   ()         => _get('/messages/groups'),
     create: (data)     => _post('/messages/groups', data),

@@ -6,6 +6,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.281.0] - 2026-11-24 - feat(messages): Read All Messages (Oversight) with reply reminders; fix(security): messages on the generic route
+
+### Security
+- **Anyone with View Messages could list every message in their school through `/api/collections/messages`** (parents and students included), and anyone who can send messages passed its check to edit other people's. Messages are now refused on that route for every role. No screen used it. The route's other collections are unchanged by this entry.
+
+### Added
+- **Settings → Roles & Permissions → Messages → Read All Messages (Oversight)** (View). Strict and off for every role, admin included, until ticked for a role or a person; an administrator can tick it. A tick on a parent or student role has no effect, and a super admin gets it only once the school has ticked it for someone.
+- **Messages → Oversight** for those ticked: conversations between families (parents, guardians, students) and staff, who is waiting for a reply and for how long, search, 7/30/90 days.
+- **Remind to reply:** sends the staff member an in-app reminder (push and email follow the school's New message switches) without the message text, at most once per conversation in 12 hours, only while the family is waiting.
+- Opening a conversation and sending a reminder are written to the audit log. Nothing is marked as read; it can't reply, edit, delete or open attachments.
+- Not included: staff-to-staff messages, announcements, group sends, replies on behaviour entries, conversations with a counsellor, nurse or similar, and conversations with leadership unless the reader is an admin or the principal.
+- While a school uses it, staff, parents and students see a line on their Messages screen saying authorised staff can read messages.
+
+### Database
+- New index `messages_school_date` on `messages`. No messages are changed.
+
+---
+
 ## [v5.280.2] - 2026-11-24 - feat(markbook): comments open with the marks
 
 ### Changed

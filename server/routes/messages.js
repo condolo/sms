@@ -23,6 +23,9 @@ const { pollView } = require('../utils/message-extras');
 const router = express.Router();
 router.use(authMiddleware, tenantMiddleware, moduleGate('messages'));
 
+/* Read All Messages (Oversight) — its own strict permission; before /:id. */
+router.use('/oversight', require('./message-oversight'));
+
 
 /* Portal roles: they may only message staff directly (never another
    parent/student they were not explicitly linked to), and they cannot

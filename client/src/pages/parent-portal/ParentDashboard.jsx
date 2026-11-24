@@ -42,6 +42,7 @@ import {
 import NotificationBell from '@/components/layout/NotificationBell.jsx';
 import FloatingHelp from '@/components/help/FloatingHelp.jsx';
 import MessagesPanel from './components/MessagesPanel.jsx';
+import OversightNotice from '@/pages/messages/components/OversightNotice.jsx';
 import BehaviourReplyThread from './components/BehaviourReplyThread.jsx';
 import ThreadView from '@/pages/messages/components/ThreadView.jsx';
 import TransportRideCard from '@/components/transport/TransportRideCard.jsx';
@@ -1614,6 +1615,7 @@ export default function ParentDashboard() {
 
     return (
       <>
+      <OversightNotice className="mb-2" />
       <MessagesPanel
         tab={msgTab}
         onTabChange={(t) => {
