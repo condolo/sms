@@ -3781,19 +3781,26 @@ router.post('/preview-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'
    admin unlock step is needed to start writing it. */
 /* v5.280.0, with `scope` (report-comments.js commentYear): only reports of
    that academic year count, so last year's Term 1 never locks this year's;
-   and the Markbook box (no cycle) reopens once a later assessment in the
-   term's schedule has started, so a report published at Mid-Term does not
-   keep teachers from writing the End-Term comment. */
-async function _publishedCommentsLockFor(schoolId, ctx, studentId, termNumber, cycle = null, scope = null) {
+   and the Markbook box (no cycle) reopens for a scheduled assessment the
+   published report does not contain (report-comments.js boxLock), so a
+   report published at Mid-Term does not keep teachers from writing the
+   End-Term comment. Returns { locked, opensOn }. */
+async function _publishedCommentsLock(schoolId, ctx, studentId, termNumber, cycle = null, scope = null) {
   const filter = { schoolId, studentId, termNumber: Number(termNumber), cycle: cycle || null, superseded: { $ne: true }, commentsLocked: true };
   const Snaps = tenantModel('report_card_snapshots', ctx);
-  if (!scope) return !!(await Snaps.findOne(filter).select('id').lean());
-  const locked = (await Snaps.find(filter).select('id publishedAt academicYearId').lean())
+  if (!scope) return { locked: !!(await Snaps.findOne(filter).select('id').lean()), opensOn: null };
+  const snaps = (await Snaps.find(filter).select(cycle ? 'id publishedAt academicYearId' : 'id publishedAt academicYearId subjects').lean())
     .filter(s => reportComments.inYear(s.academicYearId, s.publishedAt, scope));
-  if (!locked.length) return false;
-  if (cycle) return true;
-  const windows = await reportComments.termWindows(ctx, schoolId, termNumber, scope.yearId);
-  return !locked.every(s => reportComments.boxReopened(windows, s.publishedAt));
+  if (!snaps.length) return { locked: false, opensOn: null };
+  if (cycle) return { locked: true, opensOn: null };
+  return reportComments.boxLock(ctx, schoolId, { studentId, termNumber, snaps }, scope);
+}
+async function _publishedCommentsLockFor(...args) {
+  return (await _publishedCommentsLock(...args)).locked;
+}
+function _commentsLockedMessage({ opensOn }) {
+  return 'Comments are locked — the report card for this term has been published. Ask an admin to unlock it for a correction.'
+    + (opensOn ? ` They open again on ${opensOn.date}, when ${opensOn.label} starts in the assessment schedule.` : '');
 }
 
 // PUT /draft-comments/:studentId — upsert comment record for a student
@@ -3812,9 +3819,8 @@ router.put('/draft-comments/:studentId', authMiddleware, PLAN, MODGATE, rbac('re
     const ctx = tenantContext(req);
     const scope = await _commentScope(ctx, schoolId, validated.academicYearId);
     if (await isYearArchived(schoolId, scope.yearId)) return E.forbidden(res, ARCHIVED_COMMENTS);
-    if (await _publishedCommentsLockFor(schoolId, ctx, studentId, termNumber, cycle, scope)) {
-      return E.forbidden(res, 'Comments are locked — the report card for this term has been published. Ask an admin to unlock it for a correction.');
-    }
+    const lock = await _publishedCommentsLock(schoolId, ctx, studentId, termNumber, cycle, scope);
+    if (lock.locked) return E.forbidden(res, _commentsLockedMessage(lock));
 
     // Subject comments are saved one subject at a time (PUT .../subject/:subjectId),
     // so each save is checked against exactly the caller's own subject. Accepting a
@@ -3993,9 +3999,8 @@ router.put('/draft-comments/:studentId/subject/:subjectId', authMiddleware, PLAN
     const ctx = tenantContext(req);
     const scope = await _commentScope(ctx, schoolId, academicYearId);
     if (await isYearArchived(schoolId, scope.yearId)) return E.forbidden(res, ARCHIVED_COMMENTS);
-    if (await _publishedCommentsLockFor(schoolId, ctx, studentId, termNumber, cycle, scope)) {
-      return E.forbidden(res, 'Comments are locked — the report card for this term has been published. Ask an admin to unlock it for a correction.');
-    }
+    const lock = await _publishedCommentsLock(schoolId, ctx, studentId, termNumber, cycle, scope);
+    if (lock.locked) return E.forbidden(res, _commentsLockedMessage(lock));
 
     const target = await reportComments.draftForWrite(ctx, schoolId, { studentId, termNumber, cycle }, scope);
     const doc = await tenantModel('report_card_draft_comments', ctx).findOneAndUpdate(
@@ -4048,9 +4053,8 @@ router.patch('/draft-comments/:studentId/advance', authMiddleware, PLAN, MODGATE
 
     const scope = await _commentScope(ctx, schoolId, academicYearId);
     if (await isYearArchived(schoolId, scope.yearId)) return E.forbidden(res, ARCHIVED_COMMENTS);
-    if (await _publishedCommentsLockFor(schoolId, ctx, studentId, termNumber, cycle, scope)) {
-      return E.forbidden(res, 'Comments are locked — the report card for this term has been published. Ask an admin to unlock it for a correction.');
-    }
+    const lock = await _publishedCommentsLock(schoolId, ctx, studentId, termNumber, cycle, scope);
+    if (lock.locked) return E.forbidden(res, _commentsLockedMessage(lock));
 
     const Draft = tenantModel('report_card_draft_comments', ctx);
     const target = await reportComments.draftForWrite(ctx, schoolId, { studentId, termNumber, cycle }, scope);

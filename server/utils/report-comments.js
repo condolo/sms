@@ -32,8 +32,12 @@
       then a late comment still reaches the report on re-publish.
 
    4. When the box REOPENS after a Whole Term report was published: once a
-      later assessment in that term's schedule has started. With nothing
-      scheduled later it stays locked, as before (admin unlock unchanged).
+      scheduled assessment that report does NOT contain has started, or the
+      learner already has a mark for it. "Contains" is read from the report
+      itself (its subjects' breakdown), not only from dates — a Mid-Term
+      report published or re-published after End-Term started contains no
+      End-Term marks, so End-Term comments stay open (v5.280.1). With nothing
+      later it stays locked, as before (admin unlock unchanged).
    ============================================================ */
 'use strict';
 
@@ -133,7 +137,7 @@ async function termWindows(ctx, schoolId, termNumber, yearId) {
   const noYear = [{ academicYearId: null }, { academicYearId: { $exists: false } }];
   const rows = await tenantModel('assessment_schedule', ctx)
     .find({ schoolId, termNumber: Number(termNumber), $or: yearId ? [{ academicYearId: yearId }, ...noYear] : noYear })
-    .select('assessmentType instance dateFrom dateTo academicYearId commentsEnabled').lean();
+    .select('assessmentType instance dateFrom dateTo academicYearId commentsEnabled label').lean();
   const out = new Map();
   for (const r of rows || []) {
     if (!r.assessmentType || !r.dateFrom || !r.dateTo) continue;
@@ -154,10 +158,51 @@ function nextStageStart(windows, day) {
   return starts[0] || null;
 }
 
-/* Has the Markbook box reopened since a Whole Term report was published? */
-function boxReopened(windows, publishedAt, today = _today()) {
-  const next = nextStageStart(windows, _day(publishedAt));
-  return !!next && today >= next;
+/* The scheduled assessments, taking comments, that come after everything a
+   published report contains. `snap` = { publishedAt, subjects }. */
+function unreportedStages(windows, snap) {
+  const published = _day(snap?.publishedAt);
+  if (!published) return [];
+  const from = (w) => String(w.dateFrom).slice(0, 10);
+  const reported = new Set();
+  for (const s of Object.values(snap.subjects || {})) {
+    for (const [type, score] of Object.entries(s?.breakdown || {})) if (score != null) reported.add(type);
+  }
+  // Where the report got to: its latest assessment. Nothing readable in it
+  // (an older or Kindergarten report) → the day it was published.
+  const starts = (windows || []).filter(w => reported.has(w.assessmentType) && from(w) <= published).map(from).sort();
+  const reached = starts[starts.length - 1] || published;
+  // A type in the report can still have a later one to come (CA 2 after CA 1).
+  const several = (type) => (windows || []).filter(w => w.assessmentType === type).length > 1;
+  return (windows || [])
+    .filter(w => w.commentsEnabled !== false
+      && (reported.has(w.assessmentType) ? several(w.assessmentType) && from(w) > published : from(w) > reached))
+    .sort((a, b) => from(a).localeCompare(from(b)));
+}
+
+/* Is the Markbook box still locked by these published Whole Term reports?
+   `opensOn`: the first assessment that will open it, when one is scheduled. */
+async function boxLock(ctx, schoolId, { studentId, termNumber, snaps }, scope, today = _today()) {
+  const windows = await termWindows(ctx, schoolId, termNumber, scope.yearId);
+  for (const snap of snaps) {
+    const stages = unreportedStages(windows, snap);
+    if (stages.some(w => today >= String(w.dateFrom).slice(0, 10))) continue;
+    if (stages.length && await _hasOpenMark(ctx, schoolId, { studentId, termNumber, stages }, scope)) continue;
+    const next = stages[0] ? { date: String(stages[0].dateFrom).slice(0, 10), label: stages[0].label || stages[0].assessmentType } : null;
+    return { locked: true, opensOn: next };
+  }
+  return { locked: false, opensOn: null };
+}
+
+/* Marks can be entered before an assessment's start date; its comment then
+   goes with them. A mark locked by a publish is part of a report already. */
+async function _hasOpenMark(ctx, schoolId, { studentId, termNumber, stages }, scope) {
+  const year = scope.yearId ? { $or: [{ academicYearId: scope.yearId }, { academicYearId: null }] } : {};
+  const marks = await tenantModel('assessment_marks', ctx)
+    .find({ schoolId, studentId, termNumber: Number(termNumber), assessmentType: { $in: stages.map(w => w.assessmentType) }, isLocked: { $ne: true }, ...year })
+    .select('assessmentType instance academicYearId updatedAt createdAt').lean();
+  return (marks || []).some(m => inYear(m.academicYearId, m.updatedAt || m.createdAt, scope)
+    && stages.some(w => w.assessmentType === m.assessmentType && (w.instance || 1) === (m.instance || 1)));
 }
 
 /* Subject comments a cycle report prints. `own` = the cycle's row, `box` =
@@ -200,5 +245,5 @@ async function effectiveDrafts(ctx, schoolId, { studentIds, termNumber, cycle, p
 
 module.exports = {
   COLLECTION, commentYear, inYear, untaggedBelongsTo, draftsByStudent, draftForWrite,
-  termWindows, nextStageStart, boxReopened, cycleSubjectComments, effectiveDrafts,
+  termWindows, nextStageStart, unreportedStages, boxLock, cycleSubjectComments, effectiveDrafts,
 };

@@ -228,6 +228,58 @@ describe('the Markbook box after a Whole Term report was published', () => {
   });
 });
 
+describe('the box follows what the published report contains, not only its date (v5.280.1)', () => {
+  const MT = win('MT', day(-30), day(-25));
+  const ET = win('ET', day(-5), day(5), { label: 'End-Term Exam' });
+  const publish = (breakdown, daysAgo, o = {}) => mockDb.data.report_card_snapshots.push({ id: 's1', schoolId: SCHOOL, studentId: 'stu_1', termNumber: 1, academicYearId: 'y26', commentsLocked: true, publishedAt: `${day(-daysAgo)}T08:00:00Z`, subjects: { math: { breakdown } }, ...o });
+  const sched = (...w) => mockDb.data.assessment_schedule.push(...w);
+
+  test('Mid-Term published late, after End-Term started → End-Term comment saves', async () => {
+    publish({ MT: 60 }, 2); sched(MT, ET);
+    expect((await save('End-Term')).status).toBe(200);
+  });
+  test('published on the day End-Term started → End-Term comment saves', async () => {
+    publish({ MT: 60, ET: null }, 5); sched(MT, ET);
+    expect((await save('End-Term')).status).toBe(200);
+  });
+  test('the report already contains End-Term → locked, as before', async () => {
+    publish({ MT: 60, ET: 70 }, 2); sched(MT, ET);
+    expect((await save('x')).status).toBe(403);
+  });
+  test('a second CA after the report opens it; End-Term marked early and already in the report does not', async () => {
+    publish({ CA: 50, MT: 60 }, 4); sched(win('CA', day(-40), day(-35)), MT, win('CA', day(-1), day(3), { instance: 2 }));
+    expect((await save('CA 2')).status).toBe(200);
+    mockDb.data.report_card_snapshots[0].subjects = { math: { breakdown: { MT: 60, ET: 70 } } };
+    mockDb.data.assessment_schedule = [MT, win('ET', day(-1), day(9))];
+    expect((await save('x')).status).toBe(403);
+  });
+  test('an earlier assessment nobody marked does not open the box', async () => {
+    publish({ MT: 60, ET: 70 }, 2); sched(win('HW', day(-40), day(-35)), MT, ET);
+    expect((await save('x')).status).toBe(403);
+  });
+  test('End-Term not started: locked, and the message says when it opens', async () => {
+    publish({ MT: 60 }, 2); sched(MT, win('ET', day(6), day(9), { label: 'End-Term Exam' }));
+    const r = await save('x');
+    expect(r.status).toBe(403);
+    expect(JSON.stringify(r.body)).toContain(`They open again on ${day(6)}, when End-Term Exam starts`);
+  });
+  test('End-Term not started but this learner already has an End-Term mark → saves', async () => {
+    publish({ MT: 60 }, 2); sched(MT, win('ET', day(6), day(9)));
+    mockDb.data.assessment_marks = [{ schoolId: SCHOOL, studentId: 'stu_1', termNumber: 1, assessmentType: 'ET', instance: 1, academicYearId: 'y26', rawScore: 89 }];
+    expect((await save('End-Term')).status).toBe(200);
+  });
+  test('a mark of another learner, school, or one locked by a publish does not count', async () => {
+    publish({ MT: 60 }, 2); sched(MT, win('ET', day(6), day(9)));
+    const m = { schoolId: SCHOOL, studentId: 'stu_1', termNumber: 1, assessmentType: 'ET', instance: 1, academicYearId: 'y26', rawScore: 89 };
+    mockDb.data.assessment_marks = [{ ...m, studentId: 'stu_2' }, { ...m, schoolId: 'sch_2' }, { ...m, isLocked: true }, { ...m, termNumber: 2 }];
+    expect((await save('x')).status).toBe(403);
+  });
+  test('an assessment that takes no comments does not open it', async () => {
+    publish({ MT: 60 }, 2); sched(MT, { ...ET, commentsEnabled: false });
+    expect((await save('x')).status).toBe(403);
+  });
+});
+
 describe('publishing Term 2 never hides Term 1', () => {
   test('terms without ids are told apart by term number', () => {
     expect(router._termNumberWhenNoTermId({ termId: null }, 2)).toEqual({ termNumber: 2 });

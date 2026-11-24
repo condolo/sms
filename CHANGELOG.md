@@ -6,6 +6,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.280.1] - 2026-11-24 - fix(markbook): End-Term comments stayed locked for some learners
+
+### Fixed
+- **End-Term comments were refused for learners whose Whole Term report was published on or after the day End-Term started.** v5.280.0 opened the box only for an assessment starting after the publish day. It now goes by what the published report contains: the box opens for a scheduled assessment that report has no marks for, once it has started or once the learner has a mark for it. A report that already contains End-Term stays locked, as before.
+- The refusal says when comments open again, if a later assessment is scheduled.
+- **Comments showed "Not saved yet" for longer than the save took:** each box waited for the whole class list to be refreshed. A saved comment now shows straight away.
+- A comment that could not be saved says so, with the reason, under its own box.
+
+No data changes; published reports do not change.
+
+---
+
 ## [v5.280.0] - 2026-11-24 - feat(report-cards): Mid-Term and End-Term comments, one box per term and year
 
 ### Changed

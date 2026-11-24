@@ -557,18 +557,19 @@ function GridCell({ value, markState = 'present', rowIdx, colIdx, isLocked, hasC
    saved; green — saved. "Saved" comes from the stored comment itself, so it
    still shows after a reload. The characters-left count shows while typing. */
 const COMMENT_MAX = 1000;
-function GridComment({ value, disabled, unsaved, onSave, onEdit }) {
+function GridComment({ value, disabled, unsaved, error, saving, onSave, onEdit }) {
   const [text, setText] = useState(value ?? '');
   const [focused, setFocused] = useState(false);
   const ref = useRef(null);
   // A refreshed stored comment replaces the box only when nothing unsaved
   // is in it, so a refresh never wipes what a teacher is still typing.
   useEffect(() => { if (!unsaved) setText(value ?? ''); }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
-  const state = unsaved ? 'unsaved' : (value ?? '').trim() ? 'saved' : 'empty';
+  const state = error ? 'failed' : unsaved ? 'unsaved' : (value ?? '').trim() ? 'saved' : 'empty';
   const tone = {
     empty:   'border-orange-300 bg-orange-50/50',
     unsaved: 'border-amber-400 bg-amber-50',
     saved:   'border-emerald-300 bg-emerald-50/40',
+    failed:  'border-red-300 bg-red-50/50',
   }[state];
   useEffect(() => {
     if (!ref.current) return;
@@ -588,14 +589,16 @@ function GridComment({ value, disabled, unsaved, onSave, onEdit }) {
           onFocus={() => setFocused(true)}
           onBlur={() => { setFocused(false); if (text !== (value ?? '')) onSave(text); }}
           placeholder={disabled ? '' : 'Comment…'}
-          title={state === 'empty' ? 'No comment yet' : state === 'unsaved' ? 'Not saved yet' : 'Comment saved'}
+          title={state === 'empty' ? 'No comment yet' : state === 'unsaved' ? 'Not saved yet' : state === 'failed' ? 'Not saved' : 'Comment saved'}
           className={`w-full min-w-[200px] resize-none overflow-hidden rounded border px-2 py-1 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-900/10 disabled:bg-slate-100 disabled:text-slate-400 ${disabled ? 'border-slate-200' : tone}`}
         />
         {state === 'saved' && <Check size={12} className="text-emerald-600 shrink-0 mt-1.5" aria-label="Comment saved" />}
       </div>
-      {(focused || state === 'unsaved') && !disabled && (
+      {(focused || state === 'unsaved' || state === 'failed') && !disabled && (
         <div className="flex justify-between gap-2 mt-0.5 text-[10px]">
-          <span className="text-amber-700">{state === 'unsaved' ? 'Not saved yet' : ''}</span>
+          <span className={state === 'failed' ? 'text-red-600' : 'text-amber-700'}>
+            {saving ? 'Saving…' : state === 'failed' ? `Not saved. ${error}` : state === 'unsaved' ? 'Not saved yet' : ''}
+          </span>
           {focused && <span className="text-slate-400">{COMMENT_MAX - text.length} characters left</span>}
         </div>
       )}
@@ -1028,7 +1031,7 @@ function MarkbookTab({ years }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [existingData]);
 
-  useEffect(() => { setScores({}); setVersions({}); setMarkStates({}); setConflicts([]); setDirty(false); setPendingComments({}); }, [classId, streamId, subjectId, scheduleId]);
+  useEffect(() => { setScores({}); setVersions({}); setMarkStates({}); setConflicts([]); setDirty(false); setPendingComments({}); setCommentErrors({}); setSavingIds({}); }, [classId, streamId, subjectId, scheduleId]);
 
   // Cells saved in this session and not edited since. Drives the green tick.
   const [savedKeys, setSavedKeys] = useState(() => new Set());
@@ -1095,7 +1098,7 @@ function MarkbookTab({ years }) {
      assessment decides whether the comment column is shown for it. */
   const commentsOn = !!selectedEntry && selectedEntry.commentsEnabled !== false;
   const { data: draftCommentsByStudent } = useQuery({
-    queryKey: ['reportCards', 'draftComments', { classId, termNum: selectedEntry?.termNumber, yearId: selectedEntry?.academicYearId }],
+    queryKey: ['reportCards', 'draftComments', { classId, termNum: Number(selectedEntry?.termNumber), yearId: selectedEntry?.academicYearId || undefined }],
     queryFn:  () => reportCardsApi.draftComments.list({ classId, termNumber: Number(selectedEntry.termNumber), academicYearId: selectedEntry.academicYearId || undefined }),
     enabled:  canQuery && commentsOn,
     staleTime: 15_000,
@@ -1104,11 +1107,22 @@ function MarkbookTab({ years }) {
   // Same endpoint and payload as before. The subject/class/term are passed in
   // with each save, so a save started just before the teacher switches subject
   // still lands on the subject it was typed for.
+  // Which learner's comment could not be saved, and why — shown under its box.
+  const [commentErrors, setCommentErrors] = useState({});
+  const [savingIds, setSavingIds] = useState({});
   const { mutateAsync: saveCommentAsync, isPending: savingComments } = useMutation({
     mutationFn: ({ studentId, subjectId: subj, classId: cls, termNumber: term, academicYearId, text }) =>
       reportCardsApi.draftComments.saveSubject(studentId, subj, { classId: cls, termNumber: term, academicYearId, comment: text }),
-    onSuccess: async (_data, { studentId, subjectId: subj, text }) => {
-      await qc.invalidateQueries({ queryKey: ['reportCards', 'draftComments'] });
+    onSuccess: (_data, { studentId, subjectId: subj, classId: cls, termNumber: term, academicYearId, text }) => {
+      // Show it saved now; the class list is refreshed behind it. Waiting for
+      // that refresh made each box wait for every other box's save.
+      qc.setQueryData(['reportCards', 'draftComments', { classId: cls, termNum: term, yearId: academicYearId }], (old) => {
+        if (!Array.isArray(old?.data)) return old;
+        const has = old.data.some(d => d.studentId === studentId);
+        const rows = has ? old.data : [...old.data, { studentId, subjectComments: {} }];
+        return { ...old, data: rows.map(d => (d.studentId === studentId ? { ...d, subjectComments: { ...d.subjectComments, [subj]: text } } : d)) };
+      });
+      qc.invalidateQueries({ queryKey: ['reportCards', 'draftComments'] });
       // Only clear the "not saved" state if nothing new was typed meanwhile.
       if (subj !== subjectId) return;
       setPendingComments(prev => {
@@ -1116,7 +1130,11 @@ function MarkbookTab({ years }) {
         const next = { ...prev }; delete next[studentId]; return next;
       });
     },
-    onError:   err => setToast({ msg: err?.message ?? 'Could not save the comment.', type: 'error' }),
+    onError: (err, { studentId, subjectId: subj }) => {
+      const msg = err?.message ?? 'Could not save the comment.';
+      if (subj === subjectId) setCommentErrors(prev => ({ ...prev, [studentId]: msg }));
+      setToast({ msg, type: 'error' });
+    },
   });
   // One save per student+subject+text at a time: leaving the box and pressing
   // Save in the same click would otherwise send the same comment twice.
@@ -1125,10 +1143,15 @@ function MarkbookTab({ years }) {
     const key = `${studentId}|${subjectId}|${selectedEntry?.termNumber}|${selectedEntry?.academicYearId ?? ''}|${text}`;
     const running = commentSavesRef.current.get(key);
     if (running) return running;
+    setCommentErrors(prev => { if (!(studentId in prev)) return prev; const next = { ...prev }; delete next[studentId]; return next; });
+    setSavingIds(prev => ({ ...prev, [studentId]: key }));
     const p = saveCommentAsync({
       studentId, subjectId, classId, termNumber: Number(selectedEntry.termNumber),
       academicYearId: selectedEntry.academicYearId || undefined, text,
-    }).finally(() => commentSavesRef.current.delete(key));
+    }).finally(() => {
+      commentSavesRef.current.delete(key);
+      setSavingIds(prev => { if (prev[studentId] !== key) return prev; const next = { ...prev }; delete next[studentId]; return next; });
+    });
     commentSavesRef.current.set(key, p);
     return p;
   }
@@ -1144,6 +1167,7 @@ function MarkbookTab({ years }) {
     return results.every(r => r.status === 'fulfilled');
   }
   function editComment(studentId, text) {
+    setCommentErrors(prev => { if (!(studentId in prev)) return prev; const next = { ...prev }; delete next[studentId]; return next; });
     const saved = draftCommentsByStudent?.[studentId]?.subjectComments?.[subjectId] ?? '';
     setPendingComments(prev => {
       if (text === saved) {
@@ -1693,6 +1717,8 @@ function MarkbookTab({ years }) {
                             value={draftCommentsByStudent?.[sid]?.subjectComments?.[subjectId] ?? ''}
                             disabled={false}
                             unsaved={sid in pendingComments}
+                            error={commentErrors[sid]}
+                            saving={sid in savingIds}
                             onSave={text => { saveComment(sid, text).catch(() => {}); }}
                             onEdit={text => editComment(sid, text)}
                           />
