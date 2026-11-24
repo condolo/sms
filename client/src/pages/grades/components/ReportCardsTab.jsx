@@ -341,16 +341,12 @@ export default function ReportCardsTab() {
     },
   });
 
-  // Draft comments indexed by studentId. NOTE: report_card_draft_comments
-  // is keyed by {studentId, termNumber} only — the server route has no
-  // academicYearId filter to pass (a separate, pre-existing gap, same
-  // class of issue the comment above describes but not yet closed for
-  // this specific collection) — so a student's Term 2 draft comment can
-  // in principle be shared across every year that has a Term 2 until
-  // it's frozen into a published snapshot. Flagged, not fixed here.
+  // Draft comments indexed by studentId, for the chosen academic year
+  // (v5.280.0). With a Report Cycle picked the server also returns the
+  // Markbook's subject comments, which is what that report prints.
   const { data: commentsMap, isError: isCommentsError, refetch: refetchComments } = useQuery({
-    queryKey: ['reportCards', 'draftComments', { classId, termNum, cycle }],
-    queryFn:  () => reportCardsApi.draftComments.list({ classId, termNumber: Number(termNum), cycle: cycle || undefined }),
+    queryKey: ['reportCards', 'draftComments', { classId, termNum, yearId, cycle }],
+    queryFn:  () => reportCardsApi.draftComments.list({ classId, termNumber: Number(termNum), academicYearId: yearId || undefined, cycle: cycle || undefined }),
     enabled:  canQuery,
     staleTime: 30_000,
     select: (res) => Object.fromEntries((res?.data ?? []).map(c => [c.studentId, c])),
@@ -587,10 +583,11 @@ ${docs.map(h => `<div>${_bodyOf(h)}</div>`).join('\n')}
         ...data,
         classId,
         termNumber: Number(termNum),
+        academicYearId: yearId || undefined,
         cycle: cycle || undefined,
       }),
     onSuccess: () => qc.invalidateQueries({
-      queryKey: ['reportCards', 'draftComments', { classId, termNum, cycle }],
+      queryKey: ['reportCards', 'draftComments', { classId, termNum, yearId, cycle }],
     }),
   });
 
@@ -599,11 +596,12 @@ ${docs.map(h => `<div>${_bodyOf(h)}</div>`).join('\n')}
       reportCardsApi.draftComments.saveSubject(studentId, subjectId, {
         classId,
         termNumber: Number(termNum),
+        academicYearId: yearId || undefined,
         comment,
         cycle: cycle || undefined,
       }),
     onSuccess: () => qc.invalidateQueries({
-      queryKey: ['reportCards', 'draftComments', { classId, termNum, cycle }],
+      queryKey: ['reportCards', 'draftComments', { classId, termNum, yearId, cycle }],
     }),
   });
 
@@ -980,7 +978,7 @@ ${docs.map(h => `<div>${_bodyOf(h)}</div>`).join('\n')}
           </p>
           {visibleKgStudents.map(student => (
             <KgStudentReportCard
-              key={student.studentId}
+              key={`${student.studentId}|${yearId}|${termNum}|${cycle}`}
               ref={el => registerCardRef(student.studentId, el)}
               student={student}
               classId={classId}
@@ -1004,7 +1002,7 @@ ${docs.map(h => `<div>${_bodyOf(h)}</div>`).join('\n')}
           </p>
           {visibleStudents.map(student => (
             <StudentReportCard
-              key={student.studentId}
+              key={`${student.studentId}|${yearId}|${termNum}|${cycle}`}
               ref={el => registerCardRef(student.studentId, el)}
               student={student}
               studentInfo={studentInfoMap[student.studentId]}

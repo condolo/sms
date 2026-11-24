@@ -7,7 +7,8 @@
    (report-cards.js's /kg/generate vs /generate) rather than branching
    one component on class type.
    ============================================================ */
-import { useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
+import { useState, useEffect, useCallback, useRef, forwardRef, useImperativeHandle } from 'react';
+import { mergeRemarks, remarksDirty } from './remarkForm';
 import { CheckCircle, Printer, Download, Loader2 } from 'lucide-react';
 import { reportCards as reportCardsApi } from '@/api/client.js';
 
@@ -37,6 +38,11 @@ function gradeColor(grade) {
   return 'text-red-500';
 }
 
+const kgRemarksOf = (d) => ({
+  classTeacherRemark: d?.classTeacherRemark ?? '',
+  principalRemark:    d?.principalRemark    ?? '',
+});
+
 const KgStudentReportCard = forwardRef(function KgStudentReportCard({
   student, classId, academicYearId, className, termNum, academicYear,
   draftComment, onSaveComment, snapshot, cycle,
@@ -45,10 +51,10 @@ const KgStudentReportCard = forwardRef(function KgStudentReportCard({
   const showScore = display.showScore !== false;
   const showGrade = display.showGrade !== false;
 
-  const [comment, setComment] = useState({
-    classTeacherRemark: draftComment?.classTeacherRemark ?? '',
-    principalRemark:    draftComment?.principalRemark    ?? '',
-  });
+  const [comment, setComment] = useState(() => kgRemarksOf(draftComment));
+  // The remarks this card was last loaded with or saved (remarkForm.js).
+  const baseRef = useRef(null);
+  if (baseRef.current === null) baseRef.current = kgRemarksOf(draftComment);
   const [saving, setSaving] = useState(false);
   const [saved,  setSaved]  = useState(false);
   // Reported directly: saving a KG class teacher remark showed no success
@@ -67,21 +73,15 @@ const KgStudentReportCard = forwardRef(function KgStudentReportCard({
   // a remark mid-edit for a different student the instant any other
   // save in the class landed. Same guard as StudentReportCard.jsx's
   // equivalent — never resync over an unsaved local edit.
-  const computeDirty = () => {
-    const original = {
-      classTeacherRemark: draftComment?.classTeacherRemark ?? '',
-      principalRemark:    draftComment?.principalRemark    ?? '',
-    };
-    return JSON.stringify(comment) !== JSON.stringify(original);
-  };
+  // v5.280.0: compared with what was last loaded (baseRef), field by field.
+  const computeDirty = () => remarksDirty(comment, baseRef.current);
 
   useEffect(() => {
-    if (computeDirty()) return;
-    setComment({
-      classTeacherRemark: draftComment?.classTeacherRemark ?? '',
-      principalRemark:    draftComment?.principalRemark    ?? '',
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (!draftComment) return;
+    const base = baseRef.current;
+    const incoming = kgRemarksOf(draftComment);
+    baseRef.current = incoming;
+    setComment(c => mergeRemarks(c, base, incoming));
   }, [draftComment]);
 
   const set = (field) => (value) => setComment(c => ({ ...c, [field]: value }));
@@ -145,6 +145,7 @@ const KgStudentReportCard = forwardRef(function KgStudentReportCard({
     setCommentError(null);
     try {
       await onSaveComment(comment);
+      baseRef.current = comment;
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (err) {
@@ -164,6 +165,7 @@ const KgStudentReportCard = forwardRef(function KgStudentReportCard({
       if (!isDirty || !onSaveComment) return true;
       try {
         await onSaveComment(comment);
+        baseRef.current = comment;
         setSaved(true);
         setTimeout(() => setSaved(false), 2500);
         return true;

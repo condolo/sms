@@ -754,8 +754,12 @@ const SECTIONS = [
         a: 'Yes. Once published, students and parents can download their report card PDF from their portal. The PDF includes the Report ID, QR code for verification, and the school stamp and signature.',
       },
       {
+        q: 'How do Mid-Term and End-Term comments work?',
+        a: "The Markbook has one comment box per learner, subject and term. When a report card is published, the comments in it are kept in that report.\n• To keep both reports visible to parents, publish each with its own Report Cycle (Mid-Term, then End-Term). Publishing Whole Term twice in a term replaces the first one.\n• After a Whole Term report is published, the box opens again when the next assessment in that term's schedule starts. If nothing later is scheduled, an admin can unlock it.\n• The box still shows the Mid-Term comment until the teacher types over it, so replace it before publishing End-Term.\n• To change a Mid-Term comment after End-Term has started, use Report Cards with Mid-Term picked as the Report Cycle.\n• In a new academic year the box is empty. Pick an earlier year to see its comments.",
+      },
+      {
         q: "Teachers can't save subject comments. What do we tick?",
-        a: 'In Settings → Roles & Permissions, open the Teacher role, tick Edit on Report Card Settings → Manage Draft Comments, and Save. Teachers can then write comments only for the classes and subjects they teach, in the Markbook. It does not let them change the approval workflow, the publication policy or the report label: each of those needs its own row.',
+        a: 'In Settings → Roles & Permissions, open the Teacher role, tick Edit on Report Card Settings → Manage Draft Comments, and Save. Teachers can then write subject comments only for the classes and subjects they teach, in the Markbook. The same tick also lets them read other report comments and write the class teacher\'s remark. It does not let them change the approval workflow, the publication policy or the report label: each of those needs its own row.',
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',

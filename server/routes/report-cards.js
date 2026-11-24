@@ -48,6 +48,7 @@ const { isYearArchived } = require('../utils/archival');
 const { resolveRcTemplate } = require('../utils/rc-template-scale');
 const { computeKgReport }   = require('../utils/kg-report');
 const { reportCoverage, coverageMarkClause, coverageSummary } = require('../utils/report-coverage');
+const reportComments = require('../utils/report-comments');
 const AuditService       = require('../services/audit');
 const { sanitisePdfStr } = require('../utils/sanitisePdf');
 const { notifyGuardiansForStudents } = require('../utils/notify-students');
@@ -497,6 +498,7 @@ const CommentSchema = z.object({
 const DraftCommentBodySchema = z.object({
   termNumber:         z.union([z.string(), z.number()]),
   cycle:              z.string().max(50).trim().optional(),
+  academicYearId:     z.string().max(100).nullable().optional(),
   classTeacherName:   z.string().max(200).optional(),
   classTeacherRemark: z.string().max(1000).optional(),
   sportsAndTalent:    z.string().max(1000).optional(),
@@ -615,6 +617,21 @@ async function _lockSubmissionCombos(Submissions, { schoolId, classId, termNumbe
     }
   }
 }
+
+/* v5.280.0: a year whose terms were saved without ids resolves termId to
+   null for EVERY term, so the 'previous version of this report' lookup
+   matched Term 1's report when Term 2 was published and hid it from
+   parents. With no term id, the term number identifies the term. */
+function _termNumberWhenNoTermId(scope, termNum) {
+  return !scope.termId && termNum != null ? { termNumber: termNum } : {};
+}
+
+/* The academic year a comment read or write is for (report-comments.js). */
+function _commentScope(ctx, schoolId, academicYearId) {
+  return reportComments.commentYear(ctx, schoolId, academicYearId, resolveCurrentPeriod);
+}
+/* Same refusal publish gives for an archived year. */
+const ARCHIVED_COMMENTS = 'This academic year is archived. Its comments can be read but not changed.';
 
 async function _resolveTermScope(schoolId, ctx, { academicYearId, termId, termNumber }) {
   if (termId && academicYearId) return { academicYearId, termId };
@@ -978,6 +995,7 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
     const existingSnaps = await tenantModel('report_card_snapshots', tenantContext(req)).find({
       schoolId, classId,
       termId: scope.termId, academicYearId: scope.academicYearId,
+      ..._termNumberWhenNoTermId(scope, termNum),
       cycle: cycle || null,
       superseded: { $ne: true },
     }).lean();
@@ -1034,12 +1052,11 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
     // reported — the first fix only reached the merge function, not this
     // upstream load gate. One extra indexed query per publish is cheap;
     // always load it.
-    const draftCommentsMap = {};
-    if (studentIds.length && termNum != null) {
-      const draftDocs = await tenantModel('report_card_draft_comments', tenantContext(req))
-        .find({ schoolId, studentId: { $in: studentIds }, termNumber: termNum, cycle: cycle || null }).lean();
-      for (const d of draftDocs) draftCommentsMap[d.studentId] = d;
-    }
+    // v5.280.0: the drafts of THIS academic year, and for a Report Cycle the
+    // Markbook's comments too (they used to print blank) — report-comments.js.
+    const commentScope = await _commentScope(ctx, schoolId, scope.academicYearId);
+    const draftCommentsMap = await reportComments.effectiveDrafts(ctx, schoolId,
+      { studentIds, termNumber: termNum, cycle, prevByStudent: existingMap }, commentScope);
 
     // ── Step 6d: Load the report-comment approval chain config, if RC9's
     // "require complete" rule for it is on — a single lookup, not per-student.
@@ -1559,8 +1576,8 @@ async function _resolveKgPreview(req, data) {
 
   const kg = await computeKgReport(ctx, schoolId, classId, stu.id, termNum, scope.academicYearId, scale, cycle);
 
-  const draft = await tenantModel('report_card_draft_comments', ctx)
-    .findOne({ schoolId, studentId: stu.id, termNumber: termNum, cycle: cycle || null }).lean();
+  const kgScope = await _commentScope(ctx, schoolId, scope.academicYearId);
+  const draft = (await reportComments.draftsByStudent(ctx, schoolId, { studentIds: [stu.id], termNumber: termNum, cycle }, kgScope))[stu.id] || null;
 
   const { className, academicYear } = await _resolveDisplayNames(schoolId, ctx, { classId, academicYearId: scope.academicYearId, termId: scope.termId });
 
@@ -1728,13 +1745,16 @@ router.post('/kg/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
     // PublishSchema's own comment): a locked/published Mid-Term KG
     // snapshot is never found or superseded by an End-Term publish.
     const existingSnaps = await tenantModel('report_card_snapshots', ctx).find({
-      schoolId, classId, termId: scope.termId, academicYearId: scope.academicYearId, cycle: cycle || null, superseded: { $ne: true },
+      schoolId, classId, termId: scope.termId, academicYearId: scope.academicYearId,
+      ..._termNumberWhenNoTermId(scope, termNum),
+      cycle: cycle || null, superseded: { $ne: true },
     }).lean();
     const existingMap = Object.fromEntries(existingSnaps.map(s => [s.studentId, s]));
 
-    const draftDocs = await tenantModel('report_card_draft_comments', ctx)
-      .find({ schoolId, studentId: { $in: studentIds }, termNumber: termNum, cycle: cycle || null }).lean();
-    const draftByStudent = Object.fromEntries(draftDocs.map(d => [d.studentId, d]));
+    // This academic year's remarks only (v5.280.0). Kindergarten reports have no
+    // subject comments, so nothing is taken from the Markbook box here.
+    const kgScope = await _commentScope(ctx, schoolId, scope.academicYearId);
+    const draftByStudent = await reportComments.draftsByStudent(ctx, schoolId, { studentIds, termNumber: termNum, cycle }, kgScope);
 
     let blockedStudentIds = new Set();
     try {
@@ -2277,9 +2297,17 @@ router.get('/draft-comments', authMiddleware, PLAN, MODGATE, rbac('report_cards'
     // server-side, could carry a stale value there). Matching by the
     // CURRENT roster instead means a draft is never missed just because
     // its own classId field drifted.
+    const ctx = tenantContext(req);
+    const scope = await _commentScope(ctx, schoolId, req.query.academicYearId ? String(req.query.academicYearId).slice(0, 100) : null);
     if (req.query.classId) {
-      const rosterIds = await tenantModel('students', tenantContext(req))
-        .distinct('id', { schoolId, classId: req.query.classId });
+      const rosterIds = await tenantModel('students', ctx)
+        .distinct('id', { schoolId, classId: String(req.query.classId) });
+      // A past year: also the learners who were in this class then.
+      if (scope.yearId && scope.currentYearId && scope.yearId !== scope.currentYearId) {
+        const then = await tenantModel('student_class_history', ctx)
+          .distinct('studentId', { schoolId, academicYearId: scope.yearId, classId: String(req.query.classId) });
+        for (const id of then) if (!rosterIds.includes(id)) rosterIds.push(id);
+      }
       filter.studentId = { $in: rosterIds };
     }
     if (req.query.termNumber) filter.termNumber = Number(req.query.termNumber);
@@ -2288,7 +2316,24 @@ router.get('/draft-comments', authMiddleware, PLAN, MODGATE, rbac('report_cards'
     // un-migrated caller keeps seeing exactly what it always saw, never a
     // mix of a different cycle's drafts.
     filter.cycle = req.query.cycle ? String(req.query.cycle) : null;
-    const docs = await tenantModel('report_card_draft_comments', tenantContext(req)).find(filter).lean();
+    // v5.280.0: this academic year's comments only, and with a Report Cycle
+    // picked the Markbook's comments too — what the report will print.
+    if (filter.studentId && filter.termNumber) {
+      const studentIds = filter.studentId.$in;
+      let prevByStudent = {};
+      if (filter.cycle) {
+        const live = await tenantModel('report_card_snapshots', ctx).find({
+          schoolId, studentId: { $in: studentIds }, termNumber: filter.termNumber, cycle: filter.cycle,
+          academicYearId: scope.yearId, superseded: { $ne: true },
+        }).select('studentId coverage comments publishedAt').lean();
+        prevByStudent = Object.fromEntries(live.map(s => [s.studentId, s]));
+      }
+      const map = await reportComments.effectiveDrafts(ctx, schoolId,
+        { studentIds, termNumber: filter.termNumber, cycle: filter.cycle, prevByStudent }, scope);
+      return ok(res, await scopeDraftCommentsForCaller(req, Object.values(map)));
+    }
+    const docs = (await tenantModel('report_card_draft_comments', ctx).find(filter).lean())
+      .filter(d => reportComments.inYear(d.academicYearId, d.updatedAt || d.createdAt, scope));
     return ok(res, await scopeDraftCommentsForCaller(req, docs));
   } catch (err) {
     console.error('[report-cards/draft-comments GET]', err);
@@ -3734,11 +3779,21 @@ router.post('/preview-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'
    still-unpublished draft. A brand-new cycle's draft is never locked in
    the first place, since nothing has been published under it yet — no
    admin unlock step is needed to start writing it. */
-async function _publishedCommentsLockFor(schoolId, ctx, studentId, termNumber, cycle = null) {
-  const snap = await tenantModel('report_card_snapshots', ctx)
-    .findOne({ schoolId, studentId, termNumber: Number(termNumber), cycle: cycle || null, superseded: { $ne: true }, commentsLocked: true })
-    .select('id').lean();
-  return !!snap;
+/* v5.280.0, with `scope` (report-comments.js commentYear): only reports of
+   that academic year count, so last year's Term 1 never locks this year's;
+   and the Markbook box (no cycle) reopens once a later assessment in the
+   term's schedule has started, so a report published at Mid-Term does not
+   keep teachers from writing the End-Term comment. */
+async function _publishedCommentsLockFor(schoolId, ctx, studentId, termNumber, cycle = null, scope = null) {
+  const filter = { schoolId, studentId, termNumber: Number(termNumber), cycle: cycle || null, superseded: { $ne: true }, commentsLocked: true };
+  const Snaps = tenantModel('report_card_snapshots', ctx);
+  if (!scope) return !!(await Snaps.findOne(filter).select('id').lean());
+  const locked = (await Snaps.find(filter).select('id publishedAt academicYearId').lean())
+    .filter(s => reportComments.inYear(s.academicYearId, s.publishedAt, scope));
+  if (!locked.length) return false;
+  if (cycle) return true;
+  const windows = await reportComments.termWindows(ctx, schoolId, termNumber, scope.yearId);
+  return !locked.every(s => reportComments.boxReopened(windows, s.publishedAt));
 }
 
 // PUT /draft-comments/:studentId — upsert comment record for a student
@@ -3754,7 +3809,10 @@ router.put('/draft-comments/:studentId', authMiddleware, PLAN, MODGATE, rbac('re
             sportsAndTalent, principalName, principalRemark, closingDate, nextTermBegin,
             subjectComments, observationRatings } = validated;
 
-    if (await _publishedCommentsLockFor(schoolId, tenantContext(req), studentId, termNumber, cycle)) {
+    const ctx = tenantContext(req);
+    const scope = await _commentScope(ctx, schoolId, validated.academicYearId);
+    if (await isYearArchived(schoolId, scope.yearId)) return E.forbidden(res, ARCHIVED_COMMENTS);
+    if (await _publishedCommentsLockFor(schoolId, ctx, studentId, termNumber, cycle, scope)) {
       return E.forbidden(res, 'Comments are locked — the report card for this term has been published. Ask an admin to unlock it for a correction.');
     }
 
@@ -3782,8 +3840,8 @@ router.put('/draft-comments/:studentId', authMiddleware, PLAN, MODGATE, rbac('re
     // in the database. Same fix needs no client change: the body never
     // needed to send classId correctly in the first place.
     const classId = placement.classId;
-    const existing = await tenantModel('report_card_draft_comments', tenantContext(req))
-      .findOne({ schoolId, studentId, termNumber: Number(termNumber), cycle: cycle || null }).lean();
+    const target = await reportComments.draftForWrite(ctx, schoolId, { studentId, termNumber, cycle }, scope);
+    const existing = target.existing;
 
     // Reported directly (2026-10-15), traced to a real, silent data-loss
     // path: GET /draft-comments (scopeDraftCommentsForCaller) strips this
@@ -3858,11 +3916,12 @@ router.put('/draft-comments/:studentId', authMiddleware, PLAN, MODGATE, rbac('re
       nextTermBegin:      nextTermBegin      ?? '',
       updatedBy,
       updatedAt: new Date(),
+      ...target.set,
     };
     if (observationRatings !== undefined) setFields.observationRatings = observationRatings;
 
-    const doc = await tenantModel('report_card_draft_comments', tenantContext(req)).findOneAndUpdate(
-      { schoolId, studentId, termNumber: Number(termNumber), cycle: cycle || null },
+    const doc = await tenantModel('report_card_draft_comments', ctx).findOneAndUpdate(
+      target.filter,
       { $set: setFields },
       { upsert: true, new: true }
     ).lean();
@@ -3878,12 +3937,16 @@ router.put('/draft-comments/:studentId/subject/:subjectId', authMiddleware, PLAN
   try {
     const { schoolId, userId: updatedBy } = req.jwtUser;
     const { studentId, subjectId } = req.params;
-    const { termNumber, comment, cycle } = req.body;
+    const { termNumber, comment, cycle, academicYearId } = req.body;
     if (!termNumber) return E.badRequest(res, 'termNumber is required');
     if (typeof comment !== 'string') return E.badRequest(res, 'comment must be a string');
     if (comment.length > 1000) return E.badRequest(res, 'comment must be 1000 characters or fewer');
     if (cycle !== undefined && (typeof cycle !== 'string' || cycle.length > 50)) {
       return E.badRequest(res, 'cycle must be a string of 50 characters or fewer');
+    }
+
+    if (academicYearId != null && (typeof academicYearId !== 'string' || academicYearId.length > 100)) {
+      return E.badRequest(res, 'academicYearId must be a string of 100 characters or fewer');
     }
 
     // Same rights as marks: the caller must teach this subject in this student's stream.
@@ -3927,12 +3990,16 @@ router.put('/draft-comments/:studentId/subject/:subjectId', authMiddleware, PLAN
     // schedule lock any more (2026-10-11) — see comment-scope.js's header.
     // The DIFFERENT, publish-based lock added 2026-10-18 still applies
     // here (see _publishedCommentsLockFor above).
-    if (await _publishedCommentsLockFor(schoolId, tenantContext(req), studentId, termNumber, cycle)) {
+    const ctx = tenantContext(req);
+    const scope = await _commentScope(ctx, schoolId, academicYearId);
+    if (await isYearArchived(schoolId, scope.yearId)) return E.forbidden(res, ARCHIVED_COMMENTS);
+    if (await _publishedCommentsLockFor(schoolId, ctx, studentId, termNumber, cycle, scope)) {
       return E.forbidden(res, 'Comments are locked — the report card for this term has been published. Ask an admin to unlock it for a correction.');
     }
 
-    const doc = await tenantModel('report_card_draft_comments', tenantContext(req)).findOneAndUpdate(
-      { schoolId, studentId, termNumber: Number(termNumber), cycle: cycle || null },
+    const target = await reportComments.draftForWrite(ctx, schoolId, { studentId, termNumber, cycle }, scope);
+    const doc = await tenantModel('report_card_draft_comments', ctx).findOneAndUpdate(
+      target.filter,
       { $set: {
           schoolId, studentId, classId,
           termNumber: Number(termNumber),
@@ -3940,6 +4007,7 @@ router.put('/draft-comments/:studentId/subject/:subjectId', authMiddleware, PLAN
           [`subjectComments.${subjectId}`]: comment,
           updatedBy,
           updatedAt: new Date(),
+          ...target.set,
         },
       },
       { upsert: true, new: true }
@@ -3964,7 +4032,10 @@ router.patch('/draft-comments/:studentId/advance', authMiddleware, PLAN, MODGATE
   try {
     const { schoolId, userId, name, role } = req.jwtUser;
     const { studentId } = req.params;
-    const { classId, termNumber, remark, cycle } = req.body;
+    const { classId, termNumber, remark, cycle, academicYearId } = req.body;
+    if (academicYearId != null && (typeof academicYearId !== 'string' || academicYearId.length > 100)) {
+      return E.badRequest(res, 'academicYearId must be a string of 100 characters or fewer');
+    }
     if (!termNumber) return E.badRequest(res, 'termNumber is required');
     if (typeof remark !== 'string' || !remark.trim()) return E.badRequest(res, 'remark is required');
     if (cycle !== undefined && (typeof cycle !== 'string' || cycle.length > 50)) {
@@ -3975,12 +4046,15 @@ router.patch('/draft-comments/:studentId/advance', authMiddleware, PLAN, MODGATE
     const config = await getWorkflowConfig(ctx, schoolId, REPORT_COMMENT_WORKFLOW_KEY);
     if (!config) return E.badRequest(res, 'No report-comment approval chain is configured for this school');
 
-    if (await _publishedCommentsLockFor(schoolId, ctx, studentId, termNumber, cycle)) {
+    const scope = await _commentScope(ctx, schoolId, academicYearId);
+    if (await isYearArchived(schoolId, scope.yearId)) return E.forbidden(res, ARCHIVED_COMMENTS);
+    if (await _publishedCommentsLockFor(schoolId, ctx, studentId, termNumber, cycle, scope)) {
       return E.forbidden(res, 'Comments are locked — the report card for this term has been published. Ask an admin to unlock it for a correction.');
     }
 
     const Draft = tenantModel('report_card_draft_comments', ctx);
-    const existing = await Draft.findOne({ schoolId, studentId, termNumber: Number(termNumber), cycle: cycle || null }).lean();
+    const target = await reportComments.draftForWrite(ctx, schoolId, { studentId, termNumber, cycle }, scope);
+    const existing = target.existing;
     const stepOrder = existing?.currentStepOrder ?? 1;
 
     if (stepOrder > config.steps.length) {
@@ -4005,8 +4079,8 @@ router.patch('/draft-comments/:studentId/advance', authMiddleware, PLAN, MODGATE
     }].sort((a, b) => a.stepOrder - b.stepOrder);
 
     const doc = await Draft.findOneAndUpdate(
-      { schoolId, studentId, termNumber: Number(termNumber), cycle: cycle || null },
-      { $set: { schoolId, studentId, classId: classId ?? existing?.classId, termNumber: Number(termNumber), cycle: cycle || null, reportRemarks, currentStepOrder: nextStepOrder, updatedBy: userId, updatedAt: new Date() } },
+      target.filter,
+      { $set: { schoolId, studentId, classId: classId ?? existing?.classId, termNumber: Number(termNumber), cycle: cycle || null, reportRemarks, currentStepOrder: nextStepOrder, updatedBy: userId, updatedAt: new Date(), ...target.set } },
       { upsert: true, new: true }
     ).lean();
 
@@ -4064,6 +4138,7 @@ router._nextReportId = _nextReportId;
 router._schoolReportCode = _schoolReportCode;
 router._lockSubmissionCombos = _lockSubmissionCombos;
 router._publishedCommentsLockFor = _publishedCommentsLockFor;
+router._termNumberWhenNoTermId = _termNumberWhenNoTermId;
 router._autoRelockComments = _autoRelockComments;
 
 module.exports = router;

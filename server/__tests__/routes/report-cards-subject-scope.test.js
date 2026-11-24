@@ -46,7 +46,7 @@ jest.mock('../../utils/tenant-model', () => ({
       return { findOne: jest.fn(() => mockChain(mockStudent)) };
     }
     if (col === 'report_card_draft_comments') {
-      return { findOne: jest.fn(() => mockChain(null)), findOneAndUpdate: mockDraftCommentUpsert };
+      return { findOne: jest.fn(() => mockChain(null)), find: jest.fn(() => mockChain([])), findOneAndUpdate: mockDraftCommentUpsert };
     }
     // class_subjects — curriculum-integrity guard; this file is about
     // subject-teacher scoping, not curriculum, so cls_001/subj_math is

@@ -53,8 +53,10 @@ jest.mock('../utils/tenant-model', () => ({
     // _publishedCommentsLockFor's own lookup — no published/locked report
     // in any of this file's scenarios, same as before comments-locking existed.
     if (col === 'report_card_snapshots') {
-      return { findOne: () => ({ select: () => ({ lean: () => Promise.resolve(null) }) }) };
+      return { findOne: () => ({ select: () => ({ lean: () => Promise.resolve(null) }) }), find: () => ({ select: () => ({ lean: () => Promise.resolve([]) }) }) };
     }
+    // v5.280.0: the academic year a comment belongs to — none set up here.
+    if (col === 'academic_years') return { find: () => ({ lean: () => Promise.resolve([]) }) };
     throw new Error(`unexpected tenantModel('${col}') call in this test`);
   }),
   tenantContext: jest.fn(() => ({})),

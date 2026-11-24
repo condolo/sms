@@ -104,6 +104,9 @@ beforeEach(() => {
   mockStores = {
     students: makeStore([{ id: 'stu_1', schoolId: SCHOOL, classId: 'cls_1', streamId: 'strm_a' }]),
     report_card_draft_comments: makeStore([]),
+    // v5.280.0: comments belong to an academic year; no year or schedule set up here.
+    academic_years: makeStore([]),
+    assessment_schedule: makeStore([]),
     report_card_snapshots: makeStore([]),
   };
 });

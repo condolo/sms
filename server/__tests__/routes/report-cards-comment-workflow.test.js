@@ -94,6 +94,10 @@ beforeEach(() => {
     ]),
     // _publishedCommentsLockFor's own lookup — nothing published in any
     // of this file's scenarios, so comments are never locked here.
+    // v5.280.0: comments belong to an academic year; no year or schedule set up here.
+    academic_years: makeStore(),
+    assessment_schedule: makeStore(),
+    academic_config: makeStore(),
     report_card_snapshots: makeStore(),
   };
 });

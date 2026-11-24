@@ -82,7 +82,9 @@ const INDEXES = [
   {
     col: 'report_card_draft_comments',
     indexes: [
-      { key: { schoolId: 1, studentId: 1, termNumber: 1, cycle: 1 }, name: 'rcdc_student_term_cycle', unique: true },
+      // v5.280.0: + academicYearId, so a new year has its own comments. Rows
+      // saved before it have none (indexed as null) and stay valid.
+      { key: { schoolId: 1, studentId: 1, termNumber: 1, cycle: 1, academicYearId: 1 }, name: 'rcdc_student_term_cycle_year', unique: true },
     ],
   },
 
@@ -1291,6 +1293,8 @@ const DROP_INDEXES = [
   // see that block's own comment for why this HAD to be a drop, not an
   // in-place edit of the same index name.
   { col: 'report_card_draft_comments', name: 'rcdc_student_term' },
+  // v5.280.0: one row per academic year too (rcdc_student_term_cycle_year).
+  { col: 'report_card_draft_comments', name: 'rcdc_student_term_cycle' },
   // Messages inbox was keyed on `recipientId`, a field the route stopped
   // writing when it moved to the `recipients` array. Replaced by
   // messages_recipients_date; dropping it removes a write-amplification tax

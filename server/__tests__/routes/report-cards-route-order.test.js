@@ -41,9 +41,8 @@ jest.mock('../../utils/tenant-model', () => ({
     // /bulk-pdf or /draft-comments never reaches GET /:id's snapshot
     // lookup at all (a shadowed request would 404 from exactly this call).
     // 'students': distinct('id', ...) resolves the roster for
-    // draft-comments' own classId filter (RCE6) — empty here on purpose,
-    // this file only cares about route dispatch, not roster matching.
-    return { findOne: jest.fn(() => mockChain(null)), find: jest.fn(() => mockChain([])), countDocuments: jest.fn(() => Promise.resolve(0)), distinct: jest.fn(() => Promise.resolve([])) };
+    // draft-comments' own classId filter (RCE6).
+    return { findOne: jest.fn(() => mockChain(null)), find: jest.fn(() => mockChain([])), countDocuments: jest.fn(() => Promise.resolve(0)), distinct: jest.fn(() => Promise.resolve(['stu_1'])) };
   }),
   tenantContext: jest.fn((req) => ({ schoolId: req?.jwtUser?.schoolId ?? null })),
 }));

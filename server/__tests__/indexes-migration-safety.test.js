@@ -39,7 +39,7 @@ describe('report_card_draft_comments index — cycle migration safety', () => {
   test('the live unique index key includes `cycle`', () => {
     expect(entry).toBeTruthy();
     const idx = entry.indexes.find(i => i.unique);
-    expect(idx.key).toEqual({ schoolId: 1, studentId: 1, termNumber: 1, cycle: 1 });
+    expect(idx.key).toEqual({ schoolId: 1, studentId: 1, termNumber: 1, cycle: 1, academicYearId: 1 });
   });
 
   test('the old, pre-cycle index name is explicitly dropped, never just redefined', () => {
@@ -52,6 +52,11 @@ describe('report_card_draft_comments index — cycle migration safety', () => {
     expect(idx.name).not.toBe('rcdc_student_term');
     expect(DROP_INDEXES).toEqual(
       expect.arrayContaining([{ col: 'report_card_draft_comments', name: 'rcdc_student_term' }])
+    );
+    // v5.280.0: the cycle-only unique index would refuse a new year's comment.
+    expect(idx.name).not.toBe('rcdc_student_term_cycle');
+    expect(DROP_INDEXES).toEqual(
+      expect.arrayContaining([{ col: 'report_card_draft_comments', name: 'rcdc_student_term_cycle' }])
     );
   });
 

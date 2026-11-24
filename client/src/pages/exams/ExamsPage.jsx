@@ -1095,8 +1095,8 @@ function MarkbookTab({ years }) {
      assessment decides whether the comment column is shown for it. */
   const commentsOn = !!selectedEntry && selectedEntry.commentsEnabled !== false;
   const { data: draftCommentsByStudent } = useQuery({
-    queryKey: ['reportCards', 'draftComments', { classId, termNum: selectedEntry?.termNumber }],
-    queryFn:  () => reportCardsApi.draftComments.list({ classId, termNumber: Number(selectedEntry.termNumber) }),
+    queryKey: ['reportCards', 'draftComments', { classId, termNum: selectedEntry?.termNumber, yearId: selectedEntry?.academicYearId }],
+    queryFn:  () => reportCardsApi.draftComments.list({ classId, termNumber: Number(selectedEntry.termNumber), academicYearId: selectedEntry.academicYearId || undefined }),
     enabled:  canQuery && commentsOn,
     staleTime: 15_000,
     select: (res) => Object.fromEntries((res?.data ?? []).map(c => [c.studentId, c])),
@@ -1105,8 +1105,8 @@ function MarkbookTab({ years }) {
   // with each save, so a save started just before the teacher switches subject
   // still lands on the subject it was typed for.
   const { mutateAsync: saveCommentAsync, isPending: savingComments } = useMutation({
-    mutationFn: ({ studentId, subjectId: subj, classId: cls, termNumber: term, text }) =>
-      reportCardsApi.draftComments.saveSubject(studentId, subj, { classId: cls, termNumber: term, comment: text }),
+    mutationFn: ({ studentId, subjectId: subj, classId: cls, termNumber: term, academicYearId, text }) =>
+      reportCardsApi.draftComments.saveSubject(studentId, subj, { classId: cls, termNumber: term, academicYearId, comment: text }),
     onSuccess: async (_data, { studentId, subjectId: subj, text }) => {
       await qc.invalidateQueries({ queryKey: ['reportCards', 'draftComments'] });
       // Only clear the "not saved" state if nothing new was typed meanwhile.
@@ -1122,11 +1122,12 @@ function MarkbookTab({ years }) {
   // Save in the same click would otherwise send the same comment twice.
   const commentSavesRef = useRef(new Map());
   function saveComment(studentId, text) {
-    const key = `${studentId}|${subjectId}|${text}`;
+    const key = `${studentId}|${subjectId}|${selectedEntry?.termNumber}|${selectedEntry?.academicYearId ?? ''}|${text}`;
     const running = commentSavesRef.current.get(key);
     if (running) return running;
     const p = saveCommentAsync({
-      studentId, subjectId, classId, termNumber: Number(selectedEntry.termNumber), text,
+      studentId, subjectId, classId, termNumber: Number(selectedEntry.termNumber),
+      academicYearId: selectedEntry.academicYearId || undefined, text,
     }).finally(() => commentSavesRef.current.delete(key));
     commentSavesRef.current.set(key, p);
     return p;
@@ -1688,7 +1689,7 @@ function MarkbookTab({ years }) {
                       {commentsOn && (
                         <td className="px-2 py-1.5">
                           <GridComment
-                            key={`${sid}|${subjectId}|${selectedEntry?.termNumber}`}
+                            key={`${sid}|${subjectId}|${selectedEntry?.termNumber}|${selectedEntry?.academicYearId ?? ''}`}
                             value={draftCommentsByStudent?.[sid]?.subjectComments?.[subjectId] ?? ''}
                             disabled={false}
                             unsaved={sid in pendingComments}
@@ -1777,8 +1778,8 @@ function SubmissionDetail({ submission, subjectName }) {
     staleTime: 60_000,
   });
   const { data: commentsData } = useQuery({
-    queryKey: ['reportCards', 'draftComments', 'review-detail', submission.classId, submission.termNumber],
-    queryFn: () => reportCardsApi.draftComments.list({ classId: submission.classId, termNumber: Number(submission.termNumber) }),
+    queryKey: ['reportCards', 'draftComments', 'review-detail', submission.classId, submission.termNumber, submission.academicYearId],
+    queryFn: () => reportCardsApi.draftComments.list({ classId: submission.classId, termNumber: Number(submission.termNumber), academicYearId: submission.academicYearId || undefined }),
     staleTime: 15_000,
   });
 

@@ -6,6 +6,31 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.280.0] - 2026-11-24 - feat(report-cards): Mid-Term and End-Term comments, one box per term and year
+
+### Changed
+- **Comments typed in the Markbook print on the report whichever Report Cycle is used.** A Mid-Term or End-Term report read only comments typed in Report Cards with that cycle picked, so Markbook comments printed blank. A comment typed for the cycle still wins, subject by subject.
+- **A published cycle report keeps its own comments** when it is published again after the Markbook box has moved on to a later scheduled assessment. A correction made before then still reaches it; later corrections are made in Report Cards with that cycle picked.
+- **The Markbook comment box opens again after a Whole Term report is published, by the assessment schedule:** once a later assessment in that term has started. With nothing scheduled later it stays locked, as before (admin unlock unchanged). The published report does not change.
+- **The box is empty in a new academic year.** Earlier years' comments stay saved and show when that year is picked. An archived year's comments can be read, not changed.
+
+### Fixed
+- Publishing Term 2 could hide Term 1's report from parents in an academic year whose terms were saved without ids.
+- Last year's published report locked this year's comments for the same term.
+- Report Cards: a card that loaded before its saved remarks stayed empty and could save that emptiness when the class, term, year or cycle was switched; a card also kept the previous term's remarks on screen when switching.
+
+### Unchanged
+- A second Whole Term publish in a term still replaces the first for parents; reports under different Report Cycles stay side by side. Parents still see the latest 6.
+
+### Database
+- `report_card_draft_comments`: unique index `rcdc_student_term_cycle` replaced by `rcdc_student_term_cycle_year` at startup. No comments, marks or published reports are changed; a comment saved before this version gets its year the next time it is saved.
+- `scripts/check-report-comments.js`: read-only check to run on the server.
+
+### Help Centre
+- New: Mid-Term and End-Term comments. Corrected: what Edit on Manage Draft Comments lets a teacher do.
+
+---
+
 ## [v5.279.3] - 2026-11-23 - fix(report-cards): report card settings follow their own Settings rows
 
 ### Fixed

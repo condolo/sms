@@ -30,6 +30,7 @@
      behaviourSummary — { merits, demerits, points, total } | null
    ============================================================ */
 import { Fragment, useState, useCallback, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
+import { mergeRemarks, remarksDirty } from './remarkForm';
 import { Printer, Download, Save, Check, BarChart2, MessageSquare, Award, CheckCircle, Loader2, CalendarCheck } from 'lucide-react';
 import { DEFAULT_CUSTOM_TYPES, _gradeFromScale } from '../constants.js';
 import { reportCards as reportCardsApi } from '@/api/client.js';
@@ -73,6 +74,17 @@ const SUBJECT_COMMENT_MAX = 1000;
    students. A failed save now shows inline, on the exact field it
    happened to, and a successful one confirms too, so neither can go
    unnoticed again. */
+const bulkRemarksOf = (d) => ({
+  classTeacherName:   d?.classTeacherName   ?? '',
+  classTeacherRemark: d?.classTeacherRemark ?? '',
+  sportsAndTalent:    d?.sportsAndTalent    ?? '',
+  principalName:      d?.principalName      ?? '',
+  principalRemark:    d?.principalRemark    ?? '',
+  closingDate:        d?.closingDate        ?? '',
+  nextTermBegin:      d?.nextTermBegin      ?? '',
+  observationRatings: d?.observationRatings ?? {},
+});
+
 function SubjectCommentField({ label, value, onSave }) {
   const [text, setText] = useState(value);
   const [status, setStatus] = useState(null); // null | 'saving' | 'saved' | 'error'
@@ -277,17 +289,13 @@ const StudentReportCard = forwardRef(function StudentReportCard({
 
   const [section, setSection] = useState('marks');
 
-  const [comment, setComment] = useState({
-    classTeacherName:   draftComment?.classTeacherName   ?? '',
-    classTeacherRemark: draftComment?.classTeacherRemark ?? '',
-    sportsAndTalent:    draftComment?.sportsAndTalent    ?? '',
-    principalName:      draftComment?.principalName      ?? '',
-    principalRemark:    draftComment?.principalRemark    ?? '',
-    closingDate:        draftComment?.closingDate        ?? '',
-    nextTermBegin:      draftComment?.nextTermBegin      ?? '',
-    subjectComments:    draftComment?.subjectComments    ?? {},
-    observationRatings: draftComment?.observationRatings ?? {},
-  });
+  const [comment, setComment] = useState(() => ({
+    ...bulkRemarksOf(draftComment),
+    subjectComments: draftComment?.subjectComments ?? {},
+  }));
+  // The remarks this card was last loaded with or saved (remarkForm.js).
+  const baseRef = useRef(null);
+  if (baseRef.current === null) baseRef.current = bulkRemarksOf(draftComment);
 
   // Reported directly, traced to a real and serious data-loss mechanism
   // (2026-10-18, multiple teachers over several days — "all my comments
@@ -304,36 +312,19 @@ const StudentReportCard = forwardRef(function StudentReportCard({
   // landed — exactly what rapid-fire entry across a class roster would
   // trigger over and over. Guarded the same way flushIfDirty's own
   // comparison already does: never resync over an unsaved local edit.
+  // v5.280.0: compared with what was last loaded (baseRef), field by field —
+  // see remarkForm.js.
   const computeBulkDirty = () => {
     const { subjectComments: _sc, ...bulk } = comment;
-    const original = {
-      classTeacherName:   draftComment?.classTeacherName   ?? '',
-      classTeacherRemark: draftComment?.classTeacherRemark ?? '',
-      sportsAndTalent:    draftComment?.sportsAndTalent    ?? '',
-      principalName:      draftComment?.principalName      ?? '',
-      principalRemark:    draftComment?.principalRemark    ?? '',
-      closingDate:        draftComment?.closingDate        ?? '',
-      nextTermBegin:      draftComment?.nextTermBegin      ?? '',
-      observationRatings: draftComment?.observationRatings ?? {},
-    };
-    return { bulk, isDirty: JSON.stringify(bulk) !== JSON.stringify(original) };
+    return { bulk, isDirty: remarksDirty(bulk, baseRef.current) };
   };
 
   useEffect(() => {
     if (!draftComment) return;
-    if (computeBulkDirty().isDirty) return;
-    setComment({
-      classTeacherName:   draftComment.classTeacherName   ?? '',
-      classTeacherRemark: draftComment.classTeacherRemark ?? '',
-      sportsAndTalent:    draftComment.sportsAndTalent    ?? '',
-      principalName:      draftComment.principalName      ?? '',
-      principalRemark:    draftComment.principalRemark    ?? '',
-      closingDate:        draftComment.closingDate        ?? '',
-      nextTermBegin:      draftComment.nextTermBegin      ?? '',
-      subjectComments:    draftComment.subjectComments    ?? {},
-      observationRatings: draftComment.observationRatings ?? {},
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const base = baseRef.current;
+    const incoming = bulkRemarksOf(draftComment);
+    baseRef.current = incoming;
+    setComment(c => ({ ...mergeRemarks(c, base, incoming), subjectComments: draftComment.subjectComments ?? {} }));
   }, [draftComment]);
 
   const [saving, setSaving] = useState(false);
@@ -356,6 +347,7 @@ const StudentReportCard = forwardRef(function StudentReportCard({
     try {
       const { subjectComments: _subjectComments, ...rest } = comment;
       await onSaveComment(rest);
+      baseRef.current = rest;
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (err) {
@@ -376,6 +368,7 @@ const StudentReportCard = forwardRef(function StudentReportCard({
       if (!isDirty || !onSaveComment) return true;
       try {
         await onSaveComment(bulk);
+        baseRef.current = bulk;
         setSaved(true);
         setTimeout(() => setSaved(false), 2500);
         return true;
