@@ -51,7 +51,12 @@ let mockCurrentUser;
 jest.mock('../../middleware/auth', () => ({
   authMiddleware: (req, _res, next) => { req.jwtUser = mockCurrentUser; next(); },
 }));
-jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => next() }));
+// v5.279.3: settings routes check their own row strictly (hasExplicitSubGrant).
+let mockTicked = new Set();
+jest.mock('../../middleware/rbac', () => ({
+  rbac: () => (_req, _res, next) => next(),
+  hasExplicitSubGrant: async (_req, mod, sub, action) => mockTicked.has(`${mod}__${sub}:${action}`),
+}));
 jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) => next() }));
 jest.mock('../../utils/model', () => ({ _model: jest.fn((col) => mockStores[col]) }));
 
@@ -73,6 +78,7 @@ function buildApp() {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockTicked = new Set();
   mockCurrentUser = { userId: 'u_class_teacher', schoolId: SCHOOL, role: 'teacher', roles: [], name: 'Ms Class Teacher', email: 'ct@x.io' };
   mockStores = {
     report_card_draft_comments: makeStore(),
@@ -94,7 +100,10 @@ beforeEach(() => {
 
 async function configureChain(app, steps) {
   mockCurrentUser = { userId: 'u_principal', schoolId: SCHOOL, role: 'principal', roles: [] };
-  await supertest(app).put('/api/report-cards/workflow-config').send({ steps });
+  mockTicked = new Set(['report_cards__workflow:update']);
+  const res = await supertest(app).put('/api/report-cards/workflow-config').send({ steps });
+  mockTicked = new Set();
+  expect(res.status).toBe(200);
 }
 
 describe('legacy schools (no workflow_configs doc) — unaffected', () => {
@@ -114,6 +123,7 @@ describe('legacy schools (no workflow_configs doc) — unaffected', () => {
 });
 
 describe('PUT /workflow-config — save validation', () => {
+  beforeEach(() => { mockCurrentUser = { userId: 'u_admin', schoolId: SCHOOL, role: 'admin', roles: [] }; });
   test('accepts a single-step chain (minSteps=1, unlike leave_approval\'s 2)', async () => {
     const app = buildApp();
     const res = await supertest(app).put('/api/report-cards/workflow-config').send({
@@ -201,5 +211,40 @@ describe('configured chain — advance flow', () => {
       .send({ classId: 'cls_1', termNumber: 1, remark: 'Trying again.' });
     expect(res.status).toBe(400);
     expect(res.body.error.message).toMatch(/already completed/);
+  });
+});
+
+describe('v5.279.3 — report card settings follow their own rows', () => {
+  const TEACHER = { userId: 'u_t', schoolId: SCHOOL, role: 'teacher', roles: ['teacher'] };
+  const steps = [{ order: 1, assigneeType: 'role', assigneeValue: 'principal' }];
+
+  test('Edit on Manage Draft Comments alone does not open the workflow or the publication policy', async () => {
+    mockCurrentUser = TEACHER;
+    mockTicked = new Set(['report_cards__draft_comments:update']);
+    expect((await supertest(buildApp()).put('/api/report-cards/workflow-config').send({ steps })).status).toBe(403);
+    expect((await supertest(buildApp()).patch('/api/report-cards/publication-policy').send({})).status).toBe(403);
+    expect(mockStores.workflow_configs._docs()).toHaveLength(0);
+  });
+
+  test('the workflow row opens the workflow only', async () => {
+    mockCurrentUser = TEACHER;
+    mockTicked = new Set(['report_cards__workflow:update']);
+    expect((await supertest(buildApp()).put('/api/report-cards/workflow-config').send({ steps })).status).toBe(200);
+    expect((await supertest(buildApp()).patch('/api/report-cards/publication-policy').send({})).status).toBe(403);
+  });
+
+  test('the publication policy row opens the policy only', async () => {
+    mockCurrentUser = TEACHER;
+    mockTicked = new Set(['report_cards__publication_policy:update']);
+    mockStores.academic_config = makeStore();
+    expect((await supertest(buildApp()).patch('/api/report-cards/publication-policy').send({})).status).toBe(200);
+    expect((await supertest(buildApp()).put('/api/report-cards/workflow-config').send({ steps })).status).toBe(403);
+  });
+
+  test('an admin in either role field keeps both', async () => {
+    mockCurrentUser = { userId: 'u_x', schoolId: SCHOOL, role: 'teacher', roles: ['teacher', 'admin'] };
+    mockStores.academic_config = makeStore();
+    expect((await supertest(buildApp()).put('/api/report-cards/workflow-config').send({ steps })).status).toBe(200);
+    expect((await supertest(buildApp()).patch('/api/report-cards/publication-policy').send({})).status).toBe(200);
   });
 });

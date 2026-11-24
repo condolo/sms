@@ -146,6 +146,24 @@ async function _canPublishReportCards(req, role) {
   return viaReportCards || viaLegacyGrades;
 }
 
+/* v5.279.3 — report card settings follow their own Settings rows.
+   These routes used to pass anyone holding Report Cards "Edit" on any row
+   (rbac('report_cards','update') reads the module-wide grant). Ticking Edit
+   on "Manage Draft Comments" so teachers can write comments therefore also
+   let them change the approval workflow, the publication policy and the
+   report label by calling the API directly — the screens already hid those.
+   Each now needs what its screen needs: Admin, or its own row (strict, no
+   module-wide fallback), and the report label follows the Generate/Publish
+   right, exactly like the label box in ReportCardsTab.jsx. */
+function _isAdminCaller(req) {
+  const { role, roles = [] } = req.jwtUser || {};
+  return [role, ...(Array.isArray(roles) ? roles : [])].some(r => r === 'admin' || r === 'superadmin');
+}
+async function _canConfigureReportCards(req, sub) {
+  if (_isAdminCaller(req)) return true;
+  return hasExplicitSubGrant(req, 'report_cards', sub, 'update');
+}
+
 /* RC9 — pure decision functions, exported (like _resolveSnapComments) for
    direct unit testing without exercising the transaction-wrapped full
    /publish route. */
@@ -689,6 +707,9 @@ router.get('/cycle-label', authMiddleware, PLAN, MODGATE, rbac('report_cards', '
 router.put('/cycle-label', authMiddleware, PLAN, MODGATE, rbac('report_cards', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
+    if (!_isAdminCaller(req) && !(await _canPublishReportCards(req, req.jwtUser.role))) {
+      return E.forbidden(res, 'Setting the report label needs Admin, or Create on Report Card Settings → Generate / Publish Report Cards.');
+    }
     const { data, error } = _validate(CycleLabelSchema, req.body);
     if (error) return E.validation(res, error);
     const doc = await tenantModel('report_card_cycle_labels', tenantContext(req)).findOneAndUpdate(
@@ -2293,6 +2314,9 @@ router.get('/workflow-config', authMiddleware, PLAN, MODGATE, rbac('report_cards
 router.put('/workflow-config', authMiddleware, PLAN, MODGATE, rbac('report_cards', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
+    if (!(await _canConfigureReportCards(req, 'workflow'))) {
+      return E.forbidden(res, 'Changing the comment approval workflow needs Admin, or Edit on Report Card Settings → Configure Approval Workflow.');
+    }
     const { steps, notifyOnly } = req.body;
     const doc = await saveWorkflowConfig(tenantContext(req), schoolId, REPORT_COMMENT_WORKFLOW_KEY, { steps, notifyOnly }, userId, REPORT_COMMENT_MIN_STEPS);
     return ok(res, doc);
@@ -2319,6 +2343,9 @@ router.get('/publication-policy', authMiddleware, PLAN, MODGATE, rbac('report_ca
 router.patch('/publication-policy', authMiddleware, PLAN, MODGATE, rbac('report_cards', 'update'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
+    if (!(await _canConfigureReportCards(req, 'publication_policy'))) {
+      return E.forbidden(res, 'Changing the publication policy needs Admin, or Edit on Report Card Settings → Configure Publication Policy.');
+    }
     const updates = req.body || {};
     const invalidKeys = Object.keys(updates).filter(k => !PUBLICATION_POLICY_KEYS.includes(k));
     if (invalidKeys.length > 0) {

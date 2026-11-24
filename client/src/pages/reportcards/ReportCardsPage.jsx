@@ -32,7 +32,11 @@ export default function ReportCardsPage() {
   // v5.279.0: role floor, or its own Settings row ticked (the row itself, never the general module grant, so roles never re-saved in Settings look exactly as before). Report card settings
   // save through rbac('report_cards','update') (report-cards.js).
   const can = useAuthStore(s => s.can);
-  const canConfigure = ['admin', 'superadmin'].includes(role) || can('report_cards__workflow', 'update') || can('report_cards__publication_policy', 'update');
+  const isAdmin = ['admin', 'superadmin'].includes(role);
+  // v5.279.3: each of these settings is now checked on its own row by the server too.
+  const canWorkflow = isAdmin || can('report_cards__workflow', 'update');
+  const canPolicy   = isAdmin || can('report_cards__publication_policy', 'update');
+  const canConfigure = canWorkflow || canPolicy;
 
   const TABS = [
     { id: 'generate', label: 'Generate & Publish', icon: FileBarChart2, adminOnly: false },
@@ -92,7 +96,7 @@ export default function ReportCardsPage() {
           )}
           {tab === 'settings' && canConfigure && (
             <motion.div key="settings" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
-              <SettingsPanel />
+              <SettingsPanel canWorkflow={canWorkflow} canPolicy={canPolicy} />
             </motion.div>
           )}
         </AnimatePresence>

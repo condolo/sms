@@ -754,8 +754,12 @@ const SECTIONS = [
         a: 'Yes. Once published, students and parents can download their report card PDF from their portal. The PDF includes the Report ID, QR code for verification, and the school stamp and signature.',
       },
       {
+        q: "Teachers can't save subject comments. What do we tick?",
+        a: 'In Settings → Roles & Permissions, open the Teacher role, tick Edit on Report Card Settings → Manage Draft Comments, and Save. Teachers can then write comments only for the classes and subjects they teach, in the Markbook. It does not let them change the approval workflow, the publication policy or the report label: each of those needs its own row.',
+      },
+      {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• Generate / Publish Report Cards\n• Manage Draft Comments\n• Configure Approval Workflow\n• Configure Publication Policy (also opens the Report Cards → Settings tab)\n• Write the Principal\'s Remark\n• Unlock Published Comments\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
+        a: '• Generate / Publish Report Cards (also sets the report label, e.g. Mid-Term Report)\n• Manage Draft Comments (Edit lets teachers write subject comments in the Markbook)\n• Configure Approval Workflow (opens Settings → Workflow)\n• Configure Publication Policy (opens Settings → Publication Policy)\n• Write the Principal\'s Remark\n• Unlock Published Comments\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions. Ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },

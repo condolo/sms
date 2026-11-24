@@ -6,6 +6,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.279.3] - 2026-11-23 - fix(report-cards): report card settings follow their own Settings rows
+
+### Fixed
+- **Report card settings were open to anyone with Report Cards Edit on any row.** Ticking Edit on "Manage Draft Comments" so teachers can write subject comments also let them change these by calling the server directly (the screens already hid them):
+  - the comment approval workflow, which now needs Admin or Edit on **Configure Approval Workflow**;
+  - the publication policy, which now needs Admin or Edit on **Configure Publication Policy**;
+  - the report label (e.g. "Mid-Term Report"), which now needs Admin or Create on **Generate / Publish Report Cards**, the same right that shows the label box.
+- Report Cards → Settings shows the Workflow and Publication Policy tabs only to those allowed to change them.
+- Both rows are now strict when one person grants them to another (an admin can still grant them).
+
+### Help Centre
+- New article: which row to tick so teachers can save subject comments (Edit on **Manage Draft Comments**).
+
+No data changes. Admins and anyone with these rows ticked keep what they had; the screens already worked this way.
+
+---
+
 ## [v5.279.2] - 2026-11-23 - feat(markbook): comment status colours, one Save for marks and comments, progress line
 
 ### Changed

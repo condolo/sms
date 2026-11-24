@@ -59,12 +59,15 @@ const SUB_TABS = [
   { id: 'templates', label: 'Templates',           icon: LayoutTemplate },
 ];
 
-export default function SettingsPanel() {
+export default function SettingsPanel({ canWorkflow = true, canPolicy = true }) {
   const [subTab, setSubTab] = useState('general');
+  // v5.279.3: Workflow and Publication Policy show only to those allowed to
+  // change them (the server checks the same rows).
+  const tabs = SUB_TABS.filter(t => (t.id !== 'workflow' || canWorkflow) && (t.id !== 'policy' || canPolicy));
   return (
     <div className="space-y-4">
       <div className="flex gap-1 border-b border-slate-200 overflow-x-auto">
-        {SUB_TABS.map(t => {
+        {tabs.map(t => {
           const Icon = t.icon;
           const active = subTab === t.id;
           return (
@@ -89,8 +92,8 @@ export default function SettingsPanel() {
         </div>
       )}
       {subTab === 'comments'  && <CommentsSection />}
-      {subTab === 'workflow'  && <WorkflowSection />}
-      {subTab === 'policy'    && <PublicationPolicySection />}
+      {subTab === 'workflow'  && canWorkflow && <WorkflowSection />}
+      {subTab === 'policy'    && canPolicy && <PublicationPolicySection />}
       {subTab === 'templates' && (
         <div className="space-y-4">
           <TemplatesSection />

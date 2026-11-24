@@ -116,3 +116,26 @@ describe('PUT /report-cards/cycle-label', () => {
     expect(get.body.data.label).toBe('Mid-Term 1');
   });
 });
+
+describe('v5.279.3 — who may set the label', () => {
+  const { hasExplicitSubGrant } = require('../../middleware/rbac');
+  afterEach(() => {
+    mockUser = { schoolId: SCHOOL, userId: 'u_admin', role: 'admin' };
+    hasExplicitSubGrant.mockImplementation(async () => true);
+  });
+  const put = () => supertest(buildApp()).put('/api/report-cards/cycle-label').send({
+    classId: 'cls_1', termNumber: 1, academicYearId: 'ay_1', label: 'Mid-Term 1',
+  });
+
+  test('a teacher with Report Cards Edit for comments, but not Generate / Publish, is refused', async () => {
+    mockUser = { schoolId: SCHOOL, userId: 'u_t', role: 'teacher' };
+    hasExplicitSubGrant.mockImplementation(async () => false);
+    expect((await put()).status).toBe(403);
+  });
+
+  test('anyone allowed to publish report cards may set it, as the screen shows', async () => {
+    mockUser = { schoolId: SCHOOL, userId: 'u_p', role: 'principal' };
+    hasExplicitSubGrant.mockImplementation(async (_req, mod, sub, action) => mod === 'report_cards' && sub === 'report_generate' && action === 'create');
+    expect((await put()).status).toBe(200);
+  });
+});

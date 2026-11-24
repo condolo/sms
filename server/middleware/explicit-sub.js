@@ -84,6 +84,8 @@ const ROLE_FLOOR_SUB_KEYS = new Set([
   'hr__staff_overview', 'hr__payroll_release',
   'report_cards__principal_remark', 'report_cards__unlock_comments',
   'behaviour__export', 'lessons__plans_all', 'analytics__group',
+  // v5.279.3: report card settings now checked on their own rows.
+  'report_cards__workflow', 'report_cards__publication_policy',
 ]);
 
 module.exports = { explicitSub, withFinanceSubGrants, EXPLICIT_SUB_KEYS, FINANCE_SUB_GRANTS, ROLE_FLOOR_SUB_KEYS };
