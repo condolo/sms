@@ -62,7 +62,7 @@ jest.mock('../../utils/tenant-model', () => ({
   tenantContext: (req) => ({ schoolId: req?.jwtUser?.schoolId ?? null }),
   tenantModel: (collection) => {
     if (collection === 'assessment_marks') return mockCollection(mockMarkDocs);
-    if (collection === 'students')         return { findOne: jest.fn(() => mockChainObj(mockStudentDoc)) };
+    if (collection === 'students')         return { find: jest.fn(() => mockChainArr([])), findOne: jest.fn(() => mockChainObj(mockStudentDoc)) };
     if (collection === 'teaching_assignments') return mockCollection(mockAssignments);
     return mockCollection([]);
   },

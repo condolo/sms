@@ -148,6 +148,27 @@ describe('precheck', () => {
     expect(res.body.data.precheck.filter(p => p.level === 'error')).toEqual([]);
   });
 
+  test('a whole-class lesson of a subject now assigned per stream stays and counts for each stream (v5.282.1)', async () => {
+    mockDb.data.streams = [{ id: 's1', schoolId: S, classId: 'c2', name: 'X', status: 'active' }, { id: 's2', schoolId: S, classId: 'c2', name: 'Y', status: 'active' }];
+    const ta3 = mockDb.data.teaching_assignments.find(a => a.id === 'ta3');
+    Object.assign(ta3, { streamId: 's1', streamName: 'X' });
+    mockDb.data.teaching_assignments.push({ ...ta3, id: 'ta3b', streamId: 's2', streamName: 'Y' });
+    const pre = (await as(ADMIN).post('/api/timetable/generate/precheck').send(SCOPE)).body.data;
+    // Form 1B Maths: 3 a week per stream, 1 whole-class lesson already there: 2 + 2 left, not 3 + 3.
+    expect(pre.lessonsNeeded).toBe(9 - 3 + 2 + 2);
+    expect(pre.replaceable).toBe(0);
+    expect(pre.precheck.find(p => p.code === 'whole_class_lessons')).toBeTruthy();
+    expect(pre.precheck.find(p => p.code === 'needs_stream')).toBeFalsy();
+  });
+
+  test('a whole-class assignment beside stream ones is named, since its lessons would be placed twice (v5.282.1)', async () => {
+    mockDb.data.streams = [{ id: 's1', schoolId: S, classId: 'c2', name: 'X', status: 'active' }];
+    const ta3 = mockDb.data.teaching_assignments.find(a => a.id === 'ta3');
+    mockDb.data.teaching_assignments.push({ ...ta3, id: 'ta3b', streamId: 's1', streamName: 'X' });
+    const pre = (await as(ADMIN).post('/api/timetable/generate/precheck').send(SCOPE)).body.data;
+    expect(pre.precheck.find(p => p.code === 'needs_stream').message).toMatch(/Form 1B.*Mathematics.*Move to stream/);
+  });
+
   test('a scope with nothing to place says why, and generating it is refused', async () => {
     const pre = await as(ADMIN).post('/api/timetable/generate/precheck').send({ scope: { sectionKey: 'primary' } });
     expect(pre.body.data.precheck.some(p => p.code === 'nothing_to_place')).toBe(true);

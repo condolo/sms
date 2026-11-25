@@ -35,6 +35,7 @@ const { scopeMiddleware } = require('../middleware/scopeMiddleware');
 const ScopeEngine        = require('../utils/scopeEngine');
 const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
+const { subjectTeacherResolver } = require('../utils/subject-teacher-names');
 const { ok, created, paginate, parsePagination, E, fail } = require('../utils/response');
 const { rankStudents, mergeRankings, bestPerSubject, computeRankingScore } = require('../utils/ranking');
 const { mergeConfig, resolveGrade, resolveCurrentPeriod, OBSERVATION_RATING_VALUES, DEFAULT_GRADING_SCHEMA } = require('./academic-config');
@@ -2188,20 +2189,15 @@ router.get('/bulk-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), s
     // attendance already uses, rather than left silently blank.
     // Resolved AFTER the zero-match 404 check above — no point paying
     // for these queries on a request that's about to 404 anyway.
-    const [bulkSchool, bulkCaConfig, bulkAssignments, bulkSubjectDocs] = await Promise.all([
+    const [bulkSchool, bulkCaConfig, bulkTeachers, bulkSubjectDocs] = await Promise.all([
       _model('schools').findOne({ id: schoolId }, { name: 1, logoUrl: 1, tagline: 1, address: 1, phone: 1, email: 1, website: 1, country: 1, principalSignatureUrl: 1, schoolStampUrl: 1, principalName: 1, timezone: 1, reportCardWatermarkEnabled: 1, reportCardWatermarkOpacity: 1 }).lean().catch(() => null),
       _getAssessmentConfig(schoolId, req.query.academicYearId || null),
-      tenantModel('teaching_assignments', tenantContext(req))
-        .find({ schoolId, classId: req.query.classId }).select('subjectId teacherName').lean().catch(() => []),
+      subjectTeacherResolver(tenantContext(req), schoolId, req.query.classId),
       tenantModel('subjects', tenantContext(req)).find({ schoolId }).select('id name').lean().catch(() => []),
     ]);
-    const bulkSubjectTeacherNames = {};
-    for (const a of bulkAssignments) {
-      if (!bulkSubjectTeacherNames[a.subjectId]) bulkSubjectTeacherNames[a.subjectId] = a.teacherName || '';
-    }
     const bulkSubjectNames = Object.fromEntries(bulkSubjectDocs.map(s => [s.id, s.name]));
     const bulkExtraBase = {
-      school: bulkSchool, subjectTeacherNames: bulkSubjectTeacherNames, subjectNames: bulkSubjectNames,
+      school: bulkSchool, subjectNames: bulkSubjectNames,
       subjectTeacherCommentsEnabled: bulkCaConfig.subjectTeacherCommentsEnabled !== false,
     };
 
@@ -2251,6 +2247,7 @@ router.get('/bulk-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), s
         if (snap.financialBlock && req.query.force !== '1' && !isAdmin) continue; // skip blocked
         const studentExtra = {
           ...bulkExtraBase,
+          subjectTeacherNames: bulkTeachers(snap.streamId),   // this student's stream
           behaviour:   behaviourResults[i],
           deviations:  computeTermDeviation(snap.subjects, deviationResults[i]?.subjects),
         };
@@ -2674,7 +2671,7 @@ async function _fetchSignatureImages(snap) {
    comments disabled would still see them in a downloaded PDF. One
    helper now, used by both, so they can never drift apart again. */
 async function _loadRenderExtras(req, schoolId, snap) {
-  const [school, behaviour, prevSnap, caConfig, assignments, subjectDocs] = await Promise.all([
+  const [school, behaviour, prevSnap, caConfig, teachersFor, subjectDocs] = await Promise.all([
     // principalSignatureUrl/schoolStampUrl added as the live fallback
     // _computeReportSections' signatures block now reads when a snapshot
     // predates this field being frozen at publish time (every snapshot
@@ -2689,9 +2686,7 @@ async function _loadRenderExtras(req, schoolId, snap) {
         }).lean().catch(() => null)
       : Promise.resolve(null),
     _getAssessmentConfig(schoolId, snap.academicYearId ?? null),
-    tenantModel('teaching_assignments', tenantContext(req))
-      .find({ schoolId, classId: snap.classId, subjectId: { $in: Object.keys(snap.subjects || {}) } })
-      .select('subjectId teacherName').lean().catch(() => []),
+    subjectTeacherResolver(tenantContext(req), schoolId, snap.classId, Object.keys(snap.subjects || {})),
     // Real subject names — report cards were printing the raw subjectId
     // (e.g. "subj_demo_bio") on every subject row and in every subject
     // comment, since nothing ever resolved it to the subjects collection's
@@ -2703,13 +2698,8 @@ async function _loadRenderExtras(req, schoolId, snap) {
       .select('id name').lean().catch(() => []),
   ]);
   const deviations = computeTermDeviation(snap.subjects, prevSnap?.subjects);
-  // First assignment found per subject wins — a subject could in theory
-  // have more than one teaching_assignments doc (co-teaching); the
-  // report shows one name, not a list.
-  const subjectTeacherNames = {};
-  for (const a of assignments) {
-    if (!subjectTeacherNames[a.subjectId]) subjectTeacherNames[a.subjectId] = a.teacherName || '';
-  }
+  // The stream the student was in when this was published decides (utils/subject-teacher-names.js).
+  const subjectTeacherNames = teachersFor(snap.streamId);
   const subjectNames = Object.fromEntries(subjectDocs.map(s => [s.id, s.name]));
   return {
     school, behaviour, deviations, subjectTeacherNames, subjectNames,
@@ -3555,15 +3545,7 @@ router.post('/preview-html', authMiddleware, PLAN, MODGATE, rbac('grades', 'read
     // Same subject-teacher resolution _loadRenderExtras does for a
     // published snapshot — see classId's own schema comment above for
     // why this needed a new field, not just a new query.
-    const assignmentDocs = classId
-      ? await tenantModel('teaching_assignments', tenantContext(req))
-          .find({ schoolId, classId, subjectId: { $in: Object.keys(student.subjects || {}) } })
-          .select('subjectId teacherName').lean().catch(() => [])
-      : [];
-    const subjectTeacherNames = {};
-    for (const a of assignmentDocs) {
-      if (!subjectTeacherNames[a.subjectId]) subjectTeacherNames[a.subjectId] = a.teacherName || '';
-    }
+    const subjectTeacherNames = (await subjectTeacherResolver(tenantContext(req), schoolId, classId, Object.keys(student.subjects || {})))(previewStudentDoc?.streamId);
 
     // The client's `school` (useAuthStore session data) never carries
     // principalSignatureUrl/schoolStampUrl — those aren't session fields —
@@ -3694,15 +3676,7 @@ router.post('/preview-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'
       .select('id name').lean().catch(() => []);
     const subjectNames = Object.fromEntries(subjectDocs.map(s => [s.id, s.name]));
 
-    const assignmentDocs = classId
-      ? await tenantModel('teaching_assignments', tenantContext(req))
-          .find({ schoolId, classId, subjectId: { $in: Object.keys(student.subjects || {}) } })
-          .select('subjectId teacherName').lean().catch(() => [])
-      : [];
-    const subjectTeacherNames = {};
-    for (const a of assignmentDocs) {
-      if (!subjectTeacherNames[a.subjectId]) subjectTeacherNames[a.subjectId] = a.teacherName || '';
-    }
+    const subjectTeacherNames = (await subjectTeacherResolver(tenantContext(req), schoolId, classId, Object.keys(student.subjects || {})))(previewStudentDoc?.streamId);
 
     const signOffDoc = await _model('schools').findOne({ id: schoolId }, { principalSignatureUrl: 1, schoolStampUrl: 1, principalName: 1, timezone: 1, address: 1, tagline: 1, email: 1, phone: 1, website: 1, country: 1, reportCardWatermarkEnabled: 1, reportCardWatermarkOpacity: 1 }).lean().catch(() => null);
     const schoolWithSignOff = {

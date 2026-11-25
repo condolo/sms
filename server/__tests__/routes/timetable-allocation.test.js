@@ -202,6 +202,16 @@ describe('PUT /api/teaching-assignments/:id/teacher — change who teaches it', 
     expect(mockDb.data.timetable.find(l => l.id === 'l1').teacherId).toBe('u1');
   });
 
+  test.each([[1, 'u2'], [2, 'u1']])('a stream row in a class with %i stream(s): whole-class lessons go to %s (v5.282.1)', async (n, want) => {
+    mockDb.data.streams = [{ id: 's7a', schoolId: S, classId: 'c7', name: '7A', status: 'active' }, { id: 's7b', schoolId: S, classId: 'c7', name: '7B', status: 'active' }].slice(0, n);
+    mockDb.data.teaching_assignments[0].streamId = 's7a';
+    mockDb.data.timetable.push(lesson('l4', 'wednesday', '08:00', '08:40', { streamId: 's7a' }), lesson('l5', 'thursday', '08:00', '08:40', { streamId: 'other' }));
+    const res = await as(TIMETABLER).put('/api/teaching-assignments/a1/teacher').send({ teacherId: 'u2', moveLessons: true });
+    expect(res.status).toBe(200);
+    const of = (id) => mockDb.data.timetable.find(l => l.id === id).teacherId;
+    expect([of('l1'), of('l2'), of('l4'), of('l5'), of('l3')]).toEqual([want, want, 'u2', 'u1', 'u1']);
+  });
+
   test('refuses the same teacher, a duplicate, an unknown teacher, and another school\x27s teacher', async () => {
     expect((await as(TIMETABLER).put('/api/teaching-assignments/a1/teacher').send({ teacherId: 't1' })).status).toBe(400);
     mockDb.data.teaching_assignments.push({ id: 'a2', schoolId: S, classId: 'c7', subjectId: 'mat', teacherId: 'u2', streamId: null });

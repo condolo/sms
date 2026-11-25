@@ -138,6 +138,15 @@ describe('_loadRenderExtras', () => {
     expect(extra.subjectTeacherNames.math).toBe('Collins Ndolo');
   });
 
+  test('names the teacher of the stream the report was published for, not the first in the class (v5.282.1)', async () => {
+    mockAssignments = [
+      { subjectId: 'math', teacherId: 'u1', teacherName: 'Collins Ndolo', streamId: '7a' },
+      { subjectId: 'math', teacherId: 'u2', teacherName: 'Second Teacher', streamId: '7b' },
+    ];
+    const of = async (streamId) => (await reportCardsRouter._loadRenderExtras({}, 'sch_1', baseSnap({ streamId }))).subjectTeacherNames.math;
+    expect([await of('7a'), await of('7b'), await of('7c')]).toEqual(['Collins Ndolo', 'Second Teacher', undefined]);
+  });
+
   test('respects the school\'s subjectTeacherCommentsEnabled=false setting', async () => {
     mockCaConfig = { subjectTeacherCommentsEnabled: false };
     const extra = await reportCardsRouter._loadRenderExtras({}, 'sch_1', baseSnap());

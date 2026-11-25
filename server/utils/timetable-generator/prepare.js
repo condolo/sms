@@ -243,6 +243,16 @@ async function buildProblem(schoolId, ctx, scope = {}) {
   };
   const targetToUnit = new Map();
   for (const g of unitGroups.values()) for (const a of g.rows) targetToUnit.set(rowTargetKey(g.k, a.streamId, a.subjectId), g.key);
+  // A whole-class lesson of a subject now assigned per stream teaches every stream, as in
+  // "Lessons to place" (v5.282.1): it stays, and counts towards each stream's lessons.
+  // Without this the generator placed the stream's full week on top of it.
+  const streamUnitsOf = new Map();   // class|subject → unit keys of its stream rows
+  for (const g of unitGroups.values()) {
+    if (g.elective || !g.rows.some(a => a.streamId)) continue;
+    const key = `${g.k}|${g.subjectId}`;
+    if (!streamUnitsOf.has(key)) streamUnitsOf.set(key, new Set());
+    streamUnitsOf.get(key).add(g.key);
+  }
   const subjectOf = l => (l.subjectId ? subjectById.get(l.subjectId) : null) || (l.subject ? subjectByName.get(l.subject.trim().toLowerCase()) : null);
 
   // ── Fixed lessons: everything outside the scope, locked lessons in it, and
@@ -254,6 +264,7 @@ async function buildProblem(schoolId, ctx, scope = {}) {
   const replaceable = [];
   let untimedIgnored = 0;
   let keptInScope = 0;
+  let coveringStreams = 0;
   const lockedBy = new Map();   // unit group key → locked lesson periods already covering it
   for (const l of lessons) {
     const k = ck(l.classId);
@@ -262,7 +273,11 @@ async function buildProblem(schoolId, ctx, scope = {}) {
     const tKeys = inScope && subj ? lessonTargetKeys(k, l, subj.id) : [];
     const unitKey = tKeys.map(t => targetToUnit.get(t)).find(Boolean) || null;
     if (inScope && !l.locked && unitKey) { replaceable.push(l); continue; }
-    if (inScope && !l.locked) keptInScope += 1;
+    const covers = !unitKey && inScope && subj && !isElec(k, subj.id) && !lessonStreams(l) ? streamUnitsOf.get(`${k}|${subj.id}`) : null;
+    if (covers) {
+      coveringStreams += 1;
+      for (const u of covers) lockedBy.set(u, (lockedBy.get(u) || 0) + 1);
+    } else if (inScope && !l.locked) keptInScope += 1;
     let { startTime, endTime } = l;
     if (!startTime || !endTime) {
       // Old lessons saved without times: take them from the class's bell schedule.
@@ -284,6 +299,9 @@ async function buildProblem(schoolId, ctx, scope = {}) {
     if (inScope && l.locked && unitKey) lockedBy.set(unitKey, (lockedBy.get(unitKey) || 0) + 1);
   }
   if (keptInScope) add('warning', 'kept_lessons', `${keptInScope} unlocked lesson${keptInScope === 1 ? '' : 's'} in this scope ${keptInScope === 1 ? 'is for a subject' : 'are for subjects'} with no periods per week set, so ${keptInScope === 1 ? 'it stays' : 'they stay'} where ${keptInScope === 1 ? 'it is' : 'they are'} and the generator works around ${keptInScope === 1 ? 'it' : 'them'}.`);
+  if (coveringStreams) add('warning', 'whole_class_lessons', `${coveringStreams} whole-class lesson${coveringStreams === 1 ? '' : 's'} of subjects now assigned per stream ${coveringStreams === 1 ? 'stays' : 'stay'} where ${coveringStreams === 1 ? 'it is' : 'they are'} and count${coveringStreams === 1 ? 's' : ''} for every stream. Delete ${coveringStreams === 1 ? 'it' : 'them'} first to place each stream separately.`);
+  const leftover = [...unitGroups.values()].filter(g => !g.elective && g.rows.some(a => !a.streamId) && streamUnitsOf.has(`${g.k}|${g.subjectId}`) && !g.rows.some(a => a.streamId));
+  if (leftover.length) add('warning', 'needs_stream', `${leftover.length} assignment${leftover.length === 1 ? ' is' : 's are'} for the whole class of a subject that is also assigned per stream, so its lessons would be placed twice: ${leftover.slice(0, 5).map(g => rowLabel(g.rows[0], g.k)).join('; ')}. Use Move to stream or remove ${leftover.length === 1 ? 'it' : 'them'} in Subject allocation.`);
   if (untimedIgnored) add('warning', 'untimed', `${untimedIgnored} lesson${untimedIgnored === 1 ? '' : 's'} ha${untimedIgnored === 1 ? 's' : 've'} a period that isn't in its class's bell schedule, so ${untimedIgnored === 1 ? 'it was' : 'they were'} ignored when checking for clashes.`);
 
   // ── Units: one per period to place, from each unit group ────

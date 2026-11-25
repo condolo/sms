@@ -64,6 +64,7 @@ const { canWriteSubject, unassignedPairs, isManagement } = require('../utils/sub
 const { isElective, isInCurriculum, electiveMarkProblem, pairsNotInCurriculum, canTeachElective } = require('../utils/elective-scope');
 const { isYearArchived } = require('../utils/archival');
 const ScopeEngine         = require('../utils/scopeEngine');
+const { includeUnstamped } = require('../utils/unstamped-records');
 const { restrictToTaught } = require('../utils/teaching-scope');
 const { scopeMiddleware } = require('../middleware/scopeMiddleware');
 const { resolveRcTemplate, effectiveBandsForSubjectId, isBandOnlySubject } = require('../utils/rc-template-scale');
@@ -132,6 +133,7 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), scopeMidd
     // grades:read holder is narrowed to their own class/stream scope and
     // the subjects they actually teach, not every mark in the school.
     ScopeEngine.applyToFilter(req, 'assessment', filter);
+    await includeUnstamped(req, filter);   // marks saved before the class had streams
     await restrictToTaught(req, filter);
 
     const docs = await tenantModel('indicator_marks', tenantContext(req)).find(filter)

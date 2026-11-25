@@ -6,6 +6,21 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.282.1] - 2026-11-25 - fix: report cards name the right subject teacher; v5.282.0 audit fixes
+
+### Fixed
+- **Report cards could name another stream's teacher.** They took the first assignment found for the subject in the class and ignored the stream (and a leftover whole-class row could win). Now: the teacher of the student's own stream, else a whole-class teacher, else no name. A published report uses the stream it was published for; an elective's teacher counts for every stream. Single and bulk PDF, on-screen report and both previews use the same rule. Imported assignments with no stored name use the staff record.
+
+Found auditing v5.282.0:
+- **Marks, KG marks and registers saved before a class had streams were hidden from a stream's teacher**, so the Markbook or register looked empty. They now see those records for the students in their own stream, and no others. Saved records are not changed.
+- **A mark saved before streams can be removed by the stream's teacher** (it was refused).
+- **The timetable generator placed a stream's full week on top of whole-class lessons already there.** Those lessons now stay and count towards each stream, as in Lessons to place. The pre-check names whole-class assignments that would be placed twice.
+- **Change teacher → move lessons** on a stream row left whole-class lessons with the old teacher. They move too when the class has one stream. With several, they stay: they are also the other streams' lessons.
+
+No data migration, no permission change.
+
+---
+
 ## [v5.282.0] - 2026-11-25 - feat(timetable): move a leftover whole-class teacher to their stream
 
 Reported by a school: in KG1 - RUBY, Subject allocation kept refusing the correct CRE teacher. The row being edited was a leftover: its teacher had been assigned to the whole class, and the class now needs one teacher per stream. **Add teacher** there was always refused ("select which stream this teacher covers") with no stream to select, and the row to use, the stream's own, was much further down.

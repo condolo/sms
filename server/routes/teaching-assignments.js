@@ -57,6 +57,7 @@ const { ok, created, E }      = require('../utils/response');
 const { invalidateScopeCache } = require('../middleware/scopeMiddleware');
 const { checkConflicts } = require('../utils/timetable-conflicts');
 const { markTimetableChanged } = require('../utils/timetable-publish');
+const { WHOLE_CLASS } = require('../utils/lesson-audience');
 
 const router = express.Router();
 
@@ -574,6 +575,10 @@ router.put('/:id/teacher', authMiddleware, async (req, res) => { // rbac: canMan
       const cls = await tenantModel('classes', tenantContext(req)).findOne(_classQuery(schoolId, existing.classId)).select('id').lean();
       const classForms = [...new Set([existing.classId, cls?.id, cls?._id && String(cls._id)].filter(Boolean))];
       const streamClause = existing.streamId ? [{ streamId: existing.streamId }, { streamIds: existing.streamId }] : null;
+      // The class's only stream: its whole-class lessons are this stream's too (v5.282.1).
+      if (streamClause && await tenantModel('streams', tenantContext(req)).countDocuments({ schoolId, classId: { $in: classForms }, status: 'active' }) === 1) {
+        streamClause.push(WHOLE_CLASS);
+      }
       lessons = await tenantModel('timetable', tenantContext(req)).find({
         schoolId, isActive: true, classId: { $in: classForms },
         $and: [

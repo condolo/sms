@@ -13,6 +13,7 @@ const { rbac, hasExplicitSubGrant } = require('../middleware/rbac');
 const { planGate }        = require('../middleware/plan');
 const { scopeMiddleware } = require('../middleware/scopeMiddleware');
 const ScopeEngine         = require('../utils/scopeEngine');
+const { includeUnstamped } = require('../utils/unstamped-records');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { isElective, enrolledStudentIds, canTeachElective } = require('../utils/elective-scope');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
@@ -192,6 +193,7 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('attendance', 'read'), scope
     const originalScope = req.scope;
     req.scope = await ScopeEngine.resolveAttendanceScope(req);
     ScopeEngine.applyToFilter(req, 'attendance', filter);
+    await includeUnstamped(req, filter);   // registers saved before the class had streams
     req.scope = originalScope;
 
     const Attendance = tenantModel('attendance', tenantContext(req));
@@ -230,6 +232,7 @@ router.get('/summary', authMiddleware, PLAN, MODGATE, rbac('attendance', 'read')
     const originalScope = req.scope;
     req.scope = await ScopeEngine.resolveAttendanceScope(req);
     ScopeEngine.applyToFilter(req, 'attendance', filter);
+    await includeUnstamped(req, filter);   // registers saved before the class had streams
     req.scope = originalScope;
 
     // No classId/studentId -> one school-wide aggregate (a single object,

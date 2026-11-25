@@ -33,6 +33,7 @@ const { canWriteSubject, unassignedPairs } = require('../utils/subject-scope');
 const { isElective, electiveMarkProblem, isInCurriculum, pairsNotInCurriculum, enrolledStudentIds } = require('../utils/elective-scope');
 const { restrictToTaught, taughtSubjectIds, taughtPairs } = require('../utils/teaching-scope');
 const ScopeEngine         = require('../utils/scopeEngine');
+const { includeUnstamped } = require('../utils/unstamped-records');
 const { scopeMiddleware } = require('../middleware/scopeMiddleware');
 const { MARK_STATES }     = require('../utils/mark-states');
 const PDFDocument         = require('pdfkit');
@@ -939,6 +940,7 @@ router.get('/marks', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), scop
     // this route had none at all before, so any grades:read holder could
     // list every mark in the school regardless of class/stream assignment.
     ScopeEngine.applyToFilter(req, 'assessment', filter);
+    await includeUnstamped(req, filter);   // marks saved before the class had streams
     // Class and stream scope does not narrow by subject: only the subjects this caller teaches.
     await restrictToTaught(req, filter);
 
@@ -1595,9 +1597,12 @@ router.delete('/marks/:id', authMiddleware, PLAN, MODGATE, rbac('grades', 'delet
     // turned on for every other write path. Closed here using the exact
     // same helper, not a new mechanism, since it's the natural counterpart
     // to the write-side check that already existed for POST.
-    const target = await Marks.findOne({ id: req.params.id, schoolId }).select('classId subjectId streamId').lean();
+    const target = await Marks.findOne({ id: req.params.id, schoolId }).select('classId subjectId streamId studentId').lean();
     if (!target) return E.notFound(res, 'Mark not found');
-    if (!(await canWriteSubject(req, target.classId, target.subjectId, target.streamId))) {
+    // Saved before the class had streams: the student's stream now decides (v5.282.1).
+    const targetStream = target.streamId || (await tenantModel('students', tenantContext(req))
+      .findOne({ schoolId, id: target.studentId, classId: target.classId }).select('streamId').lean())?.streamId;
+    if (!(await canWriteSubject(req, target.classId, target.subjectId, targetStream))) {
       return _err(res, 'You are not assigned to teach this subject in this class.', 403);
     }
 
