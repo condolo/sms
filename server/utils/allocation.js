@@ -130,6 +130,11 @@ function computeAllocation({ classes = [], streams = [], classSubjects = [], sub
   const placement = computePlacement({ assignments: [...assignments, ...standIns], slots, classes, subjects, teachers });
   const placedBy = new Map(placement.classes.map(g => [rowKey(g.classId, g.streamId, g.subjectId), g]));
 
+  /* A leftover whole-class row sits beside its stream rows (v5.282.0). Sorted as
+     "no stream" it came first in the class, far from the row to use instead. */
+  const LEFTOVER = 'whole_class_row_for_streamed_subject';
+  const sortStream = (r) => (r.note === LEFTOVER ? streamsByClass.get(r.classId)?.[0]?.name : r.streamName);
+
   const out = [...rows.values()].map(r => {
     const g = placedBy.get(r.key);
     const linkedOnce = new Set();
@@ -148,12 +153,19 @@ function computeAllocation({ classes = [], streams = [], classSubjects = [], sub
     const away = r.assignments.filter(a => a.teacherStatus !== 'active');
     return {
       ...r, needed, doubles, placed, status, taughtTogether: linkedOnce.size > 0,
+      // Streams this leftover row can be moved to (PUT /teaching-assignments/:id/streams), and who has each.
+      ...(r.note === LEFTOVER ? {
+        moveTo: (streamsByClass.get(r.classId) || []).map(s => ({
+          ...s, teachers: (rows.get(rowKey(r.classId, s.id, r.subjectId))?.assignments || []).map(a => ({ key: a.teacherKey, name: a.teacherName })),
+        })),
+      } : {}),
       teacherOnLeave: away.some(a => a.teacherStatus === 'on_leave'),
       teacherNotCurrent: away.some(a => ['inactive', 'terminated', 'unknown'].includes(a.teacherStatus)),
     };
   }).sort((x, y) =>
     (x.classOrder ?? 9999) - (y.classOrder ?? 9999) || byText(x.className, y.className)
-    || byText(x.streamName, y.streamName) || byText(x.subjectName, y.subjectName));
+    || byText(sortStream(x), sortStream(y)) || byText(x.subjectName, y.subjectName)
+    || (y.note === LEFTOVER) - (x.note === LEFTOVER));
 
   // ── Teachers, including those with nothing assigned ─────────
   const tRows = new Map();
@@ -185,6 +197,7 @@ function computeAllocation({ classes = [], streams = [], classSubjects = [], sub
     over: out.filter(r => r.status === 'over').length,
     done: out.filter(r => r.status === 'done').length,
     outsideCurriculum: out.filter(r => !r.inCurriculum).length,
+    needsStream: out.filter(r => r.note === LEFTOVER).length,
     teachers: teacherRows.length,
     teachersWithNoClasses: teacherRows.filter(t => t.status === 'no_classes' && t.staffStatus === 'active').length,
     rowsTeacherOnLeave: out.filter(r => r.teacherOnLeave).length,

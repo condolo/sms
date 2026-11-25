@@ -24,6 +24,9 @@
    of lessons (co-teaching and/or combined streams). POST /:id/link,
    POST /:id/unlink; see the section near the end of this file.
 
+   Leftover whole-class rows (v5.282.0): a row saved before the stream
+   rule applied to it. PUT /:id/streams turns it into stream rows.
+
    This feeds:
      - Timetable slot editor auto-fill (GET ?classId=X&subjectId=Y&streamId=Z)
      - Teacher profile "Assignments" tab (GET ?teacherId=X)
@@ -627,6 +630,100 @@ router.put('/:id/teacher', authMiddleware, async (req, res) => { // rbac: canMan
     return ok(res, { assignment: updated, movedLessons: moved });
   } catch (err) {
     console.error('[teaching-assignments PUT /:id/teacher]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ── PUT /api/teaching-assignments/:id/streams — a leftover whole-class row → its stream(s) (v5.282.0) ──
+   Body: { streamIds: [..], together?: boolean }
+   Reported 2026-11-25: a teacher assigned to a whole class before the class had a
+   stream (or before the subject was compulsory there) is left on a row no teacher can
+   be added to, beside a new stream row with no teacher. This turns that row into the
+   stream row(s) the school chooses, keeping the teacher, lessons per week, doubles and
+   room. The first stream keeps the row (and its id); each other stream gets a copy.
+   together: several streams are one set of lessons (lessonGroupId).
+   Draft lessons are not touched: a whole-class lesson already counts for every stream
+   (utils/timetable-placement.js). Records already taken don't reference this row. */
+router.put('/:id/streams', authMiddleware, async (req, res) => { // rbac: canManage() below — real-role check
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const ids = Array.isArray(req.body?.streamIds)
+      ? [...new Set(req.body.streamIds.filter(s => typeof s === 'string' && s.trim()).map(s => s.trim()))] : [];
+    if (!ids.length || ids.length > 20) return E.badRequest(res, 'Choose the stream this teacher teaches.');
+    const together = req.body?.together === true && ids.length > 1;
+
+    const TA = tenantModel('teaching_assignments', tenantContext(req));
+    const existing = await TA.findOne({ id: req.params.id, schoolId }).lean();
+    if (!existing) return E.notFound(res, 'Assignment not found');
+    if (!(await canManage(req, existing.departmentId))) return E.forbidden(res);
+    if (existing.streamId) return E.badRequest(res, 'This assignment already has a stream.');
+    if (existing.lessonGroupId) {
+      return E.badRequest(res, 'This row is taught together with another teacher. Open Together, separate them, then move each one to its stream.');
+    }
+
+    const cls = await tenantModel('classes', tenantContext(req)).findOne(_classQuery(schoolId, existing.classId)).lean();
+    if (!cls) return E.notFound(res, 'Class not found');
+    const classForms = [...new Set([existing.classId, cls.id, cls._id && String(cls._id)].filter(Boolean).map(String))];
+
+    const link = await tenantModel('class_subjects', tenantContext(req))
+      .findOne({ schoolId, classId: { $in: classForms }, subjectId: existing.subjectId, isActive: { $ne: false } }).lean();
+    if (!link?.isCompulsoryForClass) {
+      return E.badRequest(res, 'This subject is not compulsory in this class, so its teacher covers the whole class. There is nothing to move.');
+    }
+
+    const active = await tenantModel('streams', tenantContext(req))
+      .find({ schoolId, classId: { $in: classForms }, status: 'active' }).select('id name').lean();
+    const byId = new Map(active.map(s => [s.id || String(s._id), s]));
+    const streams = ids.map(id => ({ id, name: byId.get(id)?.name }));
+    if (ids.some(id => !byId.has(id))) return E.notFound(res, 'Stream not found in this class');
+
+    const teacher = await tenantModel('teachers', tenantContext(req))
+      .findOne({ schoolId, $or: [{ userId: existing.teacherId }, { id: existing.teacherId }] }).lean();
+    if (!teacher) return E.badRequest(res, 'This teacher has no staff record. Remove this row and assign a current teacher to the stream.');
+    const statusErr = _teacherStatusProblem(teacher);
+    if (statusErr) return E.badRequest(res, `${statusErr.split('.')[0]}. Remove this row and assign a current teacher to the stream.`);
+
+    const already = await TA.find({
+      schoolId, classId: { $in: classForms }, subjectId: existing.subjectId, streamId: { $in: ids },
+      teacherId: { $in: [...new Set([existing.teacherId, teacher.userId, teacher.id].filter(Boolean))] },
+    }).select('streamId').lean();
+    if (already.length) {
+      const names = [...new Set(already.map(a => byId.get(String(a.streamId))?.name))].filter(Boolean).join(', ');
+      return E.conflict(res, already.length >= ids.length
+        ? `This teacher already has this subject in ${names}. Remove this old row instead.`
+        : `This teacher already has this subject in ${names}. Choose only the other stream(s).`);
+    }
+
+    const now = new Date().toISOString();
+    const groupId = together ? uuidv4() : null;
+    const shared = { lessonGroupId: groupId, updatedBy: userId, updatedAt: now, movedFromWholeClassAt: now };
+    const copies = streams.slice(1).map(s => {
+      const { _id, __v, createdAt, ...rest } = existing;
+      return { ...rest, id: uuidv4(), streamId: s.id, streamName: s.name, assignedBy: userId, assignedByRole: req.jwtUser?.role ?? '', ...shared };
+    });
+    const undoCopies = () => (copies.length ? TA.deleteMany({ schoolId, id: { $in: copies.map(c => c.id) } }) : null);
+    let updated;
+    try {
+      if (copies.length) await TA.insertMany(copies);
+      // Only if it is still a whole-class row with this teacher: someone else may have changed it meanwhile.
+      updated = await TA.findOneAndUpdate(
+        { id: existing.id, schoolId, teacherId: existing.teacherId, $or: [{ streamId: null }, { streamId: '' }] },
+        { $set: { streamId: streams[0].id, streamName: streams[0].name, ...shared } },
+        { new: true },
+      ).lean();
+    } catch (err) {
+      await undoCopies();
+      throw err;
+    }
+    if (!updated) {
+      await undoCopies();
+      return E.conflict(res, 'This row was changed by someone else. Refresh and try again.');
+    }
+
+    invalidateScopeCache(existing.teacherId, schoolId);
+    return ok(res, { assignment: updated, created: copies.map(c => ({ id: c.id, streamId: c.streamId, streamName: c.streamName })) });
+  } catch (err) {
+    console.error('[teaching-assignments PUT /:id/streams]', err);
     return E.serverError(res);
   }
 });

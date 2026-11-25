@@ -1124,6 +1124,8 @@ export const teachingAssignments = {
   /** Change who teaches it, in place (v5.273.0); moveLessons also hands over the draft lessons. */
   changeTeacher: (id, teacherId, moveLessons = false) => _put(`/teaching-assignments/${id}/teacher`, { teacherId, moveLessons }),
   unlink: (id)         => _post(`/teaching-assignments/${id}/unlink`),
+  /** Turn a leftover whole-class row into stream rows (v5.282.0); together = one set of lessons. */
+  moveToStreams: (id, streamIds, together = false) => _put(`/teaching-assignments/${id}/streams`, { streamIds, together }),
   /** Convenience: find the teacher assigned to a subject in a class (and,
       for compulsory subjects with separate per-stream teachers, the stream) */
   lookup: (classId, subjectId, streamId) =>

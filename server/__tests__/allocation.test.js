@@ -66,6 +66,20 @@ describe('rows: one per curriculum entry', () => {
     expect(r.rows.find(x => x.className === 'Year 7' && !x.streamId && x.subjectName === 'Maths').note).toBe('whole_class_row_for_streamed_subject');
   });
 
+  test('that leftover row sits just above the stream row to use, and says where it can move (v5.282.0)', () => {
+    const r = run({ assignments: [{ id: 'a8', classId: 'c7', subjectId: 'mat', teacherId: 'u2', periodsPerWeek: 5 }] });
+    expect(r.rows.map(x => `${x.className}|${x.streamName || '-'}|${x.subjectName}`)).toEqual([
+      'Year 7|-|Art', 'Year 7|-|Maths', 'Year 7|7A|Maths', 'Year 7|7B|Maths', 'Year 8|-|English',
+    ]);
+    const left = r.rows[1];
+    expect(left.moveTo).toEqual([
+      { id: 's7a', name: '7A', teachers: [{ key: 't1', name: 'Agnes K' }] },
+      { id: 's7b', name: '7B', teachers: [] },
+    ]);
+    expect(r.rows.filter(x => x !== left).every(x => x.moveTo === undefined)).toBe(true);
+    expect(r.summary.needsStream).toBe(1);
+  });
+
   test('two teachers taught together count one set of lessons', () => {
     const r = run({ assignments: [
       { id: 'b1', classId: 'c7', streamId: 's7b', subjectId: 'mat', teacherId: 'u1', periodsPerWeek: 4, lessonGroupId: 'g1' },

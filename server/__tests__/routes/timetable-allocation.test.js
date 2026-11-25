@@ -126,6 +126,21 @@ describe('GET /api/timetable/allocation', () => {
     expect(names).toEqual(expect.arrayContaining(['Ms. Agnes K:ok', 'Mr. Ben O:no_classes', 'Cleo N:no_classes']));
     expect(names.join()).not.toMatch(/Other School/);
   });
+  test('a leftover whole-class row says how many active students of this school are in no active stream (v5.282.0)', async () => {
+    mockDb.data.streams.push({ id: 's7a', schoolId: S, classId: 'c7', name: '7A', status: 'active' }, { id: 'sold', schoolId: S, classId: 'c7', name: 'Old', status: 'inactive' });
+    mockDb.data.students = [
+      { id: 'p1', schoolId: S, classId: 'c7', status: 'active', streamId: 's7a' },
+      { id: 'p2', schoolId: S, classId: 'c7', status: 'active' },
+      { id: 'p3', schoolId: S, classId: 'c7', status: 'active', streamId: 'sold' },
+      { id: 'p4', schoolId: S, classId: 'c7', status: 'withdrawn' },
+      { id: 'p5', schoolId: S, classId: 'c8', status: 'active' },
+      { id: 'p6', schoolId: 'school_B', classId: 'c7', status: 'active' },
+    ];
+    const rows = (await as(TIMETABLER).get('/api/timetable/allocation')).body.data.rows;
+    const left = rows.find(r => r.classId === 'c7' && !r.streamId && r.subjectId === 'mat');
+    expect(left).toMatchObject({ note: 'whole_class_row_for_streamed_subject', studentsWithoutStream: 2, moveTo: [{ id: 's7a', name: '7A', teachers: [] }] });
+    expect(rows.filter(r => r !== left).every(r => r.studentsWithoutStream === undefined)).toBe(true);
+  });
   test('a plain teacher cannot open it', async () => {
     expect((await as(TEACHER).get('/api/timetable/allocation')).status).toBe(403);
   });

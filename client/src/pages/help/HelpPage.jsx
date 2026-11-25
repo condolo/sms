@@ -270,6 +270,10 @@ const SECTIONS = [
         a: 'In Timetable → Subject allocation (timetabler, admin, principal or deputy). Find the class and subject, click Assign teacher and pick the teacher; where the class has streams, each stream has its own row. Set lessons per week there too. A teacher\'s profile shows their assignments read-only, with a button that opens Subject allocation for them. The subject must already be in that class\'s curriculum (Subjects → Curriculum).',
       },
       {
+        q: 'Subject allocation says "Needs a stream", or says to select which stream a teacher covers. What do I do?',
+        a: 'That teacher was assigned to the whole class before the class had a stream, or before the subject was compulsory there. Now each stream needs its own teacher. On that row click Move to stream (lessons per week, doubles and room are kept), or × if they do not teach it. To assign a different teacher, use the row just below that names the stream. Put every student in their stream first (Classes → the class): a teacher assigned to a stream sees only the students in that stream.',
+      },
+      {
         q: 'Can a teacher be assigned to several classes and streams?',
         a: 'Yes. Each assignment is one class, subject and stream. A teacher can have as many as needed. A compulsory subject in a class with streams needs an assignment for each stream.',
       },

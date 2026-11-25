@@ -7812,6 +7812,14 @@ Readers: non-editors read `timetable_published` only via `publishedReader()` →
 - `canManage()` now also passes `TIMETABLE_FLOOR_ROLES.has(jwtUser.role)` (real role only, never `extraRoles`) and `hasExplicitSubGrant(req, 'timetable', 'manage', 'update')`, matching `timetableManageAccess`.
 - Scope reminder: `_loadAssigned` unions assignments with the teacher's draft `timetable` lessons, so reassigning without moving lessons leaves the old teacher with access through those lessons.
 
+### Leftover whole-class rows (v5.282.0, 2026-11-25)
+
+A whole-class assignment saved before the class had an active stream, or before the subject was compulsory there, breaks the stream rule but still exists (and still grants every stream).
+
+- `allocation.js`: such a row has `note: 'whole_class_row_for_streamed_subject'` and `moveTo: [{ id, name, teachers[] }]`; it sorts beside its class's first stream; `summary.needsStream`. `GET /allocation` adds `studentsWithoutStream` (active students of the class in no active stream).
+- `PUT /api/teaching-assignments/:id/streams` `{ streamIds, together? }` — `canManage`. First stream keeps the row (id, periods, doubles, room); each other stream gets a copy; `together` gives them one `lessonGroupId`. Copies are inserted first, then the row is updated only if it is still whole-class with the same teacher; otherwise the copies are removed (409). Refuses: electives, inactive or other-class streams, `lessonGroupId` set, teacher left or without a staff record, teacher already on the stream (either id form). Draft lessons are left: `computePlacement` counts a whole-class lesson for every stream.
+- `utils/whole-class-leftovers.js` → `findLeftovers` / `leftoversOrNone` (read-only, never fails the caller). Returned as `needsStream` by `POST /streams`, `PUT /class-subjects/:id` (when compulsory) and `POST /class-subjects/apply-catalog` (dry run too). Shown by `NeedsStreamNotice.jsx`.
+
 ## One entry point for teaching assignments (v5.274.0, 2026-11-15)
 
 - `teaching-assignments.js canManage()` = `FULL_MANAGE` (incl. the acting_deputy/head_of_school tags) **or** `TIMETABLE_FLOOR_ROLES.has(jwtUser.role)` **or** `hasExplicitSubGrant(req, 'timetable', 'manage', 'update')`. The HOD department branch, POST's separate HOD branch and the `hasPermission('teachers','update')` fallback are removed. GET is unchanged (HOD and teacher read scoping still apply).

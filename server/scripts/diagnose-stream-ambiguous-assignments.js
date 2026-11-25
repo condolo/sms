@@ -33,6 +33,10 @@
    identically to every stream by this one teacher and mark it
    deliberately exempt (not something this script can know).
 
+   Since v5.282.0: classes with ONE stream are reported too (they were
+   skipped), and each finding is fixed in Timetable → Subject allocation
+   with "Move to stream".
+
    Usage:
      node server/scripts/diagnose-stream-ambiguous-assignments.js                    # report only, writes nothing — this script never writes
      node server/scripts/diagnose-stream-ambiguous-assignments.js --schoolId=sch_xxx  # scope to one school
@@ -55,7 +59,9 @@ function isStreamAmbiguous(assignment, classSubject, activeStreamCount) {
   if (assignment.streamId) return false;              // already stream-specific — fine
   if (!classSubject) return false;                     // not in curriculum at all — a different problem, not this one
   if (!classSubject.isCompulsoryForClass) return false; // elective: whole-class is the correct default, by design
-  if (activeStreamCount <= 1) return false;             // no streams to be ambiguous between
+  // One stream counts too (v5.282.0): the Markbook isn't ambiguous there, but the
+  // row still breaks the stream rule, so no teacher can be added to it.
+  if (!activeStreamCount) return false;
   return true;
 }
 
@@ -83,7 +89,7 @@ if (require.main === module) {
       if (!exists) { console.error(`[diagnose-stream-ambiguous-assignments] School not found: ${schoolArg}`); process.exit(2); }
     }
 
-    const assignments = await _model('teaching_assignments').find({ ...schoolFilter, streamId: null }).lean();
+    const assignments = await _model('teaching_assignments').find({ ...schoolFilter, $or: [{ streamId: null }, { streamId: '' }] }).lean();
     const findings = [];
 
     // Group by (schoolId, classId) so the stream-count and class_subjects
@@ -97,15 +103,18 @@ if (require.main === module) {
 
     for (const [key, rows] of byClass) {
       const [schoolId, classId] = key.split('::');
-      const activeStreamCount = await _model('streams').countDocuments({ schoolId, classId, status: 'active' });
-      if (activeStreamCount <= 1) continue; // fast skip — nothing in this class can be ambiguous
+      // An assignment may store either form of its class id.
+      const isOid = /^[a-f0-9]{24}$/i.test(classId);
+      const classDoc = await _model('classes').findOne({ schoolId, $or: [{ id: classId }, ...(isOid ? [{ _id: classId }] : [])] }).lean();
+      const forms = [...new Set([classId, classDoc?.id, classDoc?._id && String(classDoc._id)].filter(Boolean))];
+      const activeStreamCount = await _model('streams').countDocuments({ schoolId, classId: { $in: forms }, status: 'active' });
+      if (!activeStreamCount) continue; // fast skip — no streams, the whole class is right
 
-      const classDoc = await _model('classes').findOne({ schoolId, id: classId }).lean();
       for (const a of rows) {
-        const classSubject = await _model('class_subjects').findOne({ schoolId, classId, subjectId: a.subjectId }).lean();
+        const classSubject = await _model('class_subjects').findOne({ schoolId, classId: { $in: forms }, subjectId: a.subjectId, isActive: { $ne: false } }).lean();
         if (!isStreamAmbiguous(a, classSubject, activeStreamCount)) continue;
 
-        const teacher = await _model('teachers').findOne({ schoolId, id: a.teacherId }).lean();
+        const teacher = await _model('teachers').findOne({ schoolId, $or: [{ userId: a.teacherId }, { id: a.teacherId }] }).lean();
         const subject = await _model('subjects').findOne({ schoolId, id: a.subjectId }).lean();
         findings.push({
           schoolId,
@@ -117,7 +126,7 @@ if (require.main === module) {
           subjectId:      a.subjectId,
           subjectName:    subject?.name ?? a.subjectId,
           activeStreamCount,
-          reason: `Compulsory for this class, which has ${activeStreamCount} streams, but this assignment names no stream — the teacher is silently being treated as whole-class.`,
+          reason: `Compulsory for this class, which has ${activeStreamCount} stream${activeStreamCount === 1 ? '' : 's'}, but this assignment names no stream — the teacher is silently being treated as whole-class.`,
         });
       }
     }
@@ -129,12 +138,12 @@ if (require.main === module) {
     console.error('═══════════════════════════════════════════════════════');
     console.error(`  Found: ${findings.length}`);
     for (const f of findings) {
-      console.error(`     ${f.teacherName} — ${f.subjectName} in ${f.className} (${f.activeStreamCount} streams, school ${f.schoolId})`);
+      console.error(`     ${f.teacherName} — ${f.subjectName} in ${f.className} (${f.activeStreamCount} stream${f.activeStreamCount === 1 ? '' : 's'}, school ${f.schoolId})`);
     }
     if (findings.length) {
-      console.error('\n  Each needs a human decision — go to Classes → Assignments (or HR → Staff → Assignments) for the');
-      console.error('  listed teacher/class/subject, remove the ambiguous whole-class row, and create the correct');
-      console.error('  per-stream assignment(s) instead. This script never writes anything.');
+      console.error('\n  Each needs a human decision: in Timetable → Subject allocation, find the class and subject and');
+      console.error('  use "Move to stream" (or remove the row if that teacher no longer teaches it).');
+      console.error('  This script never writes anything.');
     }
     console.error('═══════════════════════════════════════════════════════\n');
 

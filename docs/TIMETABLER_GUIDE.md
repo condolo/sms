@@ -261,6 +261,7 @@ For now, place those by hand and lock them before generating.
 **What you see.** One row for every subject in each class's curriculum (Classes → Curriculum). A subject that is compulsory for a class with streams has one row per stream. Each row shows its teacher (or teachers), lessons per week, double lessons, how many lessons are on the draft timetable, and a status:
 - **No teacher**: nobody is assigned yet.
 - **No lessons/wk**: a teacher is assigned but lessons per week isn't set, so Lessons to place and the automatic timetable can't use it.
+- **Needs a stream**: the teacher is assigned to the whole class, but this class needs a teacher per stream.
 - **To place / Too many / Done**: lessons on the timetable against lessons per week.
 
 The summary at the top counts each of these, and the teachers with no classes. Filter by status, section or department, or search. The **Teachers** panel lists every active teacher, including those with **no classes**; click a teacher to see only their rows. A row marked "not in this class's curriculum" is an assignment for a subject the class no longer has; remove it or add the subject back to the curriculum.
@@ -270,6 +271,7 @@ The summary at the top counts each of these, and the teachers with no classes. F
 - **Lessons/wk** and **Doubles**: type the number and click away or press Enter. Doubles count two periods each, so they must fit in lessons per week.
 - **Change**: choose the new teacher, then confirm. The allocation keeps its lessons per week, doubles and "taught together" link. **Also move the lessons** (ticked by default) hands that teacher's draft lessons for this subject in this class to the new teacher. It is checked first: if the new teacher is busy at any of those times, nothing changes and the clashes are listed, so you can move those lessons first or change the teacher without moving lessons. Moved lessons go live only when you publish.
 - **Remove** (×): takes the teacher off that class and subject.
+- **Move to stream** (*2026-11-25*): shown on a row marked **assigned to the whole class / Needs a stream**. That teacher was assigned before the class had a stream, or before the subject was compulsory there. Move them to their stream (lessons per week, doubles and room are kept), or remove them if they don't teach it. To assign someone else, use the row that names the stream. If the class says some students are not in a stream yet, put them in their stream first: a stream teacher doesn't see them.
 
 **What it affects, and what it never touches.** Who teaches a class decides who can take its register, enter its marks and see its lesson plans **from then on**. A teacher also has access through lessons under their name on the timetable, so after a change the old teacher keeps access until their lessons for that subject are moved or removed. Registers, marks, lesson plans and coverage already recorded are never changed or deleted.
 
@@ -277,4 +279,4 @@ The summary at the top counts each of these, and the teachers with no classes. F
 
 ---
 
-*Last reviewed: 2026-11-15 (v5.273.0) — checked directly against `client/src/pages/timetable/` (incl. `components/AllocationView.jsx`, `components/PublishModal.jsx`, `components/CoverTab.jsx`), `server/utils/allocation.js`, `server/utils/timetable-versions.js`, `client/src/pages/teachers/TeacherList.jsx`, `server/routes/timetable.js`, `server/routes/timetable-generate.js`, `server/routes/teaching-assignments.js`, `server/routes/rooms.js`, `server/utils/lesson-audience.js` and `server/utils/elective-groups.js`.*
+*Last reviewed: 2026-11-15 (v5.273.0); Move to stream added 2026-11-25 (v5.282.0) — checked directly against `client/src/pages/timetable/` (incl. `components/AllocationView.jsx`, `components/PublishModal.jsx`, `components/CoverTab.jsx`), `server/utils/allocation.js`, `server/utils/timetable-versions.js`, `client/src/pages/teachers/TeacherList.jsx`, `server/routes/timetable.js`, `server/routes/timetable-generate.js`, `server/routes/teaching-assignments.js`, `server/routes/rooms.js`, `server/utils/lesson-audience.js` and `server/utils/elective-groups.js`.*

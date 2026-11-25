@@ -17,7 +17,7 @@
    ============================================================ */
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { AlertCircle, CheckCircle2, HelpCircle, ArrowUpCircle, UserX, Loader2, Users, Plus, X, Repeat, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react';
+import { AlertCircle, CheckCircle2, HelpCircle, ArrowUpCircle, UserX, Loader2, Users, Plus, X, Repeat, ChevronDown, ChevronRight, ExternalLink, ArrowRight } from 'lucide-react';
 import { timetable as ttApi, teachingAssignments as taApi } from '@/api/client.js';
 
 const STATUS = {
@@ -25,12 +25,19 @@ const STATUS = {
   no_target:  { label: 'No lessons/wk', cls: 'bg-slate-100 text-slate-600 border-slate-200',      Icon: HelpCircle },
   short:      { label: 'To place',     cls: 'bg-amber-50 text-amber-700 border-amber-200',       Icon: AlertCircle },
   over:       { label: 'Too many',     cls: 'bg-sky-50 text-sky-700 border-sky-200',             Icon: ArrowUpCircle },
+  needs_stream: { label: 'Needs a stream', cls: 'bg-amber-50 text-amber-700 border-amber-200', Icon: AlertCircle },
   done:       { label: 'Done',         cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', Icon: CheckCircle2 },
 };
+/* Leftover whole-class row: saved before the class had a stream, or before the subject
+   was compulsory there. It can only be moved to a stream or removed (v5.282.0). */
+const isLeftover = r => r.note === 'whole_class_row_for_streamed_subject';
+const looseText = r => `${r.studentsWithoutStream} student${r.studentsWithoutStream === 1 ? '' : 's'} in ${r.className} ${r.studentsWithoutStream === 1 ? 'is' : 'are'} not in a stream yet. A stream teacher doesn't see them. Put them in their stream first (Classes → ${r.className}).`;
+const isOpen = r => r.status !== 'done' || r.teacherOnLeave || r.teacherNotCurrent || isLeftover(r);
 const FILTERS = [
-  { id: 'open',       label: 'Needs attention', test: r => r.status !== 'done' || r.teacherOnLeave || r.teacherNotCurrent },
+  { id: 'open',       label: 'Needs attention', test: isOpen },
   { id: 'no_teacher', label: 'No teacher',      test: r => r.status === 'no_teacher' },
   { id: 'no_target',  label: 'No lessons/wk',   test: r => r.status === 'no_target' },
+  { id: 'leftover',   label: 'Needs a stream',  test: isLeftover },
   { id: 'away',       label: 'Teacher away',    test: r => r.teacherOnLeave || r.teacherNotCurrent },
   { id: 'all',        label: 'All',             test: () => true },
 ];
@@ -99,6 +106,7 @@ export default function AllocationView({ canEdit, onOpenClass, initialTeacher = 
   const [changing, setChanging] = useState(null);   // assignment id whose picker is open
   const [changePick, setChangePick] = useState('');
   const [togetherFor, setTogetherFor] = useState(null); // assignment id whose "taught together" panel is open
+  const [moving, setMoving] = useState(null);           // { id, picks: [streamId], together } — leftover row being moved
   const [toast, setToast] = useState(null);
   const say = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 5000); };
 
@@ -134,6 +142,17 @@ export default function AllocationView({ canEdit, onOpenClass, initialTeacher = 
   const unlink = useMutation({
     mutationFn: (id) => taApi.unlink(id),
     onSuccess: () => { refresh(); say('Separated: these lessons are no longer taught together.'); },
+    onError: onErr,
+  });
+
+  const moveToStreams = useMutation({
+    mutationFn: ({ id, streamIds, together }) => taApi.moveToStreams(id, streamIds, together),
+    onSuccess: (_r, v) => {
+      setMoving(null);
+      v.streamIds.forEach(s => keepRow(`${v.row.classId}|${s}|${v.row.subjectId}`));
+      refresh();
+      say(`Moved to ${v.row.moveTo.filter(s => v.streamIds.includes(s.id)).map(s => s.name).join(', ')}. Lessons per week, doubles and room kept.`);
+    },
     onError: onErr,
   });
 
@@ -189,7 +208,7 @@ export default function AllocationView({ canEdit, onOpenClass, initialTeacher = 
       const t = all.get(r.classId) || { total: 0, noTeacher: 0, open: 0 };
       t.total += 1;
       if (r.status === 'no_teacher') t.noTeacher += 1;
-      if (r.status !== 'done' || r.teacherOnLeave || r.teacherNotCurrent) t.open += 1;
+      if (isOpen(r)) t.open += 1;
       all.set(r.classId, t);
     }
     return [...m.entries()].map(([cid, g]) => [cid, { ...g, counts: all.get(cid) }]);
@@ -223,6 +242,7 @@ export default function AllocationView({ canEdit, onOpenClass, initialTeacher = 
           <span className={`px-2 py-1 rounded-md ${s.noTarget ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-500'}`}>{s.noTarget ?? 0} with no lessons/week</span>
           <span className="px-2 py-1 rounded-md bg-slate-100 text-slate-700">{s.short ?? 0} still to place</span>
           <span className={`px-2 py-1 rounded-md ${s.teachersWithNoClasses ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-500'}`}>{s.teachersWithNoClasses ?? 0} of {s.teachers ?? 0} teachers with no classes</span>
+          {s.needsStream > 0 && <button onClick={() => setFilter('leftover')} className="px-2 py-1 rounded-md bg-amber-50 text-amber-700 hover:underline">{s.needsStream} need{s.needsStream === 1 ? 's' : ''} a stream</button>}
           {s.outsideCurriculum > 0 && <span className="px-2 py-1 rounded-md bg-amber-50 text-amber-700">{s.outsideCurriculum} outside the curriculum</span>}
           {s.rowsTeacherOnLeave > 0 && <span className="px-2 py-1 rounded-md bg-amber-50 text-amber-700">{s.rowsTeacherOnLeave} taught by a teacher on leave</span>}
           {s.rowsTeacherNotCurrent > 0 && <span className="px-2 py-1 rounded-md bg-red-50 text-red-700">{s.rowsTeacherNotCurrent} with a teacher no longer current</span>}
@@ -318,6 +338,15 @@ export default function AllocationView({ canEdit, onOpenClass, initialTeacher = 
                   </button>
                 )}
               </div>
+              {!collapsed.has(cid) && (() => {
+                const left = g.rows.find(isLeftover);
+                return left && (
+                  <div className="mx-4 my-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-[11px] text-amber-900 space-y-0.5">
+                    <p>Rows marked <b>assigned to the whole class</b> were saved before this class needed a teacher per stream. Move each teacher to their stream, or remove those who don&apos;t teach it. To assign someone else, use the row that names the stream.</p>
+                    {left.studentsWithoutStream > 0 && <p className="text-red-700 font-medium">{looseText(left)}</p>}
+                  </div>
+                );
+              })()}
               {!collapsed.has(cid) && (
               <table className="w-full text-xs">
                 <thead className="text-[10px] uppercase tracking-wide text-slate-400">
@@ -332,7 +361,7 @@ export default function AllocationView({ canEdit, onOpenClass, initialTeacher = 
                           {r.compulsory ? 'Compulsory' : 'Optional'}
                           {r.taughtTogether && ' · taught together'}
                           {!r.inCurriculum && <span className="text-amber-600"> · not in this class&apos;s curriculum</span>}
-                          {r.note === 'whole_class_row_for_streamed_subject' && <span className="text-amber-600"> · whole-class row for a streamed subject</span>}
+                          {isLeftover(r) && <span className="text-amber-600"> · assigned to the whole class</span>}
                         </div>
                       </td>
                       <td className="px-2 py-2 space-y-1">
@@ -354,12 +383,34 @@ export default function AllocationView({ canEdit, onOpenClass, initialTeacher = 
                               </>
                             ) : (
                               <>
-                                <button title="Change teacher" onClick={() => { setChanging(a.id); setChangePick(''); }} className="text-[10px] text-slate-500 hover:text-slate-900 inline-flex items-center gap-0.5 ml-1">
+                                {isLeftover(r) && (() => {
+                                  const free = (r.moveTo ?? []).filter(x => !x.teachers?.some(t => t.key === a.teacherKey));
+                                  if (a.lessonGroupId) return <span className="text-[10px] text-amber-700 ml-1">Separate first</span>;
+                                  if (free.length === 0) return <span className="text-[10px] text-amber-700 ml-1">Already on the stream row: remove this one</span>;
+                                  return (
+                                    <button
+                                      disabled={moveToStreams.isPending}
+                                      onClick={() => {
+                                        if (free.length > 1) { setMoving({ id: a.id, picks: [], together: false }); return; }
+                                        const st = free[0];
+                                        const also = st.teachers?.length ? ` ${st.name} already has ${st.teachers.map(t => t.name).join(', ')}; both will be listed.` : '';
+                                        const loose = r.studentsWithoutStream ? ` WARNING: ${looseText(r)}` : '';
+                                        if (window.confirm(`Move ${a.teacherName} to ${st.name} for ${r.subjectName}, ${r.className}?${also} Lessons per week, doubles and room are kept. Records already taken stay.${loose}`)) {
+                                          moveToStreams.mutate({ id: a.id, streamIds: [st.id], together: false, row: r });
+                                        }
+                                      }}
+                                      className="text-[10px] font-medium text-amber-800 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 hover:bg-amber-100 inline-flex items-center gap-0.5 ml-1 disabled:opacity-50"
+                                    >
+                                      <ArrowRight size={10} /> {free.length === 1 ? `Move to ${free[0].name}` : 'Move to stream'}
+                                    </button>
+                                  );
+                                })()}
+                                {!isLeftover(r) && <button title="Change teacher" onClick={() => { setChanging(a.id); setChangePick(''); }} className="text-[10px] text-slate-500 hover:text-slate-900 inline-flex items-center gap-0.5 ml-1">
                                   <Repeat size={10} /> Change
-                                </button>
-                                <button title="Co-teaching or streams taught together" onClick={() => setTogetherFor(togetherFor === a.id ? null : a.id)} className="text-[10px] text-slate-500 hover:text-slate-900 inline-flex items-center gap-0.5 ml-1">
+                                </button>}
+                                {(!isLeftover(r) || a.lessonGroupId) && <button title="Co-teaching or streams taught together" onClick={() => setTogetherFor(togetherFor === a.id ? null : a.id)} className="text-[10px] text-slate-500 hover:text-slate-900 inline-flex items-center gap-0.5 ml-1">
                                   <Users size={10} /> Together
-                                </button>
+                                </button>}
                                 <button
                                   title="Remove this teacher"
                                   onClick={() => window.confirm(`Remove ${a.teacherName} from ${r.subjectName}, ${r.className}${r.streamName ? ' ' + r.streamName : ''}? Records already taken stay. They stop seeing this class for this subject once they have no lessons for it on the timetable.`) && remove.mutate(a.id)}
@@ -369,6 +420,37 @@ export default function AllocationView({ canEdit, onOpenClass, initialTeacher = 
                             ))}
                           </div>
                         ))}
+                        {canEdit && moving && r.assignments.some(a => a.id === moving.id) && (() => {
+                          const a = r.assignments.find(x => x.id === moving.id);
+                          const free = (r.moveTo ?? []).filter(x => !x.teachers?.some(t => t.key === a.teacherKey));
+                          const toggle = id => setMoving(m => ({ ...m, picks: m.picks.includes(id) ? m.picks.filter(p => p !== id) : [...m.picks, id] }));
+                          return (
+                            <div className="mt-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 space-y-1 max-w-sm">
+                              <p className="text-[10px] text-amber-900">Which stream does {a.teacherName} teach? Lessons per week, doubles and room are kept on each.</p>
+                              {free.map(st => (
+                                <label key={st.id} className="flex items-center gap-1.5 text-[11px] text-amber-950">
+                                  <input type="checkbox" checked={moving.picks.includes(st.id)} onChange={() => toggle(st.id)} />
+                                  {st.name}{st.teachers?.length ? <span className="text-amber-700"> · has {st.teachers.map(t => t.name).join(', ')}</span> : null}
+                                </label>
+                              ))}
+                              {r.studentsWithoutStream > 0 && <p className="text-[10px] text-red-700">{looseText(r)}</p>}
+                              {moving.picks.length > 1 && (
+                                <label className="flex items-center gap-1.5 text-[11px] text-amber-950 border-t border-amber-200 pt-1">
+                                  <input type="checkbox" checked={moving.together} onChange={e => setMoving(m => ({ ...m, together: e.target.checked }))} />
+                                  Taught together (one set of lessons for these streams)
+                                </label>
+                              )}
+                              <div className="flex gap-2">
+                                <button
+                                  disabled={!moving.picks.length || moveToStreams.isPending}
+                                  onClick={() => moveToStreams.mutate({ id: a.id, streamIds: moving.picks, together: moving.together, row: r })}
+                                  className="text-[11px] font-medium bg-slate-900 text-white rounded px-2 py-1 disabled:opacity-40"
+                                >{moveToStreams.isPending ? 'Moving…' : 'Move'}</button>
+                                <button onClick={() => setMoving(null)} className="text-[11px] text-slate-600">Cancel</button>
+                              </div>
+                            </div>
+                          );
+                        })()}
                         {canEdit && togetherFor && r.assignments.some(a => a.id === togetherFor) && (() => {
                           const a = r.assignments.find(x => x.id === togetherFor);
                           const sib = siblingsOf(r, a);
@@ -393,7 +475,7 @@ export default function AllocationView({ canEdit, onOpenClass, initialTeacher = 
                             </div>
                           );
                         })()}
-                        {canEdit && (adding === r.key ? (
+                        {canEdit && !isLeftover(r) && (adding === r.key ? (
                           <div className="flex items-center gap-1.5">
                             <TeacherSelect autoFocus teachers={res.teachers} subjectId={r.subjectId} exclude={r.assignments.map(a => a.teacherKey)} value={addPick} onChange={setAddPick} />
                             <button disabled={!addPick || create.isPending} onClick={() => create.mutate({ row: r, teacherId: addPick })} className="text-[11px] font-medium bg-slate-900 text-white rounded px-2 py-1 disabled:opacity-40">Assign</button>
@@ -412,7 +494,7 @@ export default function AllocationView({ canEdit, onOpenClass, initialTeacher = 
                         {r.assignments.map(a => <div key={a.id}><NumberCell value={a.doubleLessons} max={20} disabled={!canEdit} onSave={n => { keepRow(r.key); update.mutate({ id: a.id, patch: { doubleLessons: n ?? 0 } }); }} /></div>)}
                       </td>
                       <td className="px-2 py-2 text-center text-slate-700">{r.placed}{r.needed ? <span className="text-slate-400"> / {r.needed}</span> : ''}</td>
-                      <td className="px-2 py-2"><Chip status={r.status} /></td>
+                      <td className="px-2 py-2"><Chip status={isLeftover(r) ? 'needs_stream' : r.status} /></td>
                     </tr>
                   ))}
                 </tbody>

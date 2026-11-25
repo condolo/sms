@@ -16,6 +16,7 @@ import { classes as classesApi, streams as streamsApi, teachers as teachersApi, 
 import { teacherPortalApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 import { useSections } from '@/hooks/useSections.js';
+import NeedsStreamNotice from '@/components/NeedsStreamNotice.jsx';
 import { lessonTeachers, lessonIsForStream, isCombined } from '@/utils/lessonLabels.js';
 
 const STREAM_COLORS = [
@@ -37,6 +38,7 @@ export default function ClassDetail() {
 
   const { sectionMap } = useSections();
   const [showAdd,              setShowAdd]              = useState(false);
+  const [needsStream,          setNeedsStream]          = useState([]);   // teachers left on the whole class by a new stream
   const [editTarget,           setEditTarget]           = useState(null);
   const [deleteTarget,         setDeleteTarget]         = useState(null);
   const [streamStudentsTarget, setStreamStudentsTarget] = useState(null);
@@ -525,13 +527,20 @@ export default function ClassDetail() {
         )}
       </div>
 
+      {needsStream.length > 0 && (
+        <div className="fixed bottom-6 right-6 z-40 max-w-sm shadow-lg rounded-xl">
+          <NeedsStreamNotice items={needsStream} onClose={() => setNeedsStream([])} />
+        </div>
+      )}
       <AnimatePresence>
         {showAdd && (
           <AddStreamSlideOver
             cls={cls}
             onClose={() => setShowAdd(false)}
-            onCreated={() => {
+            onCreated={(res) => {
               setShowAdd(false);
+              setNeedsStream(res?.data?.needsStream ?? []);
+              qc.invalidateQueries({ queryKey: ['timetable'] });
               qc.invalidateQueries({ queryKey: ['streams', { classId }] });
               qc.invalidateQueries({ queryKey: ['classes', 'list'] });
             }}

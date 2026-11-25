@@ -17,6 +17,7 @@ const ScopeEngine         = require('../utils/scopeEngine');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 const { applyOptimisticLock } = require('../utils/optimistic-lock');
+const { leftoversOrNone } = require('../utils/whole-class-leftovers');
 
 const router = express.Router();
 const PLAN   = planGate('classes');
@@ -292,7 +293,9 @@ router.post('/', authMiddleware, PLAN, rbac('classes', 'create'), async (req, re
       updatedBy:  userId,
     });
 
-    return created(res, doc.toObject ? doc.toObject() : doc);
+    // Teachers assigned to the whole class for a compulsory subject now need a stream (v5.282.0).
+    const needsStream = await leftoversOrNone(tenantContext(req), schoolId, { classIds: [resolvedClassId] });
+    return created(res, { ...(doc.toObject ? doc.toObject() : doc), needsStream });
   } catch (err) {
     console.error('[streams POST]', err);
     return E.serverError(res);

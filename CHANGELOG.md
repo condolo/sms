@@ -6,6 +6,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.282.0] - 2026-11-25 - feat(timetable): move a leftover whole-class teacher to their stream
+
+Reported by a school: in KG1 - RUBY, Subject allocation kept refusing the correct CRE teacher. The row being edited was a leftover: its teacher had been assigned to the whole class, and the class now needs one teacher per stream. **Add teacher** there was always refused ("select which stream this teacher covers") with no stream to select, and the row to use, the stream's own, was much further down.
+
+### Added
+- **Subject allocation → Move to stream** on leftover rows. The teacher, lessons per week, doubles and room are kept. One stream: one click and a confirmation. Several: choose them, and whether they are taught together. A row linked "taught together", a teacher who has left, and a teacher already on that stream are refused with the reason. `PUT /api/teaching-assignments/:id/streams`.
+- **Needs a stream** filter, count and status. The row and its class say why, and how many active students are in no stream (a stream teacher doesn't see those students).
+- Adding a stream, making a subject compulsory in a class, and "match the Catalog" list the teachers who will need a stream. Nothing moves automatically.
+
+### Changed
+- A leftover row sits just above its stream rows and no longer offers Add teacher or Change (Add was always refused; Change left it a leftover).
+- `diagnose-stream-ambiguous-assignments.js` also reports classes with one stream (it skipped them), matches both class id forms and names the teacher when the row is keyed by login id.
+
+### Safety
+- Draft lessons, registers, marks and lesson plans are not touched. The teacher's access narrows from the whole class to the chosen streams. All writes are scoped by school; a failed or overtaken move leaves nothing behind.
+- Same people as every other allocation change. No data migration, no permission change.
+
+---
+
 ## [v5.281.1] - 2026-11-24 - fix(security): the generic collections route is admin only
 
 ### Security

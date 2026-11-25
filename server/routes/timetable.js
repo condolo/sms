@@ -959,6 +959,24 @@ router.get('/allocation', authMiddleware, PLAN, MODGATE, timetableManageAccess('
       tenantModel('departments', ctx).find({ schoolId }).select('id name').lean(),
     ]);
     const result = computeAllocation({ classes, streams, classSubjects, subjects, teachers, assignments, slots });
+    // A stream teacher sees only that stream's students, so say how many of the class
+    // are in no active stream before its whole-class teachers are moved (v5.282.0).
+    const leftovers = result.rows.filter(r => r.moveTo);
+    if (leftovers.length) {
+      const keyOf = new Map();
+      for (const c of classes) for (const f of [c.id, c._id && String(c._id)].filter(Boolean)) keyOf.set(String(f), c.id || String(c._id));
+      const want = new Set(leftovers.map(r => r.classId));
+      const activeStreams = new Set(streams.map(s => s.id || String(s._id)));
+      const pupils = await tenantModel('students', ctx)
+        .find({ schoolId, status: 'active', classId: { $in: [...keyOf].filter(([, k]) => want.has(k)).map(([f]) => f) } }).select('classId streamId').lean();
+      const none = new Map();
+      for (const p of pupils) {
+        if (p.streamId && activeStreams.has(String(p.streamId))) continue;
+        const k = keyOf.get(String(p.classId));
+        none.set(k, (none.get(k) || 0) + 1);
+      }
+      for (const r of leftovers) r.studentsWithoutStream = none.get(r.classId) || 0;
+    }
     return ok(res, { ...result, departments: departments.map(d => ({ id: d.id, name: d.name })) });
   } catch (err) { console.error('[timetable GET /allocation]', err); return E.serverError(res); }
 });

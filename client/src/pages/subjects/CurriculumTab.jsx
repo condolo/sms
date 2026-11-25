@@ -22,6 +22,7 @@ import {
 } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 import { useSections } from '@/hooks/useSections.js';
+import NeedsStreamNotice from '@/components/NeedsStreamNotice.jsx';
 
 /* ── helpers ─────────────────────────────────────────────── */
 function sectionCompatible(subject, sectionKey) {
@@ -115,6 +116,7 @@ export default function CurriculumTab({ flash }) {
   const [adding,   setAdding]   = useState(null);  // subjectId being added
   const [removing, setRemoving] = useState(null);  // classSubjectId being removed
   const [toggling, setToggling] = useState(null);  // classSubjectId being toggled
+  const [needsStream, setNeedsStream] = useState([]);  // teachers left on the whole class by a subject made compulsory
 
   /* ── queries ─────────────────────────────────────────────── */
   const { data: classes = [], isLoading: classesLoading } = useQuery({
@@ -187,7 +189,9 @@ export default function CurriculumTab({ flash }) {
   async function handleToggleCompulsory(classSubjectId, newValue) {
     setToggling(classSubjectId);
     try {
-      await csApi.update(classSubjectId, { isCompulsoryForClass: newValue });
+      const r = await csApi.update(classSubjectId, { isCompulsoryForClass: newValue });
+      setNeedsStream(r?.data?.needsStream ?? []);
+      qc.invalidateQueries({ queryKey: ['timetable'] });
       qc.invalidateQueries({ queryKey: ['subjects-with-curriculum', classId] });
     } catch (err) {
       flash(err.message || 'Update failed', 'error');
@@ -206,8 +210,13 @@ export default function CurriculumTab({ flash }) {
       const enrolNote = p.studentsToEnrol
         ? `\n\n${p.studentsToEnrol} student enrolment(s) will be added so nobody drops out of the new elective's register and markbook. Remove those who don't take it under Enrollment.`
         : '';
-      if (!window.confirm(`Make ${selectedClass?.name ?? 'this class'} match the Catalog?\n\n${lines}${enrolNote}`)) return;
+      const streamNote = p.needsStream?.length
+        ? `\n\n${p.needsStream.length} teacher(s) assigned to the whole class will need a stream in Timetable → Subject allocation: ${p.needsStream.map(n => `${n.subjectName} (${n.teacherName})`).join(', ')}.`
+        : '';
+      if (!window.confirm(`Make ${selectedClass?.name ?? 'this class'} match the Catalog?\n\n${lines}${enrolNote}${streamNote}`)) return;
       await csApi.applyCatalog({ classId });
+      setNeedsStream(p.needsStream ?? []);
+      qc.invalidateQueries({ queryKey: ['timetable'] });
       qc.invalidateQueries({ queryKey: ['subjects-with-curriculum', classId] });
       qc.invalidateQueries({ queryKey: ['student-subjects-counts'] });
       flash(`Updated ${p.changes.length} subject${p.changes.length !== 1 ? 's' : ''} to match the Catalog`);
@@ -247,6 +256,7 @@ export default function CurriculumTab({ flash }) {
   /* ── render ─────────────────────────────────────────────── */
   return (
     <div className="px-6 py-5">
+      <NeedsStreamNotice items={needsStream} className="mb-4" onClose={() => setNeedsStream([])} />
 
       {/* Class selector */}
       <div className="flex items-center gap-3 mb-5 flex-wrap">
@@ -254,7 +264,7 @@ export default function CurriculumTab({ flash }) {
           <BookOpen size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
           <select
             value={classId}
-            onChange={e => { setClassId(e.target.value); setDeptFilter('all'); }}
+            onChange={e => { setClassId(e.target.value); setDeptFilter('all'); setNeedsStream([]); }}
             className="pl-9 pr-8 py-2 rounded-lg border border-slate-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-500 min-w-[200px]"
           >
             <option value="">Select a class…</option>

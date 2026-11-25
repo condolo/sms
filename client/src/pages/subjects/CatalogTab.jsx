@@ -682,7 +682,10 @@ export default function CatalogTab({ flash }) {
       const enrolNote = p.studentsToEnrol
         ? `\n\n${p.studentsToEnrol} student enrolment(s) will be added so nobody drops out of the elective's registers and markbooks. Remove those who don't take it under Enrollment.`
         : '';
-      if (!window.confirm(`${name || 'This subject'} is set differently in ${p.changes.length} class${p.changes.length !== 1 ? 'es' : ''}: ${list}.\n\nMake it ${target} in ${p.changes.length !== 1 ? 'all of them' : 'that class'} too?${enrolNote}\n\nCancel keeps each class as it is (you can still change it in Classes → Curriculum).`)) return;
+      const streamNote = p.needsStream?.length
+        ? `\n\n${p.needsStream.length} teacher(s) assigned to the whole class will need a stream in Timetable → Subject allocation: ${p.needsStream.map(n => `${n.className} (${n.teacherName})`).join(', ')}.`
+        : '';
+      if (!window.confirm(`${name || 'This subject'} is set differently in ${p.changes.length} class${p.changes.length !== 1 ? 'es' : ''}: ${list}.\n\nMake it ${target} in ${p.changes.length !== 1 ? 'all of them' : 'that class'} too?${enrolNote}${streamNote}\n\nCancel keeps each class as it is (you can still change it in Classes → Curriculum).`)) return;
       await csApi.applyCatalog({ subjectId });
       qc.invalidateQueries({ queryKey: ['student-subjects-counts'] });
       qc.invalidateQueries({ queryKey: ['subjects-with-curriculum'] });

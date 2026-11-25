@@ -29,10 +29,10 @@ describe('isStreamAmbiguous', () => {
     expect(isStreamAmbiguous(a, classSubject, 3)).toBe(false);
   });
 
-  test('class has only one stream — nothing to be ambiguous between', () => {
+  test('class has one stream — still a leftover: no teacher can be added to it (KG1 - RUBY, 2026-11-25)', () => {
     const a = { streamId: null };
     const classSubject = { isCompulsoryForClass: true };
-    expect(isStreamAmbiguous(a, classSubject, 1)).toBe(false);
+    expect(isStreamAmbiguous(a, classSubject, 1)).toBe(true);
   });
 
   test('class has zero streams — same, not ambiguous', () => {

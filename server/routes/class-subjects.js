@@ -22,6 +22,7 @@ const { ok, created, E } = require('../utils/response');
 const ScopeEngine         = require('../utils/scopeEngine');
 const { scopeMiddleware } = require('../middleware/scopeMiddleware');
 const AuditService        = require('../services/audit');
+const { leftoversOrNone } = require('../utils/whole-class-leftovers');
 
 const router = express.Router();
 
@@ -600,7 +601,7 @@ router.post('/apply-catalog', authMiddleware, rbac('subjects', 'update'), async 
 
     const classIds = [...new Set(changes.map(c => c.link.classId))];
     const classes = classIds.length
-      ? await tenantModel('classes', tenantContext(req)).find({ schoolId, $or: [{ id: { $in: classIds } }, { _id: { $in: classIds.filter(x => /^[a-fd]{24}$/i.test(x)) } }] }).select('id name').lean()
+      ? await tenantModel('classes', tenantContext(req)).find({ schoolId, $or: [{ id: { $in: classIds } }, { _id: { $in: classIds.filter(x => /^[a-f0-9]{24}$/i.test(x)) } }] }).select('id name').lean()
       : [];
     const className = id => (classes.find(c => (c.id || String(c._id)) === id) || {}).name || 'Class';
 
@@ -625,6 +626,15 @@ router.post('/apply-catalog', authMiddleware, rbac('subjects', 'update'), async 
       }
     }
 
+    // Teachers assigned to the whole class who will need a stream (v5.282.0).
+    const toComp = changes.filter(c => c.to).map(c => ({ classId: c.link.classId, subjectId: c.link.subjectId }));
+    const needsStream = toComp.length
+      ? (await leftoversOrNone(tenantContext(req), schoolId, {
+        classIds: toComp.map(x => x.classId), subjectIds: [...new Set(toComp.map(x => x.subjectId))], assumeCompulsory: toComp,
+      })).filter(l => toComp.some(x => x.subjectId === l.subjectId && x.classId === l.classId))
+        .map(l => ({ ...l, className: className(l.classId) }))
+      : [];
+
     const summary = {
       changes: changes.map(c => ({
         classSubjectId: c.link.id, classId: c.link.classId, className: className(c.link.classId),
@@ -633,6 +643,7 @@ router.post('/apply-catalog', authMiddleware, rbac('subjects', 'update'), async 
       toCompulsory: changes.filter(c => c.to).length,
       toElective:   toElective.length,
       studentsToEnrol: toEnrol.length,
+      needsStream,
     };
     if (dryRun || !changes.length) return ok(res, { ...summary, applied: false });
 
@@ -678,7 +689,12 @@ router.put('/:id', authMiddleware, rbac('subjects', 'update'), async (req, res) 
       { new: true },
     );
     if (!doc) return E.notFound(res, 'Class-subject link not found');
-    return ok(res, doc.toObject());
+    const out = doc.toObject();
+    // Now compulsory: teachers still assigned to the whole class need a stream (v5.282.0).
+    if (out.isCompulsoryForClass) {
+      out.needsStream = await leftoversOrNone(tenantContext(req), schoolId, { classIds: [out.classId], subjectIds: [out.subjectId] });
+    }
+    return ok(res, out);
   } catch (err) {
     console.error('[class-subjects PUT /:id]', err);
     return E.serverError(res);
