@@ -15,6 +15,7 @@ const { teacherLessonClause } = require('../utils/lesson-audience');
 const { isTimetablePublished, publishedReader } = require('../utils/timetable-publish');
 const { ok, created, E } = require('../utils/response');
 const { resolveTeacher } = require('../utils/resolveTeacher');
+const { canMedical, alertText } = require('../utils/medical-access');
 const { coverageStreamFilter, leafProgress } = require('../utils/topic-coverage');
 const { _inboxQuery, createDirectMessage } = require('./messages');
 const { recipientSummary } = require('../utils/message-audience');
@@ -488,7 +489,11 @@ router.get('/students/:studentId', authMiddleware, async (req, res) => {
       .map(p => ({ id: p.id, name: p.name, role: p.role }));
 
     // Medical alert (from dashboard alerts or student doc).
-    const medicalAlert = doc.medicalAlert ?? doc.medicalNotes ?? null;
+    // Free-text notes need the medical profile row (v5.285.0); otherwise the
+    // condition flags, for those with Medical Alerts.
+    const medicalAlert = (await canMedical(req, 'profile', 'read'))
+      ? (doc.medicalAlert ?? doc.medicalNotes ?? alertText(doc.medical))
+      : ((await canMedical(req, 'alerts', 'read')) ? alertText(doc.medical) : null);
 
     return ok(res, {
       id: student.id,

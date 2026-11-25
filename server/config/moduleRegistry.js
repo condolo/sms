@@ -387,6 +387,11 @@ const MODULE_REGISTRY = [
     { key: 'delete',  label: 'Delete Clinic Visit' },
     { key: 'alerts',  label: 'View Medical Alerts (condition flags only, not full profile)' },
     { key: 'reports', label: 'View Medical Reports' },
+    // v5.285.0, utils/medical-access.js: profile and clinic_notes follow View /
+    // Record until ticked; settings is strict (an explicit tick, or admin).
+    { key: 'profile',      label: 'Student Medical Profile (View / Edit)' },
+    { key: 'clinic_notes', label: 'Clinic-only Notes (never shown to parents)' },
+    { key: 'settings',     label: 'Medical Centre Settings' },
   ]},
   { key: 'inventory', label: 'Inventory', section: 'Operations', icon: 'Boxes', navRoute: '/inventory', navOrder: 21, subs: [
     { key: 'view',        label: 'View Inventory & Categories' },

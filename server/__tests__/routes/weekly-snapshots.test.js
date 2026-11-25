@@ -76,6 +76,7 @@ jest.mock('../../middleware/auth', () => ({
 jest.mock('../../middleware/rbac', () => ({
   rbac: () => (_req, _res, next) => next(),
   hasPermission: (...args) => mockHasPermission(...args),
+  effectivePerms: async () => (mockCanReadMedical ? { medical: ['read'] } : {}),
 }));
 jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) => next() }));
 jest.mock('../../middleware/module-gate', () => ({

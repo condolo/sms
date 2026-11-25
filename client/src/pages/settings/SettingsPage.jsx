@@ -3192,6 +3192,9 @@ const PERM_MODULES = [
     { key: 'delete',  label: 'Delete Clinic Visit' },
     { key: 'alerts',  label: 'View Medical Alerts (condition flags only, not full profile)' },
     { key: 'reports', label: 'View Medical Reports' },
+    { key: 'profile',      label: 'Student Medical Profile (View / Edit)' },
+    { key: 'clinic_notes', label: 'Clinic-only Notes (never shown to parents)' },
+    { key: 'settings',     label: 'Medical Centre Settings' },
   ]},
   { key: 'inventory', label: 'Inventory', subs: [
     { key: 'view',        label: 'View Inventory & Categories' },
@@ -3579,6 +3582,9 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       // Reading other people's messages is never a role's default, admin
       // included: off until someone ticks it (routes/message-oversight.js).
       if (key === 'messages__oversight') cell = N;
+      // Strict (v5.285.0): what parents see of a clinic visit is admin's until ticked.
+      if (key === 'medical__settings' && !['superadmin','admin'].includes(role)) cell = N;
+      if (key === 'medical__profile' && role === 'admissions_officer') cell = E;
       const mask = FINANCE_SUB_MASK[key];
       perms.byRole[role][key] = mask
         ? { v: cell.v && mask.v, e: cell.e && mask.e, d: cell.d && mask.d }
@@ -3594,6 +3600,14 @@ function _mergePerms(defaults, saved) {
     Object.entries(saved.byRole).forEach(([role, cells]) => {
       if (!out.byRole[role]) out.byRole[role] = {};
       Object.entries(cells).forEach(([k,v]) => { out.byRole[role][k] = { ...out.byRole[role][k], ...v }; });
+      // Medical rows added in v5.285.0 follow View / Record Clinic Visit until
+      // ticked, as the server does (utils/medical-access.js).
+      if (cells.medical__view || cells.medical__record) {
+        const view = !!cells.medical__view?.v, record = !!cells.medical__record?.e;
+        if (!cells.medical__clinic_notes) out.byRole[role].medical__clinic_notes = { v: view, e: record, d: false };
+        if (!cells.medical__profile && role !== 'admissions_officer') out.byRole[role].medical__profile = { v: view, e: record, d: false };
+        if (!cells.medical__settings && role !== 'admin' && role !== 'superadmin') out.byRole[role].medical__settings = { v: false, e: false, d: false };
+      }
     });
   }
   if (saved?.byUser) out.byUser = JSON.parse(JSON.stringify(saved.byUser));

@@ -24,6 +24,7 @@ jest.mock('../../middleware/auth', () => ({
 
 jest.mock('../../middleware/rbac', () => ({
   rbac: () => (_req, _res, next) => next(),
+  effectivePerms: async () => true,   // admin: medical profile rights (utils/medical-access.js)
 }));
 
 jest.mock('../../middleware/plan', () => ({

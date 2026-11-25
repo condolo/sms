@@ -278,6 +278,14 @@ async function hasExplicitSubGrant(req, mod, subKey, action) {
   }
 }
 
+/* The caller's whole permission map, or true for a super admin — for a
+   module whose rows need their own rule (utils/medical-access.js). */
+async function effectivePerms(req) {
+  const { schoolId, role, roles = [] } = req.jwtUser || {};
+  if (!schoolId || !role) return {};
+  return _isSuperRole(role, roles) ? true : ((await _effectivePerms(req.jwtUser)) || {});
+}
+
 function rbac(mod, action, subKey) {
   return async (req, res, next) => {
     try {
@@ -306,4 +314,4 @@ function rbac(mod, action, subKey) {
   };
 }
 
-module.exports = { rbac, hasPermission, hasExplicitSubGrant, invalidatePermCache, _mergeUserOverrides, _loadPerms, _loadUserPerms };
+module.exports = { rbac, hasPermission, hasExplicitSubGrant, effectivePerms, invalidatePermCache, _mergeUserOverrides, _loadPerms, _loadUserPerms };

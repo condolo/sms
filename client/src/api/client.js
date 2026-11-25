@@ -481,6 +481,9 @@ export const behaviour = {
 export const medical = {
   visits:  _resource('medical/visits'), // no update() — visits are never edited, only logged or soft-deleted
   alerts:  { list: () => _get('/medical/alerts') },
+  access:  () => _get('/medical/access'),   // what this person may do here (v5.285.0)
+  settings: { get: () => _get('/medical/settings'), update: (data) => _put('/medical/settings', data) },
+  students: (q) => _get('/medical/students', { q }),
   reports: { summary: (params) => _get('/medical/reports', params) },
 };
 

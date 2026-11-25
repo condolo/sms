@@ -230,7 +230,7 @@ Click any student row to open their full profile:
 - **Behaviour tab**: merit/demerit history, current stage, milestone badges
 - **Finance tab**: invoice history and payment status
 - **Timetable tab**: this student's own weekly schedule — their class's whole-class lessons, their stream's lessons (including lessons their stream shares with another), and only the option subjects they're enrolled in, grouped by day. The student and parent portals show the same.
-- **Medical tab**: emergency contact, doctor/clinic details, medical notes
+- **Medical tab**: emergency contact, doctor/clinic details, medical notes. The full profile needs **Medical Centre → Student Medical Profile** (*2026-11*); other staff see the emergency contact, and the condition flags if they have Medical Alerts
 - **Portal tab** (admin/principal/deputy only): create or reset the student's own login and, if a parent email is on file, the parent's login; deactivate or reactivate the student. See `SCHOOL_ADMIN_GUIDE.md` §7 for the full workflow, including bulk activation for many students at once.
 
 ### Adding a Student

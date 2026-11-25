@@ -2338,6 +2338,7 @@ const TENANT_COLS = [
   'attendance',
   'behaviour_incidents','behaviour_appeals','behaviour_categories',
   'merit_milestones','demerit_stages','detention_types','houses','key_stages',
+  'medical_visits',
 
   // Finance
   'invoices','payments','fee_structures',

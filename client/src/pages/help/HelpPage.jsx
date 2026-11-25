@@ -1125,7 +1125,7 @@ const SECTIONS = [
     articles: [
       {
         q: 'How do I record a clinic visit?',
-        a: "Go to Medical Centre → Log Visit. Select the student, enter the complaint and observation, record the action taken, and Save. The Visits tab lists earlier visits.",
+        a: "Go to Medical Centre → Log Visit. Select the student, enter the complaint and observation, record the action taken, and Save. The Visits tab lists earlier visits: open one to see everything recorded, who recorded it and the student's other visits, or filter by student and date. Parents never see Clinic-only notes.",
       },
       {
         q: 'What are Medical Alerts?',
@@ -1133,7 +1133,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can see a student\'s full clinic history?',
-        a: 'Only roles granted the View Clinic Visits permission, set in Settings → Roles & Permissions. A role with only the Alerts permission sees the condition flags, not the underlying visit records.',
+        a: 'Only roles granted the View Clinic Visits permission, set in Settings → Roles & Permissions. A role with only the Alerts permission sees the condition flags, not the underlying visit records. The medical profile on the student record (Student Medical Profile) and Clinic-only Notes have their own rows there.',
       },
       {
         q: 'Where else does medical information appear?',

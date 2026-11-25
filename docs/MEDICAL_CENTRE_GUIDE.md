@@ -8,6 +8,10 @@
 
 Medical access is split into separate permissions: view clinic visits, record a visit, delete a visit (soft delete), view condition alerts, and view reports. A custom Nurse/Medical role should receive only the capabilities its staff need. The default Teacher role receives **medical alerts only** (limited condition flags); it does not receive full medical profiles, visit histories, or medical reports. Principal/deputy defaults include wider medical access, but school role settings may differ.
 
+Set in **Settings → Roles & Permissions → Medical Centre** (*v5.285.0*): **Student Medical Profile** (blood group, conditions, consent: view, and edit for those who may also edit students), **Clinic-only Notes** and **Medical Centre Settings**. Until a school ticks them, the first two follow View / Record Clinic Visit, the admissions officer also has the profile, and Settings is admin only. Without the profile, staff see the emergency contact, and those with Medical Alerts see the condition flags of their own students.
+
+**Medical Centre → Settings** decides whether parents can read the visit notes, and whether the alert to parents names the complaint (off: an alert can show on a locked phone).
+
 Before working with a record, confirm the correct school and student. Never copy clinical details into general Messages, Behaviour, Growth Profile, or shared Resources.
 
 ## 2. Review the student medical profile
@@ -22,7 +26,7 @@ If a clinical fact is wrong, use the authorized student-profile workflow and fol
 2. Search by student name or admission number. Confirm the student's identity before selecting them.
 3. Enter the **Complaint**. Add relevant **Observation**, **Action taken**, and **Medication given** details.
 4. Mark whether the student **Returned to class**, was **Sent home**, or was **Referred**. If referred, enter where they were referred.
-5. Add concise relevant notes; avoid unsupported diagnoses or unrelated information.
+5. Add concise relevant notes; avoid unsupported diagnoses or unrelated information. The label says whether parents can read **Notes**. Use **Clinic-only notes** for anything parents must not see: they are never shown to parents, in Weekly Snapshots or in alerts (*v5.285.0*).
 6. Review the student and visit details, then choose **Log visit**.
 7. Wait for the saved confirmation and check the record under **Visits**.
 
@@ -31,7 +35,7 @@ Each clinic visit is a separate record. The route deliberately has no edit/overw
 ## 4. Find and review visits
 
 1. Open **Visits** and search by student or complaint.
-2. Open the matching visit and check the date, recorded student, complaint, action, medication, referral, and author.
+2. Open the matching visit (click the row) to see everything recorded: complaint, observation, action, medication, referral, notes, who recorded it and when, and the student's other visits (*v5.285.0*). To find one student's visits, use **One student…** and the dates. Opening a visit is recorded in the Audit Log.
 3. Use delete only for a genuine error and only if your role allows it. The delete is soft-delete; it is not a normal history edit.
 4. After correction, confirm the incorrect visit is no longer in the ordinary list and that the replacement is present.
 

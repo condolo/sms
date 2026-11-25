@@ -22,6 +22,7 @@ const { v4: uuidv4 } = require('uuid');
 const bcrypt   = require('bcryptjs');
 
 const { authMiddleware }      = require('../middleware/auth');
+const { canMedical } = require('../utils/medical-access');
 const { rbac }                = require('../middleware/rbac');
 const { planGate }            = require('../middleware/plan');
 const { _model }              = require('../utils/model');
@@ -2189,6 +2190,9 @@ router.get('/export/:type', authMiddleware, /* rbac: dynamic — checked via EXP
         if (h?.name) houseNameById[h.name] = h.name; // legacy docs stored the name itself as the "id"
       }
 
+      // Medical columns stay blank without Medical Centre → Student Medical Profile (v5.285.0).
+      const seesMedical = await canMedical(req, 'profile', 'read');
+
       const rows = docs.map(d => ({
         admissionNumber: d.admissionNumber || '',
         firstName:       d.firstName || '',
@@ -2200,7 +2204,7 @@ router.get('/export/:type', authMiddleware, /* rbac: dynamic — checked via EXP
         className:       d.classId ? (classById[d.classId] || '') : '',
         streamName:      d.streamId ? (streamById[d.streamId] || '') : '',
         houseName:       d.houseId ? (houseNameById[d.houseId] || '') : '',
-        allergies:       d.medical?.allergies || '',
+        allergies:       (seesMedical && d.medical?.allergies) || '',
         motherName:      d.motherName || '',
         motherEmail:     d.motherEmail || '',
         motherPhone:     d.motherPhone || '',
@@ -2220,7 +2224,7 @@ router.get('/export/:type', authMiddleware, /* rbac: dynamic — checked via EXP
         address:         d.address || '',
         enrollmentDate:  d.enrollmentDate || '',
         status:          d.status || '',
-        medicalNotes:    d.medicalNotes || '',
+        medicalNotes:    (seesMedical && d.medicalNotes) || '',
         createdAt:       d.createdAt ? new Date(d.createdAt).toISOString().slice(0, 10) : '',
       }));
 

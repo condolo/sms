@@ -27,6 +27,7 @@ const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { sortReportsByPeriod } = require('../utils/report-order');
 const { coverageStreamOr: ticksFor } = require('../utils/topic-coverage');
+const { medicalSettings } = require('../utils/medical-access');
 const { isTimetablePublished, publishedReader } = require('../utils/timetable-publish');
 const { resolveCurrentPeriod } = require('./academic-config');
 const { _getMpesaConfig } = require('./mpesa');
@@ -1111,6 +1112,9 @@ router.get('/medical/:childId', authMiddleware, PLAN, async (req, res) => {
       .select('id date time complaint observation actionTaken medicationGiven returnedToClass sentHome referred referredTo notes')
       .lean();
 
+    // The school may keep the nurse's Notes off this screen; clinic-only notes are never selected (v5.285.0).
+    const { parentsSeeNotes } = medicalSettings(await _model('schools').findOne({ id: schoolId }).select('medicalSettings').lean());
+    if (!parentsSeeNotes) docs.forEach(d => { delete d.notes; });
     return ok(res, docs);
   } catch (err) {
     console.error('[parent-portal GET /medical/:childId]', err);

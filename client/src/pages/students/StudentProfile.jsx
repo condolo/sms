@@ -561,7 +561,7 @@ td:last-child{font-weight:500}
               <TimetableTab data={timetableData?.data} loading={timetableLoading} />
             )}
             {tab === 'medical' && (
-              <MedicalTab student={student} saving={saving} onSave={updateStudent} canEdit={can('students')} />
+              <MedicalTab student={student} saving={saving} onSave={updateStudent} canEdit={can('students', 'update') && student.medicalAccess?.edit !== false} />
             )}
             {tab === 'portal' && (
               <PortalTab student={student} canEdit={can('students')} />
@@ -1457,6 +1457,26 @@ function MedicalTab({ student, saving, onSave, canEdit }) {
   });
   const hasAnyAlert = med.severeAllergy || med.hasAsthma || med.hasEpilepsy || med.otherCriticalAlert;
   function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
+
+  // Only the emergency contact and alert flags are sent without the profile row (v5.285.0).
+  if (student.medicalAccess && !student.medicalAccess.view) {
+    return (
+      <div className="space-y-4">
+        {hasAnyAlert && (
+          <div className="flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+            <ShieldAlert size={16} className="text-red-500 mt-0.5 shrink-0" />
+            <span><span className="font-semibold">Critical alerts: </span>{[med.severeAllergy && 'Severe allergy', med.hasAsthma && 'Asthma', med.hasEpilepsy && 'Epilepsy', med.otherCriticalAlert].filter(Boolean).join(' · ')}</span>
+          </div>
+        )}
+        <InfoCard title="Emergency Contact" icon={<Phone size={14} />}>
+          <InfoRow label="Name"         value={med.emergencyName} />
+          <InfoRow label="Relationship" value={med.emergencyRelation} />
+          <InfoRow label="Phone"        value={med.emergencyPhone} />
+        </InfoCard>
+        <p className="text-xs text-slate-500">The full medical profile is open only to roles with Medical Centre → Student Medical Profile.</p>
+      </div>
+    );
+  }
 
   if (!editing) {
     return (

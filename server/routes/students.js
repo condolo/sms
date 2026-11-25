@@ -22,6 +22,8 @@ const { mergeStudentData } = require('../utils/student-merge');
 const { ok, created, fail, paginate, parsePagination, E, strParam } = require('../utils/response');
 const { applyOptimisticLock } = require('../utils/optimistic-lock');
 const AuditService            = require('../services/audit');
+const { canMedical, studentFor } = require('../utils/medical-access');
+const { forbiddenForSelfServiceRole } = require('../utils/self-service-scope');
 const { provisionIdentityForUser } = require('../utils/provision-identities');
 const { revokeUserTokens, revokeIdentityTokens } = require('../utils/token-version');
 const { enqueueBatch } = require('../utils/email-queue');
@@ -796,7 +798,9 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('students', 'read'), scopeMi
     ]);
 
     await _resolveClassNames(req, docs);
-    return ok(res, docs, paginate(page, limit, total));
+    // Medical fields follow Medical Centre's own rows (v5.285.0); this list is already the caller's own students.
+    const access = await _medicalAccess(req);
+    return ok(res, docs.map(d => studentFor(d, access)), paginate(page, limit, total));
   } catch (err) {
     console.error('[students GET]', err);
     return E.serverError(res);
@@ -833,7 +837,22 @@ async function _attachPortalAccountStatus(req, doc) {
   };
 }
 
-router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('students', 'read'), async (req, res) => {
+/* What this caller may see of a student's medical record (v5.285.0). */
+async function _medicalAccess(req) {
+  const profile = await canMedical(req, 'profile', 'read');
+  return { profile, flags: profile || await canMedical(req, 'alerts', 'read') };
+}
+
+/* The condition flags of a student outside the caller's own classes stay
+   hidden, as in GET /medical/alerts. */
+async function _inStudentScope(req, doc) {
+  if (!req.scope) return true;
+  const filter = { schoolId: req.jwtUser.schoolId, _id: doc._id };
+  ScopeEngine.applyToFilter(req, 'students', filter);
+  return !!(await tenantModel('students', tenantContext(req)).findOne(filter).select('id').lean());
+}
+
+router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('students', 'read'), scopeMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const Students = tenantModel('students', tenantContext(req));
@@ -849,6 +868,8 @@ router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('students', 'read'), asyn
     }
 
     if (!doc) return E.notFound(res, 'Student not found');
+    // A parent or student only ever opens their own (v5.285.0).
+    if (forbiddenForSelfServiceRole(req, { id: doc.id ?? String(doc._id) })) return E.forbidden(res);
 
     // Reported directly: profile Overview showed "Class: —" for a real,
     // active student, while the SAME record's Edit form correctly showed
@@ -870,7 +891,10 @@ router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('students', 'read'), asyn
       if (strm?.name) doc.streamName = strm.name;
     }
 
-    return ok(res, await _attachPortalAccountStatus(req, doc));
+    const access = await _medicalAccess(req);
+    if (!access.profile && access.flags) access.flags = await _inStudentScope(req, doc);
+    const view = studentFor(await _attachPortalAccountStatus(req, doc), access);
+    return ok(res, { ...view, medicalAccess: { view: access.profile, edit: await canMedical(req, 'profile', 'update') } });
   } catch (err) {
     console.error('[students GET/:id]', err);
     return E.serverError(res);
@@ -927,7 +951,7 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('students', 'create'), asyn
       updatedBy:       userId,
     });
 
-    return created(res, doc.toObject ? doc.toObject() : doc);
+    return created(res, studentFor(doc.toObject ? doc.toObject() : doc, await _medicalAccess(req)));
   } catch (err) {
     if (err.code === 11000) return E.conflict(res, 'A student with those details already exists');
     console.error('[students POST]', err);
@@ -958,6 +982,16 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('students', 'update'), as
       try { existing = await Students.findOne({ _id: req.params.id, schoolId }).lean(); } catch (_) {}
     }
     if (!existing) return E.notFound(res, 'Student not found');
+
+    // The medical profile has its own row (v5.285.0). Someone without it was not
+    // sent it either, so an unchanged or empty field is ignored, never saved over it.
+    if (['medical', 'medicalNotes'].some(k => data[k] !== undefined) && !(await canMedical(req, 'profile', 'update'))) {
+      const notes = (data.medicalNotes || '').trim();
+      if (data.medical !== undefined || (notes && notes !== (existing.medicalNotes || '').trim())) {
+        return E.forbidden(res, 'Needs Edit on Medical Centre → Student Medical Profile.');
+      }
+      delete data.medicalNotes;
+    }
 
     // Class reassignment — reported directly (2026-10-13): a student
     // moved to a different class via this form vanished from that
@@ -1180,7 +1214,8 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('students', 'update'), as
       });
     }
 
-    return ok(res, guardianAccountSync.length ? { ...doc, guardianAccountSync } : doc);
+    const view = studentFor(doc, await _medicalAccess(req));
+    return ok(res, guardianAccountSync.length ? { ...view, guardianAccountSync } : view);
   } catch (err) {
     console.error('[students PUT/:id]', err);
     return E.serverError(res);

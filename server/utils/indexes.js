@@ -758,6 +758,13 @@ const INDEXES = [
   },
 
   {
+    col: 'medical_visits',
+    indexes: [
+      { key: { schoolId: 1, date: -1, createdAt: -1 },  name: 'mv_school_date' },
+      { key: { schoolId: 1, studentId: 1, date: -1 },   name: 'mv_school_student_date' },
+    ],
+  },
+  {
     col: 'lesson_coverage',
     indexes: [
       { key: { schoolId: 1, classId: 1, subjectId: 1, academicYear: 1, topicId: 1, subtopicId: 1 }, name: 'lc_class_sub_year_topic', sparse: true },

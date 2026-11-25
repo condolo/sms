@@ -36,6 +36,9 @@ const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E, strParam } = require('../utils/response');
 const AuditService = require('../services/audit');
 const { notifyGuardiansForStudents } = require('../utils/notify-students');
+const { _model } = require('../utils/model');
+const { resolveTeacher } = require('../utils/resolveTeacher');
+const { canMedical, needMedical, medicalSettings, DEFAULT_SETTINGS } = require('../utils/medical-access');
 
 const router  = express.Router();
 const PLAN    = planGate('medical');
@@ -56,7 +59,11 @@ const VisitSchema = z.object({
   referred:        z.boolean().default(false),
   referredTo:      z.string().max(300).optional(),  // where referred, if referred=true
   notes:           z.string().max(2000).optional(),
+  // Never sent to a parent, a Weekly Snapshot or an alert (v5.285.0).
+  clinicNotes:     z.string().max(2000).optional(),
 });
+
+const SettingsSchema = z.object(Object.fromEntries(Object.keys(DEFAULT_SETTINGS).map(k => [k, z.boolean().optional()]))).strict();
 
 function _validate(schema, data) {
   const r = schema.safeParse(data);
@@ -73,9 +80,79 @@ async function _resolveStudentName(ctx, schoolId, studentId) {
    CLINIC VISITS
    ══════════════════════════════════════════════════════════════ */
 
+/* The name behind a login, as the staff record writes it. */
+async function _staffName(ctx, schoolId, userId, email) {
+  if (!userId) return '';
+  const staff = await resolveTeacher(userId, email, schoolId, 'title firstName lastName').catch(() => null);
+  const name = [staff?.title, staff?.firstName, staff?.lastName].filter(Boolean).join(' ');
+  if (name) return name;
+  const user = await tenantModel('users', ctx).findOne({ id: userId, schoolId }).select('name').lean().catch(() => null);
+  return user?.name || '';
+}
+
+/* Opening a visit's details is written to the Audit Log, once per person
+   and visit in 10 minutes. */
+const VIEW_AUDIT_MS = 10 * 60 * 1000;
+const _viewed = new Map();
+function _auditView(req, doc) {
+  const { schoolId, userId } = req.jwtUser;
+  const key = `${schoolId}|${userId}|${doc.id}`;
+  const now = Date.now();
+  if (now - (_viewed.get(key) || 0) < VIEW_AUDIT_MS) return;
+  if (_viewed.size > 5000) _viewed.clear();
+  _viewed.set(key, now);
+  AuditService.log({
+    action: 'medical.visit_viewed', actor: req.jwtUser, schoolId,
+    target: { type: 'student', id: doc.studentId, label: doc.studentName },
+    details: { visitId: doc.id, visitDate: doc.date }, req,
+  });
+}
+
+async function _settings(schoolId) {
+  return medicalSettings(await _model('schools').findOne({ id: schoolId }, { medicalSettings: 1 }).lean());
+}
+
+/* GET /api/medical/access — what this person may do here, so the screen
+   shows exactly what the routes allow. */
+router.get('/access', authMiddleware, PLAN, MODGATE, async (req, res) => { // rbac: returns the caller's own rights only
+  try {
+    const check = (sub, action) => canMedical(req, sub, action);
+    const [visits, record, remove, alerts, reports, notesRead, notesWrite, settings] = await Promise.all([
+      check('view', 'read'), check('record', 'create'), check('delete', 'delete'), check('alerts', 'read'), check('reports', 'read'),
+      check('clinic_notes', 'read'), check('clinic_notes', 'create'), check('settings', 'update'),
+    ]);
+    return ok(res, { visits, record, remove, alerts, reports, clinicNotes: { read: notesRead, write: notesWrite }, settings });
+  } catch (err) { console.error('[medical/access GET]', err); return E.serverError(res); }
+});
+
+/* GET/PUT /api/medical/settings — the school's own choices. */
+router.get('/settings', authMiddleware, PLAN, MODGATE, async (req, res) => { // rbac: canMedical below (visits or settings)
+  try {
+    const may = await canMedical(req, 'settings', 'update') || await canMedical(req, 'view', 'read') || await canMedical(req, 'record', 'create');
+    if (!may) return E.forbidden(res);
+    return ok(res, await _settings(req.jwtUser.schoolId));
+  } catch (err) { console.error('[medical/settings GET]', err); return E.serverError(res); }
+});
+
+router.put('/settings', authMiddleware, PLAN, MODGATE, rbac('medical', 'update', 'settings'), needMedical('settings', 'update'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const { data, error } = _validate(SettingsSchema, req.body);
+    if (error) return E.validation(res, error);
+    const before = await _settings(schoolId);
+    const next = { ...before, ...data };
+    await _model('schools').updateOne({ id: schoolId }, { $set: { medicalSettings: { ...next, updatedBy: userId, updatedAt: new Date().toISOString() } } });
+    AuditService.log({
+      action: 'medical.settings_changed', actor: req.jwtUser, schoolId,
+      target: { type: 'school', id: schoolId, label: 'Medical Centre settings' }, details: { before, after: next }, req,
+    });
+    return ok(res, next);
+  } catch (err) { console.error('[medical/settings PUT]', err); return E.serverError(res); }
+});
+
 /* GET /api/medical/visits — the student's medical timeline (or the
    whole clinic's, filtered) */
-router.get('/visits', authMiddleware, PLAN, MODGATE, rbac('medical', 'read', 'view'), async (req, res) => {
+router.get('/visits', authMiddleware, PLAN, MODGATE, rbac('medical', 'read', 'view'), needMedical('view', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
@@ -92,14 +169,15 @@ router.get('/visits', authMiddleware, PLAN, MODGATE, rbac('medical', 'read', 'vi
       if (_dt) filter.date.$lte = _dt;
     }
 
-    if (req.query.search) {
-      const rx = new RegExp(req.query.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    const search = strParam(req.query.search);
+    if (search) {
+      const rx = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
       filter.$or = [{ studentName: rx }, { complaint: rx }];
     }
 
     const Visits = tenantModel('medical_visits', tenantContext(req));
     const [docs, total] = await Promise.all([
-      Visits.find(filter).sort({ date: -1, createdAt: -1 }).skip(skip).limit(limit).select('-__v').lean(),
+      Visits.find(filter).sort({ date: -1, createdAt: -1 }).skip(skip).limit(limit).select('-__v -clinicNotes').lean(),
       Visits.countDocuments(filter),
     ]);
 
@@ -110,7 +188,7 @@ router.get('/visits', authMiddleware, PLAN, MODGATE, rbac('medical', 'read', 'vi
 /* GET /api/medical/students?q= — the student picker for a new visit.
    Gated on medical read (not the students module) so a nurse account does
    not need the whole student register just to record a visit. */
-router.get('/students', authMiddleware, PLAN, MODGATE, rbac('medical', 'read', 'view'), async (req, res) => {
+router.get('/students', authMiddleware, PLAN, MODGATE, rbac('medical', 'read', 'view'), needMedical('view', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const q = (req.query.q || '').toString().trim();
@@ -142,18 +220,22 @@ router.get('/students', authMiddleware, PLAN, MODGATE, rbac('medical', 'read', '
 });
 
 /* GET /api/medical/visits/:id */
-router.get('/visits/:id', authMiddleware, PLAN, MODGATE, rbac('medical', 'read', 'view'), async (req, res) => {
+router.get('/visits/:id', authMiddleware, PLAN, MODGATE, rbac('medical', 'read', 'view'), needMedical('view', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const doc = await tenantModel('medical_visits', tenantContext(req))
+    const ctx = tenantContext(req);
+    const doc = await tenantModel('medical_visits', ctx)
       .findOne({ id: req.params.id, schoolId, deletedAt: { $exists: false } }).select('-__v').lean();
     if (!doc) return E.notFound(res, 'Visit not found');
-    return ok(res, doc);
+    if (!(await canMedical(req, 'clinic_notes', 'read'))) delete doc.clinicNotes;
+    const recordedByName = doc.recordedByName || await _staffName(ctx, schoolId, doc.recordedBy);
+    _auditView(req, doc);
+    return ok(res, { ...doc, recordedByName: recordedByName || null });
   } catch (err) { console.error('[medical/visits GET/:id]', err); return E.serverError(res); }
 });
 
 /* POST /api/medical/visits — log a new visit (never edited afterward) */
-router.post('/visits', authMiddleware, PLAN, MODGATE, rbac('medical', 'create', 'record'), async (req, res) => {
+router.post('/visits', authMiddleware, PLAN, MODGATE, rbac('medical', 'create', 'record'), needMedical('record', 'create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(VisitSchema, req.body);
@@ -164,6 +246,9 @@ router.post('/visits', authMiddleware, PLAN, MODGATE, rbac('medical', 'create', 
     }
 
     const ctx = tenantContext(req);
+    if (data.clinicNotes && !(await canMedical(req, 'clinic_notes', 'create'))) {
+      return E.forbidden(res, 'Needs Edit on Medical Centre → Clinic-only Notes.');
+    }
     if (!data.studentName) {
       data.studentName = await _resolveStudentName(ctx, schoolId, data.studentId);
     }
@@ -174,6 +259,7 @@ router.post('/visits', authMiddleware, PLAN, MODGATE, rbac('medical', 'create', 
       schoolId,
       date:       data.date || new Date().toISOString().slice(0, 10),
       recordedBy: userId,
+      recordedByName: await _staffName(ctx, schoolId, userId, req.jwtUser.email),
       createdBy:  userId,
       updatedBy:  userId,
     });
@@ -185,12 +271,14 @@ router.post('/visits', authMiddleware, PLAN, MODGATE, rbac('medical', 'create', 
       details: { visitId: plain.id, sentHome: data.sentHome, referred: data.referred }, req,
     });
 
+    // An alert can show on a locked phone: the complaint is in it only if the school chose so.
+    const { alertShowsComplaint } = await _settings(schoolId).catch(() => DEFAULT_SETTINGS);
     notifyGuardiansForStudents({
       ctx, schoolId, eventKey: 'medical_visit_logged',
       items: [{
         studentId: data.studentId,
         inAppSubject: `Clinic visit logged for ${data.studentName || 'your child'}`,
-        inAppBody:    data.complaint,
+        inAppBody:    alertShowsComplaint ? data.complaint : 'Open Clinic Visits in Msingi to read the details.',
       }],
     }).catch(err => console.error('[medical/visits notify]', err));
 
@@ -201,7 +289,7 @@ router.post('/visits', authMiddleware, PLAN, MODGATE, rbac('medical', 'create', 
 /* DELETE /api/medical/visits/:id — soft-delete only (correct a
    data-entry mistake by removing the wrong record and logging a new
    one; the original is retained, never destroyed). */
-router.delete('/visits/:id', authMiddleware, PLAN, MODGATE, rbac('medical', 'delete', 'delete'), async (req, res) => {
+router.delete('/visits/:id', authMiddleware, PLAN, MODGATE, rbac('medical', 'delete', 'delete'), needMedical('delete', 'delete'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const doc = await tenantModel('medical_visits', tenantContext(req)).findOneAndUpdate(
@@ -237,7 +325,7 @@ router.delete('/visits/:id', authMiddleware, PLAN, MODGATE, rbac('medical', 'del
    the query can't leak bloodGroup/doctor/consent/notes through this
    route, because those fields are never referenced when building
    `alerts` below. */
-router.get('/alerts', authMiddleware, PLAN, MODGATE, rbac('medical', 'read', 'alerts'), scopeMiddleware, async (req, res) => {
+router.get('/alerts', authMiddleware, PLAN, MODGATE, rbac('medical', 'read', 'alerts'), needMedical('alerts', 'read'), scopeMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const filter = {
@@ -285,7 +373,7 @@ router.get('/alerts', authMiddleware, PLAN, MODGATE, rbac('medical', 'read', 'al
    only widen or narrow the window "Common Conditions" and "Frequent
    Visitors" are computed over (defaults to the current month).
    ══════════════════════════════════════════════════════════════ */
-router.get('/reports', authMiddleware, PLAN, MODGATE, rbac('medical', 'read', 'reports'), async (req, res) => {
+router.get('/reports', authMiddleware, PLAN, MODGATE, rbac('medical', 'read', 'reports'), needMedical('reports', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const Visits = tenantModel('medical_visits', tenantContext(req));

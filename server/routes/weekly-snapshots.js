@@ -26,7 +26,10 @@ const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware }   = require('../middleware/auth');
-const { rbac, hasPermission } = require('../middleware/rbac');
+const { rbac } = require('../middleware/rbac');
+const { scopeMiddleware } = require('../middleware/scopeMiddleware');
+const ScopeEngine = require('../utils/scopeEngine');
+const { canMedical } = require('../utils/medical-access');
 const { planGate }         = require('../middleware/plan');
 const { moduleGate, isModuleEnabled } = require('../middleware/module-gate');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
@@ -65,8 +68,8 @@ function _effectiveRoles(req) {
 async function _redactMedical(req, schoolId, sections) {
   const medicalOn = await isModuleEnabled(schoolId, 'medical');
   if (!medicalOn) return { ...sections, medical: [] };
-  const canReadMedical = await hasPermission(req, 'medical', 'read');
-  if (!canReadMedical) return { ...sections, medical: [] };
+  // View Clinic Visits, not the combined grant: Alerts alone is not enough (v5.285.0).
+  if (!(await canMedical(req, 'view', 'read'))) return { ...sections, medical: [] };
   return sections;
 }
 
@@ -82,12 +85,31 @@ async function _redactMedical(req, schoolId, sections) {
    helpers never touch `res` directly (except streamSnapshotPdf, which
    owns the whole PDF response by necessity).
    ══════════════════════════════════════════════════════════════ */
+/* A teacher opens only their own students' snapshots (v5.285.0): their own
+   classes (data visibility in Settings) or a class they are form teacher in,
+   the classes /my-classes lists. It listed only those but opened any student.
+   The portals call the same helpers for their own child and are not affected. */
+async function _teacherMaySee(req, student) {
+  const eff = _effectiveRoles(req);
+  if (!eff.has('teacher') || [...BROAD_STAFF_ROLES].some(r => eff.has(r))) return true;
+  if (['parent', 'guardian', 'student'].includes(req.jwtUser?.role)) return true;   // checked above
+  const { schoolId } = req.jwtUser;
+  if (!req.scope) return true;   // this teacher's role sees the whole school
+  const filter = { schoolId, id: student.id };
+  ScopeEngine.applyToFilter(req, 'students', filter);
+  if (await tenantModel('students', tenantContext(req)).findOne(filter).select('id').lean()) return true;
+  const homeroom = await resolveHomeroomStreamIds(req);
+  if (!homeroom.length || !student.classId) return false;
+  return !!(await tenantModel('streams', tenantContext(req)).findOne({ schoolId, id: { $in: homeroom }, classId: student.classId }).select('id').lean());
+}
+
 async function _findAuthorizedStudent(req, studentId, selectFields) {
   const { schoolId } = req.jwtUser;
   const student = await tenantModel('students', tenantContext(req)).findOne({ id: studentId, schoolId })
     .select(selectFields).lean();
   if (!student) return { error: 'not_found' };
   if (forbiddenForSelfServiceRole(req, student)) return { error: 'forbidden' };
+  if (!(await _teacherMaySee(req, student))) return { error: 'forbidden' };
   return { student };
 }
 
@@ -117,7 +139,7 @@ async function getSnapshotDetail(req, studentId, weekStart) {
 async function streamSnapshotPdf(req, res, studentId, weekStart) {
   const result = await getSnapshotDetail(req, studentId, weekStart);
   if (result.error === 'not_found') return E.notFound(res, 'No snapshot generated for that week');
-  if (result.error === 'forbidden') return E.forbidden(res, 'You can only view your own Weekly Snapshots.');
+  if (result.error === 'forbidden') return E.forbidden(res, 'You can only view Weekly Snapshots of your own students.');
   const { student, snapshot } = result;
 
   let PDFDocument;
@@ -173,11 +195,11 @@ router.get('/my-classes', authMiddleware, PLAN, MODGATE, rbac('weekly_snapshot',
 });
 
 /* ── GET /api/weekly-snapshots/:studentId/weeks ─────────────── */
-router.get('/:studentId/weeks', authMiddleware, PLAN, MODGATE, rbac('weekly_snapshot', 'read'), async (req, res) => {
+router.get('/:studentId/weeks', authMiddleware, PLAN, MODGATE, rbac('weekly_snapshot', 'read'), scopeMiddleware, async (req, res) => {
   try {
     const result = await getWeeksForStudent(req, req.params.studentId);
     if (result.error === 'not_found') return E.notFound(res, 'Student not found');
-    if (result.error === 'forbidden') return E.forbidden(res, 'You can only view your own Weekly Snapshots.');
+    if (result.error === 'forbidden') return E.forbidden(res, 'You can only view Weekly Snapshots of your own students.');
     return ok(res, result);
   } catch (err) {
     console.error('[weekly-snapshots GET /:studentId/weeks]', err);
@@ -186,11 +208,11 @@ router.get('/:studentId/weeks', authMiddleware, PLAN, MODGATE, rbac('weekly_snap
 });
 
 /* ── GET /api/weekly-snapshots/:studentId/:weekStart ────────── */
-router.get('/:studentId/:weekStart', authMiddleware, PLAN, MODGATE, rbac('weekly_snapshot', 'read'), async (req, res) => {
+router.get('/:studentId/:weekStart', authMiddleware, PLAN, MODGATE, rbac('weekly_snapshot', 'read'), scopeMiddleware, async (req, res) => {
   try {
     const result = await getSnapshotDetail(req, req.params.studentId, req.params.weekStart);
     if (result.error === 'not_found') return E.notFound(res, 'No snapshot generated for that week');
-    if (result.error === 'forbidden') return E.forbidden(res, 'You can only view your own Weekly Snapshots.');
+    if (result.error === 'forbidden') return E.forbidden(res, 'You can only view Weekly Snapshots of your own students.');
     return ok(res, result);
   } catch (err) {
     console.error('[weekly-snapshots GET /:studentId/:weekStart]', err);
@@ -199,7 +221,7 @@ router.get('/:studentId/:weekStart', authMiddleware, PLAN, MODGATE, rbac('weekly
 });
 
 /* ── GET /api/weekly-snapshots/:studentId/:weekStart/pdf ────── */
-router.get('/:studentId/:weekStart/pdf', authMiddleware, PLAN, MODGATE, rbac('weekly_snapshot', 'read'), async (req, res) => {
+router.get('/:studentId/:weekStart/pdf', authMiddleware, PLAN, MODGATE, rbac('weekly_snapshot', 'read'), scopeMiddleware, async (req, res) => {
   try {
     await streamSnapshotPdf(req, res, req.params.studentId, req.params.weekStart);
   } catch (err) {

@@ -6,6 +6,30 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.285.0] - 2026-11-25 - feat(medical): open a clinic visit; fix(security): who sees medical records
+
+Asked for by a school: the nurse logs a full visit, but Visits showed only the student, complaint, outcome and date.
+
+### Added
+- **Medical Centre → Visits: open a visit** for everything logged, who recorded it, when, and the student's other visits. Filter by student and dates. Opening one is written to the Audit Log (`medical.visit_viewed`, once per person and visit in 10 minutes).
+- **Clinic-only notes** on a visit: never sent to parents, Weekly Snapshots or alerts.
+- **Medical Centre → Settings** (admin, or the new row): parents can read the visit notes (on, as before); name the complaint in the parent's alert (**now off**: it can show on a locked phone).
+- **Settings → Roles & Permissions → Medical Centre**, three rows instead of rules in code: **Student Medical Profile**, **Clinic-only Notes** (both follow View / Record Clinic Visit until ticked; the admissions officer keeps the profile) and **Medical Centre Settings** (admin only until ticked).
+
+### Security
+- **The student medical profile was sent to anyone who could open a student**, including teachers of other classes. It now needs its own row: in the student record and list, the student export, and the teacher portal (which showed free-text notes). Without it: the emergency contact, plus the condition flags for those with Medical Alerts (own students only). A save by someone who can't see the profile can't change or empty it.
+- **Saving a role with only "View Medical Alerts" ticked let it read clinic visits in Weekly Snapshots**, and, where the other rows were never saved, the visits themselves. Alerts alone now opens alerts only (`utils/medical-access.js`).
+- **A teacher could open any student's Weekly Snapshot by its address.** Now their own students (data visibility) or a class they are form teacher of.
+- **A parent or student whose role was given View Students could open another student's record by its address.** Now only their own.
+
+### Fixed
+- Clinic visits were missing from the school's own backups.
+- The Medical Centre tabs come from the server's own rights check, so a tab is never shown to be refused.
+
+No data migration. Saved visits are not changed.
+
+---
+
 ## [v5.284.0] - 2026-11-25 - feat(report-cards): subject teachers' names are saved when a report is published
 
 The name beside a subject comment was looked up each time a report was opened, so after a change of teacher an old report showed the new teacher's name beside the previous teacher's comment, or no name.

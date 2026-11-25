@@ -4198,6 +4198,14 @@ Additionally, `GET /alerts` applies the same `scopeMiddleware`/`ScopeEngine` cla
 
 Default grants (`repairPermissions.js` `ROLE_DEFAULTS`, `onboard.js` `_defaultPerms()`, `SettingsPage.jsx` `DEFS` — all three kept in sync, same reconciliation discipline as every other RBAC module in this codebase): admin/superadmin get it via the existing `ALL_MODULES` blanket; principal/deputy_principal get explicit full RCUD; teacher gets **only** `medical__alerts: ['read']`; every other built-in role gets nothing — a school grants a custom "Nurse" role via Settings → Roles & Permissions as needed.
 
+### Who may see which medical record (v5.285.0)
+
+- `utils/medical-access.js` is the one rule. `canMedical(req, row, action)` / `needMedical(row, action)` (after `rbac()`). Never read the combined `medical` grant for medical data: Settings writes it as the union of every row, so Alerts alone sets `medical: ['read']`. The rule ignores it when only narrow rows (`alerts`, `profile`, `clinic_notes`, `settings`) are behind it.
+- Rows added: `profile` (read → `view`, update → `record`, plus `admissions_officer`, until ticked), `clinic_notes` (same, no admissions officer), `settings` (admin or an explicit tick). `SettingsPage` `_mergePerms` shows the same ticks for roles saved before. `rbac.js` exports `effectivePerms(req)`.
+- Student records: every route that returns one passes it through `studentFor(doc, { profile, flags })` (`students.js` list, get, create, update). `GET /students/:id` adds `medicalAccess: { view, edit }`, runs `scopeMiddleware` (flags only inside the caller's scope) and `forbiddenForSelfServiceRole`. `PUT`: 403 for `medical` / a changed `medicalNotes` without `profile` update; an empty `medicalNotes` is ignored, so a form that was never sent it can't wipe it. The student export and teacher portal use the same check.
+- Visits: `clinicNotes` (never in the list, parent portal, snapshot or alert), `recordedByName` at save (resolved on read for older visits). `GET /medical/access`, `GET|PUT /medical/settings` (`schools.medicalSettings`: `alertShowsComplaint` false, `parentsSeeNotes` true). Audit: `medical.visit_viewed`, `medical.settings_changed`.
+- Weekly Snapshots: `_teacherMaySee` (own scope, or form class) on the staff routes; medical section needs `view`.
+
 ### Plan gating
 
 `server/middleware/plan.js` — `FEATURE_PLAN.medical = 'core'`, same tier as every other ERP module.

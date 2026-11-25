@@ -136,6 +136,8 @@ const ACTIONS = {
   // Medical Centre milestone 3 — Clinic Visits
   'medical.visit_logged':  { severity: 'info' },
   'medical.visit_deleted': { severity: 'warn' },
+  'medical.visit_viewed':     { severity: 'info' },
+  'medical.settings_changed': { severity: 'warn' },
   // Inventory milestone 1 — Items
   'inventory.item_created': { severity: 'info' },
   'inventory.item_deleted': { severity: 'warn' },
