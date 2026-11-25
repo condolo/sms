@@ -53,6 +53,51 @@ function CoverageNote({ coverage, cycleName }) {
   );
 }
 
+/* The subject teachers' names this publish saves on the reports (v5.284.0).
+   Shown before publishing because they no longer follow later changes. */
+function TeacherNames({ names, keep, setKeep }) {
+  if (!names?.shown) return null;
+  const missing = names.subjects.filter(s => s.teachers.some(t => !t.teacher));
+  return (
+    <div className="rounded-lg bg-white border border-amber-200 px-3 py-2 space-y-1.5 text-xs text-slate-700">
+      <p><span className="font-semibold">Subject teachers on these reports.</span> Names are saved when you publish and won&apos;t change if a teacher changes later. If one is wrong, cancel and correct it in Timetable → Subject allocation first.</p>
+      <ul className="max-h-40 overflow-y-auto grid sm:grid-cols-2 gap-x-4 gap-y-0.5">
+        {names.subjects.map(s => (
+          <li key={s.subjectId}>
+            <span className="text-slate-500">{s.subject}:</span>{' '}
+            {s.teachers.map((t, i) => (
+              <span key={i}>{i > 0 && '; '}{t.stream && <span className="text-slate-400">{t.stream} </span>}
+                {t.teacher || <span className="text-amber-700">no teacher</span>}</span>
+            ))}
+          </li>
+        ))}
+      </ul>
+      {missing.length > 0 && (
+        <p className="text-amber-700">With no teacher, the report shows no name until one is assigned.</p>
+      )}
+      {names.changes.length > 0 && (
+        <fieldset className="rounded-md bg-amber-50 border border-amber-200 px-2.5 py-2 space-y-1">
+          <legend className="sr-only">Names that differ from the published reports</legend>
+          <p className="font-semibold text-amber-800">These names differ from the reports already published:</p>
+          <ul className="space-y-0.5">
+            {names.changes.map((c, i) => (
+              <li key={i}>{c.subject}{c.stream ? ` · ${c.stream}` : ''}: <strong>{c.from}</strong> → <strong>{c.to || 'no teacher'}</strong> ({c.reports} report{c.reports === 1 ? '' : 's'})</li>
+            ))}
+          </ul>
+          <label className="flex items-start gap-1.5 pt-1">
+            <input type="radio" name="teacher-names" checked={keep === true} onChange={() => setKeep(true)} className="mt-0.5" />
+            <span>Keep the published names (the teacher changed after the term)</span>
+          </label>
+          <label className="flex items-start gap-1.5">
+            <input type="radio" name="teacher-names" checked={keep === false} onChange={() => setKeep(false)} className="mt-0.5" />
+            <span>Use the new names (the published name was wrong)</span>
+          </label>
+        </fieldset>
+      )}
+    </div>
+  );
+}
+
 export default function ReportCardsTab() {
   const [classId, setClassId] = useState('');
   const [streamId, setStreamId] = useState('');
@@ -141,6 +186,7 @@ export default function ReportCardsTab() {
   // locks the Markbook automatically instead of requiring every subject
   // to already be submitted+approved+manually-locked beforehand.
   const [confirmingPublish, setConfirmingPublish] = useState(false);
+  const [keepNames, setKeepNames] = useState(null);   // null = not chosen yet
 
   const school      = useAuthStore(s => s.session?.school);
   const academicYear = school?.academicYear ?? '';
@@ -460,6 +506,18 @@ export default function ReportCardsTab() {
     },
     onError: (err) => setPublishError(err?.message ?? 'Publish failed'),
   });
+
+  // Kindergarten reports have no subject comments, so no teacher names.
+  const { data: teacherNames, isLoading: namesLoading, isError: namesFailed } = useQuery({
+    queryKey: ['reportCards', 'publish-names', { classId, termNum, yearId, cycle }],
+    queryFn:  () => reportCardsApi.publishNames({ classId, termNumber: Number(termNum), academicYearId: yearId || undefined, cycle: cycle || undefined }),
+    enabled:  confirmingPublish && !isKgClass && !!classId && !!termNum,
+    staleTime: 0, gcTime: 0,
+    select: (res) => res?.data,
+  });
+  // A choice made for one class or term never carries to another.
+  useEffect(() => { setKeepNames(null); }, [classId, termNum, yearId, cycle]);
+  const mustChooseNames = !isKgClass && (teacherNames?.changes?.length ?? 0) > 0;
 
   /* ── Bulk print (the accepted school standard) ──────────────
      Reported directly: "the downloaded class report cards look
@@ -801,7 +859,7 @@ ${docs.map(h => `<div>${_bodyOf(h)}</div>`).join('\n')}
           {canQuery && canPublishReportCards && (
             <div className="flex flex-col gap-1 ml-auto">
               <button
-                onClick={() => { setPublishError(''); setConfirmingPublish(true); }}
+                onClick={() => { setPublishError(''); setKeepNames(null); setConfirmingPublish(true); }}
                 disabled={isPublishing || !(isKgClass ? kgStudents.length : students.length)}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
@@ -913,10 +971,15 @@ ${docs.map(h => `<div>${_bodyOf(h)}</div>`).join('\n')}
                 This publishes under the <strong>{schoolCustomTypes.find(t => t.key === cycle)?.label || cycle}</strong> cycle — a new, independently-visible report alongside whatever is already published under a different cycle for this term. It does not replace or hide any other cycle's report.
               </p>
             )}
+            {!isKgClass && (namesLoading
+              ? <p className="text-xs text-amber-700 flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" /> Checking subject teachers…</p>
+              : namesFailed
+                ? <p className="text-xs text-amber-700">The subject teachers&apos; names could not be loaded. Cancel and try again to check them. If you publish now, names already on published reports are kept.</p>
+                : <TeacherNames names={teacherNames} keep={keepNames} setKeep={setKeepNames} />)}
             <div className="flex items-center gap-2 pt-1">
               <button
-                onClick={() => { setConfirmingPublish(false); publishBatch(); }}
-                disabled={isPublishing}
+                onClick={() => { setConfirmingPublish(false); publishBatch(isKgClass ? {} : { keepTeacherNames: namesFailed || (mustChooseNames && keepNames === true) }); }}
+                disabled={isPublishing || (!isKgClass && namesLoading) || (mustChooseNames && keepNames === null)}
                 className="text-xs font-medium text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap"
               >
                 Lock &amp; Publish

@@ -548,6 +548,8 @@ Your school administrator generates report cards at the end of each term. The pr
 
 > **Comments are never locked by marks.** A subject teacher can write or edit their comment before marks are submitted, after they're approved or locked, or anywhere in between — submitting marks never blocks the comment, and writing the comment never blocks submitting marks.
 
+> **Subject teachers' names** are saved with the report when it is published (*2026-11*); a later change of teacher doesn't alter it. The confirm step lists them.
+
 ### Versioning — Your Records Are Safe
 If a report card needs to be corrected and republished, the **original version is never deleted**. Each republication creates a new version (v1 → v2 → v3). You can always view older versions if needed. Superseded versions are clearly marked.
 

@@ -95,4 +95,26 @@ async function subjectTeacherResolver(ctx, schoolId, classId, subjectIds = null)
   }
 }
 
-module.exports = { subjectTeacherResolver, pickAssignment };
+/* ── Saved at publishing (v5.284.0) ──────────────────────────────
+   A published report keeps the names it was published with: the comments
+   are saved, so the name beside each must not change when the subject
+   later gets another teacher. A subject with no name at publishing, and
+   every report published before this, still follow the assignments. */
+
+/** Names to save on a new snapshot. keep = the previous version's names, when the publisher chose to keep them. */
+function namesToSave(subjectIds, names, keep = null) {
+  const out = {};
+  for (const id of subjectIds) {
+    const name = keep?.[id] || names?.[id];
+    if (name) out[id] = name;
+  }
+  return out;
+}
+
+/** Names to show on a snapshot: the saved ones, else today's. */
+function namesToShow(snap, live) {
+  const saved = Object.fromEntries(Object.entries(snap?.subjectTeacherNames || {}).filter(([, v]) => v));
+  return { ...live, ...saved };
+}
+
+module.exports = { subjectTeacherResolver, pickAssignment, namesToSave, namesToShow };

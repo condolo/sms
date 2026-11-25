@@ -127,7 +127,8 @@ The same publish-time lock principle applies to Kindergarten indicator marks and
 4. Open **Report Cards → Generate & Publish** and select the exact year, term, class, and stream.
 5. Review the preview, report count, learner identities, grading, comments/remarks, and any validation or provisional warnings. Resolve errors before publishing.
 6. Confirm publication only after the school approves the results. Msingi warns that publishing makes reports available and locks marks; publication is not an ordinary save.
-7. Verify the published count/status and open representative report cards. Check parent/student access only after confirming the intended release.
+7. The confirm step lists the **subject teachers' names**, which are saved when you publish and don't change if the teacher changes later (*v5.284.0*). If one is wrong, cancel and correct it in Timetable → Subject allocation first. When you publish again after a change, choose whether to keep the published names or use the new ones. Reports published before this still follow Subject allocation.
+8. Verify the published count/status and open representative report cards. Check parent/student access only after confirming the intended release.
 
 Publication creates a versioned snapshot. If corrections require republishing, use the supported correction workflow so the earlier snapshot remains part of the history. Do not assume later grading/template changes automatically rewrite an already-published report.
 

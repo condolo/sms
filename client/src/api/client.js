@@ -1505,6 +1505,7 @@ export const council = {
 export const reportCards = {
   generate: (data) => _post('/report-cards/generate', data),
   publish:  (data) => _post('/report-cards/publish', data),
+  publishNames: (params) => _get('/report-cards/publish-names', params),   // subject teachers' names a publish would save (v5.284.0)
   // Kindergarten / competency-band pipeline — deliberately separate
   // endpoints (ranking/deviation/moderation don't apply the same way
   // to indicator-based marks), not a branch of generate/publish above.

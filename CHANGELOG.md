@@ -6,6 +6,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.284.0] - 2026-11-25 - feat(report-cards): subject teachers' names are saved when a report is published
+
+The name beside a subject comment was looked up each time a report was opened, so after a change of teacher an old report showed the new teacher's name beside the previous teacher's comment, or no name.
+
+### Added
+- **Publishing saves the subject teachers' names** on each report, as it already did the class teacher and principal.
+- **Publish Report Cards → Confirm** lists the names that will be saved, by stream where they differ, and subjects with no teacher. Publishing again after a change lists each name that differs and asks: keep the published names, or use the new ones. `GET /report-cards/publish-names`; `keepTeacherNames` on `POST /report-cards/publish`.
+
+### Unchanged
+- Reports already published are not edited and still follow the assignments: who taught at the time was not recorded. Publishing them again saves the names.
+- A subject with no teacher at publishing shows one assigned later.
+- Kindergarten reports have no subject comments, so no names. The verification code is unaffected.
+
+No data migration, no permission change.
+
+---
+
 ## [v5.283.0] - 2026-11-25 - feat(lessons): topics ticked for the whole class count for every stream
 
 Topics ticked before a class had streams (or before its teacher was moved to one, v5.282.0) didn't count for the stream: its teacher saw 0%, the HOD overview listed them as behind, and the same topics looked untaught. Students and parents already saw those ticks.

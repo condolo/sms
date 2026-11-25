@@ -35,7 +35,7 @@ const { scopeMiddleware } = require('../middleware/scopeMiddleware');
 const ScopeEngine        = require('../utils/scopeEngine');
 const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
-const { subjectTeacherResolver } = require('../utils/subject-teacher-names');
+const { subjectTeacherResolver, namesToSave, namesToShow } = require('../utils/subject-teacher-names');
 const { ok, created, paginate, parsePagination, E, fail } = require('../utils/response');
 const { rankStudents, mergeRankings, bestPerSubject, computeRankingScore } = require('../utils/ranking');
 const { mergeConfig, resolveGrade, resolveCurrentPeriod, OBSERVATION_RATING_VALUES, DEFAULT_GRADING_SCHEMA } = require('./academic-config');
@@ -474,6 +474,9 @@ const PublishSchema = z.object({
   // Required when skipModerationCheck is true
   skipReason:      z.string().max(500).optional(),
   cycle:           z.string().max(50).trim().optional(),
+  // Publishing again after a teacher changed (v5.284.0): true keeps the
+  // names already published, otherwise today's are saved. See /publish-names.
+  keepTeacherNames: z.boolean().default(false),
 });
 
 const CommentSchema = z.object({
@@ -874,6 +877,92 @@ router.post('/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
   } catch (err) { console.error('[report-cards/generate]', err); return E.serverError(res); }
 });
 
+/* ── For a past year, a student's stream is the one they were in THAT year. */
+async function _applyYearStreams(ctx, schoolId, academicYearId, studentMap) {
+  if (!academicYearId) return;
+  const hist = await tenantModel('student_class_history', ctx)
+    .find({ schoolId, academicYearId, studentId: { $in: Object.keys(studentMap) } })
+    .select('studentId streamId').lean().catch(() => []);
+  for (const h of hist) {
+    const stu = studentMap[h.studentId];
+    if (stu) stu.streamId = h.streamId || null;
+  }
+}
+
+/* ── GET /publish-names  (v5.284.0) ──────────────────────────────
+   The subject teachers' names a publish of this class/term would save,
+   for the confirm step, and, where reports are already published, which
+   saved names would change. Reads only. */
+router.get('/publish-names', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), async (req, res) => {
+  try {
+    const { schoolId, role } = req.jwtUser;
+    if (!(await _canPublishReportCards(req, role))) return E.forbidden(res, 'You do not have permission to publish report cards.');
+    const q = (k) => (typeof req.query[k] === 'string' && req.query[k] ? req.query[k] : undefined);
+    const { data, error } = _validate(PublishSchema, {
+      classId: q('classId'), academicYearId: q('academicYearId'), cycle: q('cycle'),
+      termNumber: q('termNumber') ? Number(q('termNumber')) : undefined,
+    });
+    if (error) return E.validation(res, error);
+    const { classId, termNumber: termNum, academicYearId, cycle } = data;
+    const ctx = tenantContext(req);
+
+    const scope = await _resolveTermScope(schoolId, ctx, { academicYearId, termId: undefined, termNumber: termNum });
+    // The same setting the report reads (_loadRenderExtras).
+    const caConfig = await _getAssessmentConfig(schoolId, scope.academicYearId ?? null);
+    if (caConfig.subjectTeacherCommentsEnabled === false) return ok(res, { shown: false, subjects: [], changes: [] });
+
+    const [teachersFor, links, inClass, live] = await Promise.all([
+      subjectTeacherResolver(ctx, schoolId, classId),
+      tenantModel('class_subjects', ctx).find({ schoolId, classId, isActive: { $ne: false } }).select('subjectId').lean(),
+      tenantModel('students', ctx).find({ schoolId, classId, status: 'active' }).select('id streamId').lean(),
+      // The same reports /publish would replace.
+      tenantModel('report_card_snapshots', ctx).find({
+        schoolId, classId, termId: scope.termId, academicYearId: scope.academicYearId,
+        ..._termNumberWhenNoTermId(scope, termNum), cycle: cycle || null, superseded: { $ne: true },
+      }).select('studentId streamId subjects subjectTeacherNames layoutKey').lean(),
+    ]);
+    const reports = live.filter(s => s.layoutKey !== 'kindergarten');
+
+    const known = await tenantModel('students', ctx)
+      .find({ schoolId, id: { $in: reports.map(s => s.studentId) } }).select('id streamId').lean();
+    const studentMap = Object.fromEntries([...inClass, ...known].map(s => [s.id, { ...s }]));
+    await _applyYearStreams(ctx, schoolId, scope.academicYearId, studentMap);
+    const streamOf = (studentId, fallback) => (studentMap[studentId] ? studentMap[studentId].streamId : fallback) || null;
+
+    const streamIds = [...new Set([...inClass.map(s => streamOf(s.id)), ...reports.map(s => streamOf(s.studentId, s.streamId))])];
+    const subjectIds = [...new Set([...links.map(l => l.subjectId), ...reports.flatMap(s => Object.keys(s.subjects || {}))])];
+    const [streamDocs, subjectDocs] = await Promise.all([
+      tenantModel('streams', ctx).find({ schoolId, id: { $in: streamIds.filter(Boolean) } }).select('id name').lean(),
+      tenantModel('subjects', ctx).find({ schoolId, id: { $in: subjectIds } }).select('id name').lean(),
+    ]);
+    const streamName = Object.fromEntries(streamDocs.map(s => [s.id, s.name]));
+    const subjectName = Object.fromEntries(subjectDocs.map(s => [s.id, s.name]));
+    const label = (id) => (id ? (streamName[id] || '') : (streamIds.length > 1 ? 'No stream' : ''));
+
+    // One line per subject; one name when every stream has the same.
+    const subjects = subjectIds.map(subjectId => {
+      const each = (streamIds.length ? streamIds : [null]).map(id => ({ stream: label(id), teacher: teachersFor(id)[subjectId] || null }));
+      const same = each.every(x => x.teacher === each[0].teacher);
+      return { subjectId, subject: subjectName[subjectId] || subjectId, teachers: same ? [{ stream: '', teacher: each[0].teacher }] : each };
+    }).sort((a, b) => a.subject.localeCompare(b.subject));
+
+    const changes = new Map();
+    for (const s of reports) {
+      const sid = streamOf(s.studentId, s.streamId);
+      const today = teachersFor(sid);
+      for (const [subjectId, from] of Object.entries(s.subjectTeacherNames || {})) {
+        const to = today[subjectId] || null;
+        if (!from || from === to) continue;
+        const key = [subjectId, sid, from, to].join('|');
+        const row = changes.get(key) || { subject: subjectName[subjectId] || subjectId, stream: label(sid), from, to, reports: 0 };
+        row.reports += 1;
+        changes.set(key, row);
+      }
+    }
+    return ok(res, { shown: true, subjects, changes: [...changes.values()].sort((a, b) => a.subject.localeCompare(b.subject)) });
+  } catch (err) { console.error('[report-cards/publish-names]', err); return E.serverError(res); }
+});
+
 /* ══════════════════════════════════════════════════════════════
    POST /publish  — interrupt-safe versioned batch snapshot
    ══════════════════════════════════════════════════════════════ */
@@ -895,7 +984,7 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
   const {
     classId, termId, termNumber: termNum, academicYearId,
     className: clientClassName, termName: clientTermName, academicYear: clientAcademicYear,
-    schoolName, skipModerationCheck, skipReason, cycle,
+    schoolName, skipModerationCheck, skipReason, cycle, keepTeacherNames,
   } = data;
   const now     = new Date().toISOString();
   const batchId = uuidv4();
@@ -1014,15 +1103,7 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
 
     // Class history (v5.278.0): for a past year, a student's stream is the
     // one they were in THAT year, not today's (promotion clears it).
-    if (scope.academicYearId) {
-      const hist = await tenantModel('student_class_history', ctx)
-        .find({ schoolId, academicYearId: scope.academicYearId, studentId: { $in: Object.keys(studentMap) } })
-        .select('studentId streamId').lean().catch(() => []);
-      for (const h of hist) {
-        const stu = studentMap[h.studentId];
-        if (stu) stu.streamId = h.streamId || null;
-      }
-    }
+    await _applyYearStreams(ctx, schoolId, scope.academicYearId, studentMap);
 
     // ── Step 6f: Resolve stream names once per distinct id present in this
     // class (RCE1 cover field) — same batching convention as Step 6e's
@@ -1126,6 +1207,9 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
           .map(h => [h.id ?? h.name, h.name]).filter(([id]) => id)
       );
     } catch (_) { /* non-fatal */ }
+
+    // Subject teachers' names, saved with each report (v5.284.0).
+    const teachersFor = await subjectTeacherResolver(ctx, schoolId, classId);
 
     // ── Step 7: Build new snapshots ──────────────────────────
     const newSnaps     = [];
@@ -1252,6 +1336,9 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
           // _computeReportSections' own fallback chain still lets a
           // per-report manually-typed name (Comments tab) override this.
           schoolPrincipalName,
+          // Same again for the subject teachers named beside their comments
+          // (v5.284.0), outside the hash allowlist like the names above.
+          subjectTeacherNames: namesToSave(Object.keys(r.subjects || {}), teachersFor(stu.streamId || null), keepTeacherNames ? prev?.subjectTeacherNames : null),
 
           attendanceSummary: null,
           financialBlock:    blockedStudentIds.has(r.studentId),
@@ -2247,7 +2334,7 @@ router.get('/bulk-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), s
         if (snap.financialBlock && req.query.force !== '1' && !isAdmin) continue; // skip blocked
         const studentExtra = {
           ...bulkExtraBase,
-          subjectTeacherNames: bulkTeachers(snap.streamId),   // this student's stream
+          subjectTeacherNames: namesToShow(snap, bulkTeachers(snap.streamId)),   // saved at publishing, else this student's stream
           behaviour:   behaviourResults[i],
           deviations:  computeTermDeviation(snap.subjects, deviationResults[i]?.subjects),
         };
@@ -2698,8 +2785,8 @@ async function _loadRenderExtras(req, schoolId, snap) {
       .select('id name').lean().catch(() => []),
   ]);
   const deviations = computeTermDeviation(snap.subjects, prevSnap?.subjects);
-  // The stream the student was in when this was published decides (utils/subject-teacher-names.js).
-  const subjectTeacherNames = teachersFor(snap.streamId);
+  // Saved at publishing, else by the stream the student was in then (utils/subject-teacher-names.js).
+  const subjectTeacherNames = namesToShow(snap, teachersFor(snap.streamId));
   const subjectNames = Object.fromEntries(subjectDocs.map(s => [s.id, s.name]));
   return {
     school, behaviour, deviations, subjectTeacherNames, subjectNames,
@@ -2735,14 +2822,13 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
     school = null, behaviour = null, deviations = null, subjectTeacherCommentsEnabled = true,
     // RCE3c — {subjectId: teacherName}, resolved by the caller from
     // teaching_assignments (same "caller resolves, IR formats" posture
-    // as deviations/behaviour/school above). Presentation-only — who
-    // currently teaches a subject is never frozen at publish time.
+    // as deviations/behaviour/school above). Saved at publishing since
+    // v5.284.0 (namesToShow); looked up live only where none was saved.
     subjectTeacherNames = {},
     // {subjectId: name}, resolved by the caller from the subjects
     // collection — see _loadRenderExtras. Falls back to the raw id
     // below only if a subject was deleted after this snapshot's marks
-    // were recorded (the id itself is always frozen; the name is a
-    // live lookup, same posture as subjectTeacherNames above).
+    // were recorded (the id itself is always frozen; the name is a live lookup).
     subjectNames = {},
   } = extra;
   const isDraft = snap.status !== 'published' || snap.superseded;

@@ -727,7 +727,7 @@ const SECTIONS = [
       },
       {
         q: 'How do I publish report cards?',
-        a: "Click 'Publish All' for a class. A confirmation shows how many cards will go live. Once published, students and linked parents can view and download PDFs from their portals. Publishing is logged with who did it and when.",
+        a: "Click 'Publish All' for a class. A confirmation shows how many cards will go live. Once published, students and linked parents can view and download PDFs from their portals. Publishing is logged with who did it and when. The subject teachers' names are saved on each report and don't change if a teacher changes later, so check them in the confirmation.",
       },
       {
         q: 'What is a Report ID?',
