@@ -1452,8 +1452,9 @@ teacher's own teaching-assignment** for that class-subject (see
 OPTIONAL on the record: a whole-class assignment (no streamId) still
 shares one coverage record across the class exactly as it always has;
 only a stream-scoped assignment gets its own, separate coverage per
-stream. `_streamFilterPart(streamId)` in `lessons.js` is the one-line
-identity helper every coverage read/write/count uses:
+stream. **Reading changed in v5.283.0: see "Which topic ticks count".**
+`_streamFilterPart(streamId)` in `lessons.js` is the one-line identity
+helper every coverage write uses:
 ```js
 function _streamFilterPart(streamId) {
   return streamId ? { streamId } : { streamId: { $exists: false } };
@@ -7826,7 +7827,16 @@ A whole-class assignment saved before the class had an active stream, or before 
 - `timetable-generator/prepare.js`: a whole-class lesson of a subject assigned per stream is fixed and counts in `lockedBy` for each stream unit (precheck `whole_class_lessons`); a whole-class assignment beside stream ones adds `needs_stream`.
 - `PUT /teaching-assignments/:id/teacher` with `moveLessons` on a stream row also moves whole-class lessons when the class has exactly one active stream.
 - `utils/subject-teacher-names.js` → `subjectTeacherResolver(ctx, schoolId, classId, subjectIds)` returns `(streamId) => { subjectId: name }`. Used by every report card renderer (`_loadRenderExtras`, bulk PDF, `/preview-html`, `/preview-pdf`). Don't read `teaching_assignments` for names directly. Names are live: a reassigned subject changes the name on reports already published.
-- Not changed: topic coverage and lesson plans keep their own stream rule (`_streamFilterPart`), so coverage ticked for the whole class doesn't count for a stream.
+- Topic coverage and lesson plans: v5.283.0, below.
+
+### Which topic ticks count (v5.283.0, 2026-11-25)
+
+- `utils/topic-coverage.js` is the one rule for **reading** `lesson_coverage`: a tick with no `streamId` counts for every stream of its class unless that stream is in its `notForStreams`; a tick with a `streamId` counts for that stream only; a whole-class assignment counts whole-class ticks only. `coverageStreamFilter(streamId)` (has a top-level `$or`: use `coverageStreamOr` where the filter already has one) and `leafProgress(topics, ticks)`, which counts items, never records. Never `countDocuments` ticks.
+- Used by `lessons.js` (my-classes, coverage, summary, pending-teachers, class-summary?studentId), `teacher-portal.js`, `student-portal.js`, `parent-portal.js`, `lesson-reminders.js`. `weekly-snapshot-aggregate.js` honours `notForStreams` only: it still lists every stream's topics for the class.
+- `_streamFilterPart` is for **writing** only (which record a tick is saved as).
+- Unticking with `?streamId` (`DELETE /lessons/coverage/:id` and bulk) → `_untickForStream`: deletes the stream's own tick (own records, unless admin) and `$addToSet`s the stream on whole-class ticks of that item; needs an assignment for the class + subject + stream (or the whole class), or admin. Without it, a teacher with only stream assignments gets 409 on a whole-class tick (a page open since before this version). Ticking again writes the stream's own record.
+- `GET /lessons/coverage` with a stream marks such ticks `coverage.wholeClass`, and lists a student's unstamped individual tick only when the student is in that stream.
+- Plans: `GET /lessons/plans?streamId` includes the whole-class ones; week-status counts them and treats a whole-class lesson as the stream's when the teacher has exactly one stream (and no whole-class row) for that class + subject.
 
 ## One entry point for teaching assignments (v5.274.0, 2026-11-15)
 

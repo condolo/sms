@@ -19,6 +19,7 @@ const PLAN = planGate('student_portal');
 const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { sortReportsByPeriod } = require('../utils/report-order');
+const { coverageStreamOr } = require('../utils/topic-coverage');
 const { studentStreamOr, filterElectivesForStudent } = require('../utils/lesson-audience');
 const { isTimetablePublished, publishedReader } = require('../utils/timetable-publish');
 const { resolveCurrentPeriod } = require('./academic-config');
@@ -175,9 +176,7 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
     // non-subdivided subject still counts normally.
     let lessonsCoverage = [];
     if (student.classId) {
-      const streamOr = student.streamId
-        ? [{ streamId: student.streamId }, { streamId: { $exists: false } }]
-        : [{ streamId: { $exists: false } }];
+      const streamOr = coverageStreamOr(student.streamId);
       const recordedSubjectIds = await Coverage.distinct('subjectId', { schoolId, classId: student.classId, academicYear, $or: streamOr });
       // A subject with no coverage record is still part of the class's
       // syllabus; without this union it disappeared from the checklist and a

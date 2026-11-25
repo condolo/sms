@@ -26,6 +26,7 @@ const { teacherLessonClause, lessonTeacherIds } = require('./lesson-audience');
 
 const cron         = require('node-cron');
 const { _model }   = require('./model');
+const { coverageStreamFilter, leafProgress } = require('./topic-coverage');
 const { sendLessonReminder, sendHodEscalation } = require('./lesson-email');
 
 /* ── Config ─────────────────────────────────────────────────── */
@@ -64,7 +65,7 @@ async function _getPendingTeachers(schoolId, academicYear, dayOfWeek) {
   // 1. Get assignments
   const assignments = await _model('teaching_assignments')
     .find({ schoolId })
-    .select('teacherId teacherName classId className subjectId subjectName')
+    .select('teacherId teacherName classId className subjectId subjectName streamId streamName')
     .lean();
 
   if (!assignments.length) return [];
@@ -94,6 +95,7 @@ async function _getPendingTeachers(schoolId, academicYear, dayOfWeek) {
     byTeacher[a.teacherId].pending.push({
       classId: a.classId, className: a.className,
       subjectId: a.subjectId, subjectName: a.subjectName,
+      streamId: a.streamId ?? null, streamName: a.streamName ?? null,
     });
   });
 
@@ -106,20 +108,19 @@ async function _getPendingTeachers(schoolId, academicYear, dayOfWeek) {
       if (hasUncovered) return;
 
       const topics = await _model('syllabus_topics')
-        .find({ schoolId, subjectId: c.subjectId, academicYear })
+        .find({ schoolId, subjectId: c.subjectId, academicYear, $or: [{ classId: c.classId }, { classId: { $exists: false } }] })
         .select('id subtopics').lean();
 
       if (!topics.length) return; // no curriculum defined yet
 
-      let totalItems = 0;
-      topics.forEach(tp => { totalItems += tp.subtopics?.length ? tp.subtopics.length : 1; });
-
-      const coveredCount = await _model('lesson_coverage').countDocuments({
-        schoolId, classId: c.classId, subjectId: c.subjectId, academicYear,
+      // Ticks that count for this teacher's stream: utils/topic-coverage.js.
+      const ticks = await _model('lesson_coverage').find({
+        schoolId, classId: c.classId, subjectId: c.subjectId, academicYear, ...coverageStreamFilter(c.streamId),
         studentId: { $exists: false },   // individual students' marks (v5.277.0) aren't class progress
-      });
+      }).select('topicId subtopicId').lean();
+      const { totalItems, coveredItems } = leafProgress(topics, ticks);
 
-      if (coveredCount < totalItems) hasUncovered = true;
+      if (coveredItems < totalItems) hasUncovered = true;
     }));
 
     if (hasUncovered) pendingTeachers.push(t);
@@ -280,4 +281,4 @@ function startLessonReminders() {
   console.log(`  Saturday HOD 4pm:   ${CRON_SAT_HOD} UTC`);
 }
 
-module.exports = { startLessonReminders, runFridayReminder, runSaturdayMorningReminder, runSaturdayHodEscalation };
+module.exports = { _getPendingTeachers, startLessonReminders, runFridayReminder, runSaturdayMorningReminder, runSaturdayHodEscalation };

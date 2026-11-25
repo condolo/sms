@@ -240,7 +240,7 @@ function IndividualChip({ item }) {
   );
 }
 
-function TopicRow({ topic, classId, streamId, subjectId, academicYear, canManage, onEdit, onDelete, picked = null }) {
+function TopicRow({ topic, classId, streamId, streamName, subjectId, academicYear, canManage, onEdit, onDelete, picked = null }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
 
@@ -264,11 +264,19 @@ function TopicRow({ topic, classId, streamId, subjectId, academicYear, canManage
   const unmarkMutation = useMutation({
     mutationFn: ({ coverageId, subtopicId, ids }) => {
       if (ids) return Promise.all(ids.map(id => lessonsApi.coverage.unmark(id)));
-      if (coverageId) return lessonsApi.coverage.unmark(coverageId);
+      if (coverageId) return lessonsApi.coverage.unmark(coverageId, streamId);
       return lessonsApi.coverage.unmarkBulk({ classId, ...(streamId ? { streamId } : {}), subjectId, topicId: topic.id, subtopicId });
     },
     onSuccess: invalidate,
+    onError: (e) => window.alert(e.message || 'Could not untick'),
   });
+
+  /* A whole-class tick (from before the class had streams) counts for every
+     stream; unticking it here takes it off this stream only (v5.283.0). */
+  function okToUntick(items) {
+    return !items.some(i => i.coverage?.wholeClass)
+      || window.confirm(`This was ticked for the whole class. Untick it for ${streamName || 'this stream'} only? Other streams keep it.`);
+  }
 
   /* Selected-students mode: tick = mark for the picked students not yet
      covered; untick = remove their individual marks. A whole-class mark
@@ -284,7 +292,7 @@ function TopicRow({ topic, classId, streamId, subjectId, academicYear, canManage
       return;
     }
     if (targets.some(t => t.item.covered)) {
-      window.alert('This is covered for the whole class. To untick it, switch to "Whole class" mode.');
+      window.alert(`This is covered for the whole ${streamId ? 'stream' : 'class'}. To untick it, switch to "Whole ${streamId ? 'stream' : 'class'}" mode.`);
       return;
     }
     const ids = targets.flatMap(t => (t.item.studentCoverage || []).filter(x => picked.includes(x.studentId)).map(x => x.id)).filter(Boolean);
@@ -294,7 +302,7 @@ function TopicRow({ topic, classId, streamId, subjectId, academicYear, canManage
   function toggleTopic() {
     if (picked) return toggleForStudents(leaves);
     if (allDone) {
-      unmarkMutation.mutate({});
+      if (okToUntick(leaves.map(l => l.item))) unmarkMutation.mutate({});
     } else if (hasSubs) {
       markMutation.mutate(topic.subtopics.filter(st => !st.covered).map(st => ({ subtopicId: st.id })));
     } else {
@@ -304,8 +312,9 @@ function TopicRow({ topic, classId, streamId, subjectId, academicYear, canManage
 
   function toggleSubtopic(st) {
     if (picked) return toggleForStudents([{ item: st, subtopicId: st.id }]);
-    if (st.covered) unmarkMutation.mutate({ coverageId: st.coverage?.id, subtopicId: st.id });
-    else markMutation.mutate([{ subtopicId: st.id }]);
+    if (st.covered) {
+      if (okToUntick([st])) unmarkMutation.mutate({ coverageId: st.coverage?.id, subtopicId: st.id });
+    } else markMutation.mutate([{ subtopicId: st.id }]);
   }
 
   const isBusy = markMutation.isPending || unmarkMutation.isPending;
@@ -382,7 +391,7 @@ function TopicRow({ topic, classId, streamId, subjectId, academicYear, canManage
                 {!picked && <IndividualChip item={st} />}
                 {!picked && st.covered && st.coverage?.coveredAt && (
                   <span className="text-[10px] text-slate-400 ml-auto">
-                    {new Date(st.coverage.coveredAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                    {st.coverage.wholeClass ? 'Whole class · ' : ''}{new Date(st.coverage.coveredAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
                   </span>
                 )}
               </div>
@@ -583,6 +592,7 @@ function DrillDown({ item, onBack, canManage }) {
               topic={t}
               classId={classId}
               streamId={streamId}
+              streamName={streamName}
               subjectId={subjectId}
               academicYear={academicYear}
               canManage={canManage}

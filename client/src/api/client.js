@@ -1374,7 +1374,7 @@ export const lessons = {
   coverage: {
     list:    (params)     => _get('/lessons/coverage', params),
     mark:    (data)       => _post('/lessons/coverage', data),
-    unmark:  (id)         => _delete(`/lessons/coverage/${id}`),
+    unmark:  (id, streamId) => _req('DELETE', `/lessons/coverage/${id}`, null, streamId ? { streamId } : undefined),   // streamId: untick for that stream only (v5.283.0)
     unmarkBulk: (params)  => _req('DELETE', '/lessons/coverage', null, params),
     roster:  (params)     => _get('/lessons/roster', params),   // students coverage can be marked for (v5.277.0)
   },

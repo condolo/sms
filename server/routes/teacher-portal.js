@@ -15,6 +15,7 @@ const { teacherLessonClause } = require('../utils/lesson-audience');
 const { isTimetablePublished, publishedReader } = require('../utils/timetable-publish');
 const { ok, created, E } = require('../utils/response');
 const { resolveTeacher } = require('../utils/resolveTeacher');
+const { coverageStreamFilter, leafProgress } = require('../utils/topic-coverage');
 const { _inboxQuery, createDirectMessage } = require('./messages');
 const { recipientSummary } = require('../utils/message-audience');
 const { readExtras, messageExtras } = require('../utils/message-extras');
@@ -1336,22 +1337,23 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     // of real progress. Also now keyed by the assignment's OWN streamId
     // (when it's a stream-scoped assignment) so this teacher's Diamond
     // progress is never conflated with a colleague's Sapphire progress
-    // for the same class-subject.
+    // for the same class-subject. Which ticks count, and counting items
+    // rather than records: utils/topic-coverage.js.
     let curriculumCoverage = [];
     const topAssignments = assignments.slice(0, 10);
     if (topAssignments.length) {
       curriculumCoverage = await Promise.all(topAssignments.map(async a => {
-        const streamFilter = a.streamId ? { streamId: a.streamId } : { streamId: { $exists: false } };
         // Class-scoped, same as lessons.js's _topicClassFilterPart (2026-09
         // fix): a pre-migration topic with no classId is still counted for
         // every class, but a topic scoped to a DIFFERENT class must not
         // inflate this assignment's total.
         const topicClassFilter = { $or: [{ classId: a.classId }, { classId: { $exists: false } }] };
-        const [total, covered] = await Promise.all([
-          Topics.countDocuments({ schoolId, subjectId: a.subjectId, academicYear, ...topicClassFilter }).catch(() => 0),
+        const [topics, ticks] = await Promise.all([
+          Topics.find({ schoolId, subjectId: a.subjectId, academicYear, ...topicClassFilter }).select('id subtopics').lean().catch(() => []),
           // Whole-class marks only: an individual student's mark (v5.277.0) is not class progress.
-          Coverage.countDocuments({ schoolId, classId: a.classId, subjectId: a.subjectId, academicYear, ...streamFilter, studentId: { $exists: false } }).catch(() => 0),
+          Coverage.find({ schoolId, classId: a.classId, subjectId: a.subjectId, academicYear, ...coverageStreamFilter(a.streamId), studentId: { $exists: false } }).select('topicId subtopicId').lean().catch(() => []),
         ]);
+        const { totalItems: total, coveredItems: covered } = leafProgress(topics, ticks);
         if (total === 0) return null;
         return {
           classId:     a.classId,

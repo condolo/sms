@@ -177,3 +177,20 @@ describe('GET /api/teacher-portal/dashboard — lessonPlans (v5.117.0)', () => {
     expect(res.body.data.lessonPlans).toHaveLength(0);
   });
 });
+
+describe('whole-class ticks count for each stream (v5.283.0)', () => {
+  test('both stream rows of one teacher count it once, also when the stream ticked it too; subtopics are items', async () => {
+    mockTopicDocs = [
+      { id: 'topic_1', schoolId: SCHOOL_A, subjectId: 'subj_eng', academicYear: '2026', subtopics: [] },
+      { id: 'topic_2', schoolId: SCHOOL_A, subjectId: 'subj_eng', academicYear: '2026', subtopics: [{ id: 's1' }, { id: 's2' }, { id: 's3' }] },
+    ];
+    const base = { schoolId: SCHOOL_A, classId: CLASS_ID, subjectId: 'subj_eng', academicYear: '2026' };
+    mockCoverageDocs = [
+      { ...base, topicId: 'topic_1' },
+      { ...base, topicId: 'topic_1', streamId: DIAMOND },
+      { ...base, topicId: 'topic_2', subtopicId: 's1' },
+    ];
+    const rows = (await supertest(buildApp()).get('/api/teacher-portal/dashboard')).body.data.curriculumCoverage;
+    expect(rows.map(r => [r.streamId, r.covered, r.total, r.pct])).toEqual([[DIAMOND, 2, 4, 50], [SAPPHIRE, 2, 4, 50]]);
+  });
+});

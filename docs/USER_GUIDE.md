@@ -313,6 +313,7 @@ Navigate to **Timetable** to build the weekly schedule.
 - **Days & rules** sets the working days (add Saturday if your school teaches then) and the timetable rules (e.g. most lessons a teacher teaches in a day).
 - In **Teacher View**, **Availability** marks the periods or days a teacher can't teach.
 - Set **Lessons/wk** and **Doubles** for each class and subject in **Timetable → Subject allocation** (the one place who-teaches-what is entered; teacher profiles show it read-only), and **Room needed** on subjects that need a lab or hall.
+- **Topics ticked for the whole class** (before it had streams) count for every stream; unticking one from a stream takes it off that stream only (*2026-11*).
 - **Needs a stream** in Subject allocation marks a teacher assigned to a whole class that now needs a teacher per stream. Use **Move to stream**, or × if they don't teach it; to assign someone else, use the row that names the stream (*2026-11*).
 - Tick **Lock this lesson** to pin a lesson so it can't be changed or removed until unlocked.
 - **Teaching together** (*2026-11*): two teachers can share the same lessons (co-teaching), and two streams can have a lesson together (e.g. 7i + 7ii PE). Link their assignments in Timetable → Subject allocation (**Together**), or use **Also teaching** / **Taught together with** when adding a lesson. Co-taught lessons appear on every teacher's timetable as "Teacher A & Teacher B"; combined lessons appear on each stream's timetable.

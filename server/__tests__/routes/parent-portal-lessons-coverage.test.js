@@ -224,3 +224,14 @@ describe("GET /api/parent-portal/dashboard/:childId — Today's Timetable is str
     expect(res.body.data.timetableToday).toHaveLength(1);
   });
 });
+
+describe('a whole-class tick unticked for a stream (v5.283.0)', () => {
+  const pct = async () => (await supertest(buildApp()).get(`/api/parent-portal/dashboard/${CHILD_1}`)).body.data.lessonsCoverage.find(s => s.subjectId === 'subj_eng')?.coveredTopics ?? 0;
+  const TICK = { schoolId: SCHOOL_A, classId: CLASS_ID, subjectId: 'subj_eng', academicYear: '2026', topicId: 'topic_1' };
+  test('does not count for a child in that stream, and still counts in another', async () => {
+    mockCoverageDocs = [{ ...TICK, notForStreams: [DIAMOND] }];
+    expect(await pct()).toBe(0);
+    mockCoverageDocs = [{ ...TICK, notForStreams: [SAPPHIRE] }];
+    expect(await pct()).toBe(1);
+  });
+});

@@ -38,6 +38,7 @@ const { timetableReaderFor } = require('../utils/timetable-publish');
 const { ok, created, paginate, parsePagination, E, fail } = require('../utils/response');
 const { resolveAcademicPeriod } = require('../utils/academic-period');
 const { resolveTeacher } = require('../utils/resolveTeacher');
+const { coverageStreamFilter, leafProgress } = require('../utils/topic-coverage');
 const AuditService = require('../services/audit');
 const { extractDocxRows, extractLessonBlocks } = require('../utils/lesson-plan-docx-parser');
 const { extractCsvLessonBlocks } = require('../utils/lesson-plan-csv-parser');
@@ -529,10 +530,10 @@ async function _teacherNameFor(req, teacherId) {
   return user?.name || '';
 }
 
-/* ── Helper: coverage identity filter for one class-subject-[stream] ──
-   The exact same optional-field pattern subtopicId already uses below —
-   a stream-scoped assignment's coverage never bleeds into a whole-class
-   assignment's shared coverage (or another stream's), and vice versa. */
+/* ── Helper: coverage IDENTITY for one class-subject-[stream] ──
+   For writing: which record a tick is saved as. The same optional-field
+   pattern subtopicId uses. For READING ticks use coverageStreamFilter
+   (utils/topic-coverage.js): a whole-class tick counts for every stream. */
 function _streamFilterPart(streamId) {
   return streamId ? { streamId } : { streamId: { $exists: false } };
 }
@@ -979,42 +980,15 @@ router.get('/my-classes', authMiddleware, PLAN, MODGATE, async (req, res) => {
         .select('id subtopics')
         .lean();
 
-      // Count coverable items (each subtopic counts separately; if no subtopics, topic itself counts)
-      let totalItems = 0;
-      topics.forEach(t => {
-        totalItems += t.subtopics?.length ? t.subtopics.length : 1;
-      });
-
-      // Count covered items for this exact class-subject[-stream] — a
-      // stream-scoped assignment's coverage never merges with a sibling
-      // stream's or the whole-class total, matching how it's written
-      // (see POST /coverage's identical identity filter).
-      //
-      // Count LEAF items, not raw coverage rows. A topic with subtopics is
-      // covered through those subtopics; a legacy whole-topic mark on such a
-      // topic must not count (it used to inflate 2-of-3 subtopics to 100%),
-      // and two records for the same subtopic are still one item.
-      const coverageRows = await tenantModel('lesson_coverage', tenantContext(req))
+      // Ticks that count for this assignment (utils/topic-coverage.js): its
+      // own stream's, plus the whole class's. Leaf items, not records.
+      const ticks = await tenantModel('lesson_coverage', tenantContext(req))
         .find({
-          schoolId, classId: a.classId, subjectId: a.subjectId, academicYear, ..._streamFilterPart(a.streamId), ...CLASS_LEVEL,
+          schoolId, classId: a.classId, subjectId: a.subjectId, academicYear, ...coverageStreamFilter(a.streamId), ...CLASS_LEVEL,
         })
         .select('topicId subtopicId')
         .lean();
-
-      const coveredSubtopicKeys = new Set(
-        coverageRows.filter(r => r.subtopicId).map(r => `${r.topicId}__${r.subtopicId}`),
-      );
-      const coveredTopicIds = new Set(
-        coverageRows.filter(r => !r.subtopicId).map(r => r.topicId),
-      );
-      let coveredItems = 0;
-      topics.forEach(t => {
-        if (t.subtopics?.length) {
-          coveredItems += t.subtopics.filter(st => coveredSubtopicKeys.has(`${t.id}__${st.id}`)).length;
-        } else if (coveredTopicIds.has(t.id)) {
-          coveredItems += 1;
-        }
-      });
+      const { totalItems, coveredItems } = leafProgress(topics, ticks);
 
       const pct = totalItems > 0 ? Math.round((coveredItems / totalItems) * 100) : 0;
 
@@ -1120,9 +1094,16 @@ router.get('/coverage', authMiddleware, PLAN, MODGATE, scopeMiddleware, async (r
         .sort({ order: 1, createdAt: 1 })
         .lean(),
       tenantModel('lesson_coverage', tenantContext(req))
-        .find({ schoolId, classId, subjectId, academicYear: year, ..._streamFilterPart(streamId) })
+        .find({ schoolId, classId, subjectId, academicYear: year, ...coverageStreamFilter(streamId) })
         .lean(),
     ]);
+
+    // One student's mark saved before the class had streams: listed to a
+    // stream only for the students now in it, never another stream's.
+    const unstamped = streamId ? [...new Set(coverageRecords.filter(r => r.studentId && !r.streamId).map(r => r.studentId))] : [];
+    const inStream = new Set(unstamped.length
+      ? (await tenantModel('students', tenantContext(req)).find({ schoolId, id: { $in: unstamped }, streamId }).select('id').lean()).map(s => s.id)
+      : []);
 
     // Build coverage lookup. Whole-class records decide "covered"; records
     // for individual students are listed per item (studentCoverage) and, in
@@ -1133,8 +1114,12 @@ router.get('/coverage', authMiddleware, PLAN, MODGATE, scopeMiddleware, async (r
       const key = r.subtopicId ? `${r.topicId}__${r.subtopicId}` : r.topicId;
       const entry = { coveredAt: r.coveredAt, notes: r.notes, id: r.id, teacherName: r.teacherName };
       if (r.studentId) {
+        if (streamId && !r.streamId && !inStream.has(r.studentId)) return;
         (byStudent[key] = byStudent[key] || []).push({ ...entry, studentId: r.studentId, studentName: r.studentName || '' });
         if (viewStudentId && r.studentId === viewStudentId && !covered[key]) covered[key] = { ...entry, studentId: r.studentId, individual: true };
+      } else if (streamId && !r.streamId) {
+        // Ticked for the whole class; the stream's own tick wins when both exist.
+        if (!covered[key] || covered[key].individual) covered[key] = { ...entry, wholeClass: true };
       } else {
         covered[key] = entry;
       }
@@ -1282,13 +1267,63 @@ router.post('/coverage', authMiddleware, PLAN, MODGATE, rbac('lessons', 'create'
   } catch (err) { console.error('[lessons/coverage POST]', err); return E.serverError(res); }
 });
 
-/* ── DELETE /api/lessons/coverage/:id ─ unmark coverage ─────── */
+/* ── Unticking from a stream (v5.283.0) ─────────────────────────
+   The stream's own tick is deleted (own records only, unless admin). A
+   whole-class tick also covers the other streams, so it is never deleted
+   from here: it stops counting for this stream (notForStreams). Any
+   teacher of the subject in this stream may do that, whoever ticked it. */
+async function _untickForStream(req, { classId, subjectId, topicId, streamId, subtopicPart, academicYear }) {
+  const { schoolId, userId } = req.jwtUser;
+  const admin = isAdmin(req);
+  const Coverage = tenantModel('lesson_coverage', tenantContext(req));
+  const item = { schoolId, classId, subjectId, topicId, ...subtopicPart, ...(academicYear ? { academicYear } : {}), ...CLASS_LEVEL };
+
+  const own = await Coverage.deleteMany({ ...item, streamId, ...(admin ? {} : { teacherId: userId }) });
+
+  const teaches = admin
+    ? !!(await tenantModel('streams', tenantContext(req)).findOne({ schoolId, id: streamId }).select('id').lean())
+    : (await _teacherAssignments(schoolId, userId)).some(a => a.classId === classId && a.subjectId === subjectId && (!a.streamId || a.streamId === streamId));
+  const left = teaches
+    ? await Coverage.updateMany(
+        { ...item, streamId: { $exists: false }, notForStreams: { $ne: streamId } },
+        { $addToSet: { notForStreams: streamId }, $set: { updatedBy: userId } },
+      )
+    : null;
+  return (own?.deletedCount || 0) + (left?.modifiedCount || 0);
+}
+
+/* ── DELETE /api/lessons/coverage/:id ─ unmark coverage ───────
+   ?streamId = unticked from that stream's card. */
 router.delete('/coverage/:id', authMiddleware, PLAN, MODGATE, rbac('lessons', 'delete'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
+    const { streamId } = req.query;
     const filter = { id: req.params.id, schoolId };
+    const tick = await tenantModel('lesson_coverage', tenantContext(req)).findOne(filter).lean();
+    if (!tick) return E.notFound(res, 'Coverage record not found');
+
+    if (streamId && !tick.studentId) {
+      if (tick.streamId && tick.streamId !== streamId) return E.notFound(res, 'Coverage record not found');
+      const changed = await _untickForStream(req, {
+        classId: tick.classId, subjectId: tick.subjectId, topicId: tick.topicId, streamId: String(streamId), academicYear: tick.academicYear,
+        subtopicPart: { subtopicId: tick.subtopicId || null },   // null also matches a missing field
+      });
+      if (!changed) return E.notFound(res, 'Coverage record not found');
+      return ok(res, { id: req.params.id, deleted: true });
+    }
+
     // Teachers can only delete their own records
-    if (!isAdmin(req)) filter.teacherId = userId;
+    if (!isAdmin(req)) {
+      filter.teacherId = userId;
+      // A whole-class tick also covers the other streams: a teacher of one
+      // stream only (a page open since before v5.283.0) must not delete it.
+      if (!tick.studentId && !tick.streamId && tick.teacherId === userId) {
+        const mine = (await _teacherAssignments(schoolId, userId)).filter(a => a.classId === tick.classId && a.subjectId === tick.subjectId);
+        if (mine.length && mine.every(a => a.streamId)) {
+          return E.conflict(res, 'This was ticked for the whole class. Refresh the page, then untick it for your stream.');
+        }
+      }
+    }
 
     const doc = await tenantModel('lesson_coverage', tenantContext(req)).findOneAndDelete(filter);
     if (!doc) return E.notFound(res, 'Coverage record not found');
@@ -1303,6 +1338,13 @@ router.delete('/coverage', authMiddleware, PLAN, MODGATE, rbac('lessons', 'delet
     const { classId, subjectId, streamId, topicId, subtopicId, studentId } = req.query;
     if (!classId || !subjectId || !topicId) {
       return E.validation(res, [{ field: 'classId', message: 'classId, subjectId, and topicId are required' }]);
+    }
+
+    if (streamId && !studentId) {
+      const deleted = await _untickForStream(req, {
+        classId, subjectId, topicId, streamId: String(streamId), subtopicPart: subtopicId ? { subtopicId } : {},
+      });
+      return ok(res, { deleted });
     }
 
     // ?studentId removes one student's individual mark; without it only the
@@ -1350,7 +1392,9 @@ router.get('/plans', authMiddleware, PLAN, MODGATE, rbac('lessons', 'read'), asy
     if (classId)    filter.classId    = classId;
     if (subjectId)  filter.subjectId  = subjectId;
     if (topicId)    filter.topicId    = topicId;
-    if (streamId !== undefined) Object.assign(filter, _streamFilterPart(streamId || undefined));
+    // A plan made for the whole class belongs to each of its streams too (v5.283.0).
+    if (streamId) filter.$or = [{ streamId }, { streamId: { $exists: false } }, { streamId: null }];
+    else if (streamId !== undefined) Object.assign(filter, _streamFilterPart(undefined));
     if (dateFrom || dateTo) {
       filter.date = {};
       if (dateFrom) filter.date.$gte = dateFrom;
@@ -1550,12 +1594,22 @@ router.get('/plans/week-status', authMiddleware, PLAN, MODGATE, rbac('lessons', 
     // granularity. A slot with no subjectId (shouldn't normally happen for
     // type:'lesson', but real data drifts) can't be matched to a plan at
     // all, so it's skipped rather than counted as permanently unplannable.
+    // A whole-class lesson still on the timetable, of a teacher since moved to
+    // one stream (v5.282.0), is that stream's lesson. With several streams,
+    // or any whole-class assignment, it stays a whole-class lesson.
+    const myRows = await tenantModel('teaching_assignments', tenantContext(req))
+      .find({ schoolId, $or: teacherIdOr }).select('classId subjectId streamId').lean();
+    const onlyStream = (classId, subjectId) => {
+      const of = new Set(myRows.filter(a => a.classId === classId && a.subjectId === subjectId).map(a => a.streamId || ''));
+      return of.size === 1 ? ([...of][0] || null) : null;
+    };
     const requiredMap = new Map();
     for (const s of slots) {
       if (!s.subjectId) continue;
       const date = dateForDay(s.day);
-      const key = `${s.classId}__${s.subjectId}__${s.streamId || ''}__${date}`;
-      requiredMap.set(key, { classId: s.classId, subjectId: s.subjectId, streamId: s.streamId || null, date, day: s.day });
+      const streamId = s.streamId || onlyStream(s.classId, s.subjectId);
+      const key = `${s.classId}__${s.subjectId}__${streamId || ''}__${date}`;
+      requiredMap.set(key, { classId: s.classId, subjectId: s.subjectId, streamId, date, day: s.day });
     }
     const required = [...requiredMap.values()];
 
@@ -1563,6 +1617,9 @@ router.get('/plans/week-status', authMiddleware, PLAN, MODGATE, rbac('lessons', 
     const plans = await LessonPlans.find({ schoolId, $or: teacherIdOr, date: { $gte: weekStart, $lte: weekEnd } })
       .select('classId subjectId streamId date').lean();
     const plannedKeys = new Set(plans.map(p => `${p.classId}__${p.subjectId || ''}__${p.streamId || ''}__${p.date}`));
+    // A plan made for the whole class that day covers each of its streams.
+    const isPlanned = (r) => plannedKeys.has(`${r.classId}__${r.subjectId}__${r.streamId || ''}__${r.date}`)
+      || plannedKeys.has(`${r.classId}__${r.subjectId}____${r.date}`);
 
     const classIds   = [...new Set(required.map(r => r.classId))];
     const subjectIds = [...new Set(required.map(r => r.subjectId))];
@@ -1588,13 +1645,13 @@ router.get('/plans/week-status', authMiddleware, PLAN, MODGATE, rbac('lessons', 
         };
       }
       byAssignment[gKey].required++;
-      if (plannedKeys.has(`${r.classId}__${r.subjectId}__${r.streamId || ''}__${r.date}`)) byAssignment[gKey].planned++;
+      if (isPlanned(r)) byAssignment[gKey].planned++;
       else byAssignment[gKey].unplannedDates.push(r.date);
     });
     const assignments = Object.values(byAssignment).sort((a, b) => a.className.localeCompare(b.className));
 
     const unplanned = required
-      .filter(r => !plannedKeys.has(`${r.classId}__${r.subjectId}__${r.streamId || ''}__${r.date}`))
+      .filter(r => !isPlanned(r))
       .map(r => ({
         ...r, className: classMap[r.classId] || '', subjectName: subjectMap[r.subjectId] || '',
         streamName: r.streamId ? (streamMap[r.streamId] || '') : null,
@@ -1854,33 +1911,27 @@ router.get('/summary', authMiddleware, PLAN, MODGATE, async (req, res) => { // r
     // (not just subjectId) so a Year 7-scoped topic set never inflates a
     // Year 8 row's total, matching the same class-scoping fix as GET
     // /coverage above.
-    const topicCounts = {};
+    const topicsFor = {};   // key → topics
     const uniqueSubjectClass = [...new Set(assignments.map(a => `${a.subjectId}__${a.classId}`))];
     await Promise.all(uniqueSubjectClass.map(async key => {
       const [sid, cid] = key.split('__');
       const topics = await tenantModel('syllabus_topics', tenantContext(req))
         .find({ schoolId, subjectId: sid, academicYear, ..._topicClassFilterPart(cid) }).select('id subtopics').lean();
-      let total = 0;
-      topics.forEach(t => { total += t.subtopics?.length ? t.subtopics.length : 1; });
-      topicCounts[key] = total;
+      topicsFor[key] = topics;
     }));
 
-    // Coverage per class-subject[-stream] — a stream-scoped assignment's
-    // row must never be credited with a sibling stream's (or the whole
-    // class's) coverage, matching how it's written (see POST /coverage).
-    const coverageCounts = {};
+    // Ticks that count per class-subject[-stream]: utils/topic-coverage.js.
+    const progress = {};
     await Promise.all(assignments.map(async a => {
-      const key = `${a.classId}__${a.subjectId}__${a.streamId ?? ''}`;
-      const count = await tenantModel('lesson_coverage', tenantContext(req)).countDocuments({
-        schoolId, classId: a.classId, subjectId: a.subjectId, academicYear, ..._streamFilterPart(a.streamId), ...CLASS_LEVEL,
-      });
-      coverageCounts[key] = count;
+      const ticks = await tenantModel('lesson_coverage', tenantContext(req)).find({
+        schoolId, classId: a.classId, subjectId: a.subjectId, academicYear, ...coverageStreamFilter(a.streamId), ...CLASS_LEVEL,
+      }).select('topicId subtopicId').lean();
+      progress[`${a.classId}__${a.subjectId}__${a.streamId ?? ''}`] = leafProgress(topicsFor[`${a.subjectId}__${a.classId}`] || [], ticks);
     }));
 
     const rows = assignments.map(a => {
-      const totalItems   = topicCounts[`${a.subjectId}__${a.classId}`] || 0;
-      const covered      = coverageCounts[`${a.classId}__${a.subjectId}__${a.streamId ?? ''}`] || 0;
-      const pct          = totalItems > 0 ? Math.round((Math.min(covered, totalItems) / totalItems) * 100) : 0;
+      const { totalItems, coveredItems } = progress[`${a.classId}__${a.subjectId}__${a.streamId ?? ''}`];
+      const pct = totalItems > 0 ? Math.round((coveredItems / totalItems) * 100) : 0;
       return {
         teacherId:   a.teacherId,
         teacherName: a.teacherName,
@@ -1891,7 +1942,7 @@ router.get('/summary', authMiddleware, PLAN, MODGATE, async (req, res) => { // r
         subjectId:   a.subjectId,
         subjectName: a.subjectName,
         totalItems,
-        coveredItems: Math.min(covered, totalItems),
+        coveredItems,
         pct,
         academicYear,
       };
@@ -1916,7 +1967,12 @@ router.get('/class-summary/:classId', authMiddleware, PLAN, MODGATE, async (req,
     const academicYear = yearQ || school?.academicYear || String(new Date().getFullYear());
     // ?studentId = that student's own progress (whole-class marks plus their
     // individual ones); otherwise whole-class marks only.
-    const whoPart = summaryStudentId ? _forStudentPart(String(summaryStudentId)) : CLASS_LEVEL;
+    // A student's progress also follows their own stream (utils/topic-coverage.js).
+    let whoPart = CLASS_LEVEL;
+    if (summaryStudentId) {
+      const st = await tenantModel('students', tenantContext(req)).findOne({ schoolId, id: String(summaryStudentId) }).select('streamId').lean();
+      whoPart = { $and: [_forStudentPart(String(summaryStudentId)), coverageStreamFilter(st?.streamId)] };
+    }
 
     // Get subjects taught in this class via teaching assignments
     const assignments = await tenantModel('teaching_assignments', tenantContext(req))
@@ -2025,16 +2081,16 @@ router.get('/pending-teachers', authMiddleware, PLAN, MODGATE, async (req, res) 
         const topics = await tenantModel('syllabus_topics', tenantContext(req))
           .find({ schoolId, subjectId: c.subjectId, academicYear, ..._topicClassFilterPart(c.classId) })
           .select('id subtopics').lean();
-        topics.forEach(tp => { totalItems += tp.subtopics?.length ? tp.subtopics.length : 1; });
-
-        const cov = await tenantModel('lesson_coverage', tenantContext(req)).countDocuments({
-          schoolId, classId: c.classId, subjectId: c.subjectId, academicYear, ..._streamFilterPart(c.streamId), ...CLASS_LEVEL,
-        });
-        coveredItems += cov;
+        const ticks = await tenantModel('lesson_coverage', tenantContext(req)).find({
+          schoolId, classId: c.classId, subjectId: c.subjectId, academicYear, ...coverageStreamFilter(c.streamId), ...CLASS_LEVEL,
+        }).select('topicId subtopicId').lean();
+        const p = leafProgress(topics, ticks);
+        totalItems += p.totalItems;
+        coveredItems += p.coveredItems;
       }));
 
-      const pct = totalItems > 0 ? Math.round((Math.min(coveredItems, totalItems) / totalItems) * 100) : 100;
-      return { ...t, totalItems, coveredItems: Math.min(coveredItems, totalItems), pct, hasPending: pct < 100 };
+      const pct = totalItems > 0 ? Math.round((coveredItems / totalItems) * 100) : 100;
+      return { ...t, totalItems, coveredItems, pct, hasPending: pct < 100 };
     }));
 
     return ok(res, results.filter(t => t.hasPending));

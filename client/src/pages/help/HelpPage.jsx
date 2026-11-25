@@ -789,7 +789,7 @@ const SECTIONS = [
       },
       {
         q: 'My class has multiple streams and I teach them separately — is coverage tracked per stream?',
-        a: 'Yes, when it should be. If a subject is taught to each stream separately (e.g. a different pace or a different teacher per stream), your "My Classes" cards show one card per stream — e.g. "Standard 4A · 4A" and "Standard 4A · 4B" — each with its own topics and its own percentage. Marking a topic covered in one stream never affects the other. If instead the whole class is taught together with no stream split, there is just one shared card, same as it always was.',
+        a: 'Yes, when it should be. If a subject is taught to each stream separately (e.g. a different pace or a different teacher per stream), your "My Classes" cards show one card per stream — e.g. "Standard 4A · 4A" and "Standard 4A · 4B" — each with its own topics and its own percentage. Marking a topic covered in one stream never affects the other. Topics ticked for the whole class, before it had streams, count for every stream; if you untick one, it comes off your stream only. If instead the whole class is taught together with no stream split, there is just one shared card, same as it always was.',
       },
       {
         q: 'Can I mark coverage for only some students?',

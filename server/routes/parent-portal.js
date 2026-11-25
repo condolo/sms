@@ -26,6 +26,7 @@ const PLAN = planGate('parent_portal');
 const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { sortReportsByPeriod } = require('../utils/report-order');
+const { coverageStreamOr: ticksFor } = require('../utils/topic-coverage');
 const { isTimetablePublished, publishedReader } = require('../utils/timetable-publish');
 const { resolveCurrentPeriod } = require('./academic-config');
 const { _getMpesaConfig } = require('./mpesa');
@@ -291,9 +292,7 @@ router.get('/dashboard/:childId', authMiddleware, PLAN, async (req, res) => {
 
     /* This child's OWN stream's coverage, unioned with any legacy/whole-class
        record — declared here because the batched read below needs it. */
-    const coverageStreamOr = student.streamId
-      ? [{ streamId: student.streamId }, { streamId: { $exists: false } }]
-      : [{ streamId: { $exists: false } }];
+    const coverageStreamOr = ticksFor(student.streamId);
 
     /* Five independent reads in ONE batch. Each of these used to be awaited on
        its own, one after another, so a parent waited out every round-trip in

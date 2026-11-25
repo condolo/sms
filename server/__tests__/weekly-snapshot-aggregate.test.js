@@ -92,6 +92,15 @@ describe('week-range correctness (plain date-string fields)', () => {
     expect(att.records.map(r => r.date).sort()).toEqual([weekStart, weekEnd]);
   });
 
+  test('a whole-class tick unticked for a stream is left out for that stream only (v5.283.0)', async () => {
+    mockStores.lesson_coverage = mockMakeStore([
+      { schoolId: SCHOOL_A, classId: 'cls_1', subjectId: 'sub_1', topicId: 't1', coveredAt: weekStart, notForStreams: ['ruby'] },
+    ]);
+    const roster = [{ ...ROSTER[0], streamId: 'ruby' }, { ...ROSTER[1], streamId: 'pearl' }, { ...ROSTER[1], id: 'stu_3' }];
+    const result = await buildSnapshotsForSchool({ schoolId: SCHOOL_A }, weekStart, weekEnd, 'Africa/Nairobi', roster);
+    expect(['stu_1', 'stu_2', 'stu_3'].map(id => result.get(id).topics.length)).toEqual([0, 1, 1]);
+  });
+
   test('lesson_coverage is grouped by classId, shared across every student in that class', async () => {
     mockStores.lesson_coverage = mockMakeStore([
       { schoolId: SCHOOL_A, classId: 'cls_1', subjectId: 'sub_1', subjectName: 'Math', topicId: 't1', topicTitle: 'Fractions', coveredAt: weekStart, teacherName: 'Ms X' },

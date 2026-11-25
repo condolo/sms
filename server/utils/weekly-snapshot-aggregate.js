@@ -104,7 +104,7 @@ function _groupBy(docs, keyFn) {
 async function fetchActiveRoster(ctx) {
   return tenantModel('students', ctx)
     .find({ schoolId: ctx.schoolId, status: 'active', classId: { $ne: null } })
-    .select('id classId className firstName lastName')
+    .select('id classId className firstName lastName streamId')
     .lean();
 }
 
@@ -166,7 +166,7 @@ async function buildSnapshotsForSchool(ctx, weekStart, weekEnd, timezone, roster
 
     tenantModel('lesson_coverage', ctx)
       .find({ schoolId: ctx.schoolId, classId: { $in: classIds }, coveredAt: { $gte: weekStart, $lte: weekEnd } })
-      .select('classId subjectId subjectName topicId topicTitle subtopicId subtopicTitle coveredAt teacherName notes studentId').lean(),
+      .select('classId subjectId subjectName topicId topicTitle subtopicId subtopicTitle coveredAt teacherName notes studentId notForStreams').lean(),
 
     ...GROWTH_COLLECTIONS.map(col =>
       tenantModel(col, ctx)
@@ -212,7 +212,9 @@ async function buildSnapshotsForSchool(ctx, weekStart, weekEnd, timezone, roster
 
     result.set(student.id, {
       // Whole-class marks plus this student's own individual ones (v5.277.0).
-      topics: (coverageByClass.get(student.classId) ?? []).filter(c => !c.studentId || c.studentId === student.id).map(c => ({
+      topics: (coverageByClass.get(student.classId) ?? []).filter(c => !c.studentId || c.studentId === student.id)
+        .filter(c => !(student.streamId && c.notForStreams?.includes(student.streamId)))   // unticked for their stream (v5.283.0)
+        .map(c => ({
         subjectId: c.subjectId, subjectName: c.subjectName,
         topicId: c.topicId, topicTitle: c.topicTitle,
         subtopicId: c.subtopicId ?? null, subtopicTitle: c.subtopicTitle ?? null,

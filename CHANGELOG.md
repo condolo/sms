@@ -6,6 +6,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.283.0] - 2026-11-25 - feat(lessons): topics ticked for the whole class count for every stream
+
+Topics ticked before a class had streams (or before its teacher was moved to one, v5.282.0) didn't count for the stream: its teacher saw 0%, the HOD overview listed them as behind, and the same topics looked untaught. Students and parents already saw those ticks.
+
+### Changed
+- **A whole-class tick counts for every stream of the class**: Topics & Coverage, My Classes, the HOD overview and pending list, the teacher dashboard and reminder emails. A stream's own tick still counts for that stream only.
+- **Unticking from a stream affects that stream only.** The whole-class tick is kept for the other streams (`notForStreams` on the record). The page says so first. Any teacher of the subject in that stream can do it, whoever ticked it; their own stream's ticks keep the own-records rule.
+- One student's ticks from before streams show in that student's stream, and no other.
+- **Lesson plans:** plans made for the whole class stay listed in the stream and count in the weekly "planned" status. A whole-class lesson of a teacher who has only one stream of that class counts as that stream's lesson (it showed as "no matching teaching assignment").
+
+### Fixed
+- The HOD overview, pending list and teacher dashboard counted records, not topics, so a topic ticked twice, or at topic level when it has subtopics, could overstate progress. They now count the same way as My Classes, so some percentages may go down.
+- Reminder emails added all streams' ticks together (one finished stream could silence another's reminder) and expected topics of other classes.
+
+Saved ticks are not changed. No data migration, no permission change.
+
+---
+
 ## [v5.282.1] - 2026-11-25 - fix: report cards name the right subject teacher; v5.282.0 audit fixes
 
 ### Fixed
