@@ -327,6 +327,65 @@ const INDEXES = [
     ],
   },
 
+  /* ── outreach (platform sales workspace) ───────────────────────
+     Prospect data is platform-level. Queries are by workflow state,
+     owner, campaign and normalized email; sends are claimed by the
+     durable queue using status + runAt. */
+  {
+    col: 'outreach_leads',
+    indexes: [
+      { key: { id: 1 },                         name: 'outreach_leads_id', unique: true, sparse: true },
+      { key: { email: 1 },                      name: 'outreach_leads_email', unique: true, sparse: true },
+      { key: { status: 1, updatedAt: -1 },       name: 'outreach_leads_status_date' },
+      { key: { ownerId: 1, updatedAt: -1 },      name: 'outreach_leads_owner_date' },
+    ],
+  },
+  {
+    col: 'outreach_templates',
+    indexes: [
+      { key: { id: 1 },                       name: 'outreach_templates_id', unique: true, sparse: true },
+      { key: { key: 1 },                      name: 'outreach_templates_key', unique: true, sparse: true },
+      { key: { category: 1, name: 1 },        name: 'outreach_templates_category' },
+    ],
+  },
+  {
+    col: 'outreach_campaigns',
+    indexes: [
+      { key: { id: 1 },                    name: 'outreach_campaigns_id', unique: true, sparse: true },
+      { key: { status: 1, createdAt: -1 }, name: 'outreach_campaigns_status_date' },
+    ],
+  },
+  {
+    col: 'outreach_sends',
+    indexes: [
+      { key: { id: 1 },                              name: 'outreach_sends_id', unique: true, sparse: true },
+      { key: { campaignId: 1, leadId: 1, stepIndex: 1 }, name: 'outreach_sends_recipient_step', unique: true },
+      { key: { campaignId: 1, status: 1, runAt: 1 }, name: 'outreach_sends_queue' },
+      { key: { campaignId: 1, runAt: 1 },           name: 'outreach_sends_campaign_date' },
+      { key: { status: 1, updatedAt: 1 },           name: 'outreach_sends_lease' },
+      { key: { campaignId: 1, status: 1, sentAt: -1 }, name: 'outreach_sends_daily_count' },
+      { key: { email: 1, status: 1 },               name: 'outreach_sends_suppression' },
+      { key: { leadId: 1, createdAt: -1 },          name: 'outreach_sends_lead_date' },
+    ],
+  },
+  {
+    col: 'outreach_suppressions',
+    indexes: [
+      { key: { id: 1 },    name: 'outreach_suppressions_id', unique: true, sparse: true },
+      { key: { email: 1 }, name: 'outreach_suppressions_email', unique: true, sparse: true },
+    ],
+  },
+
+  {
+    col: 'outreach_reservations',
+    indexes: [
+      { key: { id: 1 },       name: 'outreach_reservations_id', unique: true, sparse: true },
+      { key: { email: 1 },    name: 'outreach_reservations_email', unique: true, sparse: true },
+      { key: { campaignId: 1 }, name: 'outreach_reservations_campaign' },
+      { key: { leadId: 1 }, name: 'outreach_reservations_lead' },
+    ],
+  },
+
   /* ── mobile_devices (the app's push registry) ─────────────────────
      One row per device token. A token is looked up by value on register
      (upsert) and by school+user on send, so it needs both. */
@@ -1053,6 +1112,8 @@ const INDEXES = [
       { key: { status: 1, nextAttemptAt: 1 }, name: 'qj_status_next' },
       { key: { type: 1, createdAt: -1 },      name: 'qj_type_created' },
       { key: { id: 1 },                       name: 'qj_id', unique: true, sparse: true },
+      { key: { dedupeKey: 1 },                name: 'qj_dedupe', unique: true, sparse: true },
+      { key: { status: 1, updatedAt: 1 },     name: 'qj_lease' },
     ],
   },
 

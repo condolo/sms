@@ -299,7 +299,15 @@ function requireOwnerTier(req, res, next) {
    allowed for any authenticated operator, any other verb requires owner.
    That means a route added later is never accidentally opened up. */
 function requirePlatformCapability(req, res, next) {
-  const required = requiredCapability(req.method, req.path);
+  /* A router mounted below /api/platform (for example the outreach
+     router) sees a stripped req.path such as /leads/import. Resolve
+     policy against originalUrl so nested platform routers cannot
+     accidentally fall back to the legacy owner-only default. */
+  const originalPath = String(req.originalUrl || req.path || '/').split('?')[0];
+  const policyPath = /^\/api\/platform(?=\/|$)/i.test(originalPath)
+    ? (originalPath.slice('/api/platform'.length) || '/')
+    : (req.path || '/');
+  const required = requiredCapability(req.method, policyPath);
   if (required === null) return next();                 // explicitly any operator
   if (required === undefined) {                          // no rule — legacy default
     if (req.method === 'GET') return next();

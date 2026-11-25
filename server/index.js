@@ -279,6 +279,7 @@ console.log('[Security] rate limiting active — general: 10000/15min per user (
 /* ── API Routes ─────────────────────────────────────────────── */
 app.use('/api/public/enquiry', require('./routes/public-enquiry')); // no auth - school enquiry form
 app.use('/api/public',      require('./routes/public'));   // no auth - school branding
+app.use('/api/outreach',    require('./routes/outreach-public')); // no auth - signed unsubscribe links
 app.use('/api/demo',        require('./routes/demo'));     // no auth - self-serve demo requests
 app.use('/api/referrals',   require('./routes/referrals')); // no auth - public referral program
 app.use('/api/auth/pin',    require('./routes/pin'));      // the app-lock PIN, on the account
@@ -286,6 +287,7 @@ app.use('/api/auth',        require('./routes/auth'));
 app.use('/api/onboard',     require('./routes/onboard'));
 app.use('/api/sync',        require('./routes/sync'));
 app.use('/api/platform/analytics', require('./routes/platform-analytics'));
+app.use('/api/platform/outreach', require('./routes/platform-outreach'));
 app.use('/api/platform',    require('./routes/platform'));
 app.use('/api/collections', require('./routes/collections'));
 app.use('/api/users',       require('./routes/users'));

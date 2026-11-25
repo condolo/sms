@@ -120,6 +120,9 @@
         <i class="fas fa-rocket"></i> Demo Requests
         <span class="pa-badge" id="demo-badge" style="display:none">0</span>
       </button>
+      <button class="pa-nav-item" onclick="showView('outreach')" id="nav-outreach">
+        <i class="fas fa-envelope-open-text"></i> Outreach
+      </button>
       <button class="pa-nav-item" onclick="showView('tickets')" id="nav-tickets">
         <i class="fas fa-headset"></i> Support Tickets
         <span class="pa-badge" id="ticket-badge" style="display:none">0</span>
@@ -183,6 +186,7 @@
 <!-- ══ TOAST ═══════════════════════════════════════════════ -->
 <div class="pa-toast-wrap" id="toast-wrap"></div>
 
+<script src="/js/platform-outreach.js"></script>
 <script>
 /* ============================================================
    Msingi Platform Admin Dashboard
@@ -316,6 +320,7 @@ function _updateClock() {
 async function logout() {
   try { await fetch('/api/platform/auth/logout', { method: 'POST', credentials: 'include' }); } catch (e) {}
   _me = null;
+  if (typeof clearOutreachSession === 'function') clearOutreachSession();
   _showLogin();
 }
 
@@ -339,6 +344,7 @@ function _applyCapabilityUI() {
     'nav-provision': 'onboarding.manage',
     'nav-pending':   'onboarding.view',
     'nav-demos':     'onboarding.view',
+    'nav-outreach':  'outreach.view',
     'nav-tickets':   'tickets.view',
     'nav-billing':   'billing.view',
     'nav-referrals': 'referrals.view',
@@ -477,8 +483,11 @@ async function api(method, path, body) {
   const res  = await fetch('/api/platform' + path, opts);
   const data = await res.json().catch(() => ({}));
   if (res.status === 401) {
+    if (typeof clearOutreachSession === 'function') clearOutreachSession();
     _showLogin('Your session has expired. Please sign in again.');
-    throw new Error('PLATFORM_SESSION_EXPIRED');
+    const sessionError = new Error('PLATFORM_SESSION_EXPIRED');
+    sessionError.status = 401;
+    throw sessionError;
   }
   if (!res.ok) {
     // Preserve the HTTP status so callers can tell "you're rate-limited"
@@ -526,10 +535,10 @@ function showView(view) {
   document.querySelectorAll('.pa-nav-item').forEach(el => el.classList.remove('active'));
   document.getElementById('nav-' + view)?.classList.add('active');
 
-  const titles = { overview:'Overview', analytics:'Live Analytics', errorlog:'Error Log', mywork:'My Work', pending:'Pending Approvals', demos:'Demo Requests', tickets:'Support Tickets', schools:'Registered Schools', organizations:'Organizations', provision:'Provision New School', announcements:'System Announcements', diagnostics:'System Diagnostics', branding:'Branding & Platform Settings', landing:'Landing Page CMS', billing:'Billing Overview', referrals:'Referral Program', team:'Platform Team' };
+  const titles = { overview:'Overview', analytics:'Live Analytics', errorlog:'Error Log', mywork:'My Work', pending:'Pending Approvals', demos:'Demo Requests', outreach:'Outreach', tickets:'Support Tickets', schools:'Registered Schools', organizations:'Organizations', provision:'Provision New School', announcements:'System Announcements', diagnostics:'System Diagnostics', branding:'Branding & Platform Settings', landing:'Landing Page CMS', billing:'Billing Overview', referrals:'Referral Program', team:'Platform Team' };
   document.getElementById('view-title').textContent = titles[view] || view;
 
-  const views = { overview: renderOverview, analytics: renderAnalytics, errorlog: renderErrorLog, mywork: renderMyWork, pending: renderPending, demos: renderDemoRequests, tickets: renderTickets, schools: renderSchools, organizations: renderOrganizations, provision: renderProvision, announcements: renderAnnouncements, diagnostics: renderDiagnostics, branding: renderBranding, landing: renderLandingCMS, billing: renderBillingOverview, referrals: renderReferrals, team: renderTeam };
+  const views = { overview: renderOverview, analytics: renderAnalytics, errorlog: renderErrorLog, mywork: renderMyWork, pending: renderPending, demos: renderDemoRequests, outreach: renderOutreach, tickets: renderTickets, schools: renderSchools, organizations: renderOrganizations, provision: renderProvision, announcements: renderAnnouncements, diagnostics: renderDiagnostics, branding: renderBranding, landing: renderLandingCMS, billing: renderBillingOverview, referrals: renderReferrals, team: renderTeam };
   (views[view] || (() => {}))();
 }
 
@@ -2892,6 +2901,10 @@ function showModal(title, body, actions) {
 
 function closeModal() {
   document.getElementById('pa-modal-bg')?.remove();
+  if (typeof _outreachPreviousFocus !== 'undefined') {
+    _outreachPreviousFocus?.focus?.();
+    _outreachPreviousFocus = null;
+  }
 }
 
 /* ── Toast ──────────────────────────────────────────────── */

@@ -84,7 +84,7 @@ const ROUTE_RE = /router\.(get|post|put|patch|delete)\s*\(\s*['"`]([^'"`]+)['"`]
 //                              to confirm every other isAdmin(req) use in
 //                              lessons.js is a scope-narrowing check, not a
 //                              stand-in for a missing gate, before adding it)
-const RBAC_RE  = /rbac\s*\(|\/[/*] rbac:|planGate\(|_pdfAccess|_can\(|_typeGuard|behaviourAccess\(|timetableManageAccess\(|attendanceConflictAccess\(|_hasBulkImportGrant\(|hasExplicitSubGrant\(|explicitSub\(|payrollManageAccess\(|hrFloorOnly|!isAdmin\(req\)\)\s*return/;
+const RBAC_RE  = /rbac\s*\(|\/[/*] rbac:|planGate\(|_pdfAccess|_can\(|_typeGuard|behaviourAccess\(|timetableManageAccess\(|attendanceConflictAccess\(|_hasBulkImportGrant\(|hasExplicitSubGrant\(|explicitSub\(|payrollManageAccess\(|hrFloorOnly|requirePlatformCapability|!isAdmin\(req\)\)\s*return/;
 const AUTH_RE  = /authMiddleware/;
 // Some files apply authMiddleware once, file-wide, via router.use(...)
 // rather than repeating it on every individual route line (e.g.
@@ -94,6 +94,7 @@ const AUTH_RE  = /authMiddleware/;
 // make every route in them invisible to this scanner — not counted as a
 // gap, not counted as protected, just silently excluded from `total`.
 const ROUTER_USE_AUTH_RE = /^\s*router\.use\s*\(\s*authMiddleware\b/m;
+const ROUTER_USE_PLATFORM_RE = /router\.use\s*\(\s*platformSession\s*,\s*requirePlatformCapability/;
 
 /**
  * Scan server/routes and return coverage stats.
@@ -108,7 +109,8 @@ module.exports = function scanRoutes() {
 
     const source = fs.readFileSync(path.join(ROUTES_DIR, file), 'utf8');
     const lines  = source.split('\n');
-    const fileWideAuth = ROUTER_USE_AUTH_RE.test(source);
+    const fileWideAuth = ROUTER_USE_AUTH_RE.test(source) || ROUTER_USE_PLATFORM_RE.test(source);
+    const fileWidePlatform = ROUTER_USE_PLATFORM_RE.test(source);
     let match;
     ROUTE_RE.lastIndex = 0;
 
@@ -121,7 +123,7 @@ module.exports = function scanRoutes() {
       if (!fileWideAuth && !AUTH_RE.test(lineCtx)) continue;
       total++;
 
-      if (RBAC_RE.test(lineCtx) || OWN_ACCOUNT_PATTERNS.some(p => p.test(routePath))) {
+      if (fileWidePlatform || RBAC_RE.test(lineCtx) || OWN_ACCOUNT_PATTERNS.some(p => p.test(routePath))) {
         protectedCount++;
       } else {
         issues.push({ file, method, path: routePath, line: lineNum });

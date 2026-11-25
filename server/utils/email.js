@@ -45,6 +45,9 @@ const _platformTransporter = nodemailer.createTransport({
   port: SMTP_PORT,
   secure: false,
   auth: { user: SMTP_USER, pass: SMTP_PASS },
+  connectionTimeout: 10_000,
+  greetingTimeout: 10_000,
+  socketTimeout: 20_000,
 });
 
 const PLATFORM_FROM = `"Msingi Platform" <${SMTP_USER}>`;
@@ -330,8 +333,11 @@ async function _send(to, subject, html, opts = {}) {
 
   try {
     const mailOpts = { from, to, subject, html };
+    if (opts.text) mailOpts.text = opts.text;
     if (opts.replyTo) mailOpts.replyTo = opts.replyTo;
-    await t.sendMail(mailOpts);
+    if (opts.headers && typeof opts.headers === 'object') mailOpts.headers = opts.headers;
+    const info = await t.sendMail(mailOpts);
+    if (opts.onSuccess) opts.onSuccess({ messageId: info?.messageId || null });
     console.log(`[EMAIL] ✅ Sent "${subject}" → ${to}${opts.isCustom ? ' [custom SMTP]' : ''}`);
     return true;
   } catch (err) {
@@ -340,6 +346,32 @@ async function _send(to, subject, html, opts = {}) {
     if (opts.onFailure) opts.onFailure(err);
     return false;
   }
+}
+
+/* ── Prospect outreach sender ─────────────────────────────────
+   Uses the same configured SMTP account, but with a human display
+   name, a monitored Reply-To and conversation-appropriate headers.
+   Actual campaign sends are fail-closed behind OUTREACH_ENABLED. */
+function outreachReady() {
+  const replyTo = String(process.env.OUTREACH_REPLY_TO || '').trim();
+  return SMTP_READY
+    && process.env.OUTREACH_ENABLED === 'true'
+    && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(replyTo);
+}
+
+async function sendOutreach({ to, subject, html, text, fromName, replyTo, headers, onSuccess } = {}) {
+  if (!outreachReady()) {
+    const error = new Error('Outreach is disabled or OUTREACH_REPLY_TO is not configured.');
+    _logEmailFailure({ subject, to, via: 'outreach-disabled', error }).catch(() => {});
+    return false;
+  }
+  return _send(to, subject, html, {
+    fromName: fromName || process.env.OUTREACH_FROM_NAME || 'Msingi Schools Team',
+    replyTo: replyTo || process.env.OUTREACH_REPLY_TO,
+    text,
+    headers,
+    onSuccess,
+  });
 }
 
 /* ── School email sender ────────────────────────────────────
@@ -1738,6 +1770,8 @@ module.exports = {
   _buildSchoolPageUrl, // test-only access — see notification-deep-link.test.js
   sendContactEnquiry,
   sendContactConfirmation,
+  outreachReady,
+  sendOutreach,
   sendDemoOtp,
   sendDemoCredentials,
   sendDemoLifecycle,

@@ -507,6 +507,25 @@ body {
 
 .pa-stat-sub { font-size: 11.5px; color: var(--muted); }
 
+/* Outreach summary: five short metrics read better on one line. */
+.outreach-stats { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+
+@media (max-width: 980px) {
+  .outreach-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.outreach-leads-table th:nth-child(4),
+.outreach-leads-table td:nth-child(4),
+.outreach-leads-table th:nth-child(5),
+.outreach-leads-table td:nth-child(5) {
+  white-space: nowrap;
+}
+
+.outreach-leads-table th:nth-child(4),
+.outreach-leads-table td:nth-child(4) {
+  min-width: 118px;
+}
+
 /* ── Section card ─────────────────────────────────────────── */
 .pa-card {
   background: var(--surface);
@@ -828,6 +847,28 @@ select.pa-input, .pa-field select { appearance: none; padding-right: 30px;
 .pa-pill.rejected,
 .pa-pill.failed           { background: var(--danger-tint); color: #b42318; }
 .pa-pill.draft            { background: var(--gray-100); color: var(--muted); }
+.pa-pill.new,
+.pa-pill.queued           { background: #e7f2fd; color: #0b5aa8; }
+.pa-pill.contacted,
+.pa-pill.sending,
+.pa-pill.running          { background: var(--brand-tint); color: var(--primary-700); }
+.pa-pill.replied,
+.pa-pill.interested,
+.pa-pill.demo_booked,
+.pa-pill.sent,
+.pa-pill.delivered,
+.pa-pill.completed        { background: var(--success-tint); color: #05603a; }
+.pa-pill.not_interested,
+.pa-pill.skipped,
+.pa-pill.paused           { background: var(--gray-100); color: var(--muted); }
+.pa-pill.cancelled        { background: var(--danger-tint); color: #b42318; }
+.pa-pill.launching        { background: var(--warning-tint); color: #b54708; }
+.pa-pill.attention,
+.pa-pill.needs_review     { background: var(--warning-tint); color: #b54708; }
+.pa-pill.held             { background: var(--gray-100); color: var(--muted); }
+.pa-pill.bounced,
+.pa-pill.unsubscribed,
+.pa-pill.invalid          { background: var(--danger-tint); color: #b42318; }
 
 /* Capability toggles in the invite form */
 .pa-cap-grid {
@@ -878,6 +919,14 @@ select.pa-input, .pa-field select { appearance: none; padding-right: 30px;
   max-height: 88vh;
   overflow-y: auto;
   box-shadow: var(--shadow-lg);
+}
+
+.pa-modal-wide { width: 920px; }
+.pa-modal-wide .pa-form-row { grid-template-columns: 1fr 1fr; }
+
+@media (max-width: 700px) {
+  .pa-modal-wide .pa-form-row { grid-template-columns: 1fr; }
+  .pa-modal { padding: 20px; }
 }
 
 .pa-modal h3 { font-size: 16px; font-weight: 650; letter-spacing: -.01em; margin-bottom: 8px; }

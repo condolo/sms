@@ -60,6 +60,29 @@ services:
         sync: false          # Set in Render dashboard: the provider password
       - key: PLATFORM_EMAIL
         sync: false          # Set in Render dashboard: email address for admin alerts
+      # Prospect-school outreach. Fail-closed until a monitored Reply-To is set.
+      - key: OUTREACH_ENABLED
+        value: 'false'
+      - key: OUTREACH_FROM_NAME
+        value: Msingi Schools Team
+      - key: OUTREACH_FROM_ROLE
+        value: Schools Team
+      - key: OUTREACH_REPLY_TO
+        sync: false          # Set in Render dashboard: monitored human sales inbox
+      - key: OUTREACH_DAILY_LIMIT
+        value: 25
+      - key: OUTREACH_LOGO_URL
+        value: https://msingi.io/api/public/platform-asset/logo
+      - key: OUTREACH_PHONE
+        value: '+254 769 024 153'
+      - key: OUTREACH_TRUST_LINE
+        value: Tenant-isolated records • Audited operator actions
+      - key: OUTREACH_PRICING_LINE
+        value: Starting at KSh 250 / student / term
+      - key: OUTREACH_LEGAL_NAME
+        sync: false          # Verified legal sender name for cold-email footers
+      - key: OUTREACH_POSTAL_ADDRESS
+        sync: false          # Postal address shown in cold-email footers
       # Demo tenant lifecycle (self-serve /demo). The template school must
       # already exist in the target database.
       - key: DEMO_TEMPLATE_SCHOOL_ID
