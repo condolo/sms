@@ -348,37 +348,32 @@ router.get('/school-asset/:type', async (req, res) => {
     const slug = (req.query.slug || '').toLowerCase().trim();
     if (!slug) return res.status(400).json({ error: 'slug required' });
 
-    const cached = assetCache.get(slug, type);
-    if (cached?.miss) return res.status(404).json({ error: `No ${type} set` });
-    if (cached) {
-      res.set('Cache-Control', 'public, max-age=3600');
-      res.set('ETag', cached.etag);
-      if (req.headers['if-none-match'] === cached.etag) return res.status(304).end();
-      res.set('Content-Type', cached.mime);
-      return res.send(cached.buffer);
-    }
-
     const field  = type === 'logo' ? 'logoBase64' : type === 'favicon' ? 'faviconBase64' : 'loginBgBase64';
-    const School = _model('schools');
-    const school = await School.findOne({ id: slug }).select(field).lean();
-    const b64    = school?.[field];
+    const load = async () => {
+      const School = _model('schools');
+      const school = await School.findOne({ id: slug }).select(field).lean();
+      const b64 = school?.[field];
+      if (!b64) return null;
+      const [header, data] = b64.split(',');
+      const mimeMatch = header?.match(/data:(image\/[\w+]+);base64/);
+      return {
+        mime: mimeMatch?.[1] || 'image/png',
+        buffer: Buffer.from(data, 'base64'),
+      };
+    };
 
-    if (!b64) {
-      assetCache.setMiss(slug, type);
-      return res.status(404).json({ error: `No ${type} set` });
-    }
-
-    const [header, data] = b64.split(',');
-    const mimeMatch = header?.match(/data:(image\/[\w+]+);base64/);
-    const mime = mimeMatch?.[1] || 'image/png';
-    const buffer = Buffer.from(data, 'base64');
-    const etag = assetCache.setHit(slug, type, buffer, mime);
+    // Single-flight prevents a burst of cold requests from all reading and
+    // decoding the same blob. If an upload invalidates mid-load, retry once
+    // so the caller never receives an asset whose invalidation it lost.
+    let loaded = await assetCache.getOrLoad(slug, type, load);
+    if (!loaded) loaded = await assetCache.getOrLoad(slug, type, load);
+    if (loaded?.miss || !loaded) return res.status(404).json({ error: `No ${type} set` });
 
     res.set('Cache-Control', 'public, max-age=3600');
-    res.set('ETag', etag);
-    if (req.headers['if-none-match'] === etag) return res.status(304).end();
-    res.set('Content-Type', mime);
-    res.send(buffer);
+    res.set('ETag', loaded.etag);
+    if (req.headers['if-none-match'] === loaded.etag) return res.status(304).end();
+    res.set('Content-Type', loaded.mime);
+    res.send(loaded.buffer);
   } catch (err) {
     console.error('[public/school-asset]', err.message);
     res.status(500).json({ error: 'Server error' });

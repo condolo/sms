@@ -59,4 +59,41 @@ describe('school asset cache', () => {
     expect(cache.get('sch_test', 'login-bg')).toBeNull();
     expect(cache.get('sch_other', 'logo')).toMatchObject({ miss: false });
   });
+
+  test('concurrent cold misses share one load (single-flight)', async () => {
+    const loader = jest.fn(async () => {
+      await new Promise(resolve => setTimeout(resolve, 5));
+      return { buffer: Buffer.from('shared'), mime: 'image/png' };
+    });
+    const [a, b] = await Promise.all([
+      cache.getOrLoad('sch_singleflight', 'logo', loader),
+      cache.getOrLoad('sch_singleflight', 'logo', loader),
+    ]);
+    expect(loader).toHaveBeenCalledTimes(1);
+    expect(a.buffer).toBe(b.buffer);
+  });
+
+  test('an invalidated in-flight load cannot repopulate the cache', async () => {
+    let finish;
+    const loader = () => new Promise(resolve => { finish = resolve; });
+    const pending = cache.getOrLoad('sch_generation', 'logo', loader);
+    await Promise.resolve(); // let the single-flight loader start
+    cache.invalidate('sch_generation', 'logo');
+    finish({ buffer: Buffer.from('stale'), mime: 'image/png' });
+
+    expect(await pending).toBeNull();
+    expect(cache.get('sch_generation', 'logo')).toBeNull();
+  });
+
+  test('evicts the least recently used entry at capacity', () => {
+    for (let i = 0; i < cache.MAX_ENTRIES; i += 1) {
+      cache.setHit('sch_lru', String(i), Buffer.from(String(i)), 'image/png');
+    }
+    cache.get('sch_lru', '0'); // touch oldest -> newest
+    cache.setHit('sch_lru', 'new', Buffer.from('new'), 'image/png');
+
+    expect(cache.get('sch_lru', '0')).not.toBeNull();
+    expect(cache.get('sch_lru', '1')).toBeNull();
+    cache.invalidate('sch_lru');
+  });
 });

@@ -7,13 +7,20 @@ by `scripts/perf-load-test.js`.
 ## 1. Cache — `/api/public/school-asset/:type`
 
 `server/utils/school-asset-cache.js` caches the decoded image Buffer, MIME
-type and a content ETag in process (5-minute TTL, 30-second negative cache,
-500-entry cap). Repeat reads use no MongoDB round trip and support
-`If-None-Match` → 304. Upload/delete routes in `server/routes/settings.js`
-invalidate the affected type immediately.
+type and a content ETag in process. It is an **LRU** with both a 500-entry
+cap and a **64 MB byte budget**, lazy TTL expiry (5-minute hits, 30-second
+misses), **single-flight** loads, and generation-safe invalidation. Repeat
+reads use no MongoDB round trip and support `If-None-Match` → 304. Upload/
+delete routes invalidate the affected type immediately; an in-flight stale
+load cannot repopulate the cache after invalidation. Multi-instance
+invalidation still requires shared pub/sub (or a versioned key); other
+processes expire stale entries within 5 minutes.
 
 Tests: `server/__tests__/school-asset-cache.test.js` (hit/miss, stable and
-changing ETags, negative caching, per-type and per-school invalidation).
+changing ETags, negative caching, invalidation, single-flight, stale-load
+race, LRU eviction) and `server/__tests__/school-asset-route.test.js`
+(200 → cache hit → 304 without another Mongo read; invalidation exposes a
+new asset immediately).
 
 ## 2. Batch — `/api/classes/rosters/batch`
 
