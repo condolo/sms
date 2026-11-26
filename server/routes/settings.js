@@ -25,6 +25,7 @@ const { parsePagination, strParam } = require('../utils/response');
 const { escapeRegex } = require('../utils/escape-regex');
 const { revokeUserTokens, revokeIdentityTokens } = require('../utils/token-version');
 const emailUtil             = require('../utils/email');
+const schoolAssetCache      = require('../utils/school-asset-cache');
 const { encrypt, smtpEncryptReady } = require('../utils/smtpEncrypt');
 const { DEFAULTS: NOTIF_DEFAULTS, EVENT_REGISTRY, GROUPS: NOTIF_GROUPS } = require('../utils/notif-settings');
 const { listTemplatesForSchool, setTemplateOverride, resetTemplateOverride } = require('../utils/notificationTemplates');
@@ -783,6 +784,7 @@ router.put('/school/logo', authMiddleware, rbac('settings', 'update', 'school'),
       { $set: { logoBase64, logoUrl, updatedAt: new Date().toISOString() } }
     );
     emailUtil.invalidateLogoCache(req.jwtUser.schoolId);
+    schoolAssetCache.invalidate(req.jwtUser.schoolId, 'logo');
     AuditService.log({
       action: 'settings.school_updated', actor: req.jwtUser, schoolId: req.jwtUser.schoolId,
       target: { type: 'school', id: req.jwtUser.schoolId },
@@ -804,6 +806,7 @@ router.delete('/school/logo', authMiddleware, rbac('settings', 'update', 'school
       { $unset: { logoBase64: '', logoUrl: '' }, $set: { updatedAt: new Date().toISOString() } }
     );
     emailUtil.invalidateLogoCache(req.jwtUser.schoolId);
+    schoolAssetCache.invalidate(req.jwtUser.schoolId, 'logo');
     AuditService.log({
       action: 'settings.school_updated', actor: req.jwtUser, schoolId: req.jwtUser.schoolId,
       target: { type: 'school', id: req.jwtUser.schoolId },
@@ -829,6 +832,7 @@ router.put('/school/favicon', authMiddleware, rbac('settings', 'update', 'school
       { id: req.jwtUser.schoolId },
       { $set: { faviconBase64, faviconUrl, updatedAt: new Date().toISOString() } }
     );
+    schoolAssetCache.invalidate(req.jwtUser.schoolId, 'favicon');
     AuditService.log({
       action: 'settings.school_updated', actor: req.jwtUser, schoolId: req.jwtUser.schoolId,
       target: { type: 'school', id: req.jwtUser.schoolId },
@@ -849,6 +853,7 @@ router.delete('/school/favicon', authMiddleware, rbac('settings', 'update', 'sch
       { id: req.jwtUser.schoolId },
       { $unset: { faviconBase64: '', faviconUrl: '' }, $set: { updatedAt: new Date().toISOString() } }
     );
+    schoolAssetCache.invalidate(req.jwtUser.schoolId, 'favicon');
     AuditService.log({
       action: 'settings.school_updated', actor: req.jwtUser, schoolId: req.jwtUser.schoolId,
       target: { type: 'school', id: req.jwtUser.schoolId },
@@ -874,6 +879,7 @@ router.put('/school/login-bg', authMiddleware, rbac('settings', 'update', 'schoo
       { id: req.jwtUser.schoolId },
       { $set: { loginBgBase64, loginBgUrl, updatedAt: new Date().toISOString() } }
     );
+    schoolAssetCache.invalidate(req.jwtUser.schoolId, 'login-bg');
     AuditService.log({
       action: 'settings.school_updated', actor: req.jwtUser, schoolId: req.jwtUser.schoolId,
       target: { type: 'school', id: req.jwtUser.schoolId },
@@ -894,6 +900,7 @@ router.delete('/school/login-bg', authMiddleware, rbac('settings', 'update', 'sc
       { id: req.jwtUser.schoolId },
       { $unset: { loginBgBase64: '', loginBgUrl: '' }, $set: { updatedAt: new Date().toISOString() } }
     );
+    schoolAssetCache.invalidate(req.jwtUser.schoolId, 'login-bg');
     AuditService.log({
       action: 'settings.school_updated', actor: req.jwtUser, schoolId: req.jwtUser.schoolId,
       target: { type: 'school', id: req.jwtUser.schoolId },

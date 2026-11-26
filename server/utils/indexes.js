@@ -35,6 +35,8 @@ const INDEXES = [
     indexes: [
       { key: { schoolId: 1, classId: 1, termId: 1, superseded: 1 },   name: 'snap_class_term_superseded' },
       { key: { schoolId: 1, studentId: 1, termId: 1, academicYearId: 1 }, name: 'snap_student_term' },
+      // Parent portal report: newest published snapshot for one child.
+      { key: { schoolId: 1, studentId: 1, status: 1, superseded: 1, publishedAt: -1 }, name: 'snap_student_published' },
       { key: { id: 1 },                                                name: 'snap_id',       unique: true, sparse: true },
       { key: { batchId: 1 },                                           name: 'snap_batch' },
       { key: { schoolId: 1, publishedAt: -1 },                         name: 'snap_school_published' },
@@ -196,6 +198,9 @@ const INDEXES = [
     col: 'students',
     indexes: [
       { key: { schoolId: 1, classId: 1 },              name: 'students_class' },
+      // Class roster reads filter status and sort by name — without this the
+      // class picker/roster sorted in memory on every request.
+      { key: { schoolId: 1, classId: 1, status: 1, lastName: 1, firstName: 1 }, name: 'students_roster' },
       { key: { schoolId: 1, streamId: 1, status: 1 },   name: 'students_stream' },
       { key: { schoolId: 1, admissionNumber: 1 },       name: 'students_admission', sparse: true },
       { key: { id: 1 },                                 name: 'students_id',  unique: true, sparse: true },
@@ -658,6 +663,8 @@ const INDEXES = [
     indexes: [
       { key: { schoolId: 1, studentId: 1, termId: 1, status: 1 },  name: 'att_student_term_status' },
       { key: { schoolId: 1, classId: 1, date: 1 },                  name: 'att_class_date' },
+      // Student portal dashboard's date-range attendance read.
+      { key: { schoolId: 1, studentId: 1, date: 1 },                name: 'att_student_date' },
     ],
   },
 
@@ -781,6 +788,8 @@ const INDEXES = [
     col: 'syllabus_topics',
     indexes: [
       { key: { schoolId: 1, subjectId: 1, academicYear: 1, order: 1 },  name: 'st_school_sub_year_order' },
+      // Student portal dashboard reads topics by class and sorts by order.
+      { key: { schoolId: 1, classId: 1, order: 1, createdAt: 1 },       name: 'st_school_class_order' },
       { key: { id: 1 },                                                  name: 'st_id', unique: true, sparse: true },
     ],
   },
@@ -940,6 +949,29 @@ const INDEXES = [
     indexes: [
       { key: { schoolId: 1, subjectId: 1, createdAt: -1 }, name: 'aqb_subject_created' },
       { key: { id: 1 },                                     name: 'aqb_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── assessment_schedule ───────────────────────────────────
+     Reminders reads every schedule for a school, optionally narrowed by
+     academic year. Had no explicit index at all. */
+  {
+    col: 'assessment_schedule',
+    indexes: [
+      { key: { schoolId: 1, academicYearId: 1 }, name: 'as_school_year' },
+      { key: { id: 1 },                          name: 'as_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── teaching_assignments ──────────────────────────────────
+     Reminders, class scope and elective checks all filter by teacher or
+     by class+subject. Relied on a generic schoolId-only index. */
+  {
+    col: 'teaching_assignments',
+    indexes: [
+      { key: { schoolId: 1, teacherId: 1 },                name: 'ta_school_teacher' },
+      { key: { schoolId: 1, classId: 1, subjectId: 1 },    name: 'ta_school_class_subject' },
+      { key: { id: 1 },                                   name: 'ta_id', unique: true, sparse: true },
     ],
   },
 

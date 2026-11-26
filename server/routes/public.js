@@ -7,6 +7,7 @@
 const express   = require('express');
 const rateLimit = require('express-rate-limit');
 const { z }     = require('zod');
+const assetCache = require('../utils/school-asset-cache');
 const { _model } = require('../utils/model');
 const { sendContactEnquiry, sendContactConfirmation } = require('../utils/email');
 const { ok, E } = require('../utils/response');
@@ -347,20 +348,37 @@ router.get('/school-asset/:type', async (req, res) => {
     const slug = (req.query.slug || '').toLowerCase().trim();
     if (!slug) return res.status(400).json({ error: 'slug required' });
 
+    const cached = assetCache.get(slug, type);
+    if (cached?.miss) return res.status(404).json({ error: `No ${type} set` });
+    if (cached) {
+      res.set('Cache-Control', 'public, max-age=3600');
+      res.set('ETag', cached.etag);
+      if (req.headers['if-none-match'] === cached.etag) return res.status(304).end();
+      res.set('Content-Type', cached.mime);
+      return res.send(cached.buffer);
+    }
+
     const field  = type === 'logo' ? 'logoBase64' : type === 'favicon' ? 'faviconBase64' : 'loginBgBase64';
     const School = _model('schools');
     const school = await School.findOne({ id: slug }).select(field).lean();
     const b64    = school?.[field];
 
-    if (!b64) return res.status(404).json({ error: `No ${type} set` });
+    if (!b64) {
+      assetCache.setMiss(slug, type);
+      return res.status(404).json({ error: `No ${type} set` });
+    }
 
     const [header, data] = b64.split(',');
     const mimeMatch = header?.match(/data:(image\/[\w+]+);base64/);
     const mime = mimeMatch?.[1] || 'image/png';
+    const buffer = Buffer.from(data, 'base64');
+    const etag = assetCache.setHit(slug, type, buffer, mime);
 
-    res.set('Content-Type', mime);
     res.set('Cache-Control', 'public, max-age=3600');
-    res.send(Buffer.from(data, 'base64'));
+    res.set('ETag', etag);
+    if (req.headers['if-none-match'] === etag) return res.status(304).end();
+    res.set('Content-Type', mime);
+    res.send(buffer);
   } catch (err) {
     console.error('[public/school-asset]', err.message);
     res.status(500).json({ error: 'Server error' });

@@ -21,7 +21,7 @@ const { issueCsrfCookie, clearCsrfCookie } = require('../utils/csrf');
 const passwordTicket = require('../utils/password-ticket');
 const { schoolLoginUrl } = require('../utils/school-url');
 const demo = require('../utils/demo');
-const { safeUser: _safeUser } = require('../utils/safe-user');
+const { safeUser: _safeUser, USER_SECRET_FIELDS } = require('../utils/safe-user');
 const { comparePassword, PasswordHashInfrastructureError } = require('../services/passwordHash');
 const {
   LOGIN_OTP_TTL_MS,
@@ -2375,12 +2375,20 @@ router.get('/microsoft/callback', async (req, res) => {
 /* GET /api/auth/me — verify token + return current user */
 router.get('/me', authMiddleware, async (req, res) => {
   try {
+    // PROJECTED. `/me` is called on every app boot and on every token refresh;
+    // an unprojected school read pulls logoBase64/loginBgBase64 (1-2MB+ each)
+    // and was measured at 5-6s per request on a school with a real upload.
+    // tenant.js's _findSchool already fixed this for tenant resolution — this
+    // handler was missed. Keep every other school field; drop only the blobs,
+    // which are served by /api/public/school-asset/* instead.
     const User = tenantModel('users', tenantContext(req));
-    const user = await User.findOne({ id: req.jwtUser.userId, schoolId: req.jwtUser.schoolId }).lean();
+    const userSelect = `-${USER_SECRET_FIELDS.join(' -')}`;
+    const [user, school] = await Promise.all([
+      User.findOne({ id: req.jwtUser.userId, schoolId: req.jwtUser.schoolId }).select(userSelect).lean(),
+      _model('schools').findOne({ id: req.jwtUser.schoolId })
+        .select('-logoBase64 -faviconBase64 -loginBgBase64').lean(),
+    ]);
     if (!user) return res.status(404).json({ error: 'User not found' });
-
-    const School = _model('schools');
-    const school = await School.findOne({ id: req.jwtUser.schoolId }).lean();
 
     const safeUser = _safeUser(user);
     _attachExtraRoleFields(safeUser, req.jwtUser); // already-verified JWT — same values _buildTokenPayload put there at login, no extra DB round trip needed
