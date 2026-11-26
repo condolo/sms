@@ -291,6 +291,39 @@ describe('GET /api/students', () => {
     expect(res.body.data).toHaveLength(2);
   });
 
+  test('the default on-roll filter hides soft-deleted students', async () => {
+    mockStudentsFind.mockReturnValue({
+      sort: jest.fn().mockReturnThis(), skip: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(), select: jest.fn().mockReturnThis(),
+      lean: jest.fn().mockResolvedValue([]),
+    });
+    mockStudentsCountDocuments.mockResolvedValue(0);
+
+    await supertest(buildApp())
+      .get('/api/students')
+      .set('Authorization', 'Bearer fake-token');
+
+    expect(mockStudentsFind.mock.calls[0][0].status.$nin).toEqual(
+      expect.arrayContaining(['inactive', 'withdrawn', 'graduated', 'transferred']),
+    );
+  });
+
+  test('?status=all deliberately includes soft-deleted students', async () => {
+    mockStudentsFind.mockReturnValue({
+      sort: jest.fn().mockReturnThis(), skip: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(), select: jest.fn().mockReturnThis(),
+      lean: jest.fn().mockResolvedValue([]),
+    });
+    mockStudentsCountDocuments.mockResolvedValue(0);
+
+    await supertest(buildApp())
+      .get('/api/students')
+      .query({ status: 'all' })
+      .set('Authorization', 'Bearer fake-token');
+
+    expect(mockStudentsFind.mock.calls[0][0]).not.toHaveProperty('status');
+  });
+
   /* className is a denormalised DISPLAY field. Imports, seed data, and
      enrolments that predate it carry a valid classId with no name — which
      rendered as a dash in every row of the list. GET /:id already resolved
