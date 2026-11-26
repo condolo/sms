@@ -21,7 +21,7 @@ const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { sortReportsByPeriod } = require('../utils/report-order');
 const { coverageStreamOr } = require('../utils/topic-coverage');
 const { studentStreamOr, filterElectivesForStudent } = require('../utils/lesson-audience');
-const { isTimetablePublished, publishedReader } = require('../utils/timetable-publish');
+const { getPublishState, isTimetablePublished, publishedReader } = require('../utils/timetable-publish');
 const { resolveCurrentPeriod } = require('./academic-config');
 const { audienceClause }        = require('../utils/announcement-audience');
 const { transportRidesFor }     = require('../utils/transport-ride');
@@ -104,7 +104,7 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
       student,
       school,
       academicYears,
-      Timetable,
+      publishState,
       timetablePublished,
       rawReportCards,
       invoices,
@@ -118,7 +118,9 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
       // Live-resolved, not the schools.academicYear cached field — see
       // parent-portal.js's identical fix for the full reasoning.
       AcademicYears.find({ schoolId }).lean(),
-      publishedReader(schoolId, tenantContext(req)),
+      // Both publish reads are now projected to `timetableStatus` instead of
+      // pulling the whole school document (including the multi-MB logo blob).
+      getPublishState(schoolId),
       isTimetablePublished(schoolId),
       Reports.find({
         schoolId, studentId, status: 'published', superseded: { $ne: true },
@@ -127,6 +129,7 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
         .lean(),
       FeeInvoices.find({ schoolId, studentId }).select('total balance status').lean(),
     ]);
+    const Timetable = await publishedReader(schoolId, tenantContext(req), publishState);
     if (!student) return E.notFound(res, 'Student record not found.');
 
     /* `className` is denormalized on the student document, and older imports

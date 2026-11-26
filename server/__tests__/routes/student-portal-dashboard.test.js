@@ -183,6 +183,8 @@ jest.mock('../../utils/timetable-publish', () => {
   const { tenantModel } = require('../../utils/tenant-model');
   return {
     isTimetablePublished: jest.fn(async () => true),
+    // The dashboard resolves publish state once and passes it to publishedReader.
+    getPublishState: jest.fn(async () => ({ published: true, publishedVersionId: null })),
     publishedReader: async (_schoolId, _ctx) => tenantModel('timetable'),
     timetableReaderFor: async (req) => tenantModel('timetable', { schoolId: req.jwtUser.schoolId }),
   };

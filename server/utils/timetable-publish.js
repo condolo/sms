@@ -22,7 +22,9 @@ const { _model } = require('./model');
 const { tenantModel } = require('./tenant-model');
 
 async function getPublishState(schoolId) {
-  const school = await _model('schools').findOne({ id: schoolId }).lean();
+  // Projected: an unprojected school read pulls logoBase64/loginBgBase64
+  // (1-2MB+ each). Only timetableStatus is used here.
+  const school = await _model('schools').findOne({ id: schoolId }).select('timetableStatus').lean();
   const t = school?.timetableStatus ?? {};
   const draftRevision = t.draftRevision ?? 0;
   const publishedRevision = t.publishedRevision ?? null;
@@ -80,8 +82,11 @@ function scopedReader(model, versionId) {
  * The timetable a non-editor reads: the live published version, or nothing
  * while no version is live. `ctx` is a tenant context ({ schoolId }).
  */
-async function publishedReader(schoolId, ctx) {
-  const st = await getPublishState(schoolId);
+async function publishedReader(schoolId, ctx, state) {
+  // Callers that already resolved the state (e.g. the student dashboard,
+  // which also needs the published flag) can pass it in so the school is
+  // not read a second time on the same request.
+  const st = state || await getPublishState(schoolId);
   if (!st.published || !st.publishedVersionId) return emptyReader();
   return scopedReader(tenantModel('timetable_published', ctx), st.publishedVersionId);
 }
