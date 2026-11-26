@@ -43,6 +43,7 @@ const DB_NAME = process.env.PERF_DB_NAME || 'msingi_perf';
 const CONCURRENCY = Number(process.env.PERF_CONCURRENCY || 10);
 const DURATION_SEC = Number(process.env.PERF_DURATION_SEC || 12);
 const WARMUP = Number(process.env.PERF_WARMUP || 2);
+const ROUNDS = Number(process.env.PERF_ROUNDS || 1);
 const LABEL = process.env.PERF_LABEL || 'run';
 const OUT_JSON = path.resolve(process.env.PERF_OUT || path.join(ROOT, 'docs', 'perf', `${LABEL}.json`));
 const OUT_MD = path.resolve(process.env.PERF_OUT_MD || path.join(ROOT, 'docs', 'perf', `${LABEL}.md`));
@@ -59,6 +60,7 @@ function cfgError(message) {
 if (!Number.isInteger(CONCURRENCY) || CONCURRENCY < 1) cfgError('PERF_CONCURRENCY must be a positive integer.');
 if (!Number.isFinite(DURATION_SEC) || DURATION_SEC <= 0) cfgError('PERF_DURATION_SEC must be positive.');
 if (!Number.isInteger(WARMUP) || WARMUP < 0) cfgError('PERF_WARMUP must be a non-negative integer.');
+if (!Number.isInteger(ROUNDS) || ROUNDS < 1) cfgError('PERF_ROUNDS must be a positive integer.');
 
 const round = (n, digits = 1) => Math.round(n * 10 ** digits) / 10 ** digits;
 
@@ -267,17 +269,38 @@ function summarise(route, samples) {
 }
 
 async function runRoute(route) {
-  for (let i = 0; i < WARMUP; i += 1) await request(route);
-  const samples = [];
-  const deadline = performance.now() + DURATION_SEC * 1000;
-  while (performance.now() < deadline) {
-    const batch = [];
-    for (let i = 0; i < CONCURRENCY && performance.now() < deadline; i += 1) {
-      batch.push(request(route).then(sample => { samples.push(sample); }));
+  const rounds = [];
+  for (let r = 0; r < ROUNDS; r += 1) {
+    for (let i = 0; i < WARMUP; i += 1) await request(route);
+    const samples = [];
+    const deadline = performance.now() + DURATION_SEC * 1000;
+    while (performance.now() < deadline) {
+      const batch = [];
+      for (let i = 0; i < CONCURRENCY && performance.now() < deadline; i += 1) {
+        batch.push(request(route).then(sample => { samples.push(sample); }));
+      }
+      await Promise.all(batch);
     }
-    await Promise.all(batch);
+    rounds.push(summarise(route, samples));
   }
-  return summarise(route, samples);
+  if (ROUNDS === 1) return rounds[0];
+
+  // Local machines are noisy. Take the median round's p95 as the headline
+  // number and keep every round so variance is visible in the artifact.
+  const p95s = rounds.map(result => result.latencyMs.p95).sort((a, b) => a - b);
+  const median = percentile(p95s, 50);
+  const chosen = rounds.reduce((best, result) =>
+    Math.abs(result.latencyMs.p95 - median) < Math.abs(best.latencyMs.p95 - median) ? result : best, rounds[0]);
+  return {
+    ...chosen,
+    rounds: rounds.map(result => ({
+      requests: result.requests,
+      p50: result.latencyMs.p50,
+      p95: result.latencyMs.p95,
+      p99: result.latencyMs.p99,
+      max: result.latencyMs.max,
+    })),
+  };
 }
 
 /* ── artifact ───────────────────────────────────────────────────── */
@@ -291,7 +314,8 @@ function writeArtifact(report) {
     '',
     `- Captured: ${report.capturedAt}`,
     `- Node: ${report.environment.node} (${report.environment.platform})`,
-    `- Concurrency: ${CONCURRENCY}, duration: ${DURATION_SEC}s, warmup: ${WARMUP}`,
+    `- Concurrency: ${CONCURRENCY}, duration: ${DURATION_SEC}s per round, warmup: ${WARMUP}, rounds: ${ROUNDS}`,
+    `- Headline p95: median of ${ROUNDS} round(s)`,
     `- Database: ${DB_NAME} (local MongoDB)`,
     '',
     'True client-side percentiles (not histogram buckets):',
@@ -302,6 +326,12 @@ function writeArtifact(report) {
   for (const r of report.routes) {
     const l = r.latencyMs;
     lines.push(`| ${r.method} ${r.name} | ${r.requests} | ${l.p50} | ${l.p90} | ${l.p95} | ${l.p99} | ${l.max} | ${l.mean} | ${r.throughputRps} | ${r.okPct} |`);
+  }
+  if (ROUNDS > 1) {
+    lines.push('', 'Per-round p95 (ms):', '');
+    for (const r of report.routes) {
+      if (r.rounds) lines.push(`- **${r.name}**: ${r.rounds.map(x => x.p95).join(', ')}`);
+    }
   }
   lines.push('', 'Status counts:', '');
   for (const r of report.routes) {
@@ -368,7 +398,7 @@ async function main() {
       label: LABEL,
       capturedAt: new Date().toISOString(),
       environment: { node: process.version, platform: process.platform, arch: process.arch, baseUrl: BASE_URL },
-      config: { concurrency: CONCURRENCY, durationSec: DURATION_SEC, warmup: WARMUP, timeoutMs: TIMEOUT_MS },
+      config: { concurrency: CONCURRENCY, durationSec: DURATION_SEC, warmup: WARMUP, rounds: ROUNDS, timeoutMs: TIMEOUT_MS },
       discovered: ids,
       routes: results,
     });

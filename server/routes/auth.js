@@ -776,10 +776,16 @@ router.post('/login-credentials', loginIpLimiter, async (req, res) => {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
+    // Bounded by findLoginCandidates (at most five accounts) and offloaded to
+    // the password worker pool, so these comparisons can safely run together.
+    // Serialising them made a five-account identifier cost the sum of five
+    // cost-12 bcrypt compares — seconds, with no extra traffic.
+    const results = await Promise.all(
+      candidates.map(candidate => _candidatePasswordMatches(candidate, password)),
+    );
     const matches = [];
-    for (const candidate of candidates) {
-      const result = await _candidatePasswordMatches(candidate, password);
-      if (result.match) matches.push({ candidate, identity: result.identity });
+    for (let i = 0; i < candidates.length; i += 1) {
+      if (results[i]?.match) matches.push({ candidate: candidates[i], identity: results[i].identity });
     }
 
     if (!matches.length) {
@@ -793,14 +799,15 @@ router.post('/login-credentials', loginIpLimiter, async (req, res) => {
     }
 
     /* The password proved, so a lockout is now the caller's own business. */
-    for (const { candidate } of matches) {
-      const retryAfter = await SecurityService.checkAccountLock(candidate.schoolId, loginId);
-      if (retryAfter !== null) {
-        return res.status(429).json({
-          error: 'Too many failed login attempts. Please wait before trying again.',
-          retryAfter,
-        });
-      }
+    const lockResults = await Promise.all(
+      matches.map(({ candidate }) => SecurityService.checkAccountLock(candidate.schoolId, loginId)),
+    );
+    const retryAfter = lockResults.find(value => value != null);
+    if (retryAfter !== undefined) {
+      return res.status(429).json({
+        error: 'Too many failed login attempts. Please wait before trying again.',
+        retryAfter,
+      });
     }
 
     const schools = [];

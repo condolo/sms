@@ -74,8 +74,8 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
     // edits never reached this dashboard widget. Confirmed live against
     // the real database: 202 real documents in 'timetable' vs 55 stale
     // ones in 'timetable_slots'.
-    const Timetable     = await publishedReader(schoolId, tenantContext(req));
     const Subjects      = tenantModel('subjects', tenantContext(req));
+    const AcademicYears = tenantModel('academic_years', tenantContext(req));
     const ClassSubjects = tenantModel('class_subjects', tenantContext(req));
     const Schools       = _model('schools');
     /* 'behaviour_incidents', NOT 'behaviour': behaviour.js:515 stores every
@@ -95,10 +95,38 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
 
     const todayISO = new Date().toISOString().slice(0, 10);
 
-    // ── Student record ───────────────────────────────────────
-    const student = await Students.findOne({ id: studentId, schoolId })
-      .select('id firstName lastName admissionNumber classId className streamId photo status dateOfBirth gender')
-      .lean();
+    // ── First wave: independent reads ──────────────────────────
+    // These used to be seven serial awaits (student -> class name -> school
+    // -> academic years -> attendance -> invoices -> report cards). None of
+    // the reads below depends on another, so fan them out together. Reads
+    // that DO depend on the student or resolved term stay in later waves.
+    const [
+      student,
+      school,
+      academicYears,
+      Timetable,
+      timetablePublished,
+      rawReportCards,
+      invoices,
+    ] = await Promise.all([
+      Students.findOne({ id: studentId, schoolId })
+        .select('id firstName lastName admissionNumber classId className streamId photo status dateOfBirth gender')
+        .lean(),
+      Schools.findOne({ id: schoolId })
+        .select('termsPerYear name emergencyOnlineMode portalConfig mpesa')
+        .lean(),
+      // Live-resolved, not the schools.academicYear cached field — see
+      // parent-portal.js's identical fix for the full reasoning.
+      AcademicYears.find({ schoolId }).lean(),
+      publishedReader(schoolId, tenantContext(req)),
+      isTimetablePublished(schoolId),
+      Reports.find({
+        schoolId, studentId, status: 'published', superseded: { $ne: true },
+      }).sort({ publishedAt: -1 }).limit(60)
+        .select('id academicYear termName termNumber totalScore averageScore gpa rankings status publishedAt version termId academicYearId subjects reportLabel cycle')
+        .lean(),
+      FeeInvoices.find({ schoolId, studentId }).select('total balance status').lean(),
+    ]);
     if (!student) return E.notFound(res, 'Student record not found.');
 
     /* `className` is denormalized on the student document, and older imports
@@ -117,15 +145,6 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
       studentClassName = cls?.name ?? null;
     }
 
-    const school = await Schools.findOne({ id: schoolId })
-      .select('termsPerYear name emergencyOnlineMode portalConfig mpesa')
-      .lean();
-
-    // Live-resolved, not the schools.academicYear cached field — see
-    // parent-portal.js's identical fix for the full reasoning (same
-    // staleness class report-cards.js's _resolveTermScope was written
-    // to fix; this dashboard had the old, unfixed version of it).
-    const academicYears = await tenantModel('academic_years', tenantContext(req)).find({ schoolId }).lean();
     const { year: currentYearDoc, term: currentTermDoc, termNumber: currentTermNumber } = resolveCurrentPeriod(academicYears);
     const academicYear = currentYearDoc?.name || '';
     const currentTerm  = currentTermDoc?.name || (currentTermNumber ? `Term ${currentTermNumber}` : '');
@@ -154,7 +173,6 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
       : 0;
 
     // ── Fee balance & clearance ──────────────────────────────
-    const invoices     = await FeeInvoices.find({ schoolId, studentId }).select('total balance status').lean();
     const feeBalance   = invoices.reduce((acc, inv) => acc + (inv.balance || 0), 0);
     const totalBilled  = invoices.reduce((acc, inv) => acc + (inv.total  || 0), 0);
     const feeClearancePct = totalBilled > 0
@@ -177,12 +195,15 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
     let lessonsCoverage = [];
     if (student.classId) {
       const streamOr = coverageStreamOr(student.streamId);
-      const recordedSubjectIds = await Coverage.distinct('subjectId', { schoolId, classId: student.classId, academicYear, $or: streamOr });
       // A subject with no coverage record is still part of the class's
       // syllabus; without this union it disappeared from the checklist and a
       // student could not tell "not started" from "not offered".
-      const offered = await ClassSubjects.find({ schoolId, classId: student.classId, isActive: { $ne: false } })
-        .select('subjectId').lean().catch(() => []);
+      // Both reads depend only on the student, so run them together.
+      const [recordedSubjectIds, offered] = await Promise.all([
+        Coverage.distinct('subjectId', { schoolId, classId: student.classId, academicYear, $or: streamOr }),
+        ClassSubjects.find({ schoolId, classId: student.classId, isActive: { $ne: false } })
+          .select('subjectId').lean().catch(() => []),
+      ]);
       const subjectIds = [...new Set([...recordedSubjectIds, ...offered.map(s => s.subjectId).filter(Boolean)])];
       const subjectDocs = await Subjects.find({ id: { $in: subjectIds }, schoolId }).select('id name code').lean();
       const subjectMap  = Object.fromEntries(subjectDocs.map(s => [s.id, s]));
@@ -289,10 +310,10 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
     const timetableStreamOr = studentStreamOr(student.streamId);
 
     // Unpublished timetables are not shown to students (see utils/timetable-publish.js).
-    // The flag itself is returned too: the home hero used to infer "not
-    // published" from "no lessons today", so every weekend it announced
-    // NOT PUBLISHED YET while the Timetable tab rendered the full week.
-    const timetablePublished = await isTimetablePublished(schoolId);
+    // timetablePublished was resolved in the first wave; the flag itself is
+    // returned too: the home hero used to infer "not published" from "no
+    // lessons today", so every weekend it announced NOT PUBLISHED YET while
+    // the Timetable tab rendered the full week.
     let rawSlots = student.classId && timetablePublished
       ? (await Timetable.find({ schoolId, classId: student.classId, day: today, isActive: true, $or: timetableStreamOr })
           .sort({ startTime: 1 })
@@ -341,11 +362,8 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
     }
 
     // ── Published report cards ───────────────────────────────
-    let reportCards = await Reports.find({
-      schoolId, studentId, status: 'published', superseded: { $ne: true },
-    }).sort({ publishedAt: -1 }).limit(60)
-      .select('id academicYear termName termNumber totalScore averageScore gpa rankings status publishedAt version termId academicYearId subjects reportLabel cycle')
-      .lean();
+    // Fetched in the first wave alongside the other independent reads.
+    let reportCards = rawReportCards;
 
     // ── Real per-subject marks — the one place this dashboard can show an
     // actual mark, since family roles have no access to the live Markbook
