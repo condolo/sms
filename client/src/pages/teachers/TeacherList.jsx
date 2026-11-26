@@ -141,17 +141,22 @@ export default function TeacherList() {
   const rows       = data?.data       ?? [];
   const pagination = data?.pagination ?? {};
 
-  const { mutate: remove, variables: removingId } = useMutation({
+  // Faded only while the request runs: a refused removal (still teaching) leaves the row as it was.
+  const { mutate: remove, variables: removeVars, isPending: removePending } = useMutation({
     mutationFn: id => teachersApi.remove(id),
-    onSuccess:  () => {
+    onSuccess:  res => {
       qc.invalidateQueries({ queryKey: ['teachers'] });
-      toast.success('Staff member removed.');
+      qc.invalidateQueries({ queryKey: ['settings', 'users'] });
+      const login = res?.data?.login ?? res?.login;
+      toast.success(login === 'parent_kept' ? 'Staff member removed. They keep parent access.' : 'Staff member removed and signed out.');
     },
-    onError: err => toast.error(err?.message ?? 'Failed to remove staff member.'),
+    onError: err => toast.error(err?.message ?? 'Failed to remove staff member.', 8000),
   });
 
+  const removingId = removePending ? removeVars : null;
+
   function confirmRemove(t) {
-    if (!confirm(`Remove ${t.firstName} ${t.lastName}? This will set their status to inactive.`)) return;
+    if (!confirm(`Remove ${t.firstName} ${t.lastName}? Their status becomes inactive, their login is switched off and they are signed out. If they are also a parent here, they keep parent access.\n\nSomeone who still teaches a subject, has timetable lessons or is a form teacher can't be removed until those are handed over.`)) return;
     remove(t.id ?? t._id);
   }
 

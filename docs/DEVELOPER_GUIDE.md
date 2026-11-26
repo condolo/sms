@@ -7881,6 +7881,27 @@ A whole-class assignment saved before the class had an active stream, or before 
 
 Still coarse `settings` read (reference data used elsewhere): `GET /settings/users`, `GET /settings/custom-roles`, `GET /academic-config`. `PUT /settings/school` keeps a coarse `rbac('settings','update')` floor, then `_schoolSectionsAllowed()` maps fields → sections (`SCHOOL_FIELD_SECTION`) and requires `update` on each. Client: `SettingsPage.jsx` `TABS[].sub`/`strict`, visible via `can('settings','read',sub)` (strict tabs read `perms['settings__<sub>']` directly).
 
+### Removing staff (v5.289.0, 2026-11-26)
+
+`DELETE /api/teachers/bulk` (HR → Delete Selected, hard-deletes the `teachers` doc) and `DELETE /api/teachers/:id` (Teachers page, soft: `status: 'inactive'`, `deletedAt`, `deletedBy`) share `server/utils/staff-removal.js`:
+
+- `findStaffLogin(ctx, schoolId, teacher)`: the `users` doc by `teacher.userId` (`id`, or `_id` when it is an ObjectId string), else by email ignoring case (escaped, anchored regex) in this school. Several active logins on that email → `ambiguous`, nothing done for that record. Before this, bulk matched `users` by exact `teachers.email` only and hard-deleted them, so a login with a different email (the Trinity case) survived, and `:id` never touched the login.
+- `removalProblem(req, ctx, teacher, login)` → a reason string or null: the actor's own login; an `admin`/`superadmin` login when the actor holds neither; or `staffLinks` > 0. `staffLinks` counts, over `teacherIdForms(teacher)` = `[userId, id, String(_id)]`: `teaching_assignments.teacherId`, `timetable` (`isActive != false`) `teacherId`/`coTeacherIds`, `streams` (`status != 'inactive'`) `formTeacherId`/`assistantFormTeacherId`. Records that still teach are refused rather than cascaded, because deleting leaves those rows pointing at nothing ("Not current" on Allocation) and deleting them would drop the allocation; hand-over is `PUT /teaching-assignments/:id/teacher` with `moveLessons`.
+- `endStaffLogin(ctx, schoolId, login)` → `'parent_kept'` (login holds `parent`/`guardian`: `role`/`roles` reduced to those, stays active), `'deactivated'` (`isActive: false`, same as `DELETE /settings/users/:id`; listed under Removed users, reactivatable), `'already_inactive'` or `'none'`. Always `revokeUserTokens(login.id)` and `invalidateScopeCache`. The login is ended before the staff doc is deleted, so a failure can be retried.
+- Bulk returns `{ deleted, usersDeleted, logins: {deactivated, parent_kept, already_inactive, none}, skipped: [{id, name, reason}] }` (200 even when some are skipped; 404 only when no id matches in this school; `ids` must be strings). `:id` returns 409 `STAFF_IN_USE` with the reason.
+- Audit: `staff.deleted` (bulk) / `staff.deactivated` (`:id`), target `teacher`, details `{email, staffId, loginId, login}`.
+
+Client: `HRPage.jsx` `bulkDeleteStaff` (confirm text, skipped list in the result banner), `TeacherList.jsx` `confirmRemove`. Tests: `server/__tests__/routes/teachers-delete-ends-login.test.js`.
+
+### Kindergarten classes: template subjects only (v5.290.0, 2026-11-26)
+
+A class that resolves to an `rc_templates` doc (`resolveRcTemplate`: explicit `classIds`, else the section's `isDefault` template) is marked only through `indicator-marks.js`, and only for `template.subjects[].subjectId`; indicator definitions already refused other subjects. Two gaps closed:
+
+- **Markbook** (`ExamsPage.jsx` `MarkbookTab`): the template query moved above `subjectsList`, which is now `_baseSubjects()` (teacher assignments / class curriculum, as before) filtered to the template's subjectIds when a template resolves. A subject id no longer in the list is cleared; until the template lookup has loaded, the grid area shows the loading skeleton; and if a non-template subject is still selected, an explanation replaces the numeric grid, which is never rendered for a template class.
+- **Server** (`assessment.js`): `POST /marks` and `POST /marks/bulk` refuse (400) any mark whose class resolves to a template, after the curriculum check, for every role (`_kgClassIds`, `KG_NUMERIC_REFUSED`). Numeric marks for such a class were never read by the KG report (`kg-report.js` reads only `indicator_marks` for template subjects).
+
+Not changed: existing numeric marks in template classes are kept (one school had 20 from before its template covered those subjects); imports (`import-export.js`) are not guarded. Tests: `server/__tests__/routes/assessment-kg-class-refuses-scores.test.js`.
+
 ### Past results and class history (v5.278.0)
 
 **`server/routes/past-results.js`** (mounted at `/api/past-results`):

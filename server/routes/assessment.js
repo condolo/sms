@@ -39,6 +39,17 @@ const { MARK_STATES }     = require('../utils/mark-states');
 const PDFDocument         = require('pdfkit');
 const { sanitisePdfStr }  = require('../utils/sanitisePdf');
 const { _buildEnrollmentAnalytics } = require('./class-subjects');
+const { resolveRcTemplate } = require('../utils/rc-template-scale');
+
+/* A class on a Kindergarten template (rc_templates) is marked only with competency
+   indicators, for the subjects in its template (indicator-marks.js). Numeric marks for it
+   never reach the Kindergarten report card, so they are refused (v5.290.0). */
+const KG_NUMERIC_REFUSED = "is a Kindergarten class: it is marked with competency indicators, only for the subjects in its Kindergarten template (Exams → Kindergarten Templates). Scores can't be entered for it here.";
+async function _kgClassIds(schoolId, classIds) {
+  const out = [];
+  for (const classId of [...new Set(classIds)]) if (await resolveRcTemplate(schoolId, classId)) out.push(classId);
+  return out;
+}
 
 const router = express.Router();
 const PLAN   = planGate('grades');
@@ -1194,6 +1205,10 @@ router.post('/marks', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), a
       return _err(res, 'This subject is not part of this class\'s curriculum — add it in Curriculum first.', 400);
     }
 
+    if ((await _kgClassIds(schoolId, [d.classId])).length) {
+      return _err(res, `This class ${KG_NUMERIC_REFUSED}`, 400);
+    }
+
     // Guard: subject-teacher scoping (RC6) — unconditional (see subject-scope.js)
     // Electives: teaching and enrolment are checked per student, not by stream.
     const electiveProblem = await electiveMarkProblem(req, [{ classId: d.classId, subjectId: d.subjectId, studentId: d.studentId }]);
@@ -1379,6 +1394,10 @@ router.post('/marks/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
     ).values()]);
     if (uncurriculumPairs.length > 0) {
       return _err(res, `Not part of this class's curriculum — add in Curriculum first: ${uncurriculumPairs.map(p => p.subjectId).join(', ')}`, 400);
+    }
+
+    if ((await _kgClassIds(schoolId, distinctPairs.map(p => p.classId))).length) {
+      return _err(res, `This class ${KG_NUMERIC_REFUSED}`, 400);
     }
 
     // Elective pairs are checked by enrolment and teaching (elective-scope.js), not by stream.

@@ -1059,7 +1059,12 @@ export default function HRPage() {
   const [staffTypeFilter, setStaffTypeFilter]   = useState('');
 
   async function bulkDeleteStaff(ids) {
-    if (!window.confirm(`Permanently delete ${ids.length} staff member${ids.length !== 1 ? 's' : ''} and their login accounts? This cannot be undone.`)) return;
+    if (!window.confirm(
+      `Permanently delete ${ids.length} staff member${ids.length !== 1 ? 's' : ''}? This cannot be undone.\n\n`
+      + 'Their login is switched off and they are signed out (it moves to Removed users in Settings, where it can be reactivated). '
+      + 'Someone who is also a parent here keeps parent access.\n\n'
+      + 'Anyone who still teaches a subject, has timetable lessons or is a form teacher is skipped: hand those over first.'
+    )) return;
     setBulkDeleting(true);
     setBulkDeleteResult(null);
     try {
@@ -1069,6 +1074,7 @@ export default function HRPage() {
       qc.invalidateQueries({ queryKey: ['teachers'] });
       qc.invalidateQueries({ queryKey: ['hr', 'summary'] });
       qc.invalidateQueries({ queryKey: ['settings-users'] });
+      qc.invalidateQueries({ queryKey: ['settings', 'users'] });
     } catch (err) {
       alert(err?.message ?? 'Failed to delete staff');
     } finally {
@@ -1285,13 +1291,24 @@ export default function HRPage() {
 
           {/* Bulk delete result banner */}
           {bulkDeleteResult && (
-            <div className="flex items-center justify-between gap-3 px-4 py-2.5 mb-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-800">
-              <div className="flex items-center gap-2">
-                <Trash2 size={14} className="shrink-0 text-red-500" />
+            <div className="flex items-start justify-between gap-3 px-4 py-2.5 mb-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-800">
+              <div className="flex items-start gap-2 min-w-0">
+                <Trash2 size={14} className="shrink-0 text-red-500 mt-0.5" />
+                <div className="min-w-0">
                 <span>
                   <span className="font-semibold">{bulkDeleteResult.deleted}</span> staff member{bulkDeleteResult.deleted !== 1 ? 's' : ''} deleted
-                  {bulkDeleteResult.usersDeleted > 0 && <span className="text-red-600"> · {bulkDeleteResult.usersDeleted} login account{bulkDeleteResult.usersDeleted !== 1 ? 's' : ''} removed</span>}
+                  {bulkDeleteResult.usersDeleted > 0 && <span className="text-red-600"> · {bulkDeleteResult.usersDeleted} login{bulkDeleteResult.usersDeleted !== 1 ? 's' : ''} switched off</span>}
+                  {bulkDeleteResult.logins?.parent_kept > 0 && <span className="text-red-600"> ({bulkDeleteResult.logins.parent_kept} kept parent access)</span>}
                 </span>
+                {bulkDeleteResult.skipped?.length > 0 && (
+                  <div className="mt-1.5 text-xs text-amber-800">
+                    <p className="font-semibold">{bulkDeleteResult.skipped.length} not deleted:</p>
+                    <ul className="list-disc ml-4 space-y-0.5">
+                      {bulkDeleteResult.skipped.map(s => <li key={s.id}>{s.reason}</li>)}
+                    </ul>
+                  </div>
+                )}
+                </div>
               </div>
               <button onClick={() => setBulkDeleteResult(null)} className="text-red-400 hover:text-red-700 transition">
                 <X size={13} />

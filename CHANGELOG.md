@@ -6,6 +6,41 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.290.0] - 2026-11-26 - fix(kindergarten): the Markbook offers only the template's subjects for a Kindergarten class
+
+Reported by a school: in a Kindergarten class, subjects left out of the Kindergarten template (e.g. Christian Religious Education) opened in the Markbook as a numeric score grid, and anything typed there would never appear on the Kindergarten report card.
+
+### Fixed
+- **Markbook**: for a class with a Kindergarten template, the Subject list shows only the template's subjects (labelled with the template's name). Other subjects are not offered; if one is still selected, the page explains how to add it to the template instead of showing a score grid.
+- **Server**: numeric marks (`POST /assessment/marks`, `/marks/bulk`) are refused for a class with a Kindergarten template, for every role. Indicators were already limited to template subjects.
+
+No data migration. Existing marks are not changed. Imports are not covered by this change.
+
+Files: `ExamsPage.jsx` (template lookup before the subject list, filtered list, explanation panel); `assessment.js` (`_kgClassIds` guard); `HelpPage.jsx`; tests `assessment-kg-class-refuses-scores.test.js`.
+
+---
+
+## [v5.289.0] - 2026-11-26 - fix(hr): deleting staff ends their login and never strands their classes
+
+Reported by a school: a staff member deleted in HR still appeared in Settings → Users and could sign in, and the classes she taught showed "Not current" while her other record showed nothing assigned.
+
+### Fixed
+- **HR → Delete Selected found the login only by an exact match on the staff record's email.** A login with a different email, or the same email in different capitals, was left active. The login linked to the record is now found first, then the email ignoring case.
+- **Teachers page → Remove never touched the login.** It now ends it too.
+- **Deleting staff left their teaching assignments and timetable lessons pointing at the deleted record**, so classes showed "Not current" and the work did not follow the person. A staff member who still teaches a subject, has active timetable lessons, or is form / assistant form teacher of an active stream is now not deleted; the result says what they still have, to hand over first (Timetable → Allocation → Change, which can move the lessons).
+- Nothing recorded who deleted staff. Each deletion now writes an audit entry.
+
+### Changed
+- The login is **switched off, not deleted**, and signed out everywhere, as Settings → Users → Remove does: it moves to Removed users and can be reactivated. Someone who is also a parent at the school keeps parent access only.
+- You can't delete your own staff record, and only an administrator can delete an administrator's.
+- HR's result banner lists any staff not deleted, with the reason.
+
+No data migration. Existing data is not changed. One school's stranded assignments and lessons from before this fix were moved to the right record by hand on 2026-11-26.
+
+Files: new `server/utils/staff-removal.js`; `server/routes/teachers.js` (`DELETE /bulk`, `DELETE /:id`); `HRPage.jsx`, `TeacherList.jsx`, `HelpPage.jsx`; tests `teachers-delete-ends-login.test.js`.
+
+---
+
 ## [v5.288.0] - 2026-11-26 - feat(lessons): filter coverage on screen; export the whole school, a department or a subject
 
 Asked for by a school: see coverage per class, subject or department on screen without downloading, and download the whole school.

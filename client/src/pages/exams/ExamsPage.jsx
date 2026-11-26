@@ -852,7 +852,37 @@ function MarkbookTab({ years }) {
   // picker itself offered every subject in the school, same bug class already
   // fixed for the Kindergarten Template's subject picker (ab7b90c) — scope it to
   // this class's own curriculum so the invalid combination is never reachable.
+  /* ── Kindergarten / competency-band indicator mode ──
+     A class resolves to AT MOST one rc_template (explicit classIds
+     override, else a section default — see rc-template-scale.js). Such a
+     class is marked only by competency indicators, and only for the
+     subjects in its template (v5.290.0): any other subject is left out of
+     the picker below, since it has no indicators and never reaches the
+     Kindergarten report card. The server refuses numeric marks for these
+     classes too (assessment.js /marks). */
+  const { data: rcTemplateData, isFetched: rcTemplateFetched } = useQuery({
+    queryKey: ['rc-templates', 'resolve', classId],
+    queryFn:  () => rcTemplatesApi.resolve(classId),
+    enabled:  !!classId,
+    staleTime: 60_000,
+  });
+  const resolvedTemplate = rcTemplateData?.data ?? null;
+  const templateResolved = !classId || rcTemplateFetched;
+
   const subjectsList = useMemo(() => {
+    const all = _baseSubjects();
+    if (!resolvedTemplate) return all;
+    const inTemplate = new Set((resolvedTemplate.subjects ?? []).map(s => s.subjectId));
+    return all.filter(s => inTemplate.has(s.id ?? s._id));
+  }, [isTeacher, assignments, classId, allSubjectsData, classSubjectsData, resolvedTemplate]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A subject picked before the class's template loaded, or kept from another class, is cleared.
+  useEffect(() => {
+    if (!resolvedTemplate || !subjectId || !subjectsList.length) return;
+    if (!subjectsList.some(s => (s.id ?? s._id) === subjectId)) setSubjectId('');
+  }, [resolvedTemplate, subjectsList, subjectId]);
+
+  function _baseSubjects() {
     if (isTeacher) {
       if (!classId) return [];
       const seen = new Set();
@@ -865,7 +895,7 @@ function MarkbookTab({ years }) {
     if (!classId) return [];
     const curriculumIds = new Set((classSubjectsData?.data ?? []).map(r => r.subjectId));
     return (allSubjectsData?.data ?? []).filter(s => curriculumIds.has(s.id));
-  }, [isTeacher, assignments, classId, allSubjectsData, classSubjectsData]);
+  }
 
   /* ── Assessment schedule ── */
   const { data: scheduleData } = useQuery({
@@ -954,19 +984,7 @@ function MarkbookTab({ years }) {
 
   const canQuery = !!(classId && (!needsStreamSelection || streamId) && subjectId && selectedEntry);
 
-  /* ── Kindergarten / competency-band indicator mode ──
-     A class resolves to AT MOST one rc_template (explicit classIds
-     override, else a section default — see rc-template-scale.js). If
-     this subject is one of that template's subjects, the Markbook
-     renders IndicatorMarkbook instead of the numeric grid below — the
-     class/subject/term pickers above stay exactly the same either way. */
-  const { data: rcTemplateData } = useQuery({
-    queryKey: ['rc-templates', 'resolve', classId],
-    queryFn:  () => rcTemplatesApi.resolve(classId),
-    enabled:  !!classId,
-    staleTime: 60_000,
-  });
-  const resolvedTemplate = rcTemplateData?.data ?? null;
+  // Kindergarten template for this class: resolved above, next to the subject list.
   const templateSubject  = resolvedTemplate?.subjects?.find(s => s.subjectId === subjectId) ?? null;
 
   /* ── Existing marks ──
@@ -1380,7 +1398,8 @@ function MarkbookTab({ years }) {
   const yearTerms    = selectedYear?.terms ?? [];
 
   const selectedClassName  = classesList.find(c => (c.id ?? c._id) === classId)?.name ?? '';
-  const selectedSubjectName = subjectsList.find(s => (s.id ?? s._id) === subjectId)?.name ?? subjectId;
+  const selectedSubjectName = subjectsList.find(s => (s.id ?? s._id) === subjectId)?.name
+    ?? _baseSubjects().find(s => (s.id ?? s._id) === subjectId)?.name ?? subjectId;
 
   return (
     <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} className="space-y-4">
@@ -1476,6 +1495,7 @@ function MarkbookTab({ years }) {
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1.5">
               Subject {isTeacher && classId && subjectsList.length > 0 && <span className="text-slate-400 font-normal">(assigned to you)</span>}
+              {resolvedTemplate && <span className="text-slate-400 font-normal"> · in “{resolvedTemplate.name}”</span>}
             </label>
             <select
               value={subjectId}
@@ -1575,6 +1595,14 @@ function MarkbookTab({ years }) {
         <div className="bg-white border border-slate-200 rounded-xl p-12 flex flex-col items-center gap-2">
           <Users2 size={28} className="text-slate-300" />
           <p className="text-sm text-slate-500">No active students in {selectedClassName || 'this class'}.</p>
+        </div>
+      ) : !templateResolved ? (
+        <div className="space-y-2">{[...Array(6)].map((_, i) => <div key={i} className="bg-white rounded-xl border border-slate-200 h-12 animate-pulse" />)}</div>
+      ) : resolvedTemplate && !templateSubject ? (
+        <div className="bg-white border border-amber-200 rounded-xl p-10 flex flex-col items-center gap-2 text-center">
+          <BookMarked size={28} className="text-amber-400" />
+          <p className="text-sm font-medium text-slate-700">{selectedSubjectName} isn't in the Kindergarten template “{resolvedTemplate.name}”.</p>
+          <p className="text-xs text-slate-500 max-w-md">{selectedClassName || 'This class'} is marked with competency indicators, only for the subjects in its template. An administrator can add this subject in Exams → Kindergarten Templates.</p>
         </div>
       ) : templateSubject ? (
         <IndicatorMarkbook

@@ -19,6 +19,8 @@ const { ok, created, fail, paginate, parsePagination, E } = require('../utils/re
 const { applyOptimisticLock } = require('../utils/optimistic-lock');
 const { revokeUserTokens } = require('../utils/token-version');
 const { BUILTIN_EXTRA_ROLE_VALUES } = require('../config/staffResponsibilities');
+const AuditService = require('../services/audit');
+const { teacherName, findStaffLogin, removalProblem, endStaffLogin } = require('../utils/staff-removal');
 
 const router = express.Router();
 const PLAN   = planGate('teachers');
@@ -582,7 +584,11 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('teachers', 'update'), as
   }
 });
 
-/* ── DELETE /api/teachers/bulk — hard-delete multiple teachers + their user accounts ── */
+/* ── DELETE /api/teachers/bulk — HR "Delete Selected" ─────────────────────
+   Deletes each staff record and ends its login (v5.289.0, see
+   utils/staff-removal.js). A record that still teaches something, the
+   actor's own record, or an administrator's record (for a non-admin) is
+   skipped with the reason; the rest go ahead. */
 router.delete('/bulk', authMiddleware, PLAN, MODGATE, rbac('teachers', 'delete'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
@@ -591,9 +597,11 @@ router.delete('/bulk', authMiddleware, PLAN, MODGATE, rbac('teachers', 'delete')
       return E.badRequest(res, 'ids array is required');
     if (ids.length > 200)
       return E.badRequest(res, 'Maximum 200 teachers per batch');
+    if (!ids.every(id => typeof id === 'string' && id.length > 0 && id.length <= 100))
+      return E.badRequest(res, 'ids must be strings');
 
-    const Teachers = tenantModel('teachers', tenantContext(req));
-    const Users    = tenantModel('users', tenantContext(req));
+    const ctx      = tenantContext(req);
+    const Teachers = tenantModel('teachers', ctx);
 
     // Build a filter that handles both UUID id and legacy ObjectId-only records
     const isOid = id => /^[a-f\d]{24}$/i.test(id);
@@ -606,47 +614,83 @@ router.delete('/bulk', authMiddleware, PLAN, MODGATE, rbac('teachers', 'delete')
       ],
     };
 
-    // Resolve emails before deleting (needed to remove user accounts)
-    const toDelete  = await Teachers.find(findFilter).select('id _id email').lean();
-    const emails    = toDelete.map(t => t.email).filter(Boolean);
-    const confirmed = toDelete.map(t => t.id || t._id?.toString()).filter(Boolean);
+    const found = await Teachers.find(findFilter).lean();
+    if (found.length === 0) return E.notFound(res, 'No matching teachers found');
 
-    if (confirmed.length === 0) return E.notFound(res, 'No matching teachers found');
+    let deleted = 0;
+    const logins = { deactivated: 0, parent_kept: 0, already_inactive: 0, none: 0 };
+    const skipped = [];
+    for (const teacher of found) {
+      const name = teacherName(teacher);
+      const { user: login, ambiguous } = await findStaffLogin(ctx, schoolId, teacher);
+      const problem = ambiguous
+        ? 'shares an email with more than one login. Remove the right login in Settings → Users first.'
+        : await removalProblem(req, ctx, teacher, login);
+      if (problem) { skipped.push({ id: teacher.id || String(teacher._id), name, reason: `${name} ${problem}` }); continue; }
 
-    const { deletedCount } = await Teachers.deleteMany(findFilter);
-
-    let usersDeleted = 0;
-    if (emails.length > 0) {
-      const r = await Users.deleteMany({ schoolId, email: { $in: emails } });
-      usersDeleted = r.deletedCount;
+      const loginOutcome = await endStaffLogin(ctx, schoolId, login);
+      const r = await Teachers.deleteOne({ schoolId, _id: teacher._id });
+      if (!r.deletedCount) continue;
+      deleted += 1;
+      logins[loginOutcome] += 1;
+      AuditService.log({
+        action: 'staff.deleted', actor: req.jwtUser, schoolId,
+        target: { type: 'teacher', id: teacher.id || String(teacher._id), label: name },
+        details: { email: teacher.email || null, staffId: teacher.staffId || null, loginId: login?.id || null, login: loginOutcome },
+        req,
+      });
     }
 
-    console.log(`[teachers] Bulk delete: ${deletedCount} teachers, ${usersDeleted} user accounts — school ${schoolId}`);
-    return ok(res, { deleted: deletedCount, usersDeleted });
+    console.log(`[teachers] Bulk delete: ${deleted} deleted, ${skipped.length} skipped — school ${schoolId}`);
+    return ok(res, {
+      deleted,
+      // Logins whose staff access ended (kept for the existing banner).
+      usersDeleted: logins.deactivated + logins.parent_kept,
+      logins,
+      skipped,
+    });
   } catch (err) {
     console.error('[teachers DELETE/bulk]', err);
     return E.serverError(res);
   }
 });
 
-/* ── DELETE /api/teachers/:id ─ Soft-delete ─────────────────── */
+/* ── DELETE /api/teachers/:id ─ Soft-delete + end the login ──────────────
+   Same rules as /bulk (utils/staff-removal.js); the record is kept,
+   marked inactive. */
 router.delete('/:id', authMiddleware, PLAN, MODGATE, rbac('teachers', 'delete'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const paramId = req.params.id;
     const isOid   = /^[a-f\d]{24}$/i.test(paramId);
     const delFilter = isOid
-      ? { $or: [{ id: paramId }, { _id: new mongoose.Types.ObjectId(paramId) }], schoolId }
+      ? { $or: [{ id: paramId }, { _id: { $in: [new mongoose.Types.ObjectId(paramId)] } }], schoolId }
       : { id: paramId, schoolId };
 
-    const Teachers = tenantModel('teachers', tenantContext(req));
-    const doc = await Teachers.findOneAndUpdate(
-      delFilter,
-      { status: 'inactive', deletedAt: new Date().toISOString(), deletedBy: userId },
-      { new: true }
-    ).lean();
-    if (!doc) return E.notFound(res, 'Teacher not found');
-    return ok(res, { id: paramId, deleted: true });
+    const ctx      = tenantContext(req);
+    const Teachers = tenantModel('teachers', ctx);
+    const teacher  = await Teachers.findOne(delFilter).lean();
+    if (!teacher) return E.notFound(res, 'Teacher not found');
+
+    const name = teacherName(teacher);
+    const { user: login, ambiguous } = await findStaffLogin(ctx, schoolId, teacher);
+    const problem = ambiguous
+      ? 'shares an email with more than one login. Remove the right login in Settings → Users first.'
+      : await removalProblem(req, ctx, teacher, login);
+    if (problem) return fail(res, 'STAFF_IN_USE', `${name} ${problem}`, 409);
+
+    const loginOutcome = await endStaffLogin(ctx, schoolId, login);
+    await Teachers.updateOne(
+      { schoolId, _id: teacher._id },
+      { $set: { status: 'inactive', deletedAt: new Date().toISOString(), deletedBy: userId } },
+    );
+    AuditService.log({
+      action: 'staff.deactivated', actor: req.jwtUser, schoolId,
+      target: { type: 'teacher', id: teacher.id || String(teacher._id), label: name },
+      details: { email: teacher.email || null, staffId: teacher.staffId || null, loginId: login?.id || null, login: loginOutcome },
+      req,
+    });
+    return ok(res, { id: paramId, deleted: true, login: loginOutcome });
   } catch (err) {
     console.error('[teachers DELETE/:id]', err);
     return E.serverError(res);

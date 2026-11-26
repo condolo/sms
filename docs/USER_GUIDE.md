@@ -456,6 +456,8 @@ Some classes — typically early-years ones — aren't graded with a single nume
 
 **How do I know if my class uses this?** You don't need to do anything to switch it on or off — it's entirely based on whether your school's admin has assigned a **Kindergarten Template** to your class (directly, or as the default for your Section, e.g. "Early Years"). If a template is assigned, the Markbook switches to indicator entry automatically the moment you select that class/subject; if not, you'll see the ordinary numeric grid, even for a class literally named "Kindergarten." Ask your admin (Exams → Kindergarten Templates) if you expected indicator entry but are seeing the numeric grid instead.
 
+**Only the template's subjects (v5.290.0):** for a class with a Kindergarten template, the Markbook lists only the subjects in that template. A subject the class takes that isn't in the template is not offered at all (before, it opened as a numeric score grid whose marks never reached the Kindergarten report card), and scores can't be entered for these classes. To mark such a subject, the admin adds it to the template in **Exams → Kindergarten Templates**.
+
 **Adding indicators (2026-10-19):** the indicators themselves aren't pre-written by your admin — you add them, per class/subject/term, in an "Indicators for this term" panel at the top of the Markbook. Type what you actually assessed this term (e.g. "Able to count to 20"), set its maximum score, and add it — it's immediately available to score every student against. You can edit or delete an indicator any time before students have scores against it; once scored, you'll need to remove those scores first. Indicators don't carry over automatically from one term to the next, since what you taught (and so what you're assessing) can genuinely change.
 
 **Entering scores:**
@@ -859,6 +861,16 @@ Click a staff member to open their profile:
 
 ### Adding Staff
 In **HR & Staff → Staff**, click **Add Staff** to create the employee's HR profile. This is separate from a login account. If the employee needs to sign in, use **Create Login Account** from the profile, or **Activate Existing User** when the person already has a login but no HR record. See the [HR Guide](HR_GUIDE.md#2-staff-records) for the current linking workflow.
+
+### Deleting Staff *(v5.289.0)*
+In **HR & Staff → Staff**, tick the staff and choose **Delete Selected**. (On the **Teachers** page, **Remove** does the same but keeps the record, marked inactive.)
+
+- Their **login is switched off** and they are **signed out** everywhere. It moves to **Settings → Users → Removed users**, where it can be reactivated.
+- The login is the one linked to the staff record, even if its email differs from the email on the record.
+- Someone who is **also a parent** at the school keeps parent access only.
+- A staff member who **still teaches a subject, has timetable lessons or is a form teacher is not deleted**. The result says what they still have. Hand those over first (**Timetable → Allocation → Change**, which can move their lessons too), then delete. This stops a class from quietly losing its teacher.
+- You can't delete your own record, and only an administrator can delete an administrator.
+- Each deletion is recorded in the audit log (who, whom, when).
 
 ---
 

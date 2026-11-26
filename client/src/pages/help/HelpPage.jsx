@@ -750,6 +750,10 @@ const SECTIONS = [
         a: "No. Only report cards for the current academic year send messages or emails. Parents can still open published past report cards in the parent portal, and the current term's report stays the one shown first.",
       },
       {
+        q: "Why can't I find a subject in the Markbook for a Kindergarten class?",
+        a: "A class with a Kindergarten template is marked only with competency indicators, and only for the subjects in its template. Any other subject the class takes is not listed in the Markbook, because it would have no indicators and would never appear on the Kindergarten report card. Scores can't be entered for these classes either. To mark the subject, an administrator adds it to the template in Exams & Assessment → Kindergarten Templates; it then appears in the Markbook with indicator entry.",
+      },
+      {
         q: "A Kindergarten report lists subjects with no indicators. How do we remove them?",
         a: "A Kindergarten report lists every subject on the class's Kindergarten template. Open Exams & Assessment → Kindergarten Templates, open the template used by that class, remove the subjects that shouldn't print, save, and generate the reports again. This changes every class using that template, and indicators already entered are kept.",
       },
@@ -854,6 +858,10 @@ const SECTIONS = [
       {
         q: 'How do I add a staff member?',
         a: 'Go to HR → "Add Staff". Enter their name, email, role and department. This creates the staff record only. To give them a login, open the record and choose Create Login Account. Msingi then creates the account with a temporary password and emails them a welcome message with their credentials. They must set a new password at first sign-in. You can also bulk-import staff from a CSV.',
+      },
+      {
+        q: 'What happens when I delete a staff member?',
+        a: 'In HR → Staff, tick the staff and choose Delete Selected (or Remove on the Teachers page, which keeps the record as inactive). Their login is switched off straight away and they are signed out everywhere; it moves to Settings → Users → Removed users, where it can be reactivated. Someone who is also a parent at the school keeps parent access only.\n\nA staff member who still teaches a subject, has timetable lessons or is a form teacher is not deleted: the message says what they still have. Give those to another teacher first (Timetable → Allocation → Change, which can move their lessons too), then delete. You also can\'t delete your own record, and only an administrator can delete an administrator. Every deletion is recorded in the audit log.',
       },
       {
         q: 'Does teacher import create login accounts automatically?',
