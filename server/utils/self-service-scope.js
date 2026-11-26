@@ -27,6 +27,18 @@
 'use strict';
 
 /**
+ * The complete family link set carried by a session. Primary guardians are
+ * stored in studentIds; co-guardians are stored in guardianOf. Consumers must
+ * check the union or a valid primary guardian is treated as an unrelated user.
+ */
+function linkedStudentIds(user = {}) {
+  return [...new Set([
+    ...(Array.isArray(user.studentIds) ? user.studentIds : []),
+    ...(Array.isArray(user.guardianOf) ? user.guardianOf : []),
+  ])];
+}
+
+/**
  * @param {object} req - Express request with req.jwtUser populated
  * @param {{id: string}} target - the record being accessed; must expose
  *   the student's id as `.id` (a lean student doc, or any object that
@@ -39,7 +51,7 @@ function forbiddenForSelfServiceRole(req, target) {
     return req.jwtUser.studentId !== target.id;
   }
   if (role === 'parent' || role === 'guardian') {
-    const owned = new Set([...(req.jwtUser.studentIds ?? []), ...(req.jwtUser.guardianOf ?? [])]);
+    const owned = new Set(linkedStudentIds(req.jwtUser));
     return !owned.has(target.id);
   }
   return false; // any other role — module-level RBAC already gates this
@@ -72,4 +84,4 @@ function forbiddenForSelfServiceRole(req, target) {
    reason as forbiddenForSelfServiceRole above. */
 const GROWTH_PROFILE_STAFF_ROLES = ['admin', 'superadmin', 'teacher', 'section_head', 'deputy_principal'];
 
-module.exports = { forbiddenForSelfServiceRole, GROWTH_PROFILE_STAFF_ROLES };
+module.exports = { forbiddenForSelfServiceRole, linkedStudentIds, GROWTH_PROFILE_STAFF_ROLES };

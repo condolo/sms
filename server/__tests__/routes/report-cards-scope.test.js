@@ -135,6 +135,14 @@ describe('GET /api/report-cards — data scope', () => {
     expect(ids).toEqual(['rc_1']);
   });
 
+  test('a primary guardian linked through studentIds sees their child report', async () => {
+    mockJwtUser = { userId: 'usr_parent_1', schoolId: SCHOOL, role: 'parent', studentIds: [STUDENT_1], guardianOf: [] };
+    mockScope = { level: 'guardian', classIds: [], subjectIds: [], streamIds: [], unrestrictedModules: [] };
+    const res = await supertest(buildApp()).get('/api/report-cards');
+    const ids = res.body.data.map(d => d.id);
+    expect(ids).toEqual(['rc_1']);
+  });
+
   test("a parent explicitly requesting another guardian's studentId gets no results, not that student's data", async () => {
     mockJwtUser = { userId: 'usr_parent_1', schoolId: SCHOOL, role: 'parent', guardianOf: [STUDENT_1] };
     mockScope = { level: 'guardian', classIds: [], subjectIds: [], streamIds: [], unrestrictedModules: [] };
@@ -170,6 +178,13 @@ describe('GET /api/report-cards/:id — data scope + ownership', () => {
     mockScope = { level: 'guardian', classIds: [], subjectIds: [], streamIds: [], unrestrictedModules: [] };
     const res = await supertest(buildApp()).get('/api/report-cards/rc_1');
     expect(res.status).toBe(403);
+  });
+
+  test('a primary guardian linked only through studentIds can view the report JSON', async () => {
+    mockJwtUser = { userId: 'usr_parent_1', schoolId: SCHOOL, role: 'parent', studentIds: [STUDENT_1], guardianOf: [] };
+    mockScope = { level: 'guardian', classIds: [], subjectIds: [], streamIds: [], unrestrictedModules: [] };
+    const res = await supertest(buildApp()).get('/api/report-cards/rc_1');
+    expect(res.status).toBe(200);
   });
 
   test("a student fetching another student's report card by id → 403 (the fix — this had NO check before)", async () => {

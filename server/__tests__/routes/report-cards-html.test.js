@@ -114,6 +114,12 @@ jest.mock('../../routes/academic-config', () => ({
   resolveGrade: jest.fn((score) => ({ grade: score >= 80 ? 'A' : 'B', points: 10, descriptor: 'Good', remarks: '' })),
 }));
 
+jest.mock('../../utils/html-to-pdf', () => ({
+  htmlToPdfBuffer: jest.fn().mockResolvedValue(Buffer.from('%PDF-test')),
+  htmlToPdfBufferOrFallback: jest.fn().mockResolvedValue(Buffer.from('%PDF-test')),
+  mergePdfBuffers: jest.fn(),
+}));
+
 const express   = require('express');
 const supertest = require('supertest');
 const reportCardsRouter = require('../../routes/report-cards');
@@ -197,6 +203,13 @@ describe('GET /api/report-cards/:id/html', () => {
     expect(res.status).toBe(200);
   });
 
+  test('a primary guardian linked only through studentIds CAN fetch the html', async () => {
+    mockCurrentUser = { schoolId: SCHOOL, role: 'parent', userId: 'u_parent', studentIds: ['stu_1'], guardianOf: [] };
+    const app = buildApp();
+    const res = await supertest(app).get('/report-cards/snap_1/html');
+    expect(res.status).toBe(200);
+  });
+
   test('a superseded snapshot is blocked for restricted roles (parent/student/guardian)', async () => {
     mockSnapshot = baseSnapshot({ superseded: true });
     mockCurrentUser = { schoolId: SCHOOL, role: 'student', studentId: 'stu_1', guardianOf: [] };
@@ -222,6 +235,24 @@ describe('GET /api/report-cards/:id/html', () => {
     const res = await supertest(app).get('/report-cards/snap_1/html');
     expect(res.status).toBe(200);
     expect(res.body.data.html).toMatch(/Merits[\s\S]*?>5</);
+  });
+});
+
+describe('GET /api/report-cards/:id/pdf — family ownership', () => {
+  test('a primary guardian linked only through studentIds can download the PDF', async () => {
+    mockCurrentUser = { schoolId: SCHOOL, role: 'parent', userId: 'u_parent', studentIds: ['stu_1'], guardianOf: [] };
+    const app = buildApp();
+    const res = await supertest(app).get('/report-cards/snap_1/pdf');
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/application\/pdf/);
+  });
+
+  test('a parent linked only to another child cannot download this PDF', async () => {
+    mockCurrentUser = { schoolId: SCHOOL, role: 'parent', userId: 'u_parent', studentIds: ['stu_other'], guardianOf: [] };
+    const app = buildApp();
+    const res = await supertest(app).get('/report-cards/snap_1/pdf');
+    expect(res.status).toBe(403);
+    expect(mockAuditLogCreate).toHaveBeenCalledWith(expect.objectContaining({ action: 'GUARDIAN_ACCESS_DENIED' }));
   });
 });
 
