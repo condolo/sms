@@ -56,6 +56,7 @@ const { notifyGuardiansForStudents } = require('../utils/notify-students');
 const { canWriteSubject, unassignedPairs, isManagement } = require('../utils/subject-scope');
 const { studentPlacement, canWriteClassRemark, scopeDraftCommentsForCaller } = require('../utils/comment-scope');
 const { canViewFullReport, viewReportFor } = require('../utils/report-view-scope');
+const { linkedStudentIds } = require('../utils/self-service-scope');
 const { isElective, enrolledStudentIds, canTeachElective, isInCurriculum } = require('../utils/elective-scope');
 const { getWorkflowConfig, saveWorkflowConfig, resolveStep, resolveAssigneeLabel } = require('../utils/workflow-config');
 const { dispatchNotification } = require('../utils/notify-dispatch');
@@ -2095,7 +2096,7 @@ router.get('/publish-batches', authMiddleware, PLAN, MODGATE, rbac('grades', 're
    ══════════════════════════════════════════════════════════════ */
 router.get('/', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), scopeMiddleware, async (req, res) => {
   try {
-    const { schoolId, role, userId, guardianOf } = req.jwtUser;
+    const { schoolId, role, userId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
 
     // Restricted roles can never see superseded versions
@@ -2130,7 +2131,7 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), scopeMidd
     // classId(+streamId) narrowing every other stream-aware module uses.
     if (RESTRICTED_ROLES.includes(role)) {
       const ownStudentIds = ['parent', 'guardian'].includes(role)
-        ? (Array.isArray(guardianOf) ? guardianOf : [])
+        ? linkedStudentIds(req.jwtUser)
         : [req.jwtUser.studentId].filter(Boolean);
       const requested = filter.studentId;
       filter.studentId = requested
@@ -2504,7 +2505,7 @@ router.patch('/publication-policy', authMiddleware, PLAN, MODGATE, rbac('report_
    ══════════════════════════════════════════════════════════════ */
 router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), scopeMiddleware, async (req, res) => {
   try {
-    const { schoolId, role, userId, guardianOf, studentId: ownStudentId } = req.jwtUser;
+    const { schoolId, role, userId, studentId: ownStudentId } = req.jwtUser;
     const doc = await tenantModel('report_card_snapshots', tenantContext(req))
       .findOne({ id: req.params.id, schoolId }).select('-__v').lean();
     if (!doc) return E.notFound(res, 'Report card snapshot not found');
@@ -2516,7 +2517,7 @@ router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), scopeM
 
     // Guardian/parent: can only view their own linked children's report cards
     if (['parent', 'guardian'].includes(role)) {
-      const linkedStudents = Array.isArray(guardianOf) ? guardianOf : [];
+      const linkedStudents = linkedStudentIds(req.jwtUser);
       if (!linkedStudents.includes(doc.studentId)) {
         // Log the access attempt for compliance (GDPR/POPIA: failed access to student records)
         tenantModel('mark_audit_log', tenantContext(req)).create({
@@ -3280,7 +3281,7 @@ function _pdfAccess(req, res, next) {
    false, exactly the same "guard clause decides, caller trusts it"
    shape _pdfAccess already established one level up (RBAC vs. ownership). */
 async function _checkSnapshotAccess(req, res, snap) {
-  const { schoolId, role, guardianOf, studentId: jwtStudentId, userId } = req.jwtUser;
+  const { schoolId, role, studentId: jwtStudentId, userId } = req.jwtUser;
 
   if (snap.superseded && RESTRICTED_ROLES.includes(role)) {
     E.forbidden(res, 'This report card has been superseded. Please download the latest version.');
@@ -3293,7 +3294,7 @@ async function _checkSnapshotAccess(req, res, snap) {
   }
 
   if (['parent', 'guardian'].includes(role)) {
-    const linkedStudents = Array.isArray(guardianOf) ? guardianOf : [];
+    const linkedStudents = linkedStudentIds(req.jwtUser);
     if (!linkedStudents.includes(snap.studentId)) {
       tenantModel('mark_audit_log', tenantContext(req)).create({
         action:       'GUARDIAN_ACCESS_DENIED',
