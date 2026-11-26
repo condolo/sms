@@ -86,9 +86,12 @@ async function renderOutreach() {
           <h3 style="font-size:18px;letter-spacing:-.02em;margin:0 0 6px;">Prospect school outreach</h3>
           <p style="font-size:13px;color:var(--muted);margin:0;max-width:680px;line-height:1.6;">Import school contacts, prepare branded templates and run a controlled three-touch sequence. Marking a lead replied, unsubscribed or demo-booked stops future emails automatically.</p>
         </div>
-        <div class="pa-pill ${_outreachConfig.ready ? 'resolved' : 'draft'}"><i class="fas ${_outreachConfig.ready ? 'fa-circle-check' : 'fa-triangle-exclamation'}" style="margin-right:6px;"></i>${_outreachConfig.ready ? 'Sending configured' : 'Sending disabled'}</div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          ${_can('*') ? '<button class="pa-btn" onclick="openOutreachSettings()"><i class="fas fa-gear"></i> Outreach settings</button>' : ''}
+          <div class="pa-pill ${_outreachConfig.ready ? 'resolved' : 'draft'}"><i class="fas ${_outreachConfig.ready ? 'fa-circle-check' : 'fa-triangle-exclamation'}" style="margin-right:6px;"></i>${_outreachConfig.ready ? 'Sending configured' : 'Sending disabled'}</div>
+        </div>
       </div>
-      ${_outreachConfig.ready ? '' : `<div class="pa-error" style="margin:0 0 20px;"><strong>Before sending:</strong> set <code>OUTREACH_ENABLED=true</code> and a monitored <code>OUTREACH_REPLY_TO</code> address on the server. You can still import leads and prepare templates.</div>`}
+      ${_outreachConfig.ready ? '' : `<div class="pa-error" style="margin:0 0 20px;"><strong>Sending is off.</strong> ${_can('*') ? 'Open Outreach settings to enable it and add a monitored Reply-To address.' : 'Ask a platform owner to enable it and add a monitored Reply-To address in Outreach settings.'} You can still import leads and prepare templates.</div>`}
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;" role="tablist" aria-label="Outreach sections">
         <button class="pa-btn ${_outreachTab === 'leads' ? 'primary' : ''}" role="tab" aria-selected="${_outreachTab === 'leads'}" onclick="outreachSwitchTab('leads')"><i class="fas fa-school"></i> Leads</button>
         <button class="pa-btn ${_outreachTab === 'templates' ? 'primary' : ''}" role="tab" aria-selected="${_outreachTab === 'templates'}" onclick="outreachSwitchTab('templates')"><i class="fas fa-palette"></i> Templates</button>
@@ -99,6 +102,54 @@ async function renderOutreach() {
     await _renderOutreachTab();
   } catch (error) {
     main.innerHTML = `<div class="pa-error">${_esc(error.message || 'Could not load outreach.')}</div>`;
+  }
+}
+
+function openOutreachSettings() {
+  const settings = _outreachConfig.settings || {};
+  _outreachModal('Outreach settings', `
+    <form id="outreach-settings-form" onsubmit="event.preventDefault();outreachSaveSettings();">
+      <div class="pa-panel" style="padding:14px;margin:0 0 16px;">
+        <label style="display:flex;align-items:center;gap:10px;font-size:13px;font-weight:700;color:var(--text);">
+          <input id="outreach-enabled" type="checkbox" ${settings.enabled ? 'checked' : ''} style="width:16px;height:16px;accent-color:var(--primary);">
+          Enable outreach sending
+        </label>
+        <p style="font-size:11px;color:var(--muted);margin:7px 0 0 26px;line-height:1.6;">When disabled, due emails are held safely instead of sent.</p>
+      </div>
+      <div class="pa-field"><label for="outreach-reply-to">Monitored Reply-To</label><input id="outreach-reply-to" type="email" value="${_esc(settings.replyTo || '')}" placeholder="sales@msingi.io"><p style="font-size:11px;color:var(--faint);margin:5px 0 0;">Replies go to this human inbox. Required when sending is enabled.</p></div>
+      <div class="pa-form-row"><div class="pa-field"><label for="outreach-from-name">Sender display name</label><input id="outreach-from-name" maxlength="120" value="${_esc(settings.fromName || '')}"></div><div class="pa-field"><label for="outreach-from-role">Sender role</label><input id="outreach-from-role" maxlength="120" value="${_esc(settings.fromRole || '')}"></div></div>
+      <div class="pa-field"><label for="outreach-logo-url">Logo URL</label><input id="outreach-logo-url" type="url" maxlength="500" value="${_esc(settings.logoUrl || '')}"></div>
+      <div class="pa-form-row"><div class="pa-field"><label for="outreach-phone">Call / WhatsApp phone</label><input id="outreach-phone" maxlength="50" value="${_esc(settings.phone || '')}"></div><div class="pa-field"><label for="outreach-daily-limit">Daily sending limit</label><input id="outreach-daily-limit" type="number" min="1" max="100" value="${Number(settings.dailyLimit) || 25}"></div></div>
+      <div class="pa-field"><label for="outreach-trust-line">Trust line</label><input id="outreach-trust-line" maxlength="300" value="${_esc(settings.trustLine || '')}"></div>
+      <div class="pa-field"><label for="outreach-pricing-line">Pricing line</label><input id="outreach-pricing-line" maxlength="300" value="${_esc(settings.pricingLine || '')}"></div>
+      <div class="pa-form-row"><div class="pa-field"><label for="outreach-legal-name">Legal sender name</label><input id="outreach-legal-name" maxlength="200" value="${_esc(settings.legalName || '')}"></div><div class="pa-field"><label for="outreach-postal-address">Postal address</label><input id="outreach-postal-address" maxlength="300" value="${_esc(settings.postalAddress || '')}"></div></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;"><button type="button" class="pa-btn" onclick="closeModal()">Cancel</button><button class="pa-btn primary" type="submit"><i class="fas fa-save"></i> Save settings</button></div>
+    </form>`, true);
+}
+
+async function outreachSaveSettings() {
+  const value = id => document.getElementById(id)?.value.trim() || '';
+  const input = {
+    enabled: document.getElementById('outreach-enabled')?.checked === true,
+    replyTo: value('outreach-reply-to'),
+    fromName: value('outreach-from-name'),
+    fromRole: value('outreach-from-role'),
+    logoUrl: value('outreach-logo-url'),
+    phone: value('outreach-phone'),
+    dailyLimit: Number(value('outreach-daily-limit') || 25),
+    trustLine: value('outreach-trust-line'),
+    pricingLine: value('outreach-pricing-line'),
+    legalName: value('outreach-legal-name'),
+    postalAddress: value('outreach-postal-address'),
+  };
+  try {
+    _outreachConfig.settings = (await api('PUT', '/outreach/settings', input)).data;
+    _outreachConfig.dailyLimit = _outreachConfig.settings.dailyLimit;
+    closeModal();
+    toast('Outreach settings saved.', 'success');
+    renderOutreach();
+  } catch (error) {
+    toast(error.message || 'Could not save outreach settings.', 'error');
   }
 }
 

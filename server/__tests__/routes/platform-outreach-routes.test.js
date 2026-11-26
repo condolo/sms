@@ -5,7 +5,8 @@ const mockOutreach = {
   CAMPAIGN_STATUSES: ['draft', 'launching', 'running', 'paused', 'attention', 'cancelled', 'completed'],
   SEND_STATUSES: ['queued', 'sending', 'sent', 'failed', 'skipped', 'held', 'needs_review'],
   outreachReady: jest.fn(() => true),
-  safeSenderConfig: jest.fn(() => ({ name: 'Msingi Schools Team', role: 'Schools Team', replyTo: 'sales@example.test' })),
+  getOutreachSettings: jest.fn().mockResolvedValue({ enabled: true, replyTo: 'sales@example.test', fromName: 'Msingi Schools Team', fromRole: 'Schools Team', dailyLimit: 25, logoUrl: 'https://msingi.io/api/public/platform-asset/logo', phone: '+254 769 024 153', trustLine: 'Tenant-isolated records', pricingLine: 'Starting at KSh 250', legalName: 'Msingi', postalAddress: '' }),
+  updateOutreachSettings: jest.fn().mockResolvedValue({ enabled: true, replyTo: 'sales@example.test', dailyLimit: 25 }),
   getLeadStats: jest.fn().mockResolvedValue({ total: 2 }),
   listLeads: jest.fn().mockResolvedValue({ data: [{ id: 'lead_1' }], pagination: { page: 1, limit: 50, total: 1, pages: 1 } }),
   importLeads: jest.fn().mockResolvedValue({ created: 1, updated: 0, skipped: 0, suppressed: 0, errors: [], errorCount: 0 }),
@@ -60,6 +61,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   process.env = { ...ORIGINAL_ENV, PLATFORM_JWT_SECRET: 'test-platform-secret', NODE_ENV: 'test' };
   mockOperators = [
+    { id: 'op_owner', name: 'Olivia Owner', email: 'owner@msingi.io', tier: 'owner', template: 'owner', isActive: true, status: 'active' },
     { id: 'op_sales', name: 'Sam Sales', email: 'sam@msingi.io', tier: 'support', template: 'sales', isActive: true, status: 'active' },
     { id: 'op_viewer', name: 'Vic Viewer', email: 'vic@msingi.io', tier: 'support', template: 'viewer', isActive: true, status: 'active' },
     { id: 'op_send_only', name: 'Sam Send', email: 'send@msingi.io', tier: 'support', template: 'custom', capabilities: ['outreach.send'], isActive: true, status: 'active' },
@@ -120,5 +122,14 @@ describe('platform outreach routes', () => {
       .send({ to: 'test@example.test', leadId: 'lead_1' });
     expect(response.status).toBe(400);
     expect(mockOutreach.testTemplate).not.toHaveBeenCalled();
+  });
+
+  test('only an owner can update outreach settings', async () => {
+    const payload = { enabled: true, replyTo: 'sales@example.test', fromName: 'Msingi Schools Team', fromRole: 'Schools Team', dailyLimit: 25, logoUrl: 'https://msingi.io/api/public/platform-asset/logo', phone: '+254 769 024 153', trustLine: 'Tenant-isolated records', pricingLine: 'Starting at KSh 250', legalName: 'Msingi', postalAddress: '' };
+    const viewer = await supertest(app).put('/api/platform/outreach/settings').set('Cookie', `platform_token=${tokenFor('op_viewer')}`).send(payload);
+    expect(viewer.status).toBe(403);
+    const owner = await supertest(app).put('/api/platform/outreach/settings').set('Cookie', `platform_token=${tokenFor('op_owner')}`).send(payload);
+    expect(owner.status).toBe(200);
+    expect(mockOutreach.updateOutreachSettings).toHaveBeenCalled();
   });
 });

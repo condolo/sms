@@ -550,22 +550,84 @@ async function updateTemplate({ id, input, actor }) {
   return getTemplate(id);
 }
 
-function senderConfig() {
+const DEFAULT_OUTREACH_SETTINGS = {
+  enabled: false,
+  fromName: 'Msingi Schools Team',
+  fromRole: 'Schools Team',
+  replyTo: '',
+  dailyLimit: 25,
+  logoUrl: 'https://msingi.io/api/public/platform-asset/logo',
+  phone: '+254 769 024 153',
+  trustLine: 'Tenant-isolated records • Audited operator actions',
+  pricingLine: 'Starting at KSh 250 / student / term',
+  legalName: 'Msingi',
+  postalAddress: '',
+};
+
+function cleanOutreachSettings(input = {}) {
+  const text = (value, fallback, max) => String(value ?? fallback).trim().slice(0, max);
   return {
-    name: process.env.OUTREACH_FROM_NAME || 'Msingi Schools Team',
-    role: process.env.OUTREACH_FROM_ROLE || 'Schools Team',
-    replyTo: process.env.OUTREACH_REPLY_TO || '',
-    logoUrl: process.env.OUTREACH_LOGO_URL || appUrl('/api/public/platform-asset/logo'),
-    phone: process.env.OUTREACH_PHONE || '+254 769 024 153',
-    trustLine: process.env.OUTREACH_TRUST_LINE || 'Tenant-isolated records • Audited operator actions',
-    pricingLine: process.env.OUTREACH_PRICING_LINE || 'Starting at KSh 250 / student / term',
-    legalName: process.env.OUTREACH_LEGAL_NAME || 'Msingi',
-    postalAddress: process.env.OUTREACH_POSTAL_ADDRESS || '',
+    enabled: input.enabled === true,
+    fromName: text(input.fromName, DEFAULT_OUTREACH_SETTINGS.fromName, 120),
+    fromRole: text(input.fromRole, DEFAULT_OUTREACH_SETTINGS.fromRole, 120),
+    replyTo: text(input.replyTo, '', 300).toLowerCase(),
+    dailyLimit: Math.min(Math.max(parseInt(input.dailyLimit, 10) || DEFAULT_OUTREACH_SETTINGS.dailyLimit, 1), 100),
+    logoUrl: text(input.logoUrl, DEFAULT_OUTREACH_SETTINGS.logoUrl, 500),
+    phone: text(input.phone, DEFAULT_OUTREACH_SETTINGS.phone, 50),
+    trustLine: text(input.trustLine, DEFAULT_OUTREACH_SETTINGS.trustLine, 300),
+    pricingLine: text(input.pricingLine, DEFAULT_OUTREACH_SETTINGS.pricingLine, 300),
+    legalName: text(input.legalName, DEFAULT_OUTREACH_SETTINGS.legalName, 200),
+    postalAddress: text(input.postalAddress, '', 300),
   };
 }
 
-function outreachReady() {
-  return !!(email.outreachReady && email.outreachReady());
+async function getOutreachSettings() {
+  const Settings = platformModel('platform_settings');
+  const doc = await Settings.findOne({ id: 'global' }).lean();
+  if (!doc?.outreach) {
+    const outreach = cleanOutreachSettings(DEFAULT_OUTREACH_SETTINGS);
+    await Settings.updateOne(
+      { id: 'global' },
+      { $set: { outreach, updatedAt: new Date() }, $setOnInsert: { id: 'global' } },
+      { upsert: true },
+    );
+    return outreach;
+  }
+  return cleanOutreachSettings({ ...DEFAULT_OUTREACH_SETTINGS, ...doc.outreach });
+}
+
+async function updateOutreachSettings({ input = {}, actor }) {
+  const current = await getOutreachSettings();
+  const settings = cleanOutreachSettings({ ...current, ...input });
+  if (settings.enabled && !isValidEmail(settings.replyTo)) {
+    throw new Error('Enter a valid monitored Reply-To address before enabling outreach.');
+  }
+  try {
+    const logo = new URL(settings.logoUrl);
+    if (!['http:', 'https:'].includes(logo.protocol)) throw new Error('invalid');
+  } catch {
+    throw new Error('Logo URL must be a valid HTTP(S) address.');
+  }
+  await platformModel('platform_settings').updateOne(
+    { id: 'global' },
+    { $set: { outreach: settings, updatedAt: new Date() } },
+    { upsert: true },
+  );
+  AuditService.log({
+    action: 'platform.outreach.settings_updated', actor: actor || {}, schoolId: null,
+    target: { type: 'platform_settings', id: 'global', label: 'Outreach settings' },
+    details: { enabled: settings.enabled, dailyLimit: settings.dailyLimit },
+  });
+  return settings;
+}
+
+async function senderConfig() {
+  return getOutreachSettings();
+}
+
+async function outreachReady() {
+  const settings = await getOutreachSettings();
+  return !!(email.outreachReady && email.outreachReady(settings));
 }
 
 async function previewTemplate({ templateId, leadId }) {
@@ -576,21 +638,22 @@ async function previewTemplate({ templateId, leadId }) {
   };
   if (!lead) throw new Error('Lead not found.');
   return renderOutreachEmail({
-    template, lead, campaign: { id: 'preview' }, sender: senderConfig(),
+    template, lead, campaign: { id: 'preview' }, sender: await senderConfig(),
     unsubscribeUrl: `${appUrl('/api/outreach/unsubscribe/preview')}`,
   });
 }
 
 async function testTemplate({ templateId, to, actor }) {
   if (!isValidEmail(to)) throw new Error('Enter a valid test email address.');
-  if (!outreachReady()) throw new Error('Outreach sending is not configured. Set OUTREACH_ENABLED=true and OUTREACH_REPLY_TO.');
+  if (!(await outreachReady())) throw new Error('Outreach sending is disabled in Platform → Outreach settings, or the Reply-To address is invalid.');
   if (await model('outreach_suppressions').exists({ email: normalizeEmail(to) })) {
     throw new Error('That address is on the suppression list and cannot receive outreach email.');
   }
   const preview = await previewTemplate({ templateId });
+  const sender = await senderConfig();
   const sent = await email.sendOutreach({
     to: normalizeEmail(to), subject: `[TEST] ${preview.subject}`, html: preview.html, text: preview.text,
-    fromName: senderConfig().name, replyTo: senderConfig().replyTo,
+    fromName: sender.fromName, replyTo: sender.replyTo, settings: sender,
     headers: { 'X-Msingi-Outreach-Test': 'true' },
   });
   AuditService.log({ action: 'platform.outreach.test_sent', actor: actor || {}, schoolId: null, target: { type: 'outreach_template', id: templateId, label: 'Test email' }, details: { to: normalizeEmail(to), sent } });
@@ -650,6 +713,7 @@ async function createCampaign({ input, actor }) {
     if (errors.length) throw new Error(`${template.name}: ${errors.join(' ')}`);
   }
   const leadIds = Array.isArray(input.leadIds) ? [...new Set(input.leadIds.map(String))].slice(0, 5000) : null;
+  const settings = await getOutreachSettings();
   const doc = {
     id: `camp_${crypto.randomUUID()}`,
     name,
@@ -657,7 +721,7 @@ async function createCampaign({ input, actor }) {
     audience: leadIds ? 'selected' : 'eligible',
     leadIds,
     steps: templates.map((template, index) => ({ ...template, delayDays: SEQUENCE_DELAYS[index] ?? SEQUENCE_DELAYS[SEQUENCE_DELAYS.length - 1] })),
-    dailyLimit: Math.min(Math.max(parseInt(input.dailyLimit || process.env.OUTREACH_DAILY_LIMIT || '25', 10) || 25, 1), 100),
+    dailyLimit: Math.min(Math.max(parseInt(input.dailyLimit || settings.dailyLimit || 25, 10) || 25, 1), 100),
     scheduledAt: null,
     createdBy: actor?.userId || null,
     createdByName: actor?.name || actor?.email || '',
@@ -752,7 +816,7 @@ async function reconcileCampaignJobs(campaignId) {
       const key = `outreach_send:${send.id}`;
       if (active.has(key)) return;
       if (send.status === 'held') {
-        if (!outreachReady()) return;
+        if (!(await outreachReady())) return;
         await Sends.updateOne({ id: send.id, status: 'held' }, { $set: { status: 'queued', updatedAt: new Date() } });
         promoted = true;
       }
@@ -831,7 +895,7 @@ async function launchCampaign({ id, scheduledAt, dailyLimit, actor }) {
   const campaign = await Campaigns.findOne({ id }).lean();
   if (!campaign) throw new Error('Campaign not found.');
   if (campaign.status !== 'draft') throw new Error('Only a draft campaign can be launched.');
-  if (!outreachReady()) throw new Error('Outreach sending is not configured. Set OUTREACH_ENABLED=true and OUTREACH_REPLY_TO.');
+  if (!(await outreachReady())) throw new Error('Outreach sending is disabled in Platform → Outreach settings, or the Reply-To address is invalid.');
   const start = scheduledAt ? new Date(scheduledAt) : new Date();
   if (Number.isNaN(start.getTime())) throw new Error('Choose a valid launch date.');
   const limit = Math.min(Math.max(parseInt(dailyLimit || campaign.dailyLimit || 25, 10) || 25, 1), 100);
@@ -1092,7 +1156,7 @@ async function processOutreachSend(sendId) {
   const Sends = model('outreach_sends');
   const send = await Sends.findOne({ id: sendId }).lean();
   if (!send || send.status !== 'queued') return;
-  if (!outreachReady()) {
+  if (!(await outreachReady())) {
     await Sends.updateOne({ id: sendId, status: 'queued' }, { $set: { status: 'held', lastError: 'Outreach sending is disabled or not configured.', updatedAt: new Date() } });
     await maybeCompleteCampaign(send.campaignId);
     return;
@@ -1100,6 +1164,7 @@ async function processOutreachSend(sendId) {
   const now = new Date();
   const claimed = await Sends.updateOne({ id: sendId, status: 'queued' }, { $set: { status: 'sending', updatedAt: now } });
   if (!claimed.modifiedCount) return;
+  const sender = await senderConfig();
   let smtpAccepted = false;
 
   try {
@@ -1151,7 +1216,7 @@ async function processOutreachSend(sendId) {
     }
 
     const preview = renderOutreachEmail({
-      template: step, lead, campaign, sender: senderConfig(), stepIndex: send.stepIndex,
+      template: step, lead, campaign, sender, stepIndex: send.stepIndex,
       unsubscribeUrl: appUrl(`/api/outreach/unsubscribe/${createUnsubscribeToken(sendId)}`),
     });
     if ([preview.subject, preview.html, preview.text].some(value => unresolvedPlaceholders(value).length)) {
@@ -1180,8 +1245,9 @@ async function processOutreachSend(sendId) {
       subject: preview.subject,
       html: preview.html,
       text: preview.text,
-      fromName: senderConfig().name,
-      replyTo: senderConfig().replyTo,
+      fromName: sender.fromName,
+      replyTo: sender.replyTo,
+      settings: sender,
       onSuccess: info => { providerMessageId = info?.messageId || null; },
       headers: {
         'X-Msingi-Outreach-Campaign': campaign.id,
@@ -1234,6 +1300,7 @@ module.exports = {
   getCampaign,
   getLead,
   getLeadStats,
+  getOutreachSettings,
   getTemplate,
   importLeads,
   launchCampaign,
@@ -1258,6 +1325,7 @@ module.exports = {
   testTemplate,
   unsubscribeByToken,
   updateLead,
+  updateOutreachSettings,
   updateTemplate,
   validateTemplate,
   verifyUnsubscribeToken,

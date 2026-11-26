@@ -193,34 +193,18 @@ describe('email failure log', () => {
 });
 
 describe('prospect outreach sender', () => {
-  const previousEnabled = process.env.OUTREACH_ENABLED;
-  const previousReplyTo = process.env.OUTREACH_REPLY_TO;
-
-  afterEach(() => {
-    if (previousEnabled === undefined) delete process.env.OUTREACH_ENABLED;
-    else process.env.OUTREACH_ENABLED = previousEnabled;
-    if (previousReplyTo === undefined) delete process.env.OUTREACH_REPLY_TO;
-    else process.env.OUTREACH_REPLY_TO = previousReplyTo;
-  });
-
-  test('is fail-closed until explicitly enabled with a monitored Reply-To', () => {
-    delete process.env.OUTREACH_ENABLED;
-    expect(outreachReady()).toBe(false);
-    process.env.OUTREACH_ENABLED = 'true';
-    delete process.env.OUTREACH_REPLY_TO;
-    expect(outreachReady()).toBe(false);
-    process.env.OUTREACH_REPLY_TO = 'not-an-email';
-    expect(outreachReady()).toBe(false);
-    process.env.OUTREACH_REPLY_TO = 'sales@example.com';
-    expect(outreachReady()).toBe(true);
+  test('is fail-closed until enabled in database settings with a monitored Reply-To', () => {
+    expect(outreachReady({ enabled: false, replyTo: 'sales@example.com' })).toBe(false);
+    expect(outreachReady({ enabled: true, replyTo: '' })).toBe(false);
+    expect(outreachReady({ enabled: true, replyTo: 'not-an-email' })).toBe(false);
+    expect(outreachReady({ enabled: true, replyTo: 'sales@example.com' })).toBe(true);
   });
 
   test('sends HTML, plain text, human Reply-To and unsubscribe headers', async () => {
-    process.env.OUTREACH_ENABLED = 'true';
-    process.env.OUTREACH_REPLY_TO = 'sales@example.com';
+    const settings = { enabled: true, replyTo: 'sales@example.com', fromName: 'Msingi Schools Team' };
     const sent = await sendOutreach({
       to: 'school@example.com', subject: 'Hello', html: '<p>Hello</p>', text: 'Hello',
-      fromName: 'Msingi Schools Team', headers: { 'List-Unsubscribe': '<https://example.com/unsubscribe>' },
+      settings, headers: { 'List-Unsubscribe': '<https://example.com/unsubscribe>' },
     });
     expect(sent).toBe(true);
     expect(lastMail().mailOpts).toEqual(expect.objectContaining({
