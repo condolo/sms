@@ -24,7 +24,7 @@ const { rbac, hasExplicitSubGrant } = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
-const { ok, created, E } = require('../utils/response');
+const { ok, created, E, parsePagination, paginate } = require('../utils/response');
 const email              = require('../utils/email');
 const { mergeConfig, resolveCurrentPeriod } = require('./academic-config');
 const { aggregateAssessmentMarks, computeFinalScores } = require('../utils/academic-calc');
@@ -2817,6 +2817,13 @@ router.get('/reminders', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
     const { academicYearId, classId, subjectId } = req.query;
     const daysAhead = Number(req.query.days) || 7;
 
+    // Opt-in pagination. Existing callers send no page/limit and still get
+    // the complete flat array; clients that do send them get the same array
+    // plus standard pagination metadata.
+    const paged = Object.prototype.hasOwnProperty.call(req.query, 'page')
+      || Object.prototype.hasOwnProperty.call(req.query, 'limit');
+    const { page, limit, skip } = paged ? parsePagination(req.query) : { page: 1, limit: 0, skip: 0 };
+
     // UTC, not local midnight: a +03:00 school would otherwise read "yesterday"
     // and flip today's deadline to overdue a day early.
     const todayStr   = new Date().toISOString().slice(0, 10);
@@ -2854,7 +2861,7 @@ router.get('/reminders', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
         seen.add(key);
         return true;
       });
-      if (!targets.length) return _ok(res, []);
+      if (!targets.length) return _ok(res, [], paged ? paginate(page, limit, 0) : null);
     }
 
     const targetClassIds = [...new Set([
@@ -3022,6 +3029,9 @@ router.get('/reminders', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
       || (a.dateFrom === b.dateFrom ? 0 : a.dateFrom > b.dateFrom ? 1 : -1)
       || String(a.className ?? '').localeCompare(String(b.className ?? '')));
 
+    if (paged) {
+      return _ok(res, reminders.slice(skip, skip + limit), paginate(page, limit, reminders.length));
+    }
     return _ok(res, reminders);
   } catch (err) {
     console.error('[assessment/reminders GET]', err);

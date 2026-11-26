@@ -399,6 +399,7 @@ async function main() {
       { name: 'student-dashboard', method: 'GET', path: '/api/student-portal/dashboard', token: tokens.student },
       { name: 'assessment-reminders', method: 'GET', path: '/api/assessment/reminders', token: tokens.teacher },
       { name: 'class-students', method: 'GET', path: `/api/classes/${ids.classId}/students`, token: tokens.teacher },
+      { name: 'class-rosters-batch', method: 'POST', path: '/api/classes/rosters/batch', body: { classIds: [ids.classId], status: 'active' }, token: tokens.teacher },
       { name: 'parent-report', method: 'GET', path: `/api/parent-portal/report/${ids.studentId}`, token: tokens.parent },
       { name: 'school-asset', method: 'GET', path: `/api/public/school-asset/logo?slug=${SCHOOL_ID}` },
     ];

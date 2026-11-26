@@ -501,9 +501,31 @@ async function addLeadNote({ id, body, actor }) {
   return getLead(id);
 }
 
-async function listTemplates() {
+// Opt-in page helper for outreach lists. Existing callers pass nothing and
+// keep receiving the full array, so the console contract does not break.
+function _pageOf(pagination, cap) {
+  const page = Math.max(1, parseInt(pagination?.page) || 1);
+  const pageSize = Math.min(cap, Math.max(1, parseInt(pagination?.pageSize ?? pagination?.limit) || cap));
+  return { page, pageSize, skip: (page - 1) * pageSize };
+}
+
+function _pageMeta(page, pageSize, total) {
+  return { page, limit: pageSize, total, pages: Math.ceil(total / pageSize) || 1 };
+}
+
+async function listTemplates(pagination = null) {
   await ensureDefaultTemplates();
-  return model('outreach_templates').find({ isArchived: { $ne: true } }).sort({ category: 1, name: 1 }).lean();
+  const Templates = model('outreach_templates');
+  const filter = { isArchived: { $ne: true } };
+  if (!pagination) {
+    return Templates.find(filter).sort({ category: 1, name: 1 }).lean();
+  }
+  const { page, pageSize, skip } = _pageOf(pagination, 100);
+  const [rows, total] = await Promise.all([
+    Templates.find(filter).sort({ category: 1, name: 1 }).skip(skip).limit(pageSize).lean(),
+    Templates.countDocuments(filter),
+  ]);
+  return { data: rows, pagination: _pageMeta(page, pageSize, total) };
 }
 
 async function getTemplate(id) {
@@ -661,14 +683,25 @@ async function testTemplate({ templateId, to, actor }) {
   return { sent: true };
 }
 
-async function listCampaigns() {
+async function listCampaigns(pagination = null) {
   const Campaigns = model('outreach_campaigns');
-  const campaigns = await Campaigns.find({}).sort({ createdAt: -1 }).limit(100).lean();
+  if (!pagination) {
+    const campaigns = await Campaigns.find({}).sort({ createdAt: -1 }).limit(100).lean();
+    return Promise.all(campaigns.map(async campaign => ({
+      ...campaign,
+      stats: await campaignStats(campaign.id),
+    })));
+  }
+  const { page, pageSize, skip } = _pageOf(pagination, 100);
+  const [campaigns, total] = await Promise.all([
+    Campaigns.find({}).sort({ createdAt: -1 }).skip(skip).limit(pageSize).lean(),
+    Campaigns.countDocuments({}),
+  ]);
   const withStats = await Promise.all(campaigns.map(async campaign => ({
     ...campaign,
     stats: await campaignStats(campaign.id),
   })));
-  return withStats;
+  return { data: withStats, pagination: _pageMeta(page, pageSize, total) };
 }
 
 async function campaignStats(campaignId) {

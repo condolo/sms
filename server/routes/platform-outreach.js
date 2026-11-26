@@ -153,8 +153,14 @@ router.post('/leads/:id/notes', actionLimiter, async (req, res) => {
   try { return ok(res, await outreach.addLeadNote({ id: req.params.id, body: parsed.data.body, actor: actor(req) })); } catch (error) { return fail(error, res); }
 });
 
-router.get('/templates', async (_req, res) => {
-  try { return ok(res, await outreach.listTemplates()); } catch (error) { return fail(error, res, 500); }
+router.get('/templates', async (req, res) => {
+  try {
+    // Opt-in: no page/pageSize keeps the legacy flat array.
+    const paged = 'page' in req.query || 'pageSize' in req.query || 'limit' in req.query;
+    const result = await outreach.listTemplates(paged ? req.query : null);
+    const rows = Array.isArray(result) ? result : result.data;
+    return ok(res, rows, Array.isArray(result) ? null : result.pagination);
+  } catch (error) { return fail(error, res, 500); }
 });
 
 router.post('/templates', actionLimiter, async (req, res) => {
@@ -188,8 +194,13 @@ router.post('/templates/:id/test', actionLimiter, async (req, res) => {
   try { return ok(res, await outreach.testTemplate({ templateId: req.params.id, ...parsed.data, actor: actor(req) })); } catch (error) { return fail(error, res); }
 });
 
-router.get('/campaigns', async (_req, res) => {
-  try { return ok(res, await outreach.listCampaigns()); } catch (error) { return fail(error, res, 500); }
+router.get('/campaigns', async (req, res) => {
+  try {
+    const paged = 'page' in req.query || 'pageSize' in req.query || 'limit' in req.query;
+    const result = await outreach.listCampaigns(paged ? req.query : null);
+    const rows = Array.isArray(result) ? result : result.data;
+    return ok(res, rows, Array.isArray(result) ? null : result.pagination);
+  } catch (error) { return fail(error, res, 500); }
 });
 
 router.post('/campaigns', actionLimiter, async (req, res) => {

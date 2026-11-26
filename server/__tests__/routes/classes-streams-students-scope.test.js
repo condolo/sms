@@ -431,3 +431,36 @@ describe('GET /api/streams/:id/students — status defaults to active-only', () 
     expect(res.body.data.map(s => s.firstName).sort()).toEqual(['Amara', 'Nathaniel']);
   });
 });
+
+describe('POST /api/classes/rosters/batch — batch fetching', () => {
+  test('returns one roster per requested class, in request order', async () => {
+    const res = await supertest(buildApp())
+      .post('/api/classes/rosters/batch')
+      .send({ classIds: ['cls_9c', 'cls_4a'], status: 'active' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(2);
+    expect(res.body.data[0].classId).toBe('cls_9c');
+    expect(res.body.data[0].students.map(s => s.firstName).sort()).toEqual(['Amara', 'Chiamaka']);
+    expect(res.body.data[1].classId).toBe('cls_4a');
+    expect(res.body.data[1].students.map(s => s.firstName)).toEqual(['Brian']);
+  });
+
+  test('applies the same scope denial as the single-class route', async () => {
+    asTeacherOf('cls_9c'); // assigned to 9C only, not 4A
+    const res = await supertest(buildApp())
+      .post('/api/classes/rosters/batch')
+      .send({ classIds: ['cls_9c', 'cls_4a'], status: 'active' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data[0].error).toBeNull();
+    expect(res.body.data[1].status).toBe(403);
+    expect(res.body.data[1].students).toEqual([]);
+  });
+
+  test('rejects empty and oversized batches', async () => {
+    expect((await supertest(buildApp()).post('/api/classes/rosters/batch').send({ classIds: [] })).status).toBe(400);
+    const oversized = Array.from({ length: 21 }, (_, i) => `cls_${i}`);
+    expect((await supertest(buildApp()).post('/api/classes/rosters/batch').send({ classIds: oversized })).status).toBe(400);
+  });
+});

@@ -225,7 +225,7 @@ router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('classes', 'read'), async
 });
 
 /* ── GET /api/classes/:id/students ─ Students in a class ─────── */
-router.get('/:id/students', authMiddleware, PLAN, MODGATE, rbac('students', 'read'), scopeMiddleware, async (req, res) => {
+async function getStudentsHandler(req, res) {
   try {
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
@@ -410,6 +410,57 @@ router.get('/:id/students', authMiddleware, PLAN, MODGATE, rbac('students', 'rea
     console.error('[classes/:id/students GET]', err);
     return E.serverError(res);
   }
+}
+
+router.get('/:id/students', authMiddleware, PLAN, MODGATE, rbac('students', 'read'), scopeMiddleware, getStudentsHandler);
+
+/* ── POST /api/classes/rosters/batch ───────────────────────────
+   One request for several class rosters (the teacher students screen used
+   to fire one GET per class in parallel). Calling the SAME handler as the
+   single-class route means ownership checks, scope narrowing, elective
+   rules and status filtering cannot drift between the two paths.
+   ─────────────────────────────────────────────────────────────── */
+const BATCH_ROSTER_MAX = 20;
+
+function captureResponse() {
+  const captured = { status: 200, body: null };
+  const res = {
+    status(code) { captured.status = code; return this; },
+    json(body) { captured.body = body; return this; },
+  };
+  return { res, captured };
+}
+
+router.post('/rosters/batch', authMiddleware, PLAN, MODGATE, rbac('students', 'read'), scopeMiddleware, async (req, res) => {
+  const raw = Array.isArray(req.body?.classIds) ? req.body.classIds : [];
+  if (!raw.length || raw.length > BATCH_ROSTER_MAX) {
+    return E.badRequest(res, `Provide between 1 and ${BATCH_ROSTER_MAX} class ids.`);
+  }
+  const classIds = [...new Set(raw.filter(id => typeof id === 'string' && id.length <= 120))];
+  if (!classIds.length) return E.badRequest(res, 'Invalid class ids.');
+
+  const query = { ...req.body.query, status: req.body.status || 'active' };
+  // Bounded concurrency: a single batch must not open an unbounded number of
+  // simultaneous DB queries on a small deployment.
+  const results = [];
+  for (let i = 0; i < classIds.length; i += 4) {
+    const chunk = classIds.slice(i, i + 4);
+    const settled = await Promise.all(chunk.map(async (classId) => {
+      const { res: capture, captured } = captureResponse();
+      await getStudentsHandler({ ...req, params: { id: classId }, query }, capture);
+      if (captured.status !== 200) {
+        return { classId, students: [], error: captured.body?.error || 'Could not load roster', status: captured.status };
+      }
+      return {
+        classId,
+        students: captured.body?.data ?? [],
+        pagination: captured.body?.pagination ?? null,
+        error: null,
+      };
+    }));
+    results.push(...settled);
+  }
+  return ok(res, results);
 });
 
 /* ── POST /api/classes ───────────────────────────────────────── */

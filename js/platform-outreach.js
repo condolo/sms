@@ -6,13 +6,32 @@
 let _outreachTab = 'leads';
 let _outreachConfig = { ready: false, sender: {}, dailyLimit: 25 };
 let _outreachLeadPage = 1;
+let _outreachTemplatePage = 1;
+let _outreachCampaignPage = 1;
+const OUTREACH_PAGE_SIZE = 20;
 let _outreachLeadQuery = '';
 let _outreachLeadStatus = '';
 const _outreachLeadCache = new Map();
 
+function _outreachPager(pagination, onPrev, onNext) {
+  if (!pagination || pagination.pages <= 1) return '';
+  return `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;border-top:1px solid var(--line-soft);font-size:12px;color:var(--muted);">
+    <span>Page ${pagination.page} of ${pagination.pages} · ${pagination.total} total</span>
+    <div style="display:flex;gap:8px;">
+      <button class="pa-btn pa-btn-sm" ${pagination.page <= 1 ? 'disabled' : ''} onclick="${onPrev}">Previous</button>
+      <button class="pa-btn pa-btn-sm" ${pagination.page >= pagination.pages ? 'disabled' : ''} onclick="${onNext}">Next</button>
+    </div>
+  </div>`;
+}
+
+function outreachTemplatePage(delta) { _outreachTemplatePage = Math.max(1, _outreachTemplatePage + delta); renderOutreachTemplates(); }
+function outreachCampaignPage(delta) { _outreachCampaignPage = Math.max(1, _outreachCampaignPage + delta); renderOutreachCampaigns(); }
+
 function clearOutreachSession() {
   document.getElementById('pa-modal-bg')?.remove();
   _outreachLeadCache.clear();
+  _outreachTemplatePage = 1;
+  _outreachCampaignPage = 1;
   _outreachPreviousFocus = null;
 }
 
@@ -355,7 +374,8 @@ async function renderOutreachTemplates() {
   if (!panel) return;
   panel.innerHTML = '<div class="pa-loading">Loading templates…</div>';
   try {
-    const templates = (await api('GET', '/outreach/templates')).data || [];
+    const result = await api('GET', `/outreach/templates?page=${_outreachTemplatePage}&pageSize=${OUTREACH_PAGE_SIZE}`);
+    const templates = result.data || [];
     panel.innerHTML = `<div class="pa-card"><div class="pa-card-header"><h3>Branded email templates</h3>${_can('outreach.manage') ? '<button class="pa-btn primary" onclick="openOutreachTemplate()"><i class="fas fa-plus"></i> New template</button>' : ''}</div>
       <div style="padding:18px;display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;">
         ${(templates || []).map(template => `<div class="pa-panel" style="margin:0;">
@@ -364,7 +384,9 @@ async function renderOutreachTemplates() {
           <p style="font-size:12px;color:var(--text);margin:0 0 14px;"><strong>${_esc(template.subject)}</strong></p>
           <div style="display:flex;gap:7px;flex-wrap:wrap;"><button class="pa-btn pa-btn-sm" onclick="outreachPreviewTemplate('${_esc(template.id)}')"><i class="fas fa-eye"></i> Preview</button>${_can('outreach.manage') ? `<button class="pa-btn pa-btn-sm" onclick="openOutreachTemplate('${_esc(template.id)}')"><i class="fas fa-pen"></i> Edit</button>` : ''}${_can('outreach.send') ? `<button class="pa-btn pa-btn-sm" onclick="outreachOpenTest('${_esc(template.id)}')"><i class="fas fa-paper-plane"></i> Test</button>` : ''}</div>
         </div>`).join('')}
-      </div></div>`;
+      </div>
+      ${_outreachPager(result.pagination, 'outreachTemplatePage(-1)', 'outreachTemplatePage(1)')}
+    </div>`;
   } catch (error) {
     panel.innerHTML = `<div class="pa-error">${_esc(error.message || 'Could not load templates.')}</div>`;
   }
@@ -464,9 +486,11 @@ async function renderOutreachCampaigns() {
   if (!panel) return;
   panel.innerHTML = '<div class="pa-loading">Loading campaigns…</div>';
   try {
-    const campaigns = (await api('GET', '/outreach/campaigns')).data || [];
+    const result = await api('GET', `/outreach/campaigns?page=${_outreachCampaignPage}&pageSize=${OUTREACH_PAGE_SIZE}`);
+    const campaigns = result.data || [];
     panel.innerHTML = `<div class="pa-card"><div class="pa-card-header"><h3>Campaigns</h3>${_can('outreach.manage') ? '<button class="pa-btn primary" onclick="openOutreachCampaign()"><i class="fas fa-plus"></i> New campaign</button>' : ''}</div>
       ${(campaigns || []).length ? `<div class="pa-table-wrap"><table class="pa-table"><thead><tr><th>Campaign</th><th>Status</th><th>Recipients</th><th>Emails</th><th>Failed</th><th>Launch</th><th>Actions</th></tr></thead><tbody>${campaigns.map(campaign => `<tr><td><strong>${_esc(campaign.name)}</strong><div style="font-size:11px;color:var(--faint);margin-top:3px;">${campaign.steps?.length || 0} email sequence · ${_esc(campaign.audience)}</div></td><td><span class="pa-pill ${_esc(campaign.status)}">${_esc(campaign.status)}</span></td><td>${campaign.stats?.recipients || 0}</td><td>${campaign.stats?.sent || 0}</td><td>${campaign.stats?.failed || 0}</td><td>${_outreachDateTime(campaign.scheduledAt)}</td><td><button class="pa-btn pa-btn-sm" onclick="openOutreachCampaignDetail('${_esc(campaign.id)}')"><i class="fas fa-eye"></i> Open</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="pa-empty"><i class="fas fa-paper-plane"></i><p>No campaigns yet. Start with the three-touch default sequence.</p></div>'}
+      ${_outreachPager(result.pagination, 'outreachCampaignPage(-1)', 'outreachCampaignPage(1)')}
     </div>`;
   } catch (error) {
     panel.innerHTML = `<div class="pa-error">${_esc(error.message || 'Could not load campaigns.')}</div>`;

@@ -244,3 +244,36 @@ describe('GET /api/assessment/reminders — oversight roles', () => {
     });
   });
 });
+
+describe('GET /api/assessment/reminders — opt-in pagination', () => {
+  test('without page/limit keeps the legacy flat array and adds no pagination block', async () => {
+    const res = await supertest(buildApp()).get('/api/assessment/reminders').query({ days: 14 });
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(2);
+    expect(res.body.pagination).toBeUndefined();
+  });
+
+  test('page + limit return one slice plus standard pagination metadata', async () => {
+    const first = await supertest(buildApp()).get('/api/assessment/reminders')
+      .query({ days: 14, page: 1, limit: 1 });
+    expect(first.status).toBe(200);
+    expect(first.body.data).toHaveLength(1);
+    expect(first.body.pagination).toMatchObject({ page: 1, limit: 1, total: 2, pages: 2 });
+
+    const second = await supertest(buildApp()).get('/api/assessment/reminders')
+      .query({ days: 14, page: 2, limit: 1 });
+    expect(second.status).toBe(200);
+    expect(second.body.data).toHaveLength(1);
+    expect(second.body.pagination).toMatchObject({ page: 2, limit: 1, total: 2, pages: 2 });
+    expect(second.body.data[0].classId).not.toBe(first.body.data[0].classId);
+  });
+
+  test('an empty teacher scope paginates cleanly instead of returning an unshaped array', async () => {
+    mockAssignments = [];
+    const res = await supertest(buildApp()).get('/api/assessment/reminders')
+      .query({ days: 14, page: 1, limit: 10 });
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([]);
+    expect(res.body.pagination).toMatchObject({ page: 1, limit: 10, total: 0, pages: 1 });
+  });
+});
