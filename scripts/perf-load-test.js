@@ -44,6 +44,7 @@ const CONCURRENCY = Number(process.env.PERF_CONCURRENCY || 10);
 const DURATION_SEC = Number(process.env.PERF_DURATION_SEC || 12);
 const WARMUP = Number(process.env.PERF_WARMUP || 2);
 const ROUNDS = Number(process.env.PERF_ROUNDS || 1);
+const ROTATE_IP = process.env.PERF_ROTATE_IP === '1';
 const LABEL = process.env.PERF_LABEL || 'run';
 const OUT_JSON = path.resolve(process.env.PERF_OUT || path.join(ROOT, 'docs', 'perf', `${LABEL}.json`));
 const OUT_MD = path.resolve(process.env.PERF_OUT_MD || path.join(ROOT, 'docs', 'perf', `${LABEL}.md`));
@@ -189,10 +190,23 @@ function percentile(sorted, p) {
   return sorted[Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1)];
 }
 
+let requestCounter = 0;
+
 async function request(route) {
   const started = performance.now();
   try {
     const headers = {};
+    // The login rate limiters key on client IP. With several long rounds a
+    // single local IP would exhaust the 300/15min bucket and every later
+    // request would be a fast 429, destroying the measurement. The server
+    // trusts proxy headers, so spread synthetic load across IPs.
+    if (ROTATE_IP) {
+      requestCounter += 1;
+      const n = requestCounter;
+      const ip = `10.${(n >>> 16) & 255}.${(n >>> 8) & 255}.${n & 255}`;
+      headers['x-forwarded-for'] = ip;
+      headers['cf-connecting-ip'] = ip;
+    }
     if (route.body) headers['content-type'] = 'application/json';
     if (route.token) headers.authorization = `Bearer ${route.token}`;
     const res = await fetch(BASE_URL + route.path, {
@@ -398,7 +412,7 @@ async function main() {
       label: LABEL,
       capturedAt: new Date().toISOString(),
       environment: { node: process.version, platform: process.platform, arch: process.arch, baseUrl: BASE_URL },
-      config: { concurrency: CONCURRENCY, durationSec: DURATION_SEC, warmup: WARMUP, rounds: ROUNDS, timeoutMs: TIMEOUT_MS },
+      config: { concurrency: CONCURRENCY, durationSec: DURATION_SEC, warmup: WARMUP, rounds: ROUNDS, rotateIp: ROTATE_IP, timeoutMs: TIMEOUT_MS },
       discovered: ids,
       routes: results,
     });
