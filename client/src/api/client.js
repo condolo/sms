@@ -1419,6 +1419,8 @@ export const lessons = {
   /* Summary views */
   myClasses:    (params)  => _get('/lessons/my-classes', params),
   summary:      (params)  => _get('/lessons/summary', params),
+  // Coverage export (v5.287.0): { teacherId } or { classId, streamId? }, topics, format 'pdf' | 'csv'.
+  coverageReport: (params, filename) => _downloadPdf('/lessons/coverage-report', filename, params),
   classSummary: (classId, params) => _get(`/lessons/class-summary/${classId}`, params),
   pendingTeachers: (params) => _get('/lessons/pending-teachers', params),
 };

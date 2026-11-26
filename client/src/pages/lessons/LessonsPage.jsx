@@ -1874,6 +1874,7 @@ function OverviewTab() {
 
   return (
     <div className="space-y-4">
+      {rows.length > 0 && <CoverageExport rows={rows} />}
       <div className="relative max-w-sm">
         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
         <input
@@ -1942,6 +1943,121 @@ function OverviewTab() {
       )}
 
       {isAdmin && <TopicDiagnostic />}
+    </div>
+  );
+}
+
+/* ── Export coverage (v5.287.0) ──────────────────────────────────
+   One teacher, or one class (all streams or one stream), as PDF or a CSV
+   that opens in Excel. Choices come from the Overview rows, so only teachers
+   and classes with teaching assignments are offered. Figures are the same
+   as the table (GET /lessons/coverage-report uses the same rules). */
+function CoverageExport({ rows }) {
+  const [by, setBy]             = useState('teacher');
+  const [teacherId, setTeacher] = useState('');
+  const [classId, setClassId]   = useState('');
+  const [streamId, setStream]   = useState('');
+  const [topics, setTopics]     = useState(true);
+  const [busy, setBusy]         = useState('');
+  const [error, setError]       = useState('');
+
+  const byName = (a, b) => a.name.localeCompare(b.name);
+  const teachers = useMemo(() => {
+    const m = new Map();
+    rows.forEach(r => { if (r.teacherId && !m.has(r.teacherId)) m.set(r.teacherId, { id: r.teacherId, name: r.teacherName || '(no name)' }); });
+    return [...m.values()].sort(byName);
+  }, [rows]);
+  const classes = useMemo(() => {
+    const m = new Map();
+    rows.forEach(r => { if (r.classId && !m.has(r.classId)) m.set(r.classId, { id: r.classId, name: r.className || '(no name)' }); });
+    return [...m.values()].sort(byName);
+  }, [rows]);
+  const streams = useMemo(() => {
+    const m = new Map();
+    rows.forEach(r => { if (r.classId === classId && r.streamId && !m.has(r.streamId)) m.set(r.streamId, { id: r.streamId, name: r.streamName || '(no name)' }); });
+    return [...m.values()].sort(byName);
+  }, [rows, classId]);
+
+  const ready = by === 'teacher' ? !!teacherId : !!classId;
+
+  async function download(format) {
+    setError('');
+    setBusy(format);
+    const params = by === 'teacher'
+      ? { teacherId, topics: topics ? '1' : '', format }
+      : { classId, streamId, topics: topics ? '1' : '', format };
+    const label = by === 'teacher'
+      ? teachers.find(t => t.id === teacherId)?.name
+      : [classes.find(c => c.id === classId)?.name, streams.find(s => s.id === streamId)?.name].filter(Boolean).join('-');
+    const slug = (label || 'report').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    try {
+      await lessonsApi.coverageReport(params, `lesson-coverage-${slug}.${format}`);
+    } catch (err) {
+      setError(err?.message ?? 'Download failed');
+    } finally {
+      setBusy('');
+    }
+  }
+
+  const sel = 'text-sm px-3 py-2 border border-slate-200 rounded-lg bg-white min-w-[11rem]';
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
+      <div>
+        <p className="text-sm font-semibold text-slate-800">Export coverage</p>
+        <p className="text-xs text-slate-500">Download one teacher's or one class's progress to share. Same figures as the table below.</p>
+      </div>
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+          {[['teacher', 'By teacher'], ['class', 'By class / stream']].map(([k, l]) => (
+            <button key={k} type="button" onClick={() => { setBy(k); setError(''); }}
+              className={`px-3 py-2 ${by === k ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>{l}</button>
+          ))}
+        </div>
+        {by === 'teacher' ? (
+          <label className="flex flex-col gap-1 text-xs text-slate-500">
+            Teacher
+            <select value={teacherId} onChange={e => setTeacher(e.target.value)} className={sel}>
+              <option value="">Choose a teacher…</option>
+              {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </label>
+        ) : (
+          <>
+            <label className="flex flex-col gap-1 text-xs text-slate-500">
+              Class
+              <select value={classId} onChange={e => { setClassId(e.target.value); setStream(''); }} className={sel}>
+                <option value="">Choose a class…</option>
+                {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </label>
+            {streams.length > 0 && (
+              <label className="flex flex-col gap-1 text-xs text-slate-500">
+                Stream
+                <select value={streamId} onChange={e => setStream(e.target.value)} className={sel}>
+                  <option value="">All streams</option>
+                  {streams.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </label>
+            )}
+          </>
+        )}
+        <label className="flex items-center gap-2 text-xs text-slate-600 py-2">
+          <input type="checkbox" checked={topics} onChange={e => setTopics(e.target.checked)} />
+          List every topic
+        </label>
+        <button type="button" disabled={!ready || !!busy} onClick={() => download('pdf')}
+          className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white text-xs font-medium px-3 py-2 rounded-lg">
+          {busy === 'pdf' ? <Loader2 size={13} className="animate-spin" /> : <FileText size={13} />} PDF
+        </button>
+        <button type="button" disabled={!ready || !!busy} onClick={() => download('csv')}
+          className="flex items-center gap-1.5 bg-white border border-slate-200 hover:bg-slate-50 disabled:opacity-40 text-slate-700 text-xs font-medium px-3 py-2 rounded-lg">
+          {busy === 'csv' ? <Loader2 size={13} className="animate-spin" /> : <FileText size={13} />} Excel (CSV)
+        </button>
+      </div>
+      {by === 'class' && streamId && (
+        <p className="text-[11px] text-slate-400">A stream's export also lists subjects taught to the whole class.</p>
+      )}
+      {error && <p className="text-xs text-red-600">{error}</p>}
     </div>
   );
 }

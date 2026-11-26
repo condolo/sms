@@ -7841,11 +7841,19 @@ A whole-class assignment saved before the class had an active stream, or before 
 ### Which topic ticks count (v5.283.0, 2026-11-25)
 
 - `utils/topic-coverage.js` is the one rule for **reading** `lesson_coverage`: a tick with no `streamId` counts for every stream of its class unless that stream is in its `notForStreams`; a tick with a `streamId` counts for that stream only; a whole-class assignment counts whole-class ticks only. `coverageStreamFilter(streamId)` (has a top-level `$or`: use `coverageStreamOr` where the filter already has one) and `leafProgress(topics, ticks)`, which counts items, never records. Never `countDocuments` ticks.
-- Used by `lessons.js` (my-classes, coverage, summary, pending-teachers, class-summary?studentId), `teacher-portal.js`, `student-portal.js`, `parent-portal.js`, `lesson-reminders.js`. `weekly-snapshot-aggregate.js` honours `notForStreams` only: it still lists every stream's topics for the class.
+- Used by `lessons.js` (my-classes, coverage, summary, coverage-report, pending-teachers, class-summary?studentId), `teacher-portal.js`, `student-portal.js`, `parent-portal.js`, `lesson-reminders.js`. `weekly-snapshot-aggregate.js` honours `notForStreams` only: it still lists every stream's topics for the class.
 - `_streamFilterPart` is for **writing** only (which record a tick is saved as).
 - Unticking with `?streamId` (`DELETE /lessons/coverage/:id` and bulk) → `_untickForStream`: deletes the stream's own tick (own records, unless admin) and `$addToSet`s the stream on whole-class ticks of that item; needs an assignment for the class + subject + stream (or the whole class), or admin. Without it, a teacher with only stream assignments gets 409 on a whole-class tick (a page open since before this version). Ticking again writes the stream's own record.
 - `GET /lessons/coverage` with a stream marks such ticks `coverage.wholeClass`, and lists a student's unstamped individual tick only when the student is in that stream.
 - Plans: `GET /lessons/plans?streamId` includes the whole-class ones; week-status counts them and treats a whole-class lesson as the stream's when the teacher has exactly one stream (and no whole-class row) for that class + subject.
+
+### Coverage export (v5.287.0, 2026-11-26)
+
+- `GET /lessons/coverage-report`: `teacherId` **or** `classId` (+ optional `streamId`), `topics=1`, `format=csv|pdf`, optional `academicYear`. Guard `isHodOrAdmin()`, the same as `GET /summary`. 422 on a bad request, 404 when no assignment matches. Audit `lessons.coverage_exported`.
+- `utils/coverage-report.js` `buildCoverageReport` uses the same reads as `/summary` (`coverageStreamFilter`, whole-class ticks only, `leafProgress`, legacy class-less topics included). A stream report = assignments with that `streamId` plus the class's whole-class ones (`streamId` null/''). Date covered: the stream's own tick wins over the whole-class one.
+- `fillNames(ctx, schoolId, docs)` fills a missing `teacherName` (teachers by `userId` or `id`, title + first + last), `className`, `subjectName`, `streamName` from their records; never replaces a saved name. Used by the export and `/summary`.
+- PDF: `renderCoverageHtml` through `htmlToPdfBufferOrFallback`, `renderCoveragePdf` (PDFKit) only when Chromium can't launch. CSV: BOM, `csvCell` prefixes `'` to cells starting with `= + - @` tab or CR.
+- Client: `CoverageExport` on the Overview tab; choices come from the `/summary` rows; `lessons.coverageReport(params, filename)`.
 
 ## One entry point for teaching assignments (v5.274.0, 2026-11-15)
 

@@ -39,6 +39,8 @@ const { ok, created, paginate, parsePagination, E, fail } = require('../utils/re
 const { resolveAcademicPeriod } = require('../utils/academic-period');
 const { resolveTeacher } = require('../utils/resolveTeacher');
 const { coverageStreamFilter, leafProgress } = require('../utils/topic-coverage');
+const { buildCoverageReport, fillNames: fillCoverageNames, toCsv: coverageCsv, renderCoverageHtml, renderCoveragePdf } = require('../utils/coverage-report');
+const { htmlToPdfBufferOrFallback } = require('../utils/html-to-pdf');
 const AuditService = require('../services/audit');
 const { extractDocxRows, extractLessonBlocks } = require('../utils/lesson-plan-docx-parser');
 const { extractCsvLessonBlocks } = require('../utils/lesson-plan-csv-parser');
@@ -1906,6 +1908,8 @@ router.get('/summary', authMiddleware, PLAN, MODGATE, async (req, res) => { // r
     if (departmentId) assignFilter.departmentId = departmentId;
 
     const assignments = await tenantModel('teaching_assignments', tenantContext(req)).find(assignFilter).lean();
+    // Names missing on the assignment come from their records (v5.287.0), as in the export.
+    await fillCoverageNames(tenantContext(req), schoolId, assignments);
 
     // Aggregate topics count per subject[-class] — grouped by classId too
     // (not just subjectId) so a Year 7-scoped topic set never inflates a
@@ -1950,6 +1954,65 @@ router.get('/summary', authMiddleware, PLAN, MODGATE, async (req, res) => { // r
 
     return ok(res, rows);
   } catch (err) { console.error('[lessons/summary GET]', err); return E.serverError(res); }
+});
+
+/* ── GET /api/lessons/coverage-report ─ export (admin/HOD) ── v5.287.0
+   One teacher (?teacherId) or one class (?classId, optional ?streamId; a
+   stream also lists the class's whole-class assignments). ?topics=1 adds each
+   topic and subtopic. ?format=csv|pdf. Same people and same figures as
+   GET /summary (utils/coverage-report.js). Read-only; each export audited. */
+router.get('/coverage-report', authMiddleware, PLAN, MODGATE, async (req, res) => { // rbac: isHodOrAdmin() below — real custom guard, same as GET /summary
+  try {
+    if (!isHodOrAdmin(req)) return E.forbidden(res, 'HOD or admin access required');
+    const { schoolId, userId } = req.jwtUser;
+    const str = (v) => (typeof v === 'string' ? v.trim() : '');
+    const teacherId = str(req.query.teacherId);
+    const classId   = str(req.query.classId);
+    const streamId  = str(req.query.streamId);
+    const format    = str(req.query.format);
+    const withTopics = req.query.topics === '1' || req.query.topics === 'true';
+
+    if (!!teacherId === !!classId) return E.validation(res, [{ field: 'teacherId', message: 'Choose either a teacher or a class' }]);
+    if (streamId && !classId)       return E.validation(res, [{ field: 'streamId', message: 'A stream needs its class' }]);
+    if (!['csv', 'pdf'].includes(format)) return E.validation(res, [{ field: 'format', message: 'format must be csv or pdf' }]);
+
+    const ctx = tenantContext(req);
+    const school = await _model('schools').findOne({ id: schoolId }, { name: 1, academicYear: 1 }).lean();
+    const academicYear = str(req.query.academicYear) || school?.academicYear || String(new Date().getFullYear());
+
+    const { rows } = await buildCoverageReport(ctx, schoolId, { teacherId, classId, streamId, academicYear, withTopics });
+    if (!rows.length) return E.notFound(res, 'No teaching assignments match this teacher, class or stream.');
+
+    const first = rows[0];
+    const streamName = streamId ? (rows.find(r => !r.wholeClass)?.streamName || '') : '';
+    const scopeLabel = teacherId
+      ? `Teacher: ${first.teacherName}`
+      : `Class: ${first.className}${streamId ? ` · ${streamName || 'Stream'}` : ' (all streams)'}`;
+    const slug = (teacherId ? first.teacherName : `${first.className}${streamName ? `-${streamName}` : ''}`)
+      .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'report';
+    const filename = `lesson-coverage-${slug}-${academicYear.replace(/[^0-9A-Za-z-]+/g, '-')}.${format}`;
+
+    AuditService.log({
+      action: 'lessons.coverage_exported', actor: req.jwtUser, schoolId,
+      target: { type: teacherId ? 'teacher' : 'class', id: teacherId || classId, label: scopeLabel },
+      details: { format, withTopics, streamId: streamId || null, academicYear, rows: rows.length },
+      req,
+    });
+
+    if (format === 'csv') {
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      return res.send(coverageCsv({ rows, academicYear }, { withTopics }));
+    }
+
+    const requester = await tenantModel('users', ctx).findOne({ schoolId, id: userId }).select('name').lean().catch(() => null);
+    const data = { by: teacherId ? 'teacher' : 'class', school, scopeLabel, academicYear, rows, withTopics, generatedByName: requester?.name || null };
+    const pdf = await htmlToPdfBufferOrFallback(renderCoverageHtml(data), () => renderCoveragePdf(data));
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', pdf.length);
+    return res.send(pdf);
+  } catch (err) { console.error('[lessons/coverage-report GET]', err); return E.serverError(res); }
 });
 
 /* ── GET /api/lessons/class-summary/:classId ─ student/parent portal */

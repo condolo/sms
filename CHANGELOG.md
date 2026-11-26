@@ -6,6 +6,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.287.0] - 2026-11-26 - feat(lessons): export coverage per teacher or per class / stream
+
+Asked for by schools: share lesson coverage progress outside the platform.
+
+### Added
+- **Lessons → Overview → Export coverage**: one teacher, or one class (all streams or one stream), as **PDF** or **Excel (CSV)**. **List every topic** adds each topic and subtopic with Covered / Not yet and the date covered.
+- Same people as Overview (admins, deputies, heads of department, section heads), and exactly the Overview's figures: same topics, same stream rules (a whole-class tick counts for every stream unless that stream unticked it; a stream's tick counts for that stream only), whole-class ticks only (marks for individual students are not class progress). The report says so at the bottom.
+- A stream's export also lists the subjects taught to the whole class. A subject with no topics shows 0 / 0 with no percentage, not 0%.
+- Each export is written to the Audit Log (`lessons.coverage_exported`).
+- CSV cells that would run as a spreadsheet formula (starting with = + - @) are made plain text.
+
+### Fixed
+- **Lessons → Overview showed no teacher name** for teaching assignments saved without one (imports, seed data). Names now come from the staff, class, subject and stream records, the same way Teaching Assignments already names teachers (v5.270.0). A saved name is never replaced. A class whose record no longer exists shows as "(class not found)" in exports.
+
+No data migration. Nothing is written except the audit entry.
+
+Files: new `server/utils/coverage-report.js`; `lessons.js` (`GET /coverage-report`, `/summary` names); `client.js`, `LessonsPage.jsx` (`CoverageExport`). Tests: new `coverage-report.test.js` (13). Checked on a local copy of the demo school: all 76 Overview rows match the export, by teacher (10) and by class (9); 74 rows that had no teacher name now have one; PDF and CSV download from the page.
+
+---
+
 ## [v5.286.0] - 2026-11-25 - fix(backups): every record a school has, checked, and a way to put it back
 
 The nightly backup followed a hand-kept list, and about 60 kinds of record added since were never in it, among them streams, payroll, lesson plans, KG marks, custom roles, published timetables and staff documents. There was no tool to put records back.
