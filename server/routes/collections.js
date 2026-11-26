@@ -15,6 +15,7 @@ const { authMiddleware }   = require('../middleware/auth');
 const { tenantMiddleware } = require('../middleware/tenant');
 const { rbac }             = require('../middleware/rbac');
 const { tenantModel, tenantContext, PLATFORM_COLLECTIONS } = require('../utils/tenant-model');
+const { safeUser } = require('../utils/safe-user');
 const { moduleGate } = require('../middleware/module-gate');
 const email    = require('../utils/email');
 const AuditService = require('../services/audit');
@@ -244,13 +245,10 @@ function _writeRoleAllowed(req, res, col) {
   return true;
 }
 
-/* Strip sensitive fields from user docs — strip BOTH field names to cover legacy docs */
+/* User docs carry passwords, PINs and OTP hashes; one shared boundary strips
+   all of them. Kept as a local name because every call site here reads that way. */
 function _sanitiseUser(doc) {
-  if (!doc) return doc;
-  // auth.js stores hash as `password`; settings.js historically used `passwordHash`
-  // strip both so whichever is present never reaches the wire
-  const { password, passwordHash, twoFactorSecret, mfaOtp, mfaExpiry, ...safe } = doc;
-  return safe;
+  return safeUser(doc);
 }
 
 // Was a locally duplicated model factory missing the `id: false` schema

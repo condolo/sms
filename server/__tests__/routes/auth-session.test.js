@@ -199,6 +199,20 @@ function makeUser(overrides = {}) {
     mustChangePassword: false,
     mfaEnabled:      false,
     passwordChangedAt: new Date().toISOString(), // fresh password (not expired)
+    // Credential and one-time-code material that must never reach a client.
+    passwordHash:      'legacy-bcrypt-hash',
+    pinHash:           'pin-bcrypt-hash',
+    tempPassword:      'TempPass123!',
+    twoFactorSecret:   'totp-secret',
+    mfaOtp:            'a'.repeat(64),
+    mfaExpiry:         new Date().toISOString(),
+    loginOtp:          'b'.repeat(64),
+    loginOtpExpiry:    new Date().toISOString(),
+    loginOtpAttempts:  2,
+    loginOtpSentAt:    new Date().toISOString(),
+    loginOtpSends:     [new Date().toISOString()],
+    resetToken:        'reset-token',
+    resetTokenExpiry:  new Date().toISOString(),
     ...overrides,
   };
 }
@@ -320,6 +334,25 @@ describe('POST /api/auth/login — school shape', () => {
 
     // Critical security: password hash must never be returned
     expect(res.body.user?.password).toBeUndefined();
+  });
+
+  test('user OTP hashes and other credential fields are never serialized', async () => {
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/auth/login')
+      .set('X-School-Slug', 'demo')
+      .send({ email: 'admin@demo.school', password: 'Password123!' });
+
+    const user = res.body.user ?? {};
+    for (const field of [
+      'password', 'passwordHash', 'pinHash', 'tempPassword',
+      'twoFactorSecret', 'mfaOtp', 'mfaExpiry',
+      'loginOtp', 'loginOtpExpiry', 'loginOtpAttempts', 'loginOtpSentAt', 'loginOtpSends',
+      'resetToken', 'resetTokenExpiry',
+    ]) {
+      expect(user).not.toHaveProperty(field);
+    }
+    expect(user).toHaveProperty('email', 'admin@demo.school');
   });
 });
 
