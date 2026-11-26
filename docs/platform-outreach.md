@@ -15,38 +15,30 @@
 
 ## Enable sending
 
-Sending is fail-closed. Set these environment variables before launching a campaign:
+Outreach settings are stored in the database and edited by a platform owner:
 
-```env
-OUTREACH_ENABLED=true
-OUTREACH_FROM_NAME=Msingi Schools Team
-OUTREACH_FROM_ROLE=Schools Team
-OUTREACH_REPLY_TO=sales@example.com
-OUTREACH_DAILY_LIMIT=25
-OUTREACH_LOGO_URL=https://msingi.io/api/public/platform-asset/logo
-OUTREACH_PHONE=+254 769 024 153
-OUTREACH_TRUST_LINE=Tenant-isolated records • Audited operator actions
-OUTREACH_PRICING_LINE=Starting at KSh 250 / student / term
-```
+1. Open `/platform → Outreach`.
+2. Select **Outreach settings**.
+3. Add a monitored Reply-To address, sender identity, logo, phone, daily limit and footer details.
+4. Enable **Enable outreach sending** and save.
+
+Sending remains disabled until the database setting is enabled and the Reply-To is valid. Due emails are held safely while sending is disabled.
 
 ### Configuration checks
 
 | Setting | Required for sending | Validation |
 |---|---|---|
-| `OUTREACH_ENABLED` | Yes | Exactly `true` enables sending; anything else holds due emails safely. |
-| `OUTREACH_REPLY_TO` | Yes | Must be a valid, monitored email address. |
-| `SMTP_USER` / `SMTP_PASS` | Yes | Must be configured; connectivity is proven by a test send. |
+| Database `enabled` | Yes | Enables campaign and test sends. |
+| Database `replyTo` | Yes | Must be a valid, monitored human email address. |
+| `SMTP_USER` / `SMTP_PASS` | Yes | Server-side SMTP credentials; connectivity is proven by a test send. |
 | `APP_URL` | Yes for unsubscribe | Must be the public HTTPS origin of this deployment. |
-| `OUTREACH_LOGO_URL` | Recommended | Public HTTPS URL reachable by mail clients. |
-| `OUTREACH_PHONE` | Optional | International format; converted to a `wa.me` link. |
-| `OUTREACH_DAILY_LIMIT` | Optional | 1–100; default 25. |
-| `OUTREACH_LEGAL_NAME` | Recommended | Verified legal sender name. |
-| `OUTREACH_POSTAL_ADDRESS` | Recommended | Postal address shown in the email footer. |
-| `OUTREACH_UNSUBSCRIBE_SECRET` | Optional | Falls back to `PLATFORM_JWT_SECRET`, then `JWT_SECRET`. |
+| Database `logoUrl` | Recommended | Public HTTPS URL reachable by mail clients. |
+| Database `phone` | Optional | International format; converted to a `wa.me` link. |
+| Database `dailyLimit` | Optional | 1–100; default 25. |
+| Database `legalName` / `postalAddress` | Recommended | Verified sender identity shown in the footer. |
+| `OUTREACH_UNSUBSCRIBE_SECRET` | Optional | Server-side signing secret; falls back to `PLATFORM_JWT_SECRET`, then `JWT_SECRET`. |
 
 Before enabling outreach, verify SPF, DKIM and DMARC for the sending domain, confirm the Reply-To inbox is monitored, confirm the logo and privacy page load over HTTPS, and send a test email to Gmail, Outlook and a phone mail client.
-
-`OUTREACH_REPLY_TO` must be a monitored human inbox. The feature uses the existing `SMTP_USER` / `SMTP_PASS` transport, but with an outreach display name, a human Reply-To, plain-text alternative and one-click unsubscribe headers.
 
 For a larger or sustained cold-email programme, use a dedicated outreach domain/mailbox with SPF, DKIM and DMARC rather than the transactional sender.
 
@@ -74,7 +66,7 @@ Three capabilities keep sales access narrow:
 - `outreach.manage` — import/edit leads and manage templates/campaign drafts.
 - `outreach.send` — send test emails, launch, pause, resume, cancel and retry.
 
-The built-in **Sales / Outreach** template includes all three plus read-only onboarding and school access. Existing operator roles do not gain outreach access automatically.
+The built-in **Sales / Outreach** template includes all three plus read-only onboarding and school access. Existing operator roles do not gain outreach access automatically. Only platform owners can change outreach settings.
 
 ## Sending behaviour
 

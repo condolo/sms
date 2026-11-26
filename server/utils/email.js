@@ -351,23 +351,24 @@ async function _send(to, subject, html, opts = {}) {
 /* ── Prospect outreach sender ─────────────────────────────────
    Uses the same configured SMTP account, but with a human display
    name, a monitored Reply-To and conversation-appropriate headers.
-   Actual campaign sends are fail-closed behind OUTREACH_ENABLED. */
-function outreachReady() {
-  const replyTo = String(process.env.OUTREACH_REPLY_TO || '').trim();
+   Operational settings come from platform_settings; only SMTP
+   credentials remain environment configuration. */
+function outreachReady(settings) {
+  const replyTo = String(settings?.replyTo || '').trim();
   return SMTP_READY
-    && process.env.OUTREACH_ENABLED === 'true'
+    && settings?.enabled === true
     && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(replyTo);
 }
 
-async function sendOutreach({ to, subject, html, text, fromName, replyTo, headers, onSuccess } = {}) {
-  if (!outreachReady()) {
-    const error = new Error('Outreach is disabled or OUTREACH_REPLY_TO is not configured.');
+async function sendOutreach({ to, subject, html, text, fromName, replyTo, headers, onSuccess, settings } = {}) {
+  if (!outreachReady(settings)) {
+    const error = new Error('Outreach is disabled in platform settings or the Reply-To address is invalid.');
     _logEmailFailure({ subject, to, via: 'outreach-disabled', error }).catch(() => {});
     return false;
   }
   return _send(to, subject, html, {
-    fromName: fromName || process.env.OUTREACH_FROM_NAME || 'Msingi Schools Team',
-    replyTo: replyTo || process.env.OUTREACH_REPLY_TO,
+    fromName: fromName || settings?.fromName || 'Msingi Schools Team',
+    replyTo: replyTo || settings?.replyTo,
     text,
     headers,
     onSuccess,

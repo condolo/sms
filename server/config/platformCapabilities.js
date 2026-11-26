@@ -158,6 +158,7 @@ const POLICY = [
 
   /* Outreach — prospect-school sales workspace */
   { method: 'GET',    pattern: '/outreach/config',                    cap: 'outreach.view' },
+  { method: 'PUT',    pattern: '/outreach/settings',                  cap: '*' },
   { method: 'GET',    pattern: '/outreach/leads/stats',               cap: 'outreach.view' },
   { method: 'GET',    pattern: '/outreach/leads',                     cap: 'outreach.view' },
   { method: 'POST',   pattern: '/outreach/leads',                     cap: 'outreach.manage' },

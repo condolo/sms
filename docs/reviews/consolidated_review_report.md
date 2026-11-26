@@ -30,9 +30,9 @@ The second review round found remaining blockers in permanent queue dedupe keys,
 
 ## Priority actions before production sending
 
-1. Configure `OUTREACH_REPLY_TO` as a valid, monitored human inbox.
+1. In `/platform → Outreach → Outreach settings`, configure a valid monitored Reply-To and enable sending.
 2. Confirm `APP_URL` is the public HTTPS origin so unsubscribe links work.
-3. Supply verified `OUTREACH_LEGAL_NAME` and `OUTREACH_POSTAL_ADDRESS`.
+3. In Outreach settings, supply the verified legal sender name and postal address.
 4. Confirm SPF, DKIM and DMARC for the SMTP sending domain.
 5. Confirm the hosted logo and `/privacy` page load over HTTPS.
 6. Run a test send and visually inspect Gmail web/Android, Outlook Windows and Apple Mail at 320/375/640 px.

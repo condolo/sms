@@ -76,12 +76,37 @@ const CampaignSchema = z.object({
   dailyLimit: z.coerce.number().int().min(1).max(100).optional(),
 });
 
-router.get('/config', (_req, res) => ok(res, {
-  ready: outreach.outreachReady(),
-  sender: outreach.safeSenderConfig(),
-  dailyLimit: Math.min(Math.max(parseInt(process.env.OUTREACH_DAILY_LIMIT || '25', 10) || 25, 1), 100),
-  statuses: { leads: outreach.LEAD_STATUSES, campaigns: outreach.CAMPAIGN_STATUSES, sends: outreach.SEND_STATUSES },
-}));
+const OutreachSettingsSchema = z.object({
+  enabled: z.boolean(),
+  fromName: z.string().trim().min(1).max(120),
+  fromRole: z.string().trim().min(1).max(120),
+  replyTo: z.union([z.string().trim().email().max(300), z.literal('')]),
+  dailyLimit: z.coerce.number().int().min(1).max(100),
+  logoUrl: z.string().trim().url().max(500),
+  phone: z.string().trim().max(50),
+  trustLine: z.string().trim().max(300),
+  pricingLine: z.string().trim().max(300),
+  legalName: z.string().trim().min(1).max(200),
+  postalAddress: z.string().trim().max(300),
+});
+
+router.get('/config', async (_req, res) => {
+  try {
+    const settings = await outreach.getOutreachSettings();
+    return ok(res, {
+      ready: await outreach.outreachReady(),
+      settings,
+      dailyLimit: settings.dailyLimit,
+      statuses: { leads: outreach.LEAD_STATUSES, campaigns: outreach.CAMPAIGN_STATUSES, sends: outreach.SEND_STATUSES },
+    });
+  } catch (error) { return fail(error, res, 500); }
+});
+
+router.put('/settings', actionLimiter, async (req, res) => {
+  const parsed = OutreachSettingsSchema.safeParse(req.body || {});
+  if (!parsed.success) return E.validation(res, parsed.error.issues.map(issue => ({ field: issue.path.join('.'), message: issue.message })));
+  try { return ok(res, await outreach.updateOutreachSettings({ input: parsed.data, actor: actor(req) })); } catch (error) { return fail(error, res); }
+});
 
 router.get('/leads/stats', async (_req, res) => {
   try { return ok(res, await outreach.getLeadStats()); } catch (error) { return fail(error, res, 500); }

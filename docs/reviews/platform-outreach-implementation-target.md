@@ -61,7 +61,7 @@ The feature adds:
 
 ## Known constraints
 
-- Sending is fail-closed until `OUTREACH_ENABLED=true` and `OUTREACH_REPLY_TO` are configured.
+- Sending is fail-closed until enabled in the database-backed Outreach settings with a valid monitored Reply-To.
 - Current SMTP is reused for a controlled pilot; daily limit defaults to 25.
 - Replies and bounces are recorded manually by an operator; there is no inbound-mail parser or provider webhook.
 - Opens are deliberately not tracked.

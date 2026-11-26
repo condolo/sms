@@ -15,7 +15,7 @@ const ORIGINAL_ENV = { ...process.env };
 
 beforeEach(() => {
   jest.clearAllMocks();
-  process.env = { ...ORIGINAL_ENV, PLATFORM_JWT_SECRET: 'test-platform-secret', OUTREACH_ENABLED: 'true', OUTREACH_REPLY_TO: 'sales@example.test' };
+  process.env = { ...ORIGINAL_ENV, PLATFORM_JWT_SECRET: 'test-platform-secret' };
   email.outreachReady.mockReturnValue(true);
   email.sendOutreach.mockResolvedValue(true);
 });
@@ -106,10 +106,40 @@ function setupSend({ suppressed = false, sentToday = 0, campaignStatus = 'runnin
     outreach_suppressions: { exists: jest.fn().mockResolvedValue(suppressed) },
     outreach_reservations: { exists: jest.fn().mockResolvedValue(null), countDocuments: jest.fn().mockResolvedValue(0), deleteMany: jest.fn().mockResolvedValue({ deletedCount: 0 }) },
     queue_jobs: { deleteMany: jest.fn().mockResolvedValue({ deletedCount: 0 }) },
+    platform_settings: {
+      findOne: jest.fn(() => ({ lean: jest.fn().mockResolvedValue({ id: 'global', outreach: { enabled: true, replyTo: 'sales@example.test', fromName: 'Msingi Schools Team', fromRole: 'Schools Team', dailyLimit: 25 } }) })),
+      updateOne: jest.fn().mockResolvedValue({ modifiedCount: 1 }),
+    },
   };
   platformModel.mockImplementation(name => collections[name]);
   return { send, campaign, lead, sends, collections };
 }
+
+describe('outreach settings', () => {
+  test('stores safe defaults in platform_settings on first read', async () => {
+    const updateOne = jest.fn().mockResolvedValue({ modifiedCount: 1 });
+    platformModel.mockImplementation(name => name === 'platform_settings' ? {
+      findOne: jest.fn(() => ({ lean: jest.fn().mockResolvedValue(null) })),
+      updateOne,
+    } : {});
+    const settings = await outreach.getOutreachSettings();
+    expect(settings.enabled).toBe(false);
+    expect(settings.dailyLimit).toBe(25);
+    expect(updateOne).toHaveBeenCalledWith(
+      { id: 'global' },
+      expect.objectContaining({ $set: expect.objectContaining({ outreach: expect.objectContaining({ enabled: false }) }) }),
+      { upsert: true },
+    );
+  });
+
+  test('refuses to enable sending without a valid monitored Reply-To', async () => {
+    platformModel.mockImplementation(name => name === 'platform_settings' ? {
+      findOne: jest.fn(() => ({ lean: jest.fn().mockResolvedValue({ id: 'global', outreach: { enabled: false, replyTo: '' } }) })),
+      updateOne: jest.fn(),
+    } : {});
+    await expect(outreach.updateOutreachSettings({ input: { enabled: true, replyTo: 'not-an-email' } })).rejects.toThrow(/valid monitored Reply-To/);
+  });
+});
 
 describe('outreach send worker safeguards', () => {
   test('sends once, records the outcome and advances a new lead to contacted', async () => {
