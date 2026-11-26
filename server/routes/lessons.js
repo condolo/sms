@@ -39,7 +39,7 @@ const { ok, created, paginate, parsePagination, E, fail } = require('../utils/re
 const { resolveAcademicPeriod } = require('../utils/academic-period');
 const { resolveTeacher } = require('../utils/resolveTeacher');
 const { coverageStreamFilter, leafProgress } = require('../utils/topic-coverage');
-const { buildCoverageReport, fillNames: fillCoverageNames, toCsv: coverageCsv, renderCoverageHtml, renderCoveragePdf } = require('../utils/coverage-report');
+const { buildCoverageReport, findAssignments: findCoverageAssignments, toCsv: coverageCsv, renderCoverageHtml, renderCoveragePdf } = require('../utils/coverage-report');
 const { htmlToPdfBufferOrFallback } = require('../utils/html-to-pdf');
 const AuditService = require('../services/audit');
 const { extractDocxRows, extractLessonBlocks } = require('../utils/lesson-plan-docx-parser');
@@ -1902,14 +1902,13 @@ router.get('/summary', authMiddleware, PLAN, MODGATE, async (req, res) => { // r
     const school = await _model('schools').findOne({ id: schoolId }, { academicYear: 1 }).lean();
     const academicYear = yearQ || school?.academicYear || String(new Date().getFullYear());
 
-    let assignFilter = { schoolId };
-    if (subjectId)    assignFilter.subjectId   = subjectId;
-    if (classId)      assignFilter.classId      = classId;
-    if (departmentId) assignFilter.departmentId = departmentId;
-
-    const assignments = await tenantModel('teaching_assignments', tenantContext(req)).find(assignFilter).lean();
-    // Names missing on the assignment come from their records (v5.287.0), as in the export.
-    await fillCoverageNames(tenantContext(req), schoolId, assignments);
+    // Same selection as the export (utils/coverage-report.js): names filled from
+    // their records (v5.287.0); department = the subject's current one, since
+    // assignments rarely carry it (v5.288.0). Only plain strings are used as filters.
+    const str = (v) => (typeof v === 'string' ? v.trim() : '');
+    const assignments = await findCoverageAssignments(tenantContext(req), schoolId, {
+      subjectId: str(subjectId), classId: str(classId), departmentId: str(departmentId),
+    });
 
     // Aggregate topics count per subject[-class] — grouped by classId too
     // (not just subjectId) so a Year 7-scoped topic set never inflates a
@@ -1945,6 +1944,8 @@ router.get('/summary', authMiddleware, PLAN, MODGATE, async (req, res) => { // r
         streamName:  a.streamName ?? null,
         subjectId:   a.subjectId,
         subjectName: a.subjectName,
+        departmentId:   a.departmentId ?? null,
+        departmentName: a.departmentName || null,
         totalItems,
         coveredItems,
         pct,
@@ -1956,46 +1957,56 @@ router.get('/summary', authMiddleware, PLAN, MODGATE, async (req, res) => { // r
   } catch (err) { console.error('[lessons/summary GET]', err); return E.serverError(res); }
 });
 
-/* ── GET /api/lessons/coverage-report ─ export (admin/HOD) ── v5.287.0
-   One teacher (?teacherId) or one class (?classId, optional ?streamId; a
-   stream also lists the class's whole-class assignments). ?topics=1 adds each
-   topic and subtopic. ?format=csv|pdf. Same people and same figures as
-   GET /summary (utils/coverage-report.js). Read-only; each export audited. */
+/* ── GET /api/lessons/coverage-report ─ export (admin/HOD) ── v5.287.0, v5.288.0
+   Filters, all optional and combinable (none = the whole school): teacherId,
+   classId, streamId (needs classId; also lists the class's whole-class
+   assignments), subjectId, departmentId (the subject's current department).
+   ?topics=1 adds each topic and subtopic. ?format=csv|pdf. Same people and same
+   figures as GET /summary (utils/coverage-report.js). Read-only; audited.
+   A PDF with every topic is limited to PDF_TOPIC_ROWS class-subjects: it is
+   printed by one shared Chromium on a small server; the CSV has no limit. */
+const PDF_TOPIC_ROWS = 150;
 router.get('/coverage-report', authMiddleware, PLAN, MODGATE, async (req, res) => { // rbac: isHodOrAdmin() below — real custom guard, same as GET /summary
   try {
     if (!isHodOrAdmin(req)) return E.forbidden(res, 'HOD or admin access required');
     const { schoolId, userId } = req.jwtUser;
     const str = (v) => (typeof v === 'string' ? v.trim() : '');
-    const teacherId = str(req.query.teacherId);
-    const classId   = str(req.query.classId);
-    const streamId  = str(req.query.streamId);
+    const filters = {
+      teacherId: str(req.query.teacherId), classId: str(req.query.classId), streamId: str(req.query.streamId),
+      subjectId: str(req.query.subjectId), departmentId: str(req.query.departmentId),
+    };
     const format    = str(req.query.format);
     const withTopics = req.query.topics === '1' || req.query.topics === 'true';
 
-    if (!!teacherId === !!classId) return E.validation(res, [{ field: 'teacherId', message: 'Choose either a teacher or a class' }]);
-    if (streamId && !classId)       return E.validation(res, [{ field: 'streamId', message: 'A stream needs its class' }]);
+    if (filters.streamId && !filters.classId) return E.validation(res, [{ field: 'streamId', message: 'A stream needs its class' }]);
     if (!['csv', 'pdf'].includes(format)) return E.validation(res, [{ field: 'format', message: 'format must be csv or pdf' }]);
 
     const ctx = tenantContext(req);
     const school = await _model('schools').findOne({ id: schoolId }, { name: 1, academicYear: 1 }).lean();
     const academicYear = str(req.query.academicYear) || school?.academicYear || String(new Date().getFullYear());
 
-    const { rows } = await buildCoverageReport(ctx, schoolId, { teacherId, classId, streamId, academicYear, withTopics });
-    if (!rows.length) return E.notFound(res, 'No teaching assignments match this teacher, class or stream.');
+    const { rows } = await buildCoverageReport(ctx, schoolId, { ...filters, academicYear, withTopics });
+    if (!rows.length) return E.notFound(res, 'No teaching assignments match these filters.');
+    if (format === 'pdf' && withTopics && rows.length > PDF_TOPIC_ROWS) {
+      return fail(res, 'TOO_LARGE', `This is ${rows.length} class-subjects. A PDF listing every topic can hold up to ${PDF_TOPIC_ROWS}: narrow the filters, untick List every topic, or download Excel (CSV), which has no limit.`, 422);
+    }
 
+    // Names for the heading come from the rows (every row shares a filtered value).
     const first = rows[0];
-    const streamName = streamId ? (rows.find(r => !r.wholeClass)?.streamName || '') : '';
-    const scopeLabel = teacherId
-      ? `Teacher: ${first.teacherName}`
-      : `Class: ${first.className}${streamId ? ` · ${streamName || 'Stream'}` : ' (all streams)'}`;
-    const slug = (teacherId ? first.teacherName : `${first.className}${streamName ? `-${streamName}` : ''}`)
-      .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'report';
+    const parts = [];
+    if (filters.departmentId) parts.push(`Department: ${first.departmentName || '(department not found)'}`);
+    if (filters.classId) parts.push(`Class: ${first.className}${filters.streamId ? ` · ${rows.find(r => !r.wholeClass)?.streamName || 'Stream'}` : ''}`);
+    if (filters.subjectId) parts.push(`Subject: ${first.subjectName}`);
+    if (filters.teacherId) parts.push(`Teacher: ${first.teacherName}`);
+    const scopeLabel = parts.length ? parts.join(' · ') : 'Whole school';
+    const slug = scopeLabel.replace(/(Department|Class|Subject|Teacher): /g, '')
+      .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80) || 'report';
     const filename = `lesson-coverage-${slug}-${academicYear.replace(/[^0-9A-Za-z-]+/g, '-')}.${format}`;
 
     AuditService.log({
       action: 'lessons.coverage_exported', actor: req.jwtUser, schoolId,
-      target: { type: teacherId ? 'teacher' : 'class', id: teacherId || classId, label: scopeLabel },
-      details: { format, withTopics, streamId: streamId || null, academicYear, rows: rows.length },
+      target: { type: 'coverage_report', id: filters.teacherId || filters.classId || filters.subjectId || filters.departmentId || schoolId, label: scopeLabel },
+      details: { format, withTopics, ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v)), academicYear, rows: rows.length },
       req,
     });
 
@@ -2006,7 +2017,7 @@ router.get('/coverage-report', authMiddleware, PLAN, MODGATE, async (req, res) =
     }
 
     const requester = await tenantModel('users', ctx).findOne({ schoolId, id: userId }).select('name').lean().catch(() => null);
-    const data = { by: teacherId ? 'teacher' : 'class', school, scopeLabel, academicYear, rows, withTopics, generatedByName: requester?.name || null };
+    const data = { school, scopeLabel, academicYear, rows, withTopics, generatedByName: requester?.name || null };
     const pdf = await htmlToPdfBufferOrFallback(renderCoverageHtml(data), () => renderCoveragePdf(data));
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);

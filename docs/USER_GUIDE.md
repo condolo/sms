@@ -326,11 +326,11 @@ Navigate to **Timetable** to build the weekly schedule.
 
 ### Lesson coverage: export and share (*2026-11*)
 
-Admins, deputies and heads of department: **Lessons → Overview → Export coverage**.
-- Choose **By teacher** (every class and subject they teach) or **By class / stream** (all streams, or one stream; a stream also lists subjects taught to the whole class).
-- Tick **List every topic** to include each topic and subtopic with Covered / Not yet and the date it was covered.
-- **PDF** to print or send; **Excel (CSV)** opens in Excel or Google Sheets.
-- The figures are the same as the Overview table. A subject with no topics added shows 0 / 0. Marks given to individual students are not counted as class coverage.
+Admins, deputies and heads of department: **Lessons → Overview**.
+- **Filter on screen** by **Department**, **Class**, **Stream** (after choosing a class), **Subject** and **Teacher**, alone or together (e.g. Sciences in Form 2). The table shows only those rows, with the total covered. A stream also shows the subjects taught to the whole class. The department is the subject's department in Subjects & Departments.
+- **Export** downloads what the filters show; with no filter, the **whole school**. Tick **List every topic** to include each topic and subtopic with Covered / Not yet and the date it was covered. **PDF** to print or send; **Excel (CSV)** opens in Excel or Google Sheets. A PDF with every topic holds up to 150 rows; use CSV for more.
+- The search box narrows the table only, not the export.
+- The figures are the same on screen and in the export. A subject with no topics added shows 0 / 0. Marks given to individual students are not counted as class coverage.
 
 ## 7. Attendance
 

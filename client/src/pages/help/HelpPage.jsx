@@ -801,7 +801,7 @@ const SECTIONS = [
       },
       {
         q: 'Can leaders see the syllabus topics and lesson plans teachers have added?',
-        a: 'Yes. Admins, deputies and heads of department open Lessons → Overview. Each row is one teacher, class, stream and subject. Click a row to see the topics for it, with coverage. Click "View plans" to see its lesson plans. Both views are read-only for leaders. Topics belong to a class and are shared by the class\'s streams. To share progress, use Export coverage at the top: one teacher, or one class or stream, as PDF or Excel (CSV), with every topic and the date covered if you tick List every topic.',
+        a: 'Yes. Admins, deputies and heads of department open Lessons → Overview. Each row is one teacher, class, stream and subject. Click a row to see the topics for it, with coverage. Click "View plans" to see its lesson plans. Both views are read-only for leaders. Topics belong to a class and are shared by the class\'s streams. Filter by department, class, stream, subject or teacher to see just those rows on screen. Export downloads what the filters show (the whole school with none), as PDF or Excel (CSV), with every topic and the date covered if you tick List every topic.',
       },
       {
         q: 'Do teachers only see their assigned classes in Lessons?',

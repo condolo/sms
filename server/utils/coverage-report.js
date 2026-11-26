@@ -26,22 +26,27 @@ const CLASS_LEVEL = Object.freeze({ studentId: { $exists: false } });
 const topicClassPart = (classId) => (classId ? { $or: [{ classId }, { classId: { $exists: false } }] } : {});
 
 /**
- * Assignments saved without a teacher, class, subject or stream name (imports,
- * seed data) are named from their own records, the same way GET
- * /teaching-assignments names teachers (v5.270.0). A saved name is never
- * replaced. Best-effort: a failed lookup leaves the name blank, never fails.
+ * Fills, in place, what an assignment needs for a report:
+ *   • a missing teacher, class, subject or stream name, from its own record
+ *     (the same way GET /teaching-assignments names teachers, v5.270.0). A
+ *     saved name is never replaced;
+ *   • departmentId / departmentName (v5.288.0): the subject's CURRENT
+ *     department (Subjects & Departments). Assignments copy it only when
+ *     created, so it is often missing or out of date there; the saved copy is
+ *     used only when the subject has no department.
+ * Best-effort: a failed lookup leaves a name blank, never fails the request.
  */
 async function fillNames(ctx, schoolId, docs) {
   const missing = (idKey, nameKey) => [...new Set(docs.filter(d => !d[nameKey] && d[idKey]).map(d => d[idKey]))];
   const tIds = missing('teacherId', 'teacherName');
   const cIds = missing('classId', 'className');
-  const sIds = missing('subjectId', 'subjectName');
   const stIds = missing('streamId', 'streamName');
+  const subjectIds = [...new Set(docs.map(d => d.subjectId).filter(Boolean))];
   try {
     const [staff, classes, subjects, streams] = await Promise.all([
       tIds.length ? tenantModel('teachers', ctx).find({ schoolId, $or: [{ userId: { $in: tIds } }, { id: { $in: tIds } }] }).select('id userId title firstName lastName').lean() : [],
       cIds.length ? tenantModel('classes', ctx).find({ schoolId, id: { $in: cIds } }).select('id name').lean() : [],
-      sIds.length ? tenantModel('subjects', ctx).find({ schoolId, id: { $in: sIds } }).select('id name').lean() : [],
+      subjectIds.length ? tenantModel('subjects', ctx).find({ schoolId, id: { $in: subjectIds } }).select('id name departmentId').lean() : [],
       stIds.length ? tenantModel('streams', ctx).find({ schoolId, id: { $in: stIds } }).select('id name').lean() : [],
     ]);
     const teacherOf = new Map();
@@ -51,30 +56,51 @@ async function fillNames(ctx, schoolId, docs) {
       if (t.id) teacherOf.set(t.id, n);
     }
     const nameMap = (list) => new Map((list || []).map(x => [x.id, x.name]));
+    const subjectOf = new Map((subjects || []).map(s => [s.id, s]));
     const maps = [['teacherId', 'teacherName', teacherOf], ['classId', 'className', nameMap(classes)], ['subjectId', 'subjectName', nameMap(subjects)], ['streamId', 'streamName', nameMap(streams)]];
-    for (const d of docs) for (const [idKey, nameKey, m] of maps) if (!d[nameKey] && m.get(d[idKey])) d[nameKey] = m.get(d[idKey]);
+    for (const d of docs) {
+      for (const [idKey, nameKey, m] of maps) if (!d[nameKey] && m.get(d[idKey])) d[nameKey] = m.get(d[idKey]);
+      d.departmentId = subjectOf.get(d.subjectId)?.departmentId || d.departmentId || null;
+    }
+    const deptIds = [...new Set(docs.map(d => d.departmentId).filter(Boolean))];
+    const depts = deptIds.length ? nameMap(await tenantModel('departments', ctx).find({ schoolId, id: { $in: deptIds } }).select('id name').lean()) : new Map();
+    for (const d of docs) d.departmentName = (d.departmentId && depts.get(d.departmentId)) || '';
   } catch (err) {
     console.error('[coverage-report] names (ignored):', err.message);
   }
   return docs;
 }
 
-/** Assignments a report covers. A stream report also lists the class's whole-class assignments. */
-function assignmentFilter(schoolId, { teacherId, classId, streamId }) {
-  if (teacherId) return { schoolId, teacherId };
-  const f = { schoolId, classId };
-  if (streamId) f.$or = [{ streamId }, { streamId: null }, { streamId: '' }];
+/**
+ * Database filter for the assignments a report covers. Every filter is
+ * optional and they combine; none = the whole school. A stream also keeps the
+ * class's whole-class assignments (their teacher teaches that stream too).
+ * Department is applied after fillNames (keepDepartment), since it comes from
+ * the subject.
+ */
+function assignmentFilter(schoolId, { teacherId, classId, streamId, subjectId } = {}) {
+  const f = { schoolId };
+  if (teacherId) f.teacherId = teacherId;
+  if (classId)   f.classId = classId;
+  if (subjectId) f.subjectId = subjectId;
+  if (streamId)  f.$or = [{ streamId }, { streamId: null }, { streamId: '' }];
   return f;
+}
+const keepDepartment = (departmentId) => (a) => !departmentId || a.departmentId === departmentId;
+
+/** Assignments for these filters, named, with their department (shared with GET /summary). */
+async function findAssignments(ctx, schoolId, filters = {}) {
+  const docs = await tenantModel('teaching_assignments', ctx).find(assignmentFilter(schoolId, filters)).lean();
+  await fillNames(ctx, schoolId, docs);
+  return docs.filter(keepDepartment(filters.departmentId));
 }
 
 /**
  * @returns {Promise<{ rows: object[], academicYear: string }>}
- *   rows: { teacherName, className, streamName, wholeClass, subjectName, totalItems, coveredItems, pct, topics? }
+ *   rows: { teacherName, className, streamName, wholeClass, subjectName, departmentName, totalItems, coveredItems, pct, topics? }
  */
-async function buildCoverageReport(ctx, schoolId, { teacherId, classId, streamId, academicYear, withTopics }) {
-  const assignments = await tenantModel('teaching_assignments', ctx)
-    .find(assignmentFilter(schoolId, { teacherId, classId, streamId })).lean();
-  await fillNames(ctx, schoolId, assignments);
+async function buildCoverageReport(ctx, schoolId, { teacherId, classId, streamId, subjectId, departmentId, academicYear, withTopics }) {
+  const assignments = await findAssignments(ctx, schoolId, { teacherId, classId, streamId, subjectId, departmentId });
 
   const topicsFor = {};
   await Promise.all([...new Set(assignments.map(a => `${a.subjectId}__${a.classId}`))].map(async key => {
@@ -98,6 +124,7 @@ async function buildCoverageReport(ctx, schoolId, { teacherId, classId, streamId
       streamName:  a.streamName || '',
       wholeClass:  !a.streamId,
       subjectName: a.subjectName || '(subject not found)',
+      departmentName: a.departmentName || '',
       totalItems, coveredItems,
       pct: totalItems > 0 ? Math.round((coveredItems / totalItems) * 100) : 0,
     };
@@ -119,9 +146,9 @@ async function buildCoverageReport(ctx, schoolId, { teacherId, classId, streamId
     return row;
   }));
 
-  rows.sort((x, y) => (teacherId
-    ? x.className.localeCompare(y.className) || x.streamName.localeCompare(y.streamName) || x.subjectName.localeCompare(y.subjectName)
-    : x.subjectName.localeCompare(y.subjectName) || x.streamName.localeCompare(y.streamName) || x.teacherName.localeCompare(y.teacherName)));
+  // Class, then stream (whole class first), subject, teacher: the same order for every filter.
+  rows.sort((x, y) => x.className.localeCompare(y.className, undefined, { numeric: true })
+    || x.streamName.localeCompare(y.streamName) || x.subjectName.localeCompare(y.subjectName) || x.teacherName.localeCompare(y.teacherName));
 
   return { rows, academicYear };
 }
@@ -146,12 +173,12 @@ function csvCell(v) {
 function toCsv({ rows, academicYear }, { withTopics }) {
   const lines = [];
   if (!withTopics) {
-    lines.push(['Teacher', 'Class', 'Stream', 'Subject', 'Items covered', 'Total items', 'Coverage %', 'Academic year']);
-    for (const r of rows) lines.push([r.teacherName, r.className, streamLabel(r), r.subjectName, r.coveredItems, r.totalItems, r.totalItems ? r.pct : '', academicYear]);
+    lines.push(['Teacher', 'Class', 'Stream', 'Subject', 'Department', 'Items covered', 'Total items', 'Coverage %', 'Academic year']);
+    for (const r of rows) lines.push([r.teacherName, r.className, streamLabel(r), r.subjectName, r.departmentName, r.coveredItems, r.totalItems, r.totalItems ? r.pct : '', academicYear]);
   } else {
-    lines.push(['Teacher', 'Class', 'Stream', 'Subject', 'Topic', 'Subtopic', 'Covered', 'Date covered', 'Subject coverage %', 'Academic year']);
+    lines.push(['Teacher', 'Class', 'Stream', 'Subject', 'Department', 'Topic', 'Subtopic', 'Covered', 'Date covered', 'Subject coverage %', 'Academic year']);
     for (const r of rows) {
-      const base = [r.teacherName, r.className, streamLabel(r), r.subjectName];
+      const base = [r.teacherName, r.className, streamLabel(r), r.subjectName, r.departmentName];
       if (!r.topics.length) lines.push([...base, '(no topics added)', '', '', '', '', academicYear]);
       for (const t of r.topics) {
         if (!t.items) lines.push([...base, t.title, '', t.covered ? 'Yes' : 'No', dateOf(t.coveredAt), r.pct, academicYear]);
@@ -176,16 +203,17 @@ const NOTE = 'Same figures as Lessons → Overview. Each subtopic counts as one 
   + 'A tick for the whole class counts for every stream; a stream\'s own tick counts for that stream only. '
   + 'Marks for individual students are not included.';
 
-function renderCoverageHtml({ by, school, scopeLabel, academicYear, rows, withTopics, generatedByName, generatedAt = new Date() }) {
+function renderCoverageHtml({ school, scopeLabel, academicYear, rows, withTopics, generatedByName, generatedAt = new Date() }) {
   const schoolName = school?.name || 'School';
   const tot = totalsOf(rows);
-  const byTeacher = by === 'teacher';
 
   const summaryRows = rows.map(r => `
     <tr>
-      <td style="${tdS}">${esc(byTeacher ? r.className : r.subjectName)}</td>
+      <td style="${tdS}">${esc(r.className)}</td>
       <td style="${tdS}">${esc(streamLabel(r))}</td>
-      <td style="${tdS}">${esc(byTeacher ? r.subjectName : r.teacherName)}</td>
+      <td style="${tdS}">${esc(r.subjectName)}</td>
+      <td style="${tdS}color:#64748b">${esc(r.departmentName)}</td>
+      <td style="${tdS}">${esc(r.teacherName)}</td>
       <td style="${tdR}">${r.coveredItems} / ${r.totalItems}</td>
       <td style="${tdR}font-weight:700">${r.totalItems ? `${r.pct}%` : '—'}</td>
     </tr>`).join('');
@@ -229,7 +257,7 @@ function renderCoverageHtml({ by, school, scopeLabel, academicYear, rows, withTo
   </div>
   <p style="font-size:13px;margin:0 0 10px"><b>Overall: ${tot.covered} of ${tot.total} items covered${tot.total ? ` (${tot.pct}%)` : ''}</b> across ${rows.length} class-subject${rows.length === 1 ? '' : 's'}.</p>
   <table style="font-size:10.5px">
-    <thead><tr><th style="${thS}">${byTeacher ? 'Class' : 'Subject'}</th><th style="${thS}">Stream</th><th style="${thS}">${byTeacher ? 'Subject' : 'Teacher'}</th><th style="${thS};text-align:right">Covered / items</th><th style="${thS};text-align:right">Coverage</th></tr></thead>
+    <thead><tr><th style="${thS}">Class</th><th style="${thS}">Stream</th><th style="${thS}">Subject</th><th style="${thS}">Department</th><th style="${thS}">Teacher</th><th style="${thS};text-align:right">Covered / items</th><th style="${thS};text-align:right">Coverage</th></tr></thead>
     <tbody>${summaryRows}</tbody>
   </table>
   ${detail}
@@ -278,4 +306,4 @@ function renderCoveragePdf({ school, scopeLabel, academicYear, rows, withTopics,
   return done.then(() => Buffer.concat(bufs));
 }
 
-module.exports = { buildCoverageReport, fillNames, toCsv, renderCoverageHtml, renderCoveragePdf, csvCell, assignmentFilter };
+module.exports = { buildCoverageReport, findAssignments, fillNames, toCsv, renderCoverageHtml, renderCoveragePdf, csvCell, assignmentFilter };

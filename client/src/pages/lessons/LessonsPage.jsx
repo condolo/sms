@@ -1833,13 +1833,30 @@ function LessonPlansTab() {
 }
 
 /* ── Admin: Overview tab ─────────────────────────────────────── */
+/* Filters (v5.288.0): teacher, class, stream, subject and department narrow
+   the table on screen, and Export downloads exactly what they select; no
+   filter = the whole school. The same rules as the server
+   (utils/coverage-report.js): a stream also shows the class's whole-class
+   subjects; department is the subject's current department. Each list offers
+   only values that exist with the other filters chosen. */
+const NO_FILTERS = { teacherId: '', classId: '', streamId: '', subjectId: '', departmentId: '' };
+
+function rowMatches(r, f, skip) {
+  if (skip !== 'teacherId' && f.teacherId && r.teacherId !== f.teacherId) return false;
+  if (skip !== 'classId' && f.classId && r.classId !== f.classId) return false;
+  if (skip !== 'streamId' && f.streamId && r.streamId && r.streamId !== f.streamId) return false;
+  if (skip !== 'subjectId' && f.subjectId && r.subjectId !== f.subjectId) return false;
+  if (skip !== 'departmentId' && f.departmentId && r.departmentId !== f.departmentId) return false;
+  return true;
+}
+
 function OverviewTab() {
   const [search, setSearch] = useState('');
+  const [filters, setFilters] = useState(NO_FILTERS);
   // Opening a row shows the same topic list a teacher sees, read-only, so an
   // admin can check what teachers actually added (not only the progress %).
   const [drill, setDrill] = useState(null);
   const { isAdmin } = useRole();
-  const school  = useAuthStore(s => s.session?.school);
 
   const { data: resp, isLoading } = useQuery({
     queryKey: ['lessons', 'summary'],
@@ -1849,16 +1866,44 @@ function OverviewTab() {
 
   const rows = resp?.data ?? [];
 
+  const options = useMemo(() => {
+    const collect = (key, idKey, nameKey, fallback) => {
+      const m = new Map();
+      rows.filter(r => rowMatches(r, filters, key)).forEach(r => {
+        if (r[idKey] && !m.has(r[idKey])) m.set(r[idKey], { id: r[idKey], name: r[nameKey] || fallback });
+      });
+      return [...m.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+    };
+    return {
+      teachers:    collect('teacherId', 'teacherId', 'teacherName', '(no name)'),
+      classes:     collect('classId', 'classId', 'className', '(class not found)'),
+      streams:     filters.classId ? collect('streamId', 'streamId', 'streamName', '(no name)') : [],
+      subjects:    collect('subjectId', 'subjectId', 'subjectName', '(no name)'),
+      departments: collect('departmentId', 'departmentId', 'departmentName', '(department not found)'),
+    };
+  }, [rows, filters]);
+
+  const filteredByFilters = useMemo(() => rows.filter(r => rowMatches(r, filters)), [rows, filters]);
   const filtered = useMemo(() => {
-    if (!search) return rows;
+    if (!search) return filteredByFilters;
     const s = search.toLowerCase();
-    return rows.filter(r =>
+    return filteredByFilters.filter(r =>
       r.teacherName?.toLowerCase().includes(s) ||
       r.className?.toLowerCase().includes(s) ||
       r.streamName?.toLowerCase().includes(s) ||
-      r.subjectName?.toLowerCase().includes(s)
+      r.subjectName?.toLowerCase().includes(s) ||
+      r.departmentName?.toLowerCase().includes(s)
     );
-  }, [rows, search]);
+  }, [filteredByFilters, search]);
+
+  const totals = useMemo(() => {
+    const total = filtered.reduce((n, r) => n + r.totalItems, 0);
+    const covered = filtered.reduce((n, r) => n + r.coveredItems, 0);
+    return { total, covered, pct: total ? Math.round((covered / total) * 100) : 0 };
+  }, [filtered]);
+
+  const setFilter = (key, value) => setFilters(f => ({ ...f, [key]: value, ...(key === 'classId' ? { streamId: '' } : {}) }));
+  const anyFilter = Object.values(filters).some(Boolean);
 
   function pctBadge(pct) {
     if (pct >= 80) return 'bg-emerald-50 text-emerald-700 border-emerald-200';
@@ -1872,16 +1917,52 @@ function OverviewTab() {
       : <DrillDown item={drill.item} onBack={() => setDrill(null)} canManage={false} />;
   }
 
+  const sel = 'text-sm px-3 py-2 border border-slate-200 rounded-lg bg-white min-w-[10rem] max-w-[14rem]';
+  const filter = (label, k, list, all) => (
+    <label className="flex flex-col gap-1 text-xs text-slate-500">
+      {label}
+      <select value={filters[k]} onChange={e => setFilter(k, e.target.value)} className={sel}>
+        <option value="">{all}</option>
+        {list.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+      </select>
+    </label>
+  );
+
   return (
     <div className="space-y-4">
-      {rows.length > 0 && <CoverageExport rows={rows} />}
-      <div className="relative max-w-sm">
-        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-        <input
-          value={search} onChange={e => setSearch(e.target.value)}
-          placeholder="Search teacher, class or subject…"
-          className="w-full text-sm pl-9 pr-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/10"
-        />
+      {rows.length > 0 && (
+        <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
+          <div className="flex flex-wrap items-end gap-2">
+            {filter('Department', 'departmentId', options.departments, 'All departments')}
+            {filter('Class', 'classId', options.classes, 'All classes')}
+            {filters.classId && options.streams.length > 0 && filter('Stream', 'streamId', options.streams, 'All streams')}
+            {filter('Subject', 'subjectId', options.subjects, 'All subjects')}
+            {filter('Teacher', 'teacherId', options.teachers, 'All teachers')}
+            {anyFilter && (
+              <button type="button" onClick={() => setFilters(NO_FILTERS)} className="text-xs font-medium text-indigo-600 hover:text-indigo-800 px-2 py-2">
+                Clear filters
+              </button>
+            )}
+          </div>
+          {filters.streamId && <p className="text-[11px] text-slate-400">A stream also shows the subjects taught to the whole class.</p>}
+          <CoverageExport filters={filters} count={filteredByFilters.length} />
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="relative w-full max-w-sm">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Search teacher, class, subject or department…"
+            className="w-full text-sm pl-9 pr-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+          />
+        </div>
+        {filtered.length > 0 && (
+          <p className="text-xs text-slate-500">
+            {filtered.length} of {rows.length} rows · <span className="font-semibold text-slate-700">{totals.covered} of {totals.total} items covered{totals.total ? ` (${totals.pct}%)` : ''}</span>
+          </p>
+        )}
       </div>
 
       {isLoading ? (
@@ -1892,13 +1973,14 @@ function OverviewTab() {
           <p className="text-sm font-medium">{rows.length === 0 ? 'No teaching assignments' : 'No matches'}</p>
         </div>
       ) : (
-        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+        <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-100">
                 <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Teacher</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Class</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Subject</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Department</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Coverage</th>
                 <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Progress</th>
                 <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Lesson plans</th>
@@ -1910,6 +1992,7 @@ function OverviewTab() {
                   <td className="px-4 py-3 font-medium text-slate-800">{r.teacherName}</td>
                   <td className="px-4 py-3 text-slate-600">{r.className}{r.streamName ? ` · ${r.streamName}` : ''}</td>
                   <td className="px-4 py-3 text-slate-600">{r.subjectName}</td>
+                  <td className="px-4 py-3 text-slate-500 text-xs">{r.departmentName || '—'}</td>
                   <td className="px-4 py-3 text-slate-500 text-xs">
                     {r.coveredItems}/{r.totalItems} items
                   </td>
@@ -1947,51 +2030,26 @@ function OverviewTab() {
   );
 }
 
-/* ── Export coverage (v5.287.0) ──────────────────────────────────
-   One teacher, or one class (all streams or one stream), as PDF or a CSV
-   that opens in Excel. Choices come from the Overview rows, so only teachers
-   and classes with teaching assignments are offered. Figures are the same
-   as the table (GET /lessons/coverage-report uses the same rules). */
-function CoverageExport({ rows }) {
-  const [by, setBy]             = useState('teacher');
-  const [teacherId, setTeacher] = useState('');
-  const [classId, setClassId]   = useState('');
-  const [streamId, setStream]   = useState('');
-  const [topics, setTopics]     = useState(true);
-  const [busy, setBusy]         = useState('');
-  const [error, setError]       = useState('');
+/* ── Export coverage (v5.287.0, filters v5.288.0) ────────────────
+   Downloads exactly what the Overview filters select (none = whole school),
+   as PDF or a CSV that opens in Excel. The search box narrows the table only.
+   Figures are the same as the table (GET /lessons/coverage-report). */
+const PDF_TOPIC_ROWS = 150;   // same limit as the server
 
-  const byName = (a, b) => a.name.localeCompare(b.name);
-  const teachers = useMemo(() => {
-    const m = new Map();
-    rows.forEach(r => { if (r.teacherId && !m.has(r.teacherId)) m.set(r.teacherId, { id: r.teacherId, name: r.teacherName || '(no name)' }); });
-    return [...m.values()].sort(byName);
-  }, [rows]);
-  const classes = useMemo(() => {
-    const m = new Map();
-    rows.forEach(r => { if (r.classId && !m.has(r.classId)) m.set(r.classId, { id: r.classId, name: r.className || '(no name)' }); });
-    return [...m.values()].sort(byName);
-  }, [rows]);
-  const streams = useMemo(() => {
-    const m = new Map();
-    rows.forEach(r => { if (r.classId === classId && r.streamId && !m.has(r.streamId)) m.set(r.streamId, { id: r.streamId, name: r.streamName || '(no name)' }); });
-    return [...m.values()].sort(byName);
-  }, [rows, classId]);
-
-  const ready = by === 'teacher' ? !!teacherId : !!classId;
+function CoverageExport({ filters, count }) {
+  const [topics, setTopics] = useState(true);
+  const [busy, setBusy]     = useState('');
+  const [error, setError]   = useState('');
+  const anyFilter = Object.values(filters).some(Boolean);
+  const pdfTooBig = topics && count > PDF_TOPIC_ROWS;
 
   async function download(format) {
     setError('');
     setBusy(format);
-    const params = by === 'teacher'
-      ? { teacherId, topics: topics ? '1' : '', format }
-      : { classId, streamId, topics: topics ? '1' : '', format };
-    const label = by === 'teacher'
-      ? teachers.find(t => t.id === teacherId)?.name
-      : [classes.find(c => c.id === classId)?.name, streams.find(s => s.id === streamId)?.name].filter(Boolean).join('-');
-    const slug = (label || 'report').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const params = { ...filters, topics: topics ? '1' : '', format };
+    const stamp = new Date().toISOString().slice(0, 10);
     try {
-      await lessonsApi.coverageReport(params, `lesson-coverage-${slug}.${format}`);
+      await lessonsApi.coverageReport(params, `lesson-coverage-${anyFilter ? 'filtered' : 'whole-school'}-${stamp}.${format}`);
     } catch (err) {
       setError(err?.message ?? 'Download failed');
     } finally {
@@ -1999,64 +2057,29 @@ function CoverageExport({ rows }) {
     }
   }
 
-  const sel = 'text-sm px-3 py-2 border border-slate-200 rounded-lg bg-white min-w-[11rem]';
   return (
-    <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
-      <div>
-        <p className="text-sm font-semibold text-slate-800">Export coverage</p>
-        <p className="text-xs text-slate-500">Download one teacher's or one class's progress to share. Same figures as the table below.</p>
-      </div>
-      <div className="flex flex-wrap items-end gap-2">
-        <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
-          {[['teacher', 'By teacher'], ['class', 'By class / stream']].map(([k, l]) => (
-            <button key={k} type="button" onClick={() => { setBy(k); setError(''); }}
-              className={`px-3 py-2 ${by === k ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>{l}</button>
-          ))}
-        </div>
-        {by === 'teacher' ? (
-          <label className="flex flex-col gap-1 text-xs text-slate-500">
-            Teacher
-            <select value={teacherId} onChange={e => setTeacher(e.target.value)} className={sel}>
-              <option value="">Choose a teacher…</option>
-              {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
-          </label>
-        ) : (
-          <>
-            <label className="flex flex-col gap-1 text-xs text-slate-500">
-              Class
-              <select value={classId} onChange={e => { setClassId(e.target.value); setStream(''); }} className={sel}>
-                <option value="">Choose a class…</option>
-                {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </label>
-            {streams.length > 0 && (
-              <label className="flex flex-col gap-1 text-xs text-slate-500">
-                Stream
-                <select value={streamId} onChange={e => setStream(e.target.value)} className={sel}>
-                  <option value="">All streams</option>
-                  {streams.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
-              </label>
-            )}
-          </>
-        )}
-        <label className="flex items-center gap-2 text-xs text-slate-600 py-2">
+    <div className="border-t border-slate-100 pt-3 space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-xs text-slate-600 mr-1">
+          <span className="font-semibold text-slate-800">Export</span> {anyFilter ? `what the filters show (${count} rows)` : `the whole school (${count} rows)`}
+        </p>
+        <label className="flex items-center gap-2 text-xs text-slate-600">
           <input type="checkbox" checked={topics} onChange={e => setTopics(e.target.checked)} />
           List every topic
         </label>
-        <button type="button" disabled={!ready || !!busy} onClick={() => download('pdf')}
+        <button type="button" disabled={!count || !!busy || pdfTooBig} onClick={() => download('pdf')}
           className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white text-xs font-medium px-3 py-2 rounded-lg">
           {busy === 'pdf' ? <Loader2 size={13} className="animate-spin" /> : <FileText size={13} />} PDF
         </button>
-        <button type="button" disabled={!ready || !!busy} onClick={() => download('csv')}
+        <button type="button" disabled={!count || !!busy} onClick={() => download('csv')}
           className="flex items-center gap-1.5 bg-white border border-slate-200 hover:bg-slate-50 disabled:opacity-40 text-slate-700 text-xs font-medium px-3 py-2 rounded-lg">
           {busy === 'csv' ? <Loader2 size={13} className="animate-spin" /> : <FileText size={13} />} Excel (CSV)
         </button>
       </div>
-      {by === 'class' && streamId && (
-        <p className="text-[11px] text-slate-400">A stream's export also lists subjects taught to the whole class.</p>
+      {pdfTooBig && (
+        <p className="text-[11px] text-amber-700">A PDF listing every topic can hold up to {PDF_TOPIC_ROWS} rows. Narrow the filters, untick List every topic, or use Excel (CSV).</p>
       )}
+      <p className="text-[11px] text-slate-400">Exports follow the filters above; the search box narrows the table only.</p>
       {error && <p className="text-xs text-red-600">{error}</p>}
     </div>
   );

@@ -6,6 +6,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.288.0] - 2026-11-26 - feat(lessons): filter coverage on screen; export the whole school, a department or a subject
+
+Asked for by a school: see coverage per class, subject or department on screen without downloading, and download the whole school.
+
+### Added
+- **Lessons → Overview filters**: Department, Class, Stream (once a class is chosen), Subject and Teacher. They combine (e.g. Sciences + Form 2). The table shows only the matching rows, with a total ("9 of 16 items covered, 56%"). Each list offers only values that exist with the other filters chosen. A **Department** column is added.
+- **Export follows the filters**: with none, it is the **whole school**. PDF or Excel (CSV), with or without every topic. The search box narrows the table only.
+- A PDF listing every topic is limited to 150 class-subjects (it is printed by one shared browser on a small server); the page says so and offers CSV, which has no limit.
+
+### Fixed
+- **The Overview's department filter used the department copied onto each teaching assignment when it was created**, which most assignments don't have (75 of 76 on the demo school), so it found almost nothing. The department now comes from the subject's current department (Subjects & Departments); the copy is used only when the subject has none.
+- Overview filters that aren't plain text are ignored instead of reaching the database query.
+
+No data migration. Nothing is written except the export audit entry.
+
+Files: `coverage-report.js` (`findAssignments`, combinable `assignmentFilter`, department in `fillNames`, Department column); `lessons.js` (`/summary` uses `findAssignments` and returns `departmentId`/`departmentName`; `/coverage-report` takes any mix of filters); `LessonsPage.jsx` (filter bar, `CoverageExport` follows it). Tests: `coverage-report.test.js` (now 18). Checked on a local copy of the demo school: 41 filter combinations (whole school, each department, class, subject and teacher, and a mix) give the same rows and totals on screen and in the export.
+
+---
+
 ## [v5.287.0] - 2026-11-26 - feat(lessons): export coverage per teacher or per class / stream
 
 Asked for by schools: share lesson coverage progress outside the platform.

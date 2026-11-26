@@ -86,6 +86,15 @@ function seed() {
   mockDb = createFakeDb({
     schools: [{ id: S, name: 'Test School', academicYear: '2026' }, { id: 'sch_2', name: 'Other', academicYear: '2026' }],
     users: [{ id: 'u_admin', schoolId: S, name: 'Head Teacher' }],
+    subjects: [
+      { id: 'math', schoolId: S, name: 'Mathematics', departmentId: 'sci' },
+      { id: 'eng', schoolId: S, name: 'English' },                                   // no department on the subject
+      { id: 'math', schoolId: 'sch_2', name: 'Maths', departmentId: 'lang' },
+    ],
+    departments: [
+      { id: 'sci', schoolId: S, name: 'Sciences' }, { id: 'lang', schoolId: S, name: 'Languages' }, { id: 'old', schoolId: S, name: 'Old dept' },
+      { id: 'sci', schoolId: 'sch_2', name: 'Wrong school' },
+    ],
     syllabus_topics: [
       { id: 'm1', schoolId: S, subjectId: 'math', classId: 'f1', academicYear: '2026', title: 'Algebra', order: 1, subtopics: [{ id: 'a', title: 'Expressions' }, { id: 'b', title: 'Equations' }] },
       { id: 'm2', schoolId: S, subjectId: 'math', classId: 'f1', academicYear: '2026', title: 'Geometry', order: 2, subtopics: [] },
@@ -105,9 +114,9 @@ function seed() {
       tick('x1', { schoolId: 'sch_2', topicId: 'x1' }),
     ],
     teaching_assignments: [
-      asg('a1', 'u_red', 'f1', 'math', 'red'),
+      asg('a1', 'u_red', 'f1', 'math', 'red', { departmentId: 'old' }),   // stale copy: the subject says Sciences
       asg('a2', 'u_blue', 'f1', 'math', 'blue'),
-      asg('a3', 'u_red', 'f1', 'eng', null),                // whole-class English, same teacher
+      asg('a3', 'u_red', 'f1', 'eng', null, { departmentId: 'lang' }), // whole-class English; subject has no department, so its saved one is used
       asg('a4', 'u_red', 'f2', 'math', null),
       { ...asg('ax', 'u_red', 'f1', 'math', 'red'), id: 'ax', schoolId: 'sch_2' },
     ],
@@ -141,10 +150,8 @@ describe('who may export', () => {
     expect((await csv(ADMIN, { teacherId: 'u_red' })).status).toBe(200);
   });
 
-  test('bad requests are refused before anything is read', async () => {
+  test('bad requests are refused before anything is read (a stream without its class, an unknown format)', async () => {
     const q = (query) => api(ADMIN).get('/api/lessons/coverage-report').query(query);
-    expect((await q({ format: 'csv' })).status).toBe(422);
-    expect((await q({ format: 'csv', teacherId: 'u_red', classId: 'f1' })).status).toBe(422);
     expect((await q({ format: 'csv', teacherId: 'u_red', streamId: 'red' })).status).toBe(422);
     expect((await q({ format: 'xlsx', teacherId: 'u_red' })).status).toBe(422);
     expect(AuditService.log).not.toHaveBeenCalled();
@@ -163,10 +170,10 @@ describe('figures', () => {
     const sum = (await api(ADMIN).get('/api/lessons/summary')).body.data;
     const byKey = Object.fromEntries(sum.map(r => [`${r.className}|${r.streamName ?? ''}|${r.subjectName}|${r.teacherName}`, r]));
     const { rows } = await csv(ADMIN, { classId: 'f1' });
-    expect(rows[0]).toEqual(['Teacher', 'Class', 'Stream', 'Subject', 'Items covered', 'Total items', 'Coverage %', 'Academic year']);
+    expect(rows[0]).toEqual(['Teacher', 'Class', 'Stream', 'Subject', 'Department', 'Items covered', 'Total items', 'Coverage %', 'Academic year']);
     const data = rows.slice(1);
     expect(data).toHaveLength(3);
-    for (const [teacher, cls, stream, subject, covered, total, pct] of data) {
+    for (const [teacher, cls, stream, subject, , covered, total, pct] of data) {
       const s = byKey[`${cls}|${stream === 'Whole class' ? '' : stream}|${subject}|${teacher}`];
       expect(s).toBeDefined();
       expect([Number(covered), Number(total), Number(pct)]).toEqual([s.coveredItems, s.totalItems, s.pct]);
@@ -175,7 +182,7 @@ describe('figures', () => {
 
   test('stream rules: whole-class ticks count for every stream unless unticked there; a stream\'s tick only for it; one student\'s mark never', async () => {
     const { rows } = await csv(ADMIN, { classId: 'f1' });
-    const get = (stream, subject) => rows.find(r => r[2] === stream && r[3] === subject).slice(4, 7);
+    const get = (stream, subject) => rows.find(r => r[2] === stream && r[3] === subject).slice(5, 8);
     // Items: Expressions, Equations, Geometry, Legacy topic = 4
     expect(get('Red', 'MATH')).toEqual(['3', '4', '75']);    // a (whole) + b (own) + Geometry
     expect(get('Blue', 'MATH')).toEqual(['1', '4', '25']);   // Geometry only: Blue unticked a
@@ -186,7 +193,7 @@ describe('figures', () => {
     const { rows } = await csv(ADMIN, { teacherId: 'u_red' });
     expect(rows.slice(1).map(r => `${r[1]}|${r[2]}|${r[3]}`)).toEqual(['F1|Whole class|ENG', 'F1|Red|MATH', 'F2|Whole class|MATH']);
     expect(rows.slice(1).every(r => r[0] === 'T u_red')).toBe(true);
-    expect(rows.find(r => r[1] === 'F2').slice(4, 6)).toEqual(['0', '2']);   // Form 2 only + Legacy topic
+    expect(rows.find(r => r[1] === 'F2').slice(5, 7)).toEqual(['0', '2']);   // Form 2 only + Legacy topic
   });
 
   test('one stream lists that stream and the whole-class subjects, never a sibling stream', async () => {
@@ -198,8 +205,8 @@ describe('figures', () => {
 describe('topic detail', () => {
   test('each topic and subtopic, covered or not, with the date; the stream\'s own tick date wins', async () => {
     const { rows } = await csv(ADMIN, { classId: 'f1', streamId: 'red', topics: '1' });
-    expect(rows[0]).toEqual(['Teacher', 'Class', 'Stream', 'Subject', 'Topic', 'Subtopic', 'Covered', 'Date covered', 'Subject coverage %', 'Academic year']);
-    const red = rows.filter(r => r[2] === 'Red').map(r => [r[4], r[5], r[6], r[7]]);
+    expect(rows[0]).toEqual(['Teacher', 'Class', 'Stream', 'Subject', 'Department', 'Topic', 'Subtopic', 'Covered', 'Date covered', 'Subject coverage %', 'Academic year']);
+    const red = rows.filter(r => r[2] === 'Red').map(r => [r[5], r[6], r[7], r[8]]);
     expect(red).toEqual([
       ['Algebra', 'Expressions', 'Yes', '01/10/2026'],
       ['Algebra', 'Equations', 'Yes', '05/10/2026'],
@@ -212,7 +219,7 @@ describe('topic detail', () => {
 
   test('a cell that would run as a spreadsheet formula is made plain text', async () => {
     const { rows } = await csv(ADMIN, { classId: 'f1', topics: '1' });
-    expect(rows.find(r => r[3] === 'ENG')[4]).toBe('\'=HYPERLINK("x")');
+    expect(rows.find(r => r[3] === 'ENG')[5]).toBe('\'=HYPERLINK("x")');
     expect(csvCell('+1')).toBe('"\'+1"');
     expect(csvCell('-2')).toBe('"\'-2"');
     expect(csvCell('@a')).toBe('"\'@a"');
@@ -236,7 +243,7 @@ describe('PDF and audit', () => {
   });
 
   test('names and topics are escaped in the HTML', () => {
-    const html = renderCoverageHtml({ by: 'class', school: { name: '<b>S</b>' }, scopeLabel: 'Class: X', academicYear: '2026', withTopics: true,
+    const html = renderCoverageHtml({ school: { name: '<b>S</b>' }, scopeLabel: 'Class: X', academicYear: '2026', withTopics: true,
       rows: [{ teacherName: '<script>x</script>', className: 'X', streamName: '', wholeClass: true, subjectName: 'M', totalItems: 1, coveredItems: 0, pct: 0, topics: [{ title: '<img>', items: null, covered: false, coveredAt: null }] }] });
     expect(html).not.toContain('<script>x');
     expect(html).not.toContain('<img>');
@@ -248,8 +255,8 @@ describe('PDF and audit', () => {
     expect(AuditService.log).toHaveBeenCalledTimes(1);
     expect(AuditService.log.mock.calls[0][0]).toMatchObject({
       action: 'lessons.coverage_exported', schoolId: S,
-      target: { type: 'class', id: 'f1', label: 'Class: F1 · Red' },
-      details: { format: 'csv', withTopics: true, streamId: 'red', academicYear: '2026', rows: 2 },
+      target: { type: 'coverage_report', id: 'f1', label: 'Class: F1 · Red' },
+      details: { format: 'csv', withTopics: true, classId: 'f1', streamId: 'red', academicYear: '2026', rows: 2 },
     });
   });
 });
@@ -267,10 +274,60 @@ describe('names missing on the assignment', () => {
     mockDb.data.streams = [{ id: 'gold', schoolId: S, classId: 'f3', name: 'Gold' }];
 
     const { rows } = await csv(ADMIN, { teacherId: 'u_new' });
-    expect(rows.slice(1).map(r => r.slice(0, 4))).toEqual([['Ms. Agnes Otieno', 'Form 3', 'Gold', 'Biology']]);
+    expect(rows.slice(1).map(r => r.slice(0, 5))).toEqual([['Ms. Agnes Otieno', 'Form 3', 'Gold', 'Biology', '']]);
 
     const sum = (await api(ADMIN).get('/api/lessons/summary')).body.data;
     expect(sum.find(r => r.teacherId === 'u_new')).toMatchObject({ teacherName: 'Ms. Agnes Otieno', className: 'Form 3', streamName: 'Gold', subjectName: 'Biology' });
     expect(sum.find(r => r.teacherId === 'u_red').teacherName).toBe('T u_red');
+  });
+});
+
+describe('filters (v5.288.0): any mix, none = the whole school', () => {
+  const keys = (rows) => rows.slice(1).map(r => `${r[1]}|${r[2]}|${r[3]}`);
+
+  test('no filter: every class-subject in the school, never another school\'s', async () => {
+    const { rows } = await csv(ADMIN, {});
+    expect(keys(rows)).toEqual(['F1|Whole class|ENG', 'F1|Blue|MATH', 'F1|Red|MATH', 'F2|Whole class|MATH']);
+    const r = await api(ADMIN).get('/api/lessons/coverage-report').query({ format: 'pdf' }).buffer(true).parse((res, cb) => { res.on('data', () => {}); res.on('end', () => cb(null, null)); });
+    expect(r.status).toBe(200);
+    expect(mockLastHtml).toContain('Whole school');
+    expect(AuditService.log.mock.calls.at(-1)[0]).toMatchObject({ target: { type: 'coverage_report', id: S, label: 'Whole school' } });
+  });
+
+  test('per subject, and combined with a class', async () => {
+    expect(keys((await csv(ADMIN, { subjectId: 'math' })).rows)).toEqual(['F1|Blue|MATH', 'F1|Red|MATH', 'F2|Whole class|MATH']);
+    expect(keys((await csv(ADMIN, { subjectId: 'math', classId: 'f1' })).rows)).toEqual(['F1|Blue|MATH', 'F1|Red|MATH']);
+    expect(keys((await csv(ADMIN, { subjectId: 'math', teacherId: 'u_red' })).rows)).toEqual(['F1|Red|MATH', 'F2|Whole class|MATH']);
+  });
+
+  test('per department: the subject\'s current department wins over a stale copy on the assignment; the copy counts only when the subject has none', async () => {
+    const sci = await csv(ADMIN, { departmentId: 'sci' });
+    expect(keys(sci.rows)).toEqual(['F1|Blue|MATH', 'F1|Red|MATH', 'F2|Whole class|MATH']);
+    expect(sci.rows.slice(1).every(r => r[4] === 'Sciences')).toBe(true);
+    expect(keys((await csv(ADMIN, { departmentId: 'lang' })).rows)).toEqual(['F1|Whole class|ENG']);
+    expect((await csv(ADMIN, { departmentId: 'old' })).status).toBe(404);
+    expect(mockLastHtml).toBe('');
+  });
+
+  test('the Overview uses the same selection: department filter and names on its rows', async () => {
+    const sum = (await api(ADMIN).get('/api/lessons/summary').query({ departmentId: 'sci' })).body.data;
+    expect(sum.map(r => r.subjectId)).toEqual(['math', 'math', 'math']);
+    expect(sum.every(r => r.departmentId === 'sci' && r.departmentName === 'Sciences')).toBe(true);
+    const all = (await api(ADMIN).get('/api/lessons/summary')).body.data;
+    expect(all.find(r => r.subjectId === 'eng')).toMatchObject({ departmentId: 'lang', departmentName: 'Languages' });
+    // A filter that isn't a plain string is ignored, never passed to the database.
+    const odd = (await api(ADMIN).get('/api/lessons/summary?classId[$in][]=f2')).body.data;
+    expect(odd).toHaveLength(4);
+  });
+
+  test('a PDF listing every topic is limited to 150 class-subjects; without topics, or as CSV, it is not', async () => {
+    for (let i = 0; i < 150; i++) mockDb.data.teaching_assignments.push(asg(`z${i}`, 'u_z', `c${i}`, 'math', null));
+    const big = await api(ADMIN).get('/api/lessons/coverage-report').query({ format: 'pdf', topics: '1' });
+    expect(big.status).toBe(422);
+    expect(big.body.error.code).toBe('TOO_LARGE');
+    expect(big.body.error.message).toContain('154 class-subjects');
+    expect((await csv(ADMIN, { topics: '1' })).status).toBe(200);
+    const plain = await api(ADMIN).get('/api/lessons/coverage-report').query({ format: 'pdf' }).buffer(true).parse((res, cb) => { res.on('data', () => {}); res.on('end', () => cb(null, null)); });
+    expect(plain.status).toBe(200);
   });
 });

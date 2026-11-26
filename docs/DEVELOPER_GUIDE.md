@@ -7849,11 +7849,11 @@ A whole-class assignment saved before the class had an active stream, or before 
 
 ### Coverage export (v5.287.0, 2026-11-26)
 
-- `GET /lessons/coverage-report`: `teacherId` **or** `classId` (+ optional `streamId`), `topics=1`, `format=csv|pdf`, optional `academicYear`. Guard `isHodOrAdmin()`, the same as `GET /summary`. 422 on a bad request, 404 when no assignment matches. Audit `lessons.coverage_exported`.
+- `GET /lessons/coverage-report`: any mix of `teacherId`, `classId`, `streamId` (needs `classId`), `subjectId`, `departmentId`; none = the whole school (v5.288.0). `topics=1`, `format=csv|pdf`, optional `academicYear`. Guard `isHodOrAdmin()`, the same as `GET /summary`. 422 on a bad request, 422 `TOO_LARGE` for a PDF with topics over `PDF_TOPIC_ROWS` (150) rows, 404 when no assignment matches. Audit `lessons.coverage_exported` (target type `coverage_report`, details = the filters used).
 - `utils/coverage-report.js` `buildCoverageReport` uses the same reads as `/summary` (`coverageStreamFilter`, whole-class ticks only, `leafProgress`, legacy class-less topics included). A stream report = assignments with that `streamId` plus the class's whole-class ones (`streamId` null/''). Date covered: the stream's own tick wins over the whole-class one.
-- `fillNames(ctx, schoolId, docs)` fills a missing `teacherName` (teachers by `userId` or `id`, title + first + last), `className`, `subjectName`, `streamName` from their records; never replaces a saved name. Used by the export and `/summary`.
+- `fillNames(ctx, schoolId, docs)` fills a missing `teacherName` (teachers by `userId` or `id`, title + first + last), `className`, `subjectName`, `streamName` from their records; never replaces a saved name. It sets `departmentId` from the **subject's current** `departmentId` (assignments copy it only at creation, so it is usually missing), falling back to the assignment's copy, plus `departmentName`. `findAssignments(ctx, schoolId, filters)` = query (`assignmentFilter`) + `fillNames` + department filter in memory; `/summary` and the export both use it, and `/summary` only passes plain-string query values.
 - PDF: `renderCoverageHtml` through `htmlToPdfBufferOrFallback`, `renderCoveragePdf` (PDFKit) only when Chromium can't launch. CSV: BOM, `csvCell` prefixes `'` to cells starting with `= + - @` tab or CR.
-- Client: `CoverageExport` on the Overview tab; choices come from the `/summary` rows; `lessons.coverageReport(params, filename)`.
+- Client: Overview filter bar (`rowMatches` mirrors the server: a stream keeps whole-class rows of its class; options come from rows matching the other filters). `CoverageExport` sends the same filters; the search box is screen-only. `lessons.coverageReport(params, filename)`.
 
 ## One entry point for teaching assignments (v5.274.0, 2026-11-15)
 
