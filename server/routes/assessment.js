@@ -2811,15 +2811,30 @@ router.get('/reminders', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
     const Assignments = tenantModel('teaching_assignments', tenantContext(req));
     const Students    = tenantModel('students', tenantContext(req));
     const Marks       = tenantModel('assessment_marks', tenantContext(req));
+    const Classes     = tenantModel('classes', tenantContext(req));
+    const Subjects    = tenantModel('subjects', tenantContext(req));
 
     /* A schedule entry is school-wide (type + instance + term, no class), so
        "missing" only means anything against the classes this teacher actually
-       teaches. Oversight roles keep the school-wide date view. */
+       teaches. Oversight roles keep the school-wide date view.
+
+       A teacher can hold several assignments for one class+subject (one per
+       stream), so collapse to the pairs the marks grid actually writes:
+       classId + subjectId. A homeroom-only row has no subject and cannot
+       carry a mark; it is not a reminder target. */
     let targets = null;
     if (!overseeing) {
       const own = await Assignments.find({ schoolId, teacherId: userId }).lean();
-      targets = own.filter((a) =>
-        (!classId || a.classId === classId) && (!subjectId || a.subjectId === subjectId));
+      const seen = new Set();
+      targets = own.filter((a) => {
+        if (!a.classId || !a.subjectId) return false;
+        if (classId && a.classId !== classId) return false;
+        if (subjectId && a.subjectId !== subjectId) return false;
+        const key = `${a.classId}::${a.subjectId}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
       if (!targets.length) return _ok(res, []);
     }
 
@@ -2830,6 +2845,27 @@ router.get('/reminders', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
       }
       return rosterCache.get(id);
     };
+
+    // Names for the rows, so the app can show "Form 1A · Mathematics" and
+    // navigate to the right class/subject without a second round trip.
+    const targetClassIds = [...new Set([
+      ...(targets ? targets.map((t) => t.classId) : []),
+      ...(classId ? [classId] : []),
+    ].filter(Boolean))];
+    const targetSubjectIds = [...new Set([
+      ...(targets ? targets.map((t) => t.subjectId) : []),
+      ...(subjectId ? [subjectId] : []),
+    ].filter(Boolean))];
+    const [classDocs, subjectDocs] = await Promise.all([
+      targetClassIds.length
+        ? Classes.find({ schoolId, id: { $in: targetClassIds } }).select('id name').lean().catch(() => [])
+        : [],
+      targetSubjectIds.length
+        ? Subjects.find({ schoolId, id: { $in: targetSubjectIds } }).select('id name').lean().catch(() => [])
+        : [],
+    ]);
+    const classNameById  = Object.fromEntries(classDocs.map((c) => [c.id, c.name]));
+    const subjectNameById = Object.fromEntries(subjectDocs.map((s) => [s.id, s.name]));
 
     const schedules = await tenantModel('assessment_schedule', tenantContext(req))
       .find({ schoolId, ..._yearFilterPart(academicYearId) }).lean();
@@ -2844,30 +2880,51 @@ router.get('/reminders', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
         academicYearId: sched.academicYearId || null,
       };
 
-      let expected = 0;
-      let entered = 0;
+      const statusFor = (missing) => {
+        const past = sched.dateTo < todayStr;
+        if (past) return targets && missing === 0 ? 'completed' : 'overdue';
+        if (sched.dateFrom <= todayStr) return 'open';
+        if (sched.dateFrom <= futureStr) return 'upcoming';
+        return null;
+      };
+
       if (targets) {
         for (const t of targets) {
-          expected += await rosterOf(t.classId);
-          entered  += await Marks.countDocuments({ ...base, classId: t.classId, subjectId: t.subjectId });
+          const expected = await rosterOf(t.classId);
+          const entered  = await Marks.countDocuments({ ...base, classId: t.classId, subjectId: t.subjectId });
+          const missing  = Math.max(0, expected - entered);
+          const status   = statusFor(missing);
+          if (!status) continue;
+
+          reminders.push({
+            scheduleId:     sched.id,
+            termNumber:     sched.termNumber,
+            assessmentType: sched.assessmentType,
+            instance:       sched.instance,
+            label:          sched.label,
+            dateFrom:       sched.dateFrom,
+            dateTo:         sched.dateTo,
+            status,
+            marksEntered:   entered,
+            missingCount:   missing,
+            expectedCount:  expected,
+            academicYearId: sched.academicYearId,
+            // The app needs these to open the class's marks sheet directly.
+            classId:        t.classId,
+            className:      classNameById[t.classId] ?? null,
+            subjectId:      t.subjectId,
+            subject:        subjectNameById[t.subjectId] ?? null,
+          });
         }
-      } else {
-        const filter = { ...base };
-        if (classId)   filter.classId   = classId;
-        if (subjectId) filter.subjectId = subjectId;
-        entered = await Marks.countDocuments(filter);
+        continue;
       }
 
-      const missing = targets ? Math.max(0, expected - entered) : null;
-      const past    = sched.dateTo < todayStr;
-
-      const status = past
-        ? (targets && missing === 0 ? 'completed' : 'overdue')
-        : sched.dateFrom <= todayStr
-          ? 'open'
-          : sched.dateFrom <= futureStr
-            ? 'upcoming'
-            : null;
+      // Oversight (admin/principal): one school-wide row per schedule.
+      const filter = { ...base };
+      if (classId)   filter.classId   = classId;
+      if (subjectId) filter.subjectId = subjectId;
+      const entered = await Marks.countDocuments(filter);
+      const status  = statusFor(null);
       if (!status) continue;
 
       reminders.push({
@@ -2880,16 +2937,24 @@ router.get('/reminders', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
         dateTo:         sched.dateTo,
         status,
         marksEntered:   entered,
-        missingCount:   missing,
-        expectedCount:  targets ? expected : null,
+        missingCount:   null,
+        expectedCount:  null,
         academicYearId: sched.academicYearId,
+        classId:        classId || null,
+        className:      classId ? (classNameById[classId] ?? null) : null,
+        subjectId:      subjectId || null,
+        subject:        subjectId ? (subjectNameById[subjectId] ?? null) : null,
       });
     }
 
     // Overdue first, then open, then upcoming, then what is already done.
+    // Within a bucket: earliest deadline, then class name so the several
+    // class rows for one schedule read in a stable order.
     const ORDER = { overdue: 0, open: 1, upcoming: 2, completed: 3 };
     reminders.sort((a, b) =>
-      (ORDER[a.status] - ORDER[b.status]) || (a.dateFrom > b.dateFrom ? 1 : -1));
+      (ORDER[a.status] - ORDER[b.status])
+      || (a.dateFrom === b.dateFrom ? 0 : a.dateFrom > b.dateFrom ? 1 : -1)
+      || String(a.className ?? '').localeCompare(String(b.className ?? '')));
 
     return _ok(res, reminders);
   } catch (err) {
