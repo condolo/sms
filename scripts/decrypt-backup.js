@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 /* ============================================================
    Msingi — Backup Decryption CLI
-   Decrypts a .json.enc backup file produced by backup-cron.js.
+   Decrypts a backup file produced by backup-cron.js: .ndjson.gz.enc
+   (since v5.286.0, one record per line) or the older .json.enc.
+   To put records back, use server/scripts/restore-school-backup.js.
 
    Usage (local file):
      node scripts/decrypt-backup.js <path-to-file.json.enc> [output-path]
@@ -72,6 +74,17 @@ if (args[0] === '--from-s3') {
   outputArg = args[1];
 }
 
+/* A backup of one record per line, as a stream. */
+async function decryptLines(inputPath, outputArg) {
+  const { verifyBackupFile } = require('../server/utils/school-backup');
+  const { decryptFileStream } = require('../server/utils/backupEncrypt');
+  const { meta, total } = await verifyBackupFile(inputPath);
+  const out = outputArg || inputPath.replace(/\.gz\.enc$/, '');
+  if (out !== '-' && fs.existsSync(out)) throw new Error(`output file already exists — ${out}`);
+  await require('stream/promises').pipeline(decryptFileStream(inputPath), require('zlib').createGunzip(), out === '-' ? process.stdout : fs.createWriteStream(out));
+  console.error(`Decrypted ${total} records of ${meta.schoolName} (${meta.exportedAt})`);
+}
+
 async function main() {
   let buf;
 
@@ -83,6 +96,11 @@ async function main() {
     console.error(`Downloading s3://${process.env.BACKUP_S3_BUCKET}/${inputArg} …`);
     try {
       buf = await downloadBackup(inputArg);
+      if (inputArg.endsWith('.ndjson.gz.enc')) {
+        const tmp = path.join(require('os').tmpdir(), path.basename(inputArg));
+        fs.writeFileSync(tmp, buf);
+        try { return await decryptLines(tmp, outputArg || path.basename(inputArg).replace(/\.gz\.enc$/, '')); } finally { fs.unlinkSync(tmp); }
+      }
     } catch (err) {
       console.error(`Download failed: ${err.message}`);
       process.exit(1);
@@ -93,6 +111,7 @@ async function main() {
       console.error(`Error: file not found — ${inputPath}`);
       process.exit(1);
     }
+    if (inputPath.endsWith('.ndjson.gz.enc')) return decryptLines(inputPath, outputArg);
     if (!inputPath.endsWith('.json.enc')) {
       console.error(`Warning: file does not end with .json.enc — proceeding anyway.`);
     }

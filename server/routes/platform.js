@@ -2323,7 +2323,8 @@ router.post('/impersonation-sessions/:sessionId/revoke', async (req, res) => {
 });
 
 /* All tenant-scoped collections to wipe when a school is deleted.
-   Keep in sync with BACKUP_COLLECTIONS in backup.js and ALLOWED in collections.js. */
+   NOT a backup list: everything named here is deleted with the school.
+   Keep in sync with ALLOWED in collections.js. */
 const TENANT_COLS = [
   // Core
   'users','students','teachers','classes','subjects',

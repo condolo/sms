@@ -20,6 +20,8 @@
 'use strict';
 
 const crypto = require('crypto');
+const fs     = require('fs');
+const { pipeline } = require('stream/promises');
 
 const ALG      = 'aes-256-gcm';
 const IV_LEN   = 16;
@@ -76,4 +78,31 @@ function decrypt(buf) {
   return Buffer.concat([decipher.update(ct), decipher.final()]).toString('utf8');
 }
 
-module.exports = { encrypt, decrypt, encryptReady };
+/**
+ * The same file layout, written as a stream (v5.286.0): the 32-byte head is
+ * reserved, then filled in once the tag is known.
+ */
+async function encryptFileStream(source, transform, filePath) {
+  const iv = crypto.randomBytes(IV_LEN);
+  const cipher = crypto.createCipheriv(ALG, _getKey(), iv);
+  fs.writeFileSync(filePath, Buffer.alloc(IV_LEN + TAG_LEN));
+  await pipeline(source, transform, cipher, fs.createWriteStream(filePath, { flags: 'r+', start: IV_LEN + TAG_LEN }));
+  const fd = fs.openSync(filePath, 'r+');
+  try { fs.writeSync(fd, Buffer.concat([iv, cipher.getAuthTag()]), 0, IV_LEN + TAG_LEN, 0); } finally { fs.closeSync(fd); }
+}
+
+/** Decrypted stream of a file in that layout. Emits 'error' if it was altered or the key is wrong. */
+function decryptFileStream(filePath) {
+  const head = Buffer.alloc(IV_LEN + TAG_LEN);
+  const fd = fs.openSync(filePath, 'r');
+  try {
+    if (fs.readSync(fd, head, 0, head.length, 0) < head.length) throw new Error('[backupEncrypt] File too short: corrupt or not encrypted');
+  } finally { fs.closeSync(fd); }
+  const decipher = crypto.createDecipheriv(ALG, _getKey(), head.subarray(0, IV_LEN));
+  decipher.setAuthTag(head.subarray(IV_LEN));
+  const src = fs.createReadStream(filePath, { start: IV_LEN + TAG_LEN });
+  src.on('error', e => decipher.destroy(e));
+  return src.pipe(decipher);
+}
+
+module.exports = { encrypt, decrypt, encryptReady, encryptFileStream, decryptFileStream };

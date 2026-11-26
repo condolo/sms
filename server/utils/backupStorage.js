@@ -77,11 +77,11 @@ function _bucket() {
 /**
  * Upload an encrypted backup buffer to S3.
  * @param {string} filename  — e.g. "Msingi_Backup_School_2026-06-13.json.enc"
- * @param {Buffer} buffer    — encrypted binary produced by backupEncrypt.encrypt()
+ * @param {Buffer|stream.Readable} body — the file's bytes
  * @param {string} dateStr   — "YYYY-MM-DD" used for key prefix
  * @returns {string}         — the S3 object key
  */
-async function uploadBackup(filename, buffer, dateStr) {
+async function uploadBackup(filename, body, dateStr, bytes) {
   const client     = _getClient();
   const key        = `backups/${dateStr}/${filename}`;
   const encrypted  = filename.endsWith('.enc');
@@ -89,7 +89,8 @@ async function uploadBackup(filename, buffer, dateStr) {
   await client.send(new PutObjectCommand({
     Bucket:      _bucket(),
     Key:         key,
-    Body:        buffer,
+    Body:        body,
+    ...(bytes ? { ContentLength: bytes } : {}),
     ContentType: encrypted ? 'application/octet-stream' : 'application/json',
     Metadata:    { 'msingi-encrypted': encrypted ? 'true' : 'false' },
   }));
@@ -98,25 +99,22 @@ async function uploadBackup(filename, buffer, dateStr) {
 }
 
 /**
- * List backup objects for a given school name prefix.
- * @param {string} schoolNameSlug  — e.g. "Greenfields_Academy"
+ * List backup objects whose file name passes `matches`.
+ * @param {(filename: string) => boolean} matches
  * @returns {Array<{ key, lastModified }>} sorted newest first
  */
-async function listBackups(schoolNameSlug) {
+async function listBackups(matches) {
   const client = _getClient();
-  const prefix = `backups/`;
-
-  const resp = await client.send(new ListObjectsV2Command({
-    Bucket: _bucket(),
-    Prefix: prefix,
-  }));
-
-  const objects = (resp.Contents || [])
-    .filter(o => o.Key.includes(`/Msingi_Backup_${schoolNameSlug}_`))
-    .map(o => ({ key: o.Key, lastModified: o.LastModified }))
-    .sort((a, b) => b.lastModified - a.lastModified);  // newest first
-
-  return objects;
+  const objects = [];
+  let token;
+  do {   // a listing holds at most 1,000 objects: read every page
+    const resp = await client.send(new ListObjectsV2Command({ Bucket: _bucket(), Prefix: 'backups/', ...(token ? { ContinuationToken: token } : {}) }));
+    for (const o of resp.Contents || []) {
+      if (matches(o.Key.split('/').pop())) objects.push({ key: o.Key, lastModified: o.LastModified });
+    }
+    token = resp.IsTruncated ? resp.NextContinuationToken : null;
+  } while (token);
+  return objects.sort((a, b) => b.lastModified - a.lastModified);  // newest first
 }
 
 /**

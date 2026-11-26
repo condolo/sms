@@ -6,6 +6,33 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.286.0] - 2026-11-25 - fix(backups): every record a school has, checked, and a way to put it back
+
+The nightly backup followed a hand-kept list, and about 60 kinds of record added since were never in it, among them streams, payroll, lesson plans, KG marks, custom roles, published timetables and staff documents. There was no tool to put records back.
+
+### Changed
+- **Backups hold every collection with the school's records**, except a short list with reasons (`EXCLUDED`, `utils/school-backup.js`): sign-in data and tokens, job queues, sent-markers, the platform's own records. New features are included by themselves.
+- Written as a stream, compressed, encrypted as before; ids, dates and files keep their type (`.ndjson.gz.enc`; plain JSON before turned ids into text, so it could not be restored). A school is never held in memory at once.
+- **A file counts only after it is read back and checked.** A failure is logged to `backup_logs` (it was only printed).
+- Suspended schools are backed up too; demo copies are not.
+- The super admin's JSON download holds the same records.
+
+### Added
+- `server/scripts/restore-school-backup.js`: adds the records a school has lost, matched by id. Reports unless `--apply --confirm <schoolId>`; never changes or deletes a record; refuses a damaged file or another school's before writing anything.
+- `server/scripts/check-backups.js` (reads only): are backups running, encrypted, stored, and complete.
+- A backup suddenly less than half the size of the one before no longer pushes out the older ones.
+
+### Security
+- **PIN hashes, temporary passwords and Google access tokens were in the backup files.** No longer.
+
+### Fixed
+- **Pruning matched school names by their start**, so "Trinity" could delete "Trinity College"'s backups, and two schools of one name overwrote each other's. Files now carry the school's id.
+- Only the first 1,000 stored files were listed when pruning.
+
+Nothing is deleted or changed in the database. v5.285.0 also added clinic visits to `TENANT_COLS` in `platform.js`: that is not a backup list but what is deleted with a school from the platform console.
+
+---
+
 ## [v5.285.0] - 2026-11-25 - feat(medical): open a clinic visit; fix(security): who sees medical records
 
 Asked for by a school: the nurse logs a full visit, but Visits showed only the student, complaint, outcome and date.

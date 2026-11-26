@@ -2,19 +2,19 @@
    Msingi — Nightly Backup Cron
 
    Runs once per day for every active school.
-   Generates a full JSON snapshot (same content as the manual
-   "Export Backup" button), saves it to BACKUP_DIR on disk,
-   and writes a metadata row to backup_logs with source:'cron'.
+   Writes every record the school has (utils/school-backup.js), reads the
+   file back to check it, stores it, and writes a row to backup_logs with
+   source:'cron' — also when it failed.
 
    Config (env vars):
      BACKUP_CRON_EXPR       — cron expression (Africa/Nairobi timezone)
-                              default: "0 23 * * *"  (02:00 Kenya = 23:00 UTC)
+                              default: "0 23 * * *"  (23:00 Kenya)
      BACKUP_KEEP_DAYS       — number of daily files to retain per school
                               default: 7
      BACKUP_ENCRYPTION_KEY  — 32-byte AES-256-GCM key, base64-encoded (REQUIRED for KDPA compliance)
                               Generate: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
-                              When set:  files are AES-256-GCM encrypted (.json.enc)
-                              When unset: plaintext .json written (not compliant — warns on startup)
+                              When set:  files are AES-256-GCM encrypted (.ndjson.gz.enc)
+                              When unset: plaintext .ndjson.gz written (not compliant — warns on startup)
 
    Storage mode (checked in order):
      Cloud (preferred): set BACKUP_S3_BUCKET + BACKUP_S3_REGION + AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY
@@ -32,9 +32,12 @@
 const cron   = require('node-cron');
 const path   = require('path');
 const fs     = require('fs');
+const os     = require('os');
 const crypto = require('crypto');
+const mongoose = require('mongoose');
 const { _model }                                              = require('./model');
-const { encrypt, encryptReady }                               = require('./backupEncrypt');
+const { encryptReady }                                        = require('./backupEncrypt');
+const { FORMAT, writeBackupFile, verifyBackupFile }           = require('./school-backup');
 const { storageReady, uploadBackup, listBackups, deleteBackup } = require('./backupStorage');
 
 /* ── Configuration ─────────────────────────────────────────── */
@@ -43,141 +46,56 @@ const BACKUP_DIR  = process.env.BACKUP_DIR
   : path.join(__dirname, '../../backups');
 
 const KEEP_DAYS   = Math.max(1, parseInt(process.env.BACKUP_KEEP_DAYS  || '7',        10));
-const BACKUP_CRON = process.env.BACKUP_CRON_EXPR || '0 23 * * *'; // 02:00 Kenya (UTC+3)
+const BACKUP_CRON = process.env.BACKUP_CRON_EXPR || '0 23 * * *'; // 23:00 Kenya: the schedule runs in Africa/Nairobi time
 
-/* ── Collection list — must stay in sync with routes/backup.js ─ */
-const BACKUP_COLLECTIONS = [
-  // Core
-  'schools','users','students','teachers','classes','subjects',
-  'academic_years','sections','role_permissions','admissions',
-  'events','messages','notifications','announcements',
+const _slug = (school) => (school.name || school.id).replace(/[^a-z0-9]/gi, '_');
+const _idPart = (school) => String(school.id ?? school._id).replace(/[^a-z0-9]/gi, '_');
 
-  // Timetable & structure
-  'timetable','bell_schedule','rooms','departments',
-  'class_subjects','student_subjects','subject_rules','teaching_assignments',
-
-  // Attendance & behaviour
-  'attendance',
-  'behaviour_incidents','behaviour_appeals','behaviour_categories',
-  'merit_milestones','demerit_stages','detention_types','houses','key_stages',
-  'medical_visits',
-
-  // Finance
-  'invoices','payments','fee_structures',
-
-  // Grades, exams & report cards
-  'grades','exams','exam_results',
-  'assessment_marks','assessment_config','grade_boundaries',
-  'report_card_snapshots','publish_batches',
-  'mark_audit_log','mark_submissions','exam_series',
-
-  // Curriculum / lessons
-  'lesson_coverage','syllabus_topics',
-
-  // Growth / co-curricular portfolio
-  'growth_projects','growth_leadership','growth_activities',
-  'growth_service','growth_awards','growth_recommendations','growth_aspirations',
-
-  // Library, hostel, transport
-  'library_books','library_loans',
-  'hostels','hostel_rooms','hostel_assignments',
-  'transport_routes','transport_assignments','activities','activity_enrolments',
-
-  // E-learning
-  'elearning_tokens','elearning_course_links',
-  'elearning_coursework_links','elearning_sessions',
-
-  // Billing & misc
-  'billing_snapshots','comment_banks','user_photos',
-  'platform_operators',
-];
-
-function _uid() {
-  return Date.now().toString(36) + crypto.randomBytes(4).toString('hex');
+/* Which stored files are this school's. New files carry the school's id.
+   Files from before v5.286.0 carry only its name, matched exactly and only
+   when no other school has that name: a "Trinity" used to match, and prune,
+   "Trinity College". */
+function isBackupOf(school, schools) {
+  const own = new RegExp(`^Msingi_Backup_.*__${_idPart(school)}_\\d{4}-\\d{2}-\\d{2}\\.ndjson\\.gz(\\.enc)?$`);
+  const shared = schools.filter(s => _slug(s) === _slug(school)).length > 1;
+  const older = new RegExp(`^Msingi_Backup_${_slug(school)}_\\d{4}-\\d{2}-\\d{2}\\.json(\\.enc)?$`);
+  return (filename) => own.test(filename) || (!shared && older.test(filename));
 }
 
-/* ── Core backup logic ─────────────────────────────────────── */
-async function _buildBackupForSchool(schoolId) {
-  const data  = {};
-  const stats = {};
-  let   total = 0;
-  const now   = new Date().toISOString();
-
-  await Promise.all(BACKUP_COLLECTIONS.map(async col => {
-    const Model  = _model(col);
-    const filter = col === 'schools' ? { id: schoolId } : { schoolId };
-    let   docs   = await Model.find(filter).lean();
-
-    // Strip credentials — same rules as the manual export endpoint
-    if (col === 'users') {
-      docs = docs.map(({ password, passwordHash, twoFactorSecret, mfaOtp, mfaExpiry, ...rest }) => rest);
-    }
-    if (col === 'schools') {
-      docs = docs.map(({ smtpPassEnc, mpesa, ...rest }) => rest);
-    }
-    if (col === 'platform_operators') {
-      // Same pattern as 'users': the bcrypt passwordHash and the SHA-256
-      // inviteTokenHash must never leave the server in a backup file.
-      docs = docs.map(({ passwordHash, inviteTokenHash, ...rest }) => rest);
-    }
-
-    data[col]  = docs;
-    stats[col] = docs.length;
-    total     += docs.length;
-  }));
-
-  const schoolDoc  = (data['schools'] || [])[0];
-  const schoolName = (schoolDoc?.name || schoolId).replace(/[^a-z0-9]/gi, '_');
-  const dateStr    = now.slice(0, 10);
-  const label      = `Nightly auto-backup — ${dateStr}`;
-  const id         = _uid();
-
-  const manifest = {
-    _meta: {
-      id,
-      version:      '3.5.0',
-      exportedAt:   now,
-      exportedBy:   'system',
-      source:       'cron',
-      schoolId,
-      schoolName:   schoolDoc?.name || schoolId,
-      label,
-      totalRecords: total,
-      stats,
-      warning:      'This file contains sensitive school data. Store securely and do not share.',
-    },
-    data,
-  };
-
-  // Return the manifest object — caller handles serialisation, encryption, and filename
-  return { manifest, schoolName, dateStr, label, id, total, stats, now };
-}
-
-/* ── Prune old local backup files for one school ────────────── */
-function _pruneLocalBackups(schoolNameSlug) {
+/* ── Keep the newest KEEP_DAYS files of one school ──────────── */
+function _pruneLocalBackups(matches) {
   try {
-    const prefix = `Msingi_Backup_${schoolNameSlug}_`;
-    const all    = fs.readdirSync(BACKUP_DIR)
-      .filter(f => f.startsWith(prefix) && (f.endsWith('.json') || f.endsWith('.json.enc')))
-      .sort()     // ISO date strings sort lexicographically = chronologically
-      .reverse(); // newest first
+    const day = (f) => (f.match(/\d{4}-\d{2}-\d{2}(?=\.)/) || [''])[0];
+    const all = fs.readdirSync(BACKUP_DIR).filter(matches).sort((a, b) => day(b).localeCompare(day(a)));
     for (const f of all.slice(KEEP_DAYS)) {
       try { fs.unlinkSync(path.join(BACKUP_DIR, f)); } catch (_) { /* best effort */ }
     }
   } catch (_) { /* non-fatal */ }
 }
 
-/* ── Prune old S3 backup objects for one school ─────────────── */
-async function _pruneCloudBackups(schoolNameSlug) {
+async function _pruneCloudBackups(matches) {
   try {
-    const objects = await listBackups(schoolNameSlug);  // newest first
-    const toDelete = objects.slice(KEEP_DAYS);
-    await Promise.all(toDelete.map(o => deleteBackup(o.key).catch(() => {})));
+    const objects = await listBackups(matches);  // newest first
+    await Promise.all(objects.slice(KEEP_DAYS).map(o => deleteBackup(o.key).catch(() => {})));
   } catch (_) { /* non-fatal */ }
 }
 
+/* Small files go up as they always did; a large one as a stream. */
+const STREAM_UPLOAD_BYTES = 64 * 1024 * 1024;
+
+function _uid() {
+  return Date.now().toString(36) + crypto.randomBytes(4).toString('hex');
+}
+
 /* ── Main nightly job ──────────────────────────────────────── */
+let _running = false;
 async function runNightlyBackup() {
+  if (_running) { console.warn('[backup-cron] Already running — skipped'); return; }
+  _running = true;
+  try { await _runNightlyBackup(); } finally { _running = false; }
+}
+
+async function _runNightlyBackup() {
   const encrypted = encryptReady();
   const cloud     = storageReady();
 
@@ -202,17 +120,20 @@ async function runNightlyBackup() {
 
   const Schools = _model('schools');
   const Logs    = _model('backup_logs');
+  const db      = mongoose.connection.db;
 
   let schools;
   try {
-    schools = await Schools.find({ status: 'active' }).lean();
+    // Every school that has data: active or suspended. Not sign-ups still
+    // waiting, nor demo copies (they expire and are rebuilt).
+    schools = await Schools.find({ status: { $nin: ['pending', 'rejected'] }, isDemo: { $ne: true }, demoRequestId: { $exists: false } }).lean();
   } catch (err) {
-    console.error('[backup-cron] Failed to list active schools:', err.message);
+    console.error('[backup-cron] Failed to list schools:', err.message);
     return;
   }
 
   if (!schools.length) {
-    console.log('[backup-cron] No active schools found — skipping');
+    console.log('[backup-cron] No schools found — skipping');
     return;
   }
 
@@ -220,54 +141,47 @@ async function runNightlyBackup() {
   const failed  = [];
 
   for (const school of schools) {
+    const schoolId = school.id ?? String(school._id);
+    const now      = new Date().toISOString();
+    const dateStr  = now.slice(0, 10);
+    const label    = `Nightly auto-backup — ${dateStr}`;
+    const id       = _uid();
+    const filename = `Msingi_Backup_${_slug(school)}__${_idPart(school)}_${dateStr}.ndjson.gz${encrypted ? '.enc' : ''}`;
+    const tmp      = path.join(os.tmpdir(), `${id}_${filename}`);
     try {
-      const { manifest, schoolName, dateStr, label, id, total, stats, now } =
-        await _buildBackupForSchool(school.id);
+      const { total, stats, bytes } = await writeBackupFile(db, school, tmp, { id, label, exportedBy: 'system', source: 'cron' });
+      await verifyBackupFile(tmp);   // throws: a file that can't be read back is not a backup
 
-      // Serialise then optionally encrypt
-      const json = JSON.stringify(manifest, null, 2);
-      let fileContent, filename;
-      if (encrypted) {
-        fileContent = encrypt(json);
-        filename    = `Msingi_Backup_${schoolName}_${dateStr}.json.enc`;
-      } else {
-        fileContent = Buffer.from(json, 'utf8');
-        filename    = `Msingi_Backup_${schoolName}_${dateStr}.json`;
-      }
-
-      // Upload to cloud or write to local disk
       let storageRef;
       if (cloud) {
-        storageRef = await uploadBackup(filename, fileContent, dateStr);
-        await _pruneCloudBackups(schoolName);
+        storageRef = await uploadBackup(filename, bytes > STREAM_UPLOAD_BYTES ? fs.createReadStream(tmp) : fs.readFileSync(tmp), dateStr, bytes);
       } else {
-        const filePath = path.join(BACKUP_DIR, filename);
-        fs.writeFileSync(filePath, fileContent);
-        storageRef = filePath;
-        _pruneLocalBackups(schoolName);
+        storageRef = path.join(BACKUP_DIR, filename);
+        fs.copyFileSync(tmp, storageRef);
       }
 
+      // Never let a suddenly near-empty backup push out the good ones.
+      const last = await Logs.findOne({ schoolId, source: 'cron', failed: { $ne: true } }).sort({ createdAt: -1 }).lean();
+      const shrunk = last?.totalRecords > 50 && total < last.totalRecords / 2;
+      if (shrunk) console.error(`[backup-cron] ⚠ ${school.name || schoolId}: ${total} records, was ${last.totalRecords}. Older backups kept — check this school.`);
+      else if (cloud) await _pruneCloudBackups(isBackupOf(school, schools));
+      else _pruneLocalBackups(isBackupOf(school, schools));
+
       await Logs.create({
-        id,
-        schoolId:     school.id,
-        createdAt:    now,
-        createdBy:    'system',
-        label,
-        version:      manifest._meta.version,
-        totalRecords: total,
-        stats,
-        filename,
+        id, schoolId, createdAt: now, createdBy: 'system', label, version: FORMAT,
+        totalRecords: total, stats, bytes, filename,
         storageRef,          // S3 object key (cloud) or absolute path (local)
-        source:       'cron',
-        encrypted,
-        cloudStorage: cloud,
+        source: 'cron', encrypted, cloudStorage: cloud, verified: true, ...(shrunk ? { shrunk: true } : {}),
       });
 
       succeeded++;
-      console.log(`[backup-cron] ✅ ${school.name || school.id} — ${total} records → ${storageRef}`);
+      console.log(`[backup-cron] ✅ ${school.name || schoolId} — ${total} records, ${Math.round(bytes / 1024)} KB → ${storageRef}`);
     } catch (err) {
-      failed.push(school.id);
-      console.error(`[backup-cron] ❌ ${school.id}: ${err.message}`);
+      failed.push(schoolId);
+      console.error(`[backup-cron] ❌ ${schoolId}: ${err.message}`);
+      await Logs.create({ id, schoolId, createdAt: now, createdBy: 'system', label, source: 'cron', failed: true, error: String(err.message).slice(0, 300) }).catch(() => {});
+    } finally {
+      try { fs.unlinkSync(tmp); } catch (_) { /* never written */ }
     }
   }
 
@@ -295,4 +209,4 @@ function startBackupCron() {
   console.log(`[backup-cron] Scheduled — "${BACKUP_CRON}" (Africa/Nairobi). Storage: ${storageDesc}`);
 }
 
-module.exports = { startBackupCron, runNightlyBackup };
+module.exports = { startBackupCron, runNightlyBackup, isBackupOf };

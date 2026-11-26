@@ -173,7 +173,7 @@ school-management/
 │   │   ├── collections.js      # Legacy generic CRUD (kept for backward compat.)
 │   │   ├── sync.js             # GET /api/sync — bulk data download
 │   │   ├── users.js            # POST /api/users/invite, /bulk-invite, /role-change
-│   │   ├── backup.js           # POST /api/backup/export, /history, /preview
+│   │   ├── backup.js           # POST /api/backup/export, /history, /preview (what a backup holds: utils/school-backup.js, v5.286.0; never a hand-kept list)
 │   │   ├── students.js         # ★ /api/students  — RBAC + paginated + Zod
 │   │   ├── teachers.js         # ★ /api/teachers  — RBAC + paginated + Zod
 │   │   ├── classes.js          # ★ /api/classes   — RBAC + paginated + Zod

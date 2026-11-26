@@ -320,10 +320,7 @@ describe('other readers', () => {
     expect(csv).not.toMatch(/Nuts|Old note/);
   });
 
-  test('clinic visits are in every backup list', () => {
-    const fs = require('fs');
-    for (const f of ['routes/backup.js', 'utils/backup-cron.js', 'routes/platform.js']) {
-      expect(fs.readFileSync(require('path').join(__dirname, '../..', f), 'utf8')).toMatch(/'medical_visits'/);
-    }
+  test('clinic visits are backed up', () => {
+    expect(require('../../utils/school-backup').EXCLUDED.medical_visits).toBeUndefined();
   });
 });

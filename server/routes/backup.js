@@ -8,7 +8,11 @@ const crypto   = require('crypto');
 const rateLimit = require('express-rate-limit');
 const { authMiddleware } = require('../middleware/auth');
 const { _model }         = require('../utils/model');
-const { tenantModel, tenantContext, PLATFORM_COLLECTIONS } = require('../utils/tenant-model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
+const mongoose = require('mongoose');
+const { Readable } = require('stream');
+const { pipeline } = require('stream/promises');
+const { backupCollections, schoolFilter, schoolRecords } = require('../utils/school-backup');
 
 const router = express.Router();
 
@@ -31,63 +35,13 @@ const backupLimiter = rateLimit({
   skip: () => process.env.NODE_ENV === 'test',
 });
 
-/* All collections to include in a full school backup.
-   Keep in sync with TENANT_COLS in platform.js and ALLOWED in collections.js. */
-const BACKUP_COLLECTIONS = [
-  // Core
-  'schools','users','students','teachers','classes','subjects',
-  'academic_years','sections','role_permissions','admissions',
-  'events','messages','notifications','announcements',
-
-  // Timetable & structure
-  'timetable','bell_schedule','rooms','departments',
-  'class_subjects','student_subjects','subject_rules','teaching_assignments',
-
-  // Attendance & behaviour
-  'attendance',
-  'behaviour_incidents','behaviour_appeals','behaviour_categories',
-  'merit_milestones','demerit_stages','detention_types','houses','key_stages',
-  'medical_visits',
-
-  // Finance
-  'invoices','payments','fee_structures',
-
-  // Grades, exams & report cards
-  'grades','exams','exam_results',
-  'assessment_marks','assessment_config','grade_boundaries',
-  'report_card_snapshots','publish_batches',
-  'mark_audit_log','mark_submissions','exam_series',
-
-  // Curriculum / lessons
-  'lesson_coverage','syllabus_topics',
-
-  // Growth / co-curricular portfolio
-  'growth_projects','growth_leadership','growth_activities',
-  'growth_service','growth_awards','growth_recommendations','growth_aspirations',
-
-  // Library, hostel, transport
-  'library_books','library_loans',
-  'hostels','hostel_rooms','hostel_assignments',
-  'transport_routes','transport_assignments','activities','activity_enrolments',
-
-  // E-learning
-  'elearning_tokens','elearning_course_links',
-  'elearning_coursework_links','elearning_sessions',
-
-  // Billing & audit
-  'billing_snapshots','comment_banks',
-  'user_photos',
-];
-
 function _uid() {
   return Date.now().toString(36) + crypto.randomBytes(4).toString('hex');
 }
 
-/* BACKUP_COLLECTIONS mixes platform-exempt ('schools') with tenant-owned
-   collections — route each through the right accessor rather than a
-   blanket tenantModel(), which throws for platform-exempt names. */
-function _backupAccessor(col, schoolId) {
-  return PLATFORM_COLLECTIONS.has(col) ? _model(col) : tenantModel(col, { schoolId });
+/* The school's own record, whichever id form the session holds. */
+async function _school(schoolId) {
+  return _model('schools').findOne({ id: schoolId }).lean();
 }
 
 /* ── GET /api/backup/history — list this school's backup logs ── */
@@ -109,18 +63,21 @@ router.get('/history', _requireSuperAdmin, async (req, res) => {
 router.get('/preview', _requireSuperAdmin, async (req, res) => {
   try {
     const schoolId = req.jwtUser.schoolId;
-    const stats    = {};
-    let   total    = 0;
-
-    await Promise.all(BACKUP_COLLECTIONS.map(async col => {
-      const Model = _backupAccessor(col, schoolId);
-      const count = await Model.countDocuments({ schoolId });
-      stats[col]  = count;
-      total      += count;
-    }));
+    const school   = await _school(schoolId);
+    if (!school) return res.status(404).json({ error: 'School not found' });
+    const db    = mongoose.connection.db;
+    const stats = {};
+    let   total = 0;
+    for (const col of await backupCollections(db)) {
+      const count = await db.collection(col).countDocuments(schoolFilter(col, school));
+      if (!count) continue;
+      stats[col] = count;
+      total     += count;
+    }
 
     res.json({ collections: stats, totalRecords: total, schoolId });
   } catch (err) {
+    console.error('[backup/preview]', err.message);
     res.status(500).json({ error: 'Preview failed' });
   }
 });
@@ -135,77 +92,40 @@ router.post('/export', _requireSuperAdmin, backupLimiter, async (req, res) => {
     const { label } = req.body;
     const now       = new Date().toISOString();
 
-    /* Pull all data for this school */
-    const data   = {};
-    const stats  = {};
-    let   total  = 0;
+    const school = await _school(schoolId);
+    if (!school) return res.status(404).json({ error: 'School not found' });
+    const dateStr  = now.slice(0, 10);
+    const filename = `Msingi_Backup_${(school.name || schoolId).replace(/[^a-z0-9]/gi, '_')}_${dateStr}.json`;
+    const meta     = { id: _uid(), version: '4.0.0', exportedAt: now, exportedBy: userId, schoolId, schoolName: school.name || schoolId, label: label || `Backup — ${dateStr}` };
+    const stats    = {};
+    let   total    = 0;
 
-    await Promise.all(BACKUP_COLLECTIONS.map(async col => {
-      const Model  = _backupAccessor(col, schoolId);
-      const filter = col === 'schools' ? { id: schoolId } : { schoolId };
-      let   docs   = await Model.find(filter).lean();
-
-      // Strip credentials before export — bcrypt hashes must never leave the server
-      if (col === 'users') {
-        docs = docs.map(({ password, passwordHash, twoFactorSecret, mfaOtp, mfaExpiry, ...rest }) => rest);
-      }
-      // Strip school M-Pesa keys and encrypted SMTP password
-      if (col === 'schools') {
-        docs = docs.map(({ smtpPassEnc, mpesa, ...rest }) => rest);
-      }
-
-      data[col]   = docs;
-      stats[col]  = docs.length;
-      total      += docs.length;
-    }));
-
-    /* Get school name for the filename */
-    const schoolDoc = (data['schools'] || [])[0];
-    const schoolName = (schoolDoc?.name || schoolId).replace(/[^a-z0-9]/gi, '_');
-    const dateStr    = now.slice(0, 10);
-    const filename   = `Msingi_Backup_${schoolName}_${dateStr}.json`;
-
-    /* Compile the backup manifest */
-    const backup = {
-      _meta: {
-        id:          _uid(),
-        version:     '3.5.0',
-        exportedAt:  now,
-        exportedBy:  userId,
-        schoolId,
-        schoolName:  schoolDoc?.name || schoolId,
-        label:       label || `Backup — ${dateStr}`,
-        totalRecords: total,
-        stats,
-        warning:     'This file contains sensitive school data. Store securely and do not share.'
-      },
-      data
-    };
-
-    /* Log metadata (without the data blob) */
-    const Logs = tenantModel('backup_logs', tenantContext(req));
-    await Logs.create({
-      id:          backup._meta.id,
-      schoolId,
-      createdAt:   now,
-      createdBy:   userId,
-      label:       backup._meta.label,
-      version:     backup._meta.version,
-      totalRecords: total,
-      stats,
-      filename
-    });
-
-    /* Serve as downloadable JSON file */
-    const json = JSON.stringify(backup, null, 2);
+    /* Every record the school has (utils/school-backup.js), written as it is
+       read: plain JSON for the school to keep. Nightly files are the ones a
+       restore reads. */
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.setHeader('Content-Length', Buffer.byteLength(json, 'utf8'));
-    res.send(json);
+    async function* body() {
+      let current = null;
+      yield '{"data":{';
+      for await (const { c, d } of schoolRecords(mongoose.connection.db, school, stats)) {
+        yield c === current ? ',' : `${current === null ? '' : '],'}${JSON.stringify(c)}:[`;
+        current = c;
+        yield JSON.stringify(d);
+      }
+      total = Object.values(stats).reduce((a, b) => a + b, 0);
+      yield `${current === null ? '' : ']'}},"_meta":${JSON.stringify({ ...meta, totalRecords: total, stats, warning: 'This file contains sensitive school data. Store securely and do not share.' })}}`;
+    }
+    await pipeline(Readable.from(body()), res);
+
+    await tenantModel('backup_logs', tenantContext(req)).create({
+      id: meta.id, schoolId, createdAt: now, createdBy: userId, label: meta.label, version: meta.version, totalRecords: total, stats, filename,
+    });
 
     console.log(`[BACKUP] Exported ${total} records for school ${schoolId} by user ${userId}`);
   } catch (err) {
     console.error('[backup/export]', err);
+    if (res.headersSent) return res.destroy(err);   // the browser shows a failed download, never a short file as complete
     res.status(500).json({ error: 'Backup failed. Please try again.' });
   }
 });

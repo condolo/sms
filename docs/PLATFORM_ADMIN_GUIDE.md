@@ -502,7 +502,36 @@ location.reload();
 
 Msingi uses a **two-tier backup strategy**: school-level self-service exports and platform-level MongoDB snapshots.
 
-### Tier 1 — School self-service backup (built-in)
+### Tier 1 — Nightly school backups (built-in, v5.286.0)
+
+Every night at 23:00 (Nairobi) each school with data, active or suspended, is written to its own encrypted file, **read back and checked**, then stored. It holds every kind of record the school has; new features are included by themselves. Left out on purpose: passwords, sign-ins and tokens, job queues, sent-markers and the platform's own records (`EXCLUDED` in `server/utils/school-backup.js`). **Files kept in file storage (S3/R2) are not in it**, only their names.
+
+Set in Render, or the backups are not safe:
+
+| Variable | Without it |
+|---|---|
+| `BACKUP_ENCRYPTION_KEY` | files are readable by anyone who gets them. **Keep a copy of the key outside Render: without it the files can't be opened** |
+| `BACKUP_S3_BUCKET`, `BACKUP_S3_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | files stay on the server's own disk and are lost at the next deploy |
+| `BACKUP_KEEP_DAYS` | 7 days are kept |
+
+Check them (reads only):
+
+```bash
+node server/scripts/check-backups.js
+```
+
+Put back what a school has lost. It only adds records that are missing, never changes or deletes one; without `--apply` it only reports:
+
+```bash
+node server/scripts/restore-school-backup.js --key backups/2026-11-25/<file>
+node server/scripts/restore-school-backup.js --key backups/2026-11-25/<file> --only streams,payroll --apply --confirm <schoolId>
+```
+
+Records deleted on purpose since the backup would come back, so use `--only`. After restoring people, they reset their password; e-mail, M-Pesa and Google settings are entered again. Files from before v5.286.0 (`.json.enc`) can be opened (`scripts/decrypt-backup.js`) but not restored by this tool.
+
+If a school's backup is suddenly less than half the size of the one before, the older ones are kept and the log says so.
+
+### Tier 1b — School self-service export
 
 Every school superadmin can export their own data at any time from the Msingi dashboard:
 
