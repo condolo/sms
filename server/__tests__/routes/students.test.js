@@ -324,6 +324,27 @@ describe('GET /api/students', () => {
     expect(mockStudentsFind.mock.calls[0][0]).not.toHaveProperty('status');
   });
 
+  test('the stats total matches the on-roll register, not every stored record', async () => {
+    mockStudentsAggregate.mockReset();
+    mockStudentsAggregate
+      .mockResolvedValueOnce([
+        { _id: 'active', count: 31 },
+        { _id: 'inactive', count: 1 },
+        { _id: 'withdrawn', count: 2 },
+      ])
+      .mockResolvedValue([]);
+
+    const res = await supertest(buildApp())
+      .get('/api/students/stats')
+      .set('Authorization', 'Bearer fake-token');
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.total).toBe(31);
+    expect(res.body.data.enrolled).toBe(34);
+    mockStudentsAggregate.mockReset();
+    mockStudentsAggregate.mockResolvedValue([]);
+  });
+
   /* className is a denormalised DISPLAY field. Imports, seed data, and
      enrolments that predate it carry a valid classId with no name — which
      rendered as a dash in every row of the list. GET /:id already resolved
