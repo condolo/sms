@@ -673,12 +673,13 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('students', 'read'), scopeMi
 
     const filter = { schoolId };
 
-    // Status filter — default hides withdrawn/graduated; pass ?status=all for everything
+    // Status filter — default hides withdrawn/graduated/transferred and
+    // soft-deleted records; pass ?status=all for everything.
     const statusParam = strParam(req.query.status);
     if (statusParam && statusParam !== 'all') {
       filter.status = statusParam;
     } else if (!statusParam) {
-      filter.status = { $nin: ['withdrawn', 'graduated', 'transferred'] };
+      filter.status = { $nin: ['inactive', 'withdrawn', 'graduated', 'transferred'] };
     }
     // (status=all → no status filter added)
 
