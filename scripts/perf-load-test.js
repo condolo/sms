@@ -45,6 +45,7 @@ const DURATION_SEC = Number(process.env.PERF_DURATION_SEC || 12);
 const WARMUP = Number(process.env.PERF_WARMUP || 2);
 const ROUNDS = Number(process.env.PERF_ROUNDS || 1);
 const ROTATE_IP = process.env.PERF_ROTATE_IP === '1';
+const FRESH_DB = process.env.PERF_FRESH_DB === '1';
 const LABEL = process.env.PERF_LABEL || 'run';
 const OUT_JSON = path.resolve(process.env.PERF_OUT || path.join(ROOT, 'docs', 'perf', `${LABEL}.json`));
 const OUT_MD = path.resolve(process.env.PERF_OUT_MD || path.join(ROOT, 'docs', 'perf', `${LABEL}.md`));
@@ -365,6 +366,15 @@ function writeArtifact(report) {
 async function main() {
   let child = null;
   try {
+    if (FRESH_DB) {
+      // Demo seed is idempotent but some scenario rows accumulate across
+      // boots. Drop the DB first so every comparison run sees exactly the
+      // same starting dataset.
+      await mongoose.connect(MONGO_URI, { serverSelectionTimeoutMS: 10000 });
+      await mongoose.connection.dropDatabase();
+      await mongoose.disconnect();
+      console.log(`[perf] dropped ${DB_NAME} for a fresh, comparable seed`);
+    }
     if (!NO_SPAWN) {
       child = startServer();
       console.log(`[perf] starting API on ${BASE_URL} (db: ${DB_NAME})`);
@@ -412,7 +422,7 @@ async function main() {
       label: LABEL,
       capturedAt: new Date().toISOString(),
       environment: { node: process.version, platform: process.platform, arch: process.arch, baseUrl: BASE_URL },
-      config: { concurrency: CONCURRENCY, durationSec: DURATION_SEC, warmup: WARMUP, rounds: ROUNDS, rotateIp: ROTATE_IP, timeoutMs: TIMEOUT_MS },
+      config: { concurrency: CONCURRENCY, durationSec: DURATION_SEC, warmup: WARMUP, rounds: ROUNDS, rotateIp: ROTATE_IP, freshDb: FRESH_DB, timeoutMs: TIMEOUT_MS },
       discovered: ids,
       routes: results,
     });
