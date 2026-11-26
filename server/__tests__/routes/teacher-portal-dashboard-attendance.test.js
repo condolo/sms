@@ -228,6 +228,25 @@ describe('GET /dashboard — myClasses[].attendancePct', () => {
 });
 
 describe('GET /dashboard — myClasses comes from every way a school assigns a class', () => {
+  test('a login with no linked staff record still gets myClasses from its assignments', async () => {
+    const { resolveTeacher } = require('../../utils/resolveTeacher');
+    resolveTeacher.mockResolvedValueOnce(null);
+    mockAssignments = [
+      { schoolId: SCHOOL_A, teacherId: TEACHER_USER, classId: CLASS_ID, subjectId: 'subj_math' },
+    ];
+    const res = await supertest(buildApp()).get('/api/teacher-portal/dashboard');
+
+    expect(res.status).toBe(200);
+    expect(res.body.data._noStaffRecord).toBe(true);
+    expect(res.body.data.myClasses).toHaveLength(1);
+    expect(res.body.data.myClasses[0]).toMatchObject({
+      id: CLASS_ID,
+      name: 'Standard 4A',
+      studentCount: 0,
+      attendancePct: 0,
+    });
+  });
+
   test('a class on the teacher’s timetable but with no assignment row still appears', async () => {
     mockAssignments = [];
     mockTimetableDocs = [

@@ -937,10 +937,67 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     const teacher = await _resolveTeacher(userId, req.jwtUser.email, schoolId);
 
     if (!teacher) {
-      // No staff record at all — return minimal shell so the UI can inform
-      // the teacher rather than showing a generic error card.
-      const school = await Schools.findOne({ id: schoolId })
-        .select('name academicYear').lean().catch(() => null);
+      /* A login can hold teaching_assignments without a linked staff record:
+         the office assigns by login id, while the directory record may be
+         missing or carry a different email. Classes are a teaching fact, not
+         a staff-record fact, so read the same assignment + draft-timetable
+         sources used below instead of showing "No classes assigned yet". */
+      const ownerIds = [userId].filter(Boolean);
+      const [ownAssignments, ownTimetable, school, academicYears] = await Promise.all([
+        TeachingAssignments.find({ schoolId, teacherId: { $in: ownerIds } })
+          .select('classId subjectId').lean().catch(() => []),
+        tenantModel('timetable', tenantContext(req))
+          .find({ schoolId, ...teacherLessonClause(ownerIds), isActive: true })
+          .select('classId subjectId subject').lean().catch(() => []),
+        Schools.findOne({ id: schoolId }).select('name academicYear').lean().catch(() => null),
+        tenantModel('academic_years', tenantContext(req)).find({ schoolId }).lean().catch(() => []),
+      ]);
+
+      const classIds = [...new Set([
+        ...ownAssignments.map((a) => a.classId),
+        ...ownTimetable.map((s) => s.classId),
+      ].filter(Boolean))];
+      const subjectIds = [...new Set([
+        ...ownAssignments.map((a) => a.subjectId),
+        ...ownTimetable.map((s) => s.subjectId),
+      ].filter(Boolean))];
+      const [classDocs, subjectDocs] = await Promise.all([
+        classIds.length
+          ? Classes.find({ schoolId, id: { $in: classIds } }).select('id name').lean().catch(() => [])
+          : [],
+        subjectIds.length
+          ? tenantModel('subjects', tenantContext(req))
+            .find({ schoolId, id: { $in: subjectIds } }).select('id name').lean().catch(() => [])
+          : [],
+      ]);
+      const classNameById  = Object.fromEntries(classDocs.map((c) => [c.id, c.name]));
+      const subjectNameById = Object.fromEntries(subjectDocs.map((s) => [s.id, s.name]));
+      const { term } = resolveCurrentPeriod(academicYears);
+      const attDateFilter = term
+        ? { date: { $gte: term.startDate, $lte: term.endDate } }
+        : {};
+
+      const myClasses = await Promise.all(classDocs.map(async (cls) => {
+        const [studentCount, attTotal, attPresent] = await Promise.all([
+          Students.countDocuments({ schoolId, classId: cls.id, status: 'active' }).catch(() => 0),
+          Attendance.countDocuments({ schoolId, classId: cls.id, ...attDateFilter }).catch(() => 0),
+          Attendance.countDocuments({ schoolId, classId: cls.id, ...attDateFilter, status: 'present' }).catch(() => 0),
+        ]);
+        const subjects = [...new Set([
+          ...ownAssignments.filter((a) => a.classId === cls.id).map((a) => subjectNameById[a.subjectId]),
+          ...ownTimetable.filter((s) => s.classId === cls.id).map((s) => subjectNameById[s.subjectId] ?? s.subject),
+        ].filter(Boolean))];
+        return {
+          id: cls.id,
+          name: classNameById[cls.id] ?? cls.name,
+          studentCount,
+          attendancePct: attTotal > 0 ? Math.round((attPresent / attTotal) * 100) : 0,
+          subjects,
+          classTeacher: null,
+          isClassTeacher: false,
+        };
+      }));
+
       return ok(res, {
         teacher: {
           id: null,
@@ -956,7 +1013,7 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
         pendingAttendanceCount: 0,
         todayLessonsCount:     0,
         unreadMessages:        0,
-        myClasses:             [],
+        myClasses,
         formClassData:         null,
         atRiskStudents:        [],
         curriculumCoverage:    [],
