@@ -23,6 +23,7 @@ const { schoolLoginUrl } = require('../utils/school-url');
 const demo = require('../utils/demo');
 const { safeUser: _safeUser, USER_SECRET_FIELDS } = require('../utils/safe-user');
 const { comparePassword, PasswordHashInfrastructureError } = require('../services/passwordHash');
+const { performance } = require('perf_hooks');
 const {
   LOGIN_OTP_TTL_MS,
   LOGIN_OTP_MAX_ATTEMPTS,
@@ -425,7 +426,7 @@ const SecurityService = require('../services/securityService');
    credentials themselves). Everything after tenant resolution lives
    here exactly once, so the two doors cannot drift on first-login,
    password-expiry, MFA, session, cookie or mobile-token behaviour. */
-async function _handleLogin(req, res, { preverifiedUser = null, identity = null } = {}) {
+async function _handleLogin(req, res, { preverifiedUser = null, identity = null, lockChecked = false } = {}) {
   try {
     // NOTE: renamed to userEmail to avoid shadowing the module-level `email` import
     // 'identifier' supports admission-number login for students; falls back to 'email' for staff
@@ -434,12 +435,16 @@ async function _handleLogin(req, res, { preverifiedUser = null, identity = null 
     if (!loginId || !password) return res.status(400).json({ error: 'Email or admission number and password required' });
 
     // Layer 2: per-account lock (progressive: 5→1min, 10→15min, 20→1hr, 30→24hr)
-    const retryAfter = await SecurityService.checkAccountLock(req.school.id, loginId);
-    if (retryAfter !== null) {
-      return res.status(429).json({
-        error: 'Too many failed login attempts. Please wait before trying again.',
-        retryAfter,
-      });
+    // The school-less credentials door already performed this exact lock
+    // check before resolving the school; avoid the duplicate DB read.
+    if (!lockChecked) {
+      const retryAfter = await SecurityService.checkAccountLock(req.school.id, loginId);
+      if (retryAfter !== null) {
+        return res.status(429).json({
+          error: 'Too many failed login attempts. Please wait before trying again.',
+          retryAfter,
+        });
+      }
     }
 
     const User   = tenantModel('users', { schoolId: req.school.id });
@@ -756,7 +761,18 @@ async function _loadVerifiedFullUser({ schoolId, candidate, identity, password }
   return { fullUser, identity: verifiedIdentity };
 }
 
+async function _timedLogin(timing, key, fn) {
+  const started = performance.now();
+  try {
+    return await fn();
+  } finally {
+    if (timing) timing[key] = Math.round((performance.now() - started) * 10) / 10;
+  }
+}
+
 router.post('/login-credentials', loginIpLimiter, async (req, res) => {
+  const timing = process.env.AUTH_LOGIN_TIMING === '1' ? {} : null;
+  const requestStarted = performance.now();
   try {
     const { email: userEmail, password, identifier } = req.body || {};
     const loginId = String((identifier || userEmail) || '').toLowerCase().trim();
@@ -769,7 +785,7 @@ router.post('/login-credentials', loginIpLimiter, async (req, res) => {
        services/preauth-account-lookup.js — bounded, projected, and never
        echoed back — so every sign-in door shares the reviewed exception. */
     const projection = 'id schoolId email username password identityId isActive role primaryRole roles';
-    const candidates = await findLoginCandidates(loginId, projection);
+    const candidates = await _timedLogin(timing, 'searchMs', () => findLoginCandidates(loginId, projection));
 
     if (!candidates.length) {
       await comparePassword(password, TIMING_DUMMY_HASH).catch(() => false);
@@ -780,9 +796,9 @@ router.post('/login-credentials', loginIpLimiter, async (req, res) => {
     // the password worker pool, so these comparisons can safely run together.
     // Serialising them made a five-account identifier cost the sum of five
     // cost-12 bcrypt compares — seconds, with no extra traffic.
-    const results = await Promise.all(
+    const results = await _timedLogin(timing, 'passwordMs', () => Promise.all(
       candidates.map(candidate => _candidatePasswordMatches(candidate, password)),
-    );
+    ));
     const matches = [];
     for (let i = 0; i < candidates.length; i += 1) {
       if (results[i]?.match) matches.push({ candidate: candidates[i], identity: results[i].identity });
@@ -799,9 +815,9 @@ router.post('/login-credentials', loginIpLimiter, async (req, res) => {
     }
 
     /* The password proved, so a lockout is now the caller's own business. */
-    const lockResults = await Promise.all(
+    const lockResults = await _timedLogin(timing, 'lockMs', () => Promise.all(
       matches.map(({ candidate }) => SecurityService.checkAccountLock(candidate.schoolId, loginId)),
-    );
+    ));
     const retryAfter = lockResults.find(value => value != null);
     if (retryAfter !== undefined) {
       return res.status(429).json({
@@ -813,10 +829,10 @@ router.post('/login-credentials', loginIpLimiter, async (req, res) => {
     const schools = [];
     const expiredDemo = [];
     const schoolByMatchId = new Map();
-    const resolvedSchools = await Promise.all(matches.map(async ({ candidate }) => {
+    const resolvedSchools = await _timedLogin(timing, 'schoolMs', () => Promise.all(matches.map(async ({ candidate }) => {
       const school = await _findSchool({ id: candidate.schoolId });
       return school ? { school, candidate } : null;
-    }));
+    })));
     for (const resolved of resolvedSchools) {
       if (!resolved) continue;
       const { school, candidate } = resolved;
@@ -894,24 +910,30 @@ router.post('/login-credentials', loginIpLimiter, async (req, res) => {
        expiry/MFA/session fields and skip the duplicate bcrypt comparison. */
     req.school = schools[0];
     const verified = matches.find(({ candidate }) => candidate.schoolId === schools[0].id);
-    const verifiedUser = await _loadVerifiedFullUser({
+    const verifiedUser = await _timedLogin(timing, 'fullUserMs', () => _loadVerifiedFullUser({
       schoolId: schools[0].id,
       candidate: verified?.candidate,
       identity: verified?.identity ?? null,
       password,
-    });
+    }));
     if (!verifiedUser) return res.status(401).json({ error: 'Invalid email or password' });
 
-    return _handleLogin(req, res, {
+    return await _timedLogin(timing, 'handleLoginMs', () => _handleLogin(req, res, {
       preverifiedUser: verifiedUser.fullUser,
       identity: verifiedUser.identity,
-    });
+      lockChecked: true,
+    }));
   } catch (err) {
     console.error('[auth/login-credentials]', err);
     if (err instanceof PasswordHashInfrastructureError) {
       return res.status(503).json({ error: 'Authentication is temporarily unavailable. Please try again.' });
     }
     res.status(500).json({ error: 'Login failed' });
+  } finally {
+    if (timing) {
+      timing.totalMs = Math.round((performance.now() - requestStarted) * 10) / 10;
+      console.info('[auth/login-credentials:timing]', JSON.stringify(timing));
+    }
   }
 });
 

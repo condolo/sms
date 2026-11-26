@@ -1,16 +1,16 @@
 'use strict';
 
 /**
- * bcryptjs is pure JavaScript and runs its rounds on the Node event loop. Ten
- * simultaneous password logins therefore serialize into ~10s wall time even
- * on an 8-core box. Keep comparisons in a bounded worker pool so the API can
- * still answer health checks, OTP requests and other traffic while hashes run.
+ * bcryptjs is pure JavaScript and slow under concurrent logins. Comparisons
+ * run on @node-rs/bcrypt (same bcrypt hash format, native implementation)
+ * inside a bounded worker pool so the API can still answer health checks,
+ * OTP requests and other traffic while hashes run.
  *
  * Tests and single-process scripts can force the inline path with
  * AUTH_HASH_INLINE=1. Production uses workers when worker_threads is available.
  */
 
-const bcrypt = require('bcryptjs');
+const bcrypt = require('@node-rs/bcrypt');
 const os = require('os');
 const path = require('path');
 const { Worker } = require('worker_threads');

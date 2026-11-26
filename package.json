@@ -16,6 +16,7 @@
     "seed:scenarios": "node server/scripts/seed-demo-scenarios.js",
     "test": "jest --runInBand --forceExit",
     "test:auth:perf": "node scripts/auth-perf-test.js",
+    "test:auth:breakdown": "node scripts/auth-login-breakdown.js",
     "test:perf": "node scripts/perf-load-test.js",
     "e2e:council": "node scripts/e2e-council.js",
     "e2e:council:ui": "cd client && npx vite build && cd .. && node scripts/e2e-council-ui.js",
@@ -31,6 +32,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1068.0",
     "@aws-sdk/s3-request-presigner": "^3.1163.0",
+    "@node-rs/bcrypt": "^2.0.0",
     "@sentry/node": "^7.120.4",
     "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.7",
@@ -85,4 +87,3 @@
     "node": ">=18.0.0"
   }
 }
-
