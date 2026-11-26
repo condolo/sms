@@ -17,6 +17,7 @@
     "test": "jest --runInBand --forceExit",
     "test:auth:perf": "node scripts/auth-perf-test.js",
     "test:auth:breakdown": "node scripts/auth-login-breakdown.js",
+    "test:auth:load-breakdown": "node scripts/auth-login-load-breakdown.js",
     "test:perf": "node scripts/perf-load-test.js",
     "e2e:council": "node scripts/e2e-council.js",
     "e2e:council:ui": "cd client && npx vite build && cd .. && node scripts/e2e-council-ui.js",
