@@ -282,10 +282,16 @@ router.get('/stats', authMiddleware, PLAN, MODGATE, rbac('students', 'read'), as
       }
     }
 
-    const total  = byStatus.reduce((a, s) => a + s.count, 0);
+    const enrolled = byStatus.reduce((a, s) => a + s.count, 0);
+    // "On roll" means the same set the default register shows: soft-deleted,
+    // withdrawn, graduated and transferred records are not on the roll. Keep
+    // `enrolled` for consumers that need every stored record.
+    const total = byStatus
+      .filter(s => !['inactive', 'withdrawn', 'graduated', 'transferred'].includes(s._id))
+      .reduce((a, s) => a + s.count, 0);
     const active = byStatus.find(s => s._id === 'active')?.count ?? 0;
 
-    return ok(res, { total, active, byStatus, byGender, byClass });
+    return ok(res, { total, enrolled, active, byStatus, byGender, byClass });
   } catch (err) { console.error('[students GET /stats]', err); return E.serverError(res); }
 });
 
