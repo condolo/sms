@@ -16,7 +16,8 @@ describe('passwordHash worker pool', () => {
     process.env.AUTH_HASH_MODE = 'worker';
     jest.resetModules();
     bcrypt = require('bcryptjs');
-    ({ comparePassword, closePool } = require('../../../server/services/passwordHash'));
+    ({ comparePassword, warmPool, closePool } = require('../../../server/services/passwordHash'));
+    warmPool();
     hash = await bcrypt.hash('correct horse battery staple', 4);
   });
 

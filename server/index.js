@@ -21,7 +21,7 @@ const { provisionMemberships } = require('./utils/provision-memberships');
 const { provisionIdentities } = require('./utils/provision-identities');
 const { correlationIdMiddleware } = require('./utils/correlation-id');
 const { seedDemo }            = require('./scripts/seed-demo');
-const { closePool }           = require('./services/passwordHash');
+const { closePool, warmPool }  = require('./services/passwordHash');
 
 /* ── Monitoring: initialise BEFORE anything else ──────────────
    Registers uncaughtException + unhandledRejection handlers.
@@ -833,6 +833,10 @@ async function start() {
   // bursars/admins keep the explicit finance sub-permissions their general
   // finance rights imply (see utils/finance-permission-backfill.js).
   await backfillFinanceSubPermissions().catch(err => console.error('[startup] finance sub-permission backfill failed:', err.message));
+
+  // Spawn password workers before the first login so the opening request does
+  // not pay worker startup cost. The pool stays bounded by AUTH_HASH_POOL_SIZE.
+  warmPool();
 
   server = app.listen(PORT, () => {
     console.log(`\n🎓 Msingi API running on port ${PORT}`);

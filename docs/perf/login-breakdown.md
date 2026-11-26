@@ -43,6 +43,33 @@ production scale the same queries use `users_email_ci` and
   `[auth/login-credentials:timing]` with `searchMs`, `passwordMs`, `lockMs`,
   `schoolMs`, `fullUserMs`, `handleLoginMs`, and `totalMs`.
 
+## Concurrent profiler result
+
+`npm run test:auth:load-breakdown` starts an isolated API, drives 60 logins
+at concurrency 10, and summarises the server-stage timings:
+
+| Stage | p50 | p95 |
+|---|---:|---:|
+| Candidate search | 21.6 ms | 35.6 ms |
+| Password verification | 251.3 ms | 469.1 ms |
+| Account lock | 10.2 ms | 24.7 ms |
+| School resolution | 11.2 ms | 27.0 ms |
+| Full user read | 11.6 ms | 33.1 ms |
+| Session/token/permissions | 42.5 ms | 81.8 ms |
+| **Total** | **371.8 ms** | **542.4 ms** |
+
+Password verification is ~70% of p95. Pool-size tests at concurrency 10:
+
+| Configuration | Client p95 |
+|---|---:|
+| 4 workers | 1,712 ms |
+| **6 workers (current default on this 8-core host)** | **566 ms** |
+| 8 workers | 1,025 ms |
+| Direct native compare, no worker pool | 750 ms |
+
+Six workers is the best tested setting; fewer queues, more oversubscribes.
+The pool is now warmed before the API starts listening.
+
 ## What to watch next
 
 - On a 0.5–1 CPU deployment, worker-pool size is CPU-bound. More workers do

@@ -118,6 +118,11 @@ function comparePassword(password, hash) {
   return inline ? compareInline(password, hash) : compareInWorker(password, hash);
 }
 
+function warmPool() {
+  if (inline || closing) return;
+  while (workers.size < poolSize) spawnWorker();
+}
+
 function closePool() {
   if (closePromise) return closePromise;
   closing = true;
@@ -136,4 +141,4 @@ function closePool() {
   return closePromise;
 }
 
-module.exports = { comparePassword, closePool, PasswordHashInfrastructureError };
+module.exports = { comparePassword, warmPool, closePool, PasswordHashInfrastructureError };
