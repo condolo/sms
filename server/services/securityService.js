@@ -2,6 +2,7 @@
 
 const { _model }           = require('../utils/model');
 const { sendSecurityAlert } = require('../utils/email');
+const crypto               = require('crypto');
 
 /* ── Progressive lockout tiers ──────────────────────────────────
    Evaluated in descending threshold order — highest tier wins.
@@ -77,49 +78,58 @@ async function recordFail(schoolId, loginId, ip, school = {}) {
     const now         = new Date();
     const windowFloor = new Date(Date.now() - WINDOW_MS);
 
-    // Atomically increment within the current 24-hour window
-    let doc = await _model('login_failures').findOneAndUpdate(
-      { key: _key(schoolId, loginId), windowStart: { $gte: windowFloor } },
-      {
-        $inc: { count: 1 },
-        $set: {
-          lastIp:    ip,
-          updatedAt: now,
-          expiresAt: new Date(Date.now() + WINDOW_MS + TTL_BUFFER),
-        },
-      },
-      { returnDocument: 'after' },
-    ).lean();
-
-    if (!doc) {
-      // No doc in the current window — start fresh (delete stale first)
-      await _model('login_failures').deleteOne({ key: _key(schoolId, loginId) });
-      const created = await _model('login_failures').create({
-        key:         _key(schoolId, loginId),
+    // One atomic pipeline upsert both increments a live window and resets a
+    // stale one. The old findOneAndUpdate → delete → create sequence let two
+    // concurrent first failures both insert duplicate rows for the same key.
+    const key = _key(schoolId, loginId);
+    const countExpr = {
+      $cond: [
+        { $gte: ['$windowStart', windowFloor] },
+        { $add: [{ $ifNull: ['$count', 0] }, 1] },
+        1,
+      ],
+    };
+    const lockBranches = TIERS.map(tier => ({
+      case: { $gte: ['$count', tier.threshold] },
+      then: new Date(Date.now() + tier.durationMs),
+    }));
+    const pipeline = [
+      { $set: {
+        id: { $ifNull: ['$id', crypto.randomUUID()] },
+        key,
         schoolId,
         loginId,
-        count:       1,
-        windowStart: now,
-        lastIp:      ip,
-        updatedAt:   now,
-        expiresAt:   new Date(Date.now() + WINDOW_MS + TTL_BUFFER),
-      });
-      doc = created.toObject ? created.toObject() : created;
+        count: countExpr,
+        windowStart: {
+          $cond: [{ $gte: ['$windowStart', windowFloor] }, '$windowStart', now],
+        },
+        lastIp: ip,
+        updatedAt: now,
+        expiresAt: new Date(Date.now() + WINDOW_MS + TTL_BUFFER),
+      } },
+      { $set: {
+        lockedUntil: { $switch: { branches: lockBranches, default: null } },
+      } },
+    ];
+    const upsert = () => _model('login_failures').findOneAndUpdate(
+      { key },
+      pipeline,
+      { returnDocument: 'after', upsert: true },
+    ).lean();
+    let doc;
+    try {
+      doc = await upsert();
+    } catch (err) {
+      // A unique-key race can still lose one insert. Retry once so the second
+      // request increments the winner instead of dropping the failure.
+      if (err.code !== 11000) throw err;
+      doc = await upsert();
     }
 
     const count    = doc.count ?? 1;
     const tier     = _activeTier(count);
     const prevTier = _activeTier(count - 1);
-
-    // Apply lockout if we crossed (or stayed in) a tier
-    let lockedUntil = null;
-    if (tier) {
-      lockedUntil = new Date(Date.now() + tier.durationMs);
-      await _model('login_failures').updateOne(
-        { key: _key(schoolId, loginId) },
-        { $set: { lockedUntil } },
-      );
-    }
+    const lockedUntil = doc.lockedUntil ? new Date(doc.lockedUntil) : null;
 
     // Log security event
     const isTierCrossed = tier && tier !== prevTier;

@@ -15,6 +15,7 @@
     "seed:data": "node server/scripts/seed-demo-data.js",
     "seed:scenarios": "node server/scripts/seed-demo-scenarios.js",
     "test": "jest --runInBand --forceExit",
+    "test:auth:perf": "node scripts/auth-perf-test.js",
     "e2e:council": "node scripts/e2e-council.js",
     "e2e:council:ui": "cd client && npx vite build && cd .. && node scripts/e2e-council-ui.js",
     "test:watch": "jest --watch --runInBand",

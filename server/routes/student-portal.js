@@ -193,23 +193,62 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
       // this student's own class total.
       const topicClassOr = [{ classId: student.classId }, { classId: { $exists: false } }];
       // Topic-level completion, not coverage-row count: a topic with two
-      // subtopics is one topic and only counts when both are covered.
+      // subtopics is one topic and only counts when both are covered. Keep
+      // class-only and child-only sets separate for the family insight split.
       const [allTopics, coverageRecords] = await Promise.all([
-        Topics.find({ schoolId, $or: topicClassOr }).select('id subjectId subtopics').lean().catch(() => []),
+        Topics.find({ schoolId, $or: topicClassOr })
+          .select('id subjectId title order subtopics')
+          .sort({ order: 1, createdAt: 1 })
+          .lean()
+          .catch(() => []),
         // Whole-class marks plus this student's individual ones (v5.277.0).
         Coverage.find({ schoolId, classId: student.classId, $or: streamOr, $and: [{ $or: [{ studentId: { $exists: false } }, { studentId: studentId }] }] })
-          .select('topicId subtopicId').lean().catch(() => []),
+          .select('topicId subtopicId studentId coveredAt')
+          .lean()
+          .catch(() => []),
       ]);
-      const coveredKeys = new Set(coverageRecords.map(r => `${r.topicId}__${r.subtopicId ?? ''}`));
+      const classKeys = new Set();
+      const childKeys = new Set();
+      const topicSubject = new Map(allTopics.map(topic => [topic.id, topic.subjectId]));
+      const lastBySubject = new Map();
+      for (const record of coverageRecords) {
+        const key = `${record.topicId}__${record.subtopicId ?? ''}`;
+        childKeys.add(key);
+        if (!record.studentId) classKeys.add(key);
+        if (record.coveredAt) {
+          const date = new Date(record.coveredAt);
+          const subjectId = topicSubject.get(record.topicId);
+          if (
+            subjectId &&
+            !Number.isNaN(date.getTime()) &&
+            (!lastBySubject.has(subjectId) || date > lastBySubject.get(subjectId))
+          ) {
+            lastBySubject.set(subjectId, date);
+          }
+        }
+      }
       const bySubject = new Map();
       for (const topic of allTopics) {
-        const row = bySubject.get(topic.subjectId) ?? { total: 0, covered: 0 };
+        const row = bySubject.get(topic.subjectId) ?? {
+          total: 0,
+          covered: 0,
+          classCovered: 0,
+          individual: 0,
+          nextTopic: null,
+          lastCoveredAt: lastBySubject.get(topic.subjectId) ?? null,
+        };
         row.total += 1;
         const subs = Array.isArray(topic.subtopics) ? topic.subtopics : [];
         const done = subs.length
-          ? subs.every(st => coveredKeys.has(`${topic.id}__${st.id}`))
-          : coveredKeys.has(`${topic.id}__`);
+          ? subs.every(st => childKeys.has(`${topic.id}__${st.id}`))
+          : childKeys.has(`${topic.id}__`);
+        const classDone = subs.length
+          ? subs.every(st => classKeys.has(`${topic.id}__${st.id}`))
+          : classKeys.has(`${topic.id}__`);
         if (done) row.covered += 1;
+        if (classDone) row.classCovered += 1;
+        if (done && !classDone) row.individual += 1;
+        if (!done && !row.nextTopic) row.nextTopic = topic.title || null;
         bySubject.set(topic.subjectId, row);
       }
 
@@ -223,6 +262,11 @@ router.get('/dashboard', authMiddleware, PLAN, async (req, res) => {
           coveredTopics: row.covered,
           totalTopics: row.total,
           percentage: Math.round((row.covered / row.total) * 100),
+          classCoveredTopics: row.classCovered,
+          classPercentage: Math.round((row.classCovered / row.total) * 100),
+          individualTopics: row.individual,
+          nextTopic: row.nextTopic,
+          lastCoveredAt: row.lastCoveredAt ? row.lastCoveredAt.toISOString().slice(0, 10) : null,
         });
       }
     }

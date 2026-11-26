@@ -113,8 +113,8 @@ beforeEach(() => {
   mockAcademicYearDocs = [{ id: 'ay_2026', schoolId: SCHOOL_A, name: '2026', isCurrent: true, terms: [] }];
   mockSubjectDocs = [{ id: 'subj_eng', name: 'English', code: 'ENG' }];
   mockTopicDocs = [
-    { id: 'topic_1', schoolId: SCHOOL_A, subjectId: 'subj_eng', academicYear: '2026', subtopics: [] },
-    { id: 'topic_2', schoolId: SCHOOL_A, subjectId: 'subj_eng', academicYear: '2026', subtopics: [] },
+    { id: 'topic_1', schoolId: SCHOOL_A, subjectId: 'subj_eng', academicYear: '2026', title: 'Nouns', order: 1, subtopics: [] },
+    { id: 'topic_2', schoolId: SCHOOL_A, subjectId: 'subj_eng', academicYear: '2026', title: 'Verbs', order: 2, subtopics: [] },
   ];
   mockCoverageDocs = [];
   mockTimetableDocs = [];
@@ -150,6 +150,40 @@ describe('GET /api/student-portal/dashboard — curriculum coverage', () => {
     const res = await supertest(buildApp()).get('/api/student-portal/dashboard');
     const eng = res.body.data.lessonsCoverage.find(s => s.subjectId === 'subj_eng');
     expect(eng.coveredTopics).toBe(1);
+  });
+
+  test('class pace and the student’s individual instruction are reported separately', async () => {
+    mockCoverageDocs = [
+      { schoolId: SCHOOL_A, classId: CLASS_ID, subjectId: 'subj_eng', academicYear: '2026', topicId: 'topic_1', streamId: DIAMOND, coveredAt: '2026-10-20T08:00:00.000Z' },
+      { schoolId: SCHOOL_A, classId: CLASS_ID, subjectId: 'subj_eng', academicYear: '2026', topicId: 'topic_2', streamId: DIAMOND, studentId: STUDENT_1, coveredAt: '2026-11-20T08:00:00.000Z' },
+      { schoolId: SCHOOL_A, classId: CLASS_ID, subjectId: 'subj_eng', academicYear: '2026', topicId: 'topic_2', streamId: DIAMOND, studentId: 'stu_sibling', coveredAt: '2026-11-21T08:00:00.000Z' },
+    ];
+    const res = await supertest(buildApp()).get('/api/student-portal/dashboard');
+    const eng = res.body.data.lessonsCoverage.find(s => s.subjectId === 'subj_eng');
+    expect(eng).toMatchObject({
+      coveredTopics: 2,
+      classCoveredTopics: 1,
+      percentage: 100,
+      classPercentage: 50,
+      individualTopics: 1,
+      nextTopic: null,
+      lastCoveredAt: '2026-11-20',
+    });
+  });
+
+  test('no applicable records still exposes the next topic and a null last-taught date', async () => {
+    mockCoverageDocs = [
+      { schoolId: SCHOOL_A, classId: CLASS_ID, subjectId: 'subj_eng', academicYear: '2026', topicId: 'topic_1', streamId: DIAMOND, studentId: 'stu_sibling', coveredAt: '2026-11-20T08:00:00.000Z' },
+    ];
+    const res = await supertest(buildApp()).get('/api/student-portal/dashboard');
+    const eng = res.body.data.lessonsCoverage.find(s => s.subjectId === 'subj_eng');
+    expect(eng).toMatchObject({
+      coveredTopics: 0,
+      classCoveredTopics: 0,
+      individualTopics: 0,
+      nextTopic: 'Nouns',
+      lastCoveredAt: null,
+    });
   });
 });
 

@@ -129,8 +129,8 @@ beforeEach(() => {
   mockAcademicYearDocs = [{ id: 'ay_2026', schoolId: SCHOOL_A, name: '2026', isCurrent: true, terms: [] }];
   mockSubjectDocs = [{ id: 'subj_eng', name: 'English', code: 'ENG' }];
   mockTopicDocs = [
-    { id: 'topic_1', schoolId: SCHOOL_A, subjectId: 'subj_eng', academicYear: '2026', subtopics: [] },
-    { id: 'topic_2', schoolId: SCHOOL_A, subjectId: 'subj_eng', academicYear: '2026', subtopics: [] },
+    { id: 'topic_1', schoolId: SCHOOL_A, subjectId: 'subj_eng', academicYear: '2026', title: 'Nouns', order: 1, subtopics: [] },
+    { id: 'topic_2', schoolId: SCHOOL_A, subjectId: 'subj_eng', academicYear: '2026', title: 'Verbs', order: 2, subtopics: [] },
   ];
   mockCoverageDocs = [];
   mockTimetableDocs = [];
@@ -164,6 +164,43 @@ describe('GET /api/parent-portal/dashboard/:childId — curriculum coverage', ()
     const res = await supertest(buildApp()).get(`/api/parent-portal/dashboard/${CHILD_1}`);
     const eng = res.body.data.lessonsCoverage.find(s => s.subjectId === 'subj_eng');
     expect(eng.coveredTopics).toBe(1);
+  });
+
+  test('class pace and the child’s individual instruction are reported separately', async () => {
+    mockCoverageDocs = [
+      { schoolId: SCHOOL_A, classId: CLASS_ID, subjectId: 'subj_eng', academicYear: '2026', topicId: 'topic_1', streamId: DIAMOND, coveredAt: '2026-10-20T08:00:00.000Z' },
+      { schoolId: SCHOOL_A, classId: CLASS_ID, subjectId: 'subj_eng', academicYear: '2026', topicId: 'topic_2', streamId: DIAMOND, studentId: CHILD_1, coveredAt: '2026-11-20T08:00:00.000Z' },
+      // A sibling's mark is filtered out by the route and must never leak.
+      { schoolId: SCHOOL_A, classId: CLASS_ID, subjectId: 'subj_eng', academicYear: '2026', topicId: 'topic_2', streamId: DIAMOND, studentId: 'stu_sibling', coveredAt: '2026-11-21T08:00:00.000Z' },
+    ];
+    const res = await supertest(buildApp()).get(`/api/parent-portal/dashboard/${CHILD_1}`);
+    const eng = res.body.data.lessonsCoverage.find(s => s.subjectId === 'subj_eng');
+    expect(eng).toMatchObject({
+      coveredTopics: 2,
+      classCoveredTopics: 1,
+      percentage: 100,
+      classPercentage: 50,
+      individualTopics: 1,
+      nextTopic: null,
+      lastCoveredAt: '2026-11-20',
+    });
+  });
+
+  test('no applicable records still exposes the next topic and a null last-taught date', async () => {
+    // A sibling's individual mark makes the subject known, but it never counts
+    // for this child — the honest result is 0 with the first topic still next.
+    mockCoverageDocs = [
+      { schoolId: SCHOOL_A, classId: CLASS_ID, subjectId: 'subj_eng', academicYear: '2026', topicId: 'topic_1', streamId: DIAMOND, studentId: 'stu_sibling', coveredAt: '2026-11-20T08:00:00.000Z' },
+    ];
+    const res = await supertest(buildApp()).get(`/api/parent-portal/dashboard/${CHILD_1}`);
+    const eng = res.body.data.lessonsCoverage.find(s => s.subjectId === 'subj_eng');
+    expect(eng).toMatchObject({
+      coveredTopics: 0,
+      classCoveredTopics: 0,
+      individualTopics: 0,
+      nextTopic: 'Nouns',
+      lastCoveredAt: null,
+    });
   });
 });
 

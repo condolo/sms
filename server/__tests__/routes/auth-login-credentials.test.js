@@ -188,6 +188,42 @@ describe('POST /api/auth/login-credentials', () => {
     expect(SecurityService.clearFail).toHaveBeenCalledWith('sch_a', 'user@example.com');
   });
 
+  test('a single-school login verifies the password only once', async () => {
+    const user = makeUser();
+    mockCandidates = [user];
+    mockScopedUsers = { sch_a: user };
+    const compare = jest.spyOn(bcrypt, 'compare');
+
+    try {
+      const res = await supertest(buildApp())
+        .post('/api/auth/login-credentials')
+        .send({ email: 'user@example.com', password: PASSWORD, platform: 'mobile' });
+
+      expect(res.status).toBe(200);
+      expect(compare).toHaveBeenCalledTimes(1);
+    } finally {
+      compare.mockRestore();
+    }
+  });
+
+  test('a password changed between candidate lookup and full-user read is re-verified', async () => {
+    const user = makeUser();
+    mockCandidates = [user];
+    mockScopedUsers = { sch_a: makeUser({ password: bcrypt.hashSync(WRONG, 4) }) };
+    const compare = jest.spyOn(bcrypt, 'compare');
+
+    try {
+      const res = await supertest(buildApp())
+        .post('/api/auth/login-credentials')
+        .send({ email: 'user@example.com', password: PASSWORD, platform: 'mobile' });
+
+      expect(res.status).toBe(401);
+      expect(compare).toHaveBeenCalledTimes(2);
+    } finally {
+      compare.mockRestore();
+    }
+  });
+
   test('the app shape (platform: mobile) gets the token in the body and no cookie', async () => {
     const user = makeUser();
     mockCandidates = [user];
@@ -261,6 +297,47 @@ describe('POST /api/auth/login-credentials', () => {
     expect(createSession).toHaveBeenCalledTimes(2);
     // Still cookie-less for the app.
     expect(res.headers['set-cookie']).toBeUndefined();
+  });
+
+  test('multi-school mobile skips a school whose password changed after proof', async () => {
+    const a = makeUser({ id: 'usr_a_1', schoolId: 'sch_a' });
+    const bCandidate = makeUser({ id: 'usr_b_1', schoolId: 'sch_b', _id: 'oid_b' });
+    const bChanged = makeUser({
+      id: 'usr_b_1', schoolId: 'sch_b', _id: 'oid_b',
+      password: bcrypt.hashSync('OtherPassword2!', 4),
+    });
+    mockCandidates = [a, bCandidate];
+    mockScopedUsers = { sch_a: a, sch_b: bChanged };
+
+    const res = await supertest(buildApp())
+      .post('/api/auth/login-credentials')
+      .send({ email: 'user@example.com', password: PASSWORD, platform: 'mobile' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.school.id).toBe('sch_a');
+    expect(res.body.data.linkedSchools).toHaveLength(0);
+    const { createSession } = require('../../services/sessionService');
+    expect(createSession).toHaveBeenCalledTimes(1);
+  });
+
+  test('if every multi-school proof became stale, the app gets a 401 not a session', async () => {
+    const aChanged = makeUser({ schoolId: 'sch_a', password: bcrypt.hashSync('OtherPassword2!', 4) });
+    const bChanged = makeUser({
+      id: 'usr_b_1', schoolId: 'sch_b', _id: 'oid_b',
+      password: bcrypt.hashSync('OtherPassword2!', 4),
+    });
+    mockCandidates = [
+      makeUser({ schoolId: 'sch_a' }),
+      makeUser({ id: 'usr_b_1', schoolId: 'sch_b', _id: 'oid_b' }),
+    ];
+    mockScopedUsers = { sch_a: aChanged, sch_b: bChanged };
+
+    const res = await supertest(buildApp())
+      .post('/api/auth/login-credentials')
+      .send({ email: 'user@example.com', password: PASSWORD, platform: 'mobile' });
+
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe('Invalid email or password');
   });
 
   test('a school that needs MFA is not silently signed in — the other schools still are', async () => {
