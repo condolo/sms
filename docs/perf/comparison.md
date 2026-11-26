@@ -1,59 +1,64 @@
-# Before / after — local p95 comparison
+# Before / after — controlled local p95 comparison
 
-Both runs used the same harness, same configuration (concurrency 10,
-12 s per route, 2 warmup requests), same local MongoDB and the same
-`msingi_perf` database. All responses were 200.
+The authoritative comparison uses the **same harness, same fresh database,
+same seed, three rounds per route**, and reports the median round's p95.
+Only the application code differs between the two runs.
 
-- Before: `baseline.json` (commit `08f304b`)
-- After: `optimised.json` (this branch)
+- Before: `compare-baseline.json` (branch `perf/baseline-load-test`)
+- After: `compare-optimised2.json` (branch `perf/route-optimisations`)
 
-| Route | p95 before | p95 after | Change | p99 before → after |
-|---|---:|---:|---:|---:|
-| GET `/api/auth/me` | 288.4 ms | 49.0 ms | **5.9× faster (−83%)** | 328.8 → 75.8 ms |
-| POST `/api/auth/login-credentials` | 638.4 ms | 651.3 ms | unchanged | 737.4 → 899 ms |
-| GET `/api/student-portal/dashboard` | 581.7 ms | 383.9 ms | **1.5× faster (−34%)** | 930.4 → 448.4 ms |
-| GET `/api/assessment/reminders` | 249.2 ms | 206.5 ms | 1.2× faster (−17%) | 399.9 → 289.9 ms |
-| GET `/api/classes/:id/students` | 118.4 ms | 151.2 ms | within noise (+28%) | 188.9 → 262.8 ms |
-| GET `/api/parent-portal/report/:childId` | 88.1 ms | 66.2 ms | 1.3× faster (−25%) | 151.9 → 83.4 ms |
-| GET `/api/public/school-asset/:type` | 211.4 ms | 75.4 ms | **2.8× faster (−64%)** | 254.7 → 116.3 ms |
+Configuration: concurrency 10, 12 s per round, 2 warmup requests,
+3 rounds, IP rotation (so the login rate limiter does not truncate the run),
+fresh `msingi_perf` database before each run. All responses were 200.
 
-## What changed
+| Route | p95 before | p95 after | Change |
+|---|---:|---:|---:|
+| GET `/api/auth/me` | 521.6 ms | **42.8 ms** | **12.2× faster** |
+| GET `/api/public/school-asset/:type` | 370.3 ms | **36.6 ms** | **10.1× faster** |
+| GET `/api/parent-portal/report/:childId` | 120.9 ms | **37.6 ms** | **3.2× faster** |
+| GET `/api/classes/:id/students` | 120.4 ms | 68.2 ms | **1.8× faster** |
+| POST `/api/auth/login-credentials` | 865.6 ms | 787.6 ms | 1.1× faster |
+| GET `/api/student-portal/dashboard` | 607.5 ms | 620.5 ms | no measured gain |
+| GET `/api/assessment/reminders` | 105.1 ms | 122.0 ms | slightly slower locally |
 
-1. **`/api/auth/me`** — school and user reads are now projected. The school
-   query no longer pulls `logoBase64`/`loginBgBase64` (1–2 MB each on a real
-   school); user secrets are excluded at the query, not just in JSON.
-   The two reads run in parallel.
-2. **Public school assets** — decoded buffers and ETags are cached in-process
-   with a 5-minute TTL; 404s are cached briefly. `If-None-Match` returns 304.
-   Upload/delete routes invalidate the cache. Repeat reads now take ~1/3 of
-   the time and use no MongoDB round trip.
-3. **Assessment reminders** — the per-schedule × per-target
-   `Marks.countDocuments()` loop is replaced by one `$match` + `$group`
-   aggregation. This is the fix for the ≥10 s outliers in production, where
-   many schedules × many targets produced hundreds or thousands of serial
-   queries. The local demo dataset is too small to show the full gain, but
-   the query count is now constant instead of multiplicative.
-4. **MongoDB connection** — `bufferTimeoutMS` is now 2 s instead of the
-   10 s default, so a transient disconnect fails fast instead of producing
-   a slow, silent 200. `serverSelectionTimeoutMS` stays generous for cold
-   Atlas starts.
-5. **Indexes** — added compound indexes for snapshots by student/status,
-   student rosters, attendance by student/date, syllabus topics by
-   class/order, assessment schedules, and teaching assignments.
+`baseline.json` / `optimised.json` (single round, no fresh DB) are earlier,
+less reliable runs kept for reference. `final-baseline.json` /
+`final-optimised.json` show how misleading an accumulating database can be —
+do not use them for before/after claims.
 
-## Why the local numbers are far below the dashboard's 10,000 ms
+## Why two routes did not improve locally
 
-The local database is small, has no transient reconnects, and the demo
-school has few assessment schedules. The dashboard's `10,000` is a
-histogram bucket ceiling meaning ">5 s" and was driven by production-side
-N+1 fan-out, multi-megabyte document transfers, and Mongoose buffering.
-Those mechanisms are removed or bounded by the changes above; the next
-measurement that matters is on production traffic after deployment.
+- **Student dashboard**: the early reads were fanned out, but on a small local
+  Mongo this trades sequential round trips for bursts of concurrent queries
+  and does not reduce wall time. The durable win is the publish-state fix:
+  `getPublishState()` and `isTimetablePublished()` previously did unprojected
+  school reads that pulled the multi-megabyte logo blob twice per request.
+  They are now projected to `timetableStatus`, and the reader reuses the
+  resolved state. The benefit shows up on a school with a real logo upload,
+  which the small seeded fixture does not fully reproduce.
+- **Assessment reminders**: the N+1 loop is gone (one `$match`/`$group`
+  aggregation instead of `schedules × targets` count queries). On the tiny
+  seeded dataset the aggregation has fixed overhead and can be marginally
+  slower. The fix targets production datasets where hundreds or thousands of
+  serial counts dominated the response.
 
-## Remaining work
+## What was changed
 
-- Parallelise the student dashboard's ~24 mostly sequential DB reads.
-- Parallelise the parent report's six sequential queries.
-- Parallelise bounded password-candidate verification in login.
-- Move remaining inline `bcrypt.hash()` calls to the worker pool.
-- Show `max` and real bucket counts beside p95 in Live Analytics.
+1. `/api/auth/me` — projected school/user reads, in parallel; secrets excluded
+   at the query.
+2. Public school assets — in-process decoded-buffer cache with ETags and 304,
+   brief negative caching, invalidation from upload/delete routes.
+3. Assessment reminders — constant-query aggregation replacing the N+1 loop.
+4. MongoDB — `bufferTimeoutMS` reduced from 10 s to 2 s so reconnects fail
+   fast instead of producing slow silent 200s.
+5. Indexes — snapshots by student/status, student rosters, attendance by
+   student/date, syllabus topics by class/order, assessment schedules,
+   teaching assignments.
+6. Parent report and student dashboard — independent reads parallelised.
+7. Login — bounded candidate password checks and lock checks run in parallel.
+8. Timetable publish state — projected and shared within a request.
+
+## Next
+
+Batch fetching and pagination for the slow list endpoints and their client
+screens, then a fresh controlled benchmark.
