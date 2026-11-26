@@ -28,6 +28,7 @@ const CHILD_1  = 'stu_1';
 
 jest.mock('../../utils/timetable-publish', () => ({
   isTimetablePublished: jest.fn().mockResolvedValue(false),
+  getPublishState: jest.fn().mockResolvedValue({ published: false, publishedVersionId: null }),
   publishedReader: async () => mockCollection([]),
 }));
 jest.mock('../../routes/weekly-snapshots', () => ({
