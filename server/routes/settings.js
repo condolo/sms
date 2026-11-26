@@ -20,6 +20,7 @@ const nodemailer = require('nodemailer');
 const { authMiddleware }    = require('../middleware/auth');
 const { _model }            = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
+const { safeUser, USER_SECRET_FIELDS } = require('../utils/safe-user');
 const { parsePagination, strParam } = require('../utils/response');
 const { escapeRegex } = require('../utils/escape-regex');
 const { revokeUserTokens, revokeIdentityTokens } = require('../utils/token-version');
@@ -44,6 +45,9 @@ const {
 const { provisionIdentityForUser } = require('../utils/provision-identities');
 const { isIdentityCutoverEnabled } = require('../utils/identity-cutover');
 const { validateAssignableRole, SYSTEM_ROLES } = require('../utils/role-validation');
+
+/* Mongo projection that keeps every credential/OTP field off the wire. */
+const USER_SECRET_PROJECTION = Object.fromEntries(USER_SECRET_FIELDS.map((field) => [field, 0]));
 
 const router = express.Router();
 
@@ -309,9 +313,8 @@ router.get('/', authMiddleware, async (req, res) => { // rbac: self-scoped to th
       : { id: userId, schoolId };
     const user  = await Users.findOne(filter).lean();
     if (!user) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'User not found' } });
-    // Strip BOTH field names — auth.js stores as `password`, settings.js historically used `passwordHash`
-    const { password: _pw, passwordHash: _ph, ...safe } = user;
-    res.json({ success: true, data: safe });
+    // One shared boundary: never serialize passwords, PINs or OTP hashes.
+    res.json({ success: true, data: safeUser(user) });
   } catch (err) {
     console.error('[settings] GET / error:', err);
     res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Failed to fetch account' } });
@@ -948,7 +951,7 @@ router.get('/users', authMiddleware, rbac('settings', 'read'), // also read by H
       || req.query.q    !== undefined
       || req.query.role !== undefined;
 
-    const projection = { password: 0, passwordHash: 0 };
+    const projection = USER_SECRET_PROJECTION;
 
     // Normalize: ensure every user document has a string `id` field so
     // the frontend can reliably use it for PUT/DELETE without falling back
@@ -1132,7 +1135,7 @@ router.post('/users/invite', authMiddleware, rbac('settings', 'create', 'users')
       details: { role, via: 'invite' }, req,
     });
 
-    const { password: _pw2, passwordHash: _ph, ...safe } = newUser;
+    const safe = safeUser(newUser);
     res.status(201).json({ success: true, data: { user: safe, tempPassword } });
   } catch (err) {
     console.error('[settings] POST /users/invite error:', err);
@@ -1334,7 +1337,7 @@ router.put('/users/:id', authMiddleware, rbac('settings', 'update', 'users'), as
       }
     }
 
-    const updated = await Users.findOne(putFilter, { password: 0, passwordHash: 0 }).lean();
+    const updated = await Users.findOne(putFilter, USER_SECRET_PROJECTION).lean();
     res.json({ success: true, data: updated });
   } catch (err) {
     console.error('[settings] PUT /users/:id error:', err);

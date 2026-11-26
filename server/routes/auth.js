@@ -21,6 +21,7 @@ const { issueCsrfCookie, clearCsrfCookie } = require('../utils/csrf');
 const passwordTicket = require('../utils/password-ticket');
 const { schoolLoginUrl } = require('../utils/school-url');
 const demo = require('../utils/demo');
+const { safeUser: _safeUser } = require('../utils/safe-user');
 const { comparePassword, PasswordHashInfrastructureError } = require('../services/passwordHash');
 const {
   LOGIN_OTP_TTL_MS,
@@ -625,7 +626,7 @@ async function _handleLogin(req, res, { preverifiedUser = null, identity = null 
 
     AuditService.log({ action: 'auth.login', actor: { userId: user.id, role: userRole, email: user.email }, schoolId: req.school.id, req });
 
-    const safeUser = { ...user, password: undefined };
+    const safeUser = _safeUser(user);
     const allRoles = Array.isArray(user.roles) && user.roles.length ? user.roles : [userRole];
     const [, { sessionId, absoluteExpiry }, tokenPayload, , mergedPerms] = await Promise.all([
       tenantModel('users', { schoolId: req.school.id }).updateOne(
@@ -969,7 +970,7 @@ router.post('/verify-otp', otpLimiter, tenantMiddleware, async (req, res) => {
     const token = sign({ ...otpTokenPayload, sessionId: otpSessionId, absoluteExpiry: otpAbsExpiry });
 
     // Attach merged role permissions so sidebar filters correctly (same as regular login)
-    const safeUser = { ...user, password: undefined, mfaOtp: undefined, mfaExpiry: undefined };
+    const safeUser = _safeUser(user);
     _attachExtraRoleFields(safeUser, otpTokenPayload);
     await _attachPhotoUrl(safeUser, user.schoolId);
     const otpAllRoles = Array.isArray(user.roles) && user.roles.length ? user.roles : [_otpUserRole];
@@ -1171,11 +1172,7 @@ async function _issueMobileSession(req, user, school, { deviceId = null, action 
     req,
   });
 
-  const safeUser = {
-    ...user,
-    password: undefined, mfaOtp: undefined, mfaExpiry: undefined,
-    loginOtp: undefined, loginOtpExpiry: undefined, loginOtpAttempts: undefined, loginOtpSends: undefined,
-  };
+  const safeUser = _safeUser(user);
   _attachExtraRoleFields(safeUser, tokenPayload);
 
   return { token, user: safeUser, school, absoluteExpiry };
@@ -1298,7 +1295,7 @@ router.post('/otp/verify', mobileAuthLimiter, tenantMiddleware, async (req, res)
     if (!user || !user.isActive) return res.status(401).json(invalid);
 
     await _clearChallengeUserCopies(challenge);
-    const fresh = { ...user, loginOtp: undefined, loginOtpExpiry: undefined, loginOtpAttempts: undefined, loginOtpSentAt: undefined, loginOtpSends: undefined };
+    const fresh = _safeUser(user);
 
     if (await _stepUpIfRequired(req, res, fresh)) {
       AuditService.log({ action: 'auth.otp.step_up_required', actor: { userId: fresh.id, role: fresh.primaryRole || fresh.role, email: email_ }, schoolId: req.school.id, req });
@@ -1773,8 +1770,9 @@ router.post('/force-change', forceChangeLimiter, tenantMiddleware, async (req, r
       schoolId:    user.schoolId,
     }).catch(() => {});
 
-    const safeUser = { ...user, password: undefined, mfaOtp: undefined, mfaExpiry: undefined,
-                       passwordChangedAt: now, mustChangePassword: false };
+    const safeUser = _safeUser(user);
+    safeUser.passwordChangedAt = now;
+    safeUser.mustChangePassword = false;
     _attachExtraRoleFields(safeUser, fcTokenPayload);
     const fcAvailableSchools = await _availableSchools(fcTokenPayload);
     _setAuthCookie(res, token, fcAbsExpiry);
@@ -2384,7 +2382,7 @@ router.get('/me', authMiddleware, async (req, res) => {
     const School = _model('schools');
     const school = await School.findOne({ id: req.jwtUser.schoolId }).lean();
 
-    const safeUser = { ...user, password: undefined };
+    const safeUser = _safeUser(user);
     _attachExtraRoleFields(safeUser, req.jwtUser); // already-verified JWT — same values _buildTokenPayload put there at login, no extra DB round trip needed
     res.json({ user: safeUser, school });
   } catch (err) {
@@ -2517,7 +2515,7 @@ router.post('/exchange', exchangeLimiter, async (req, res) => {
       return res.status(404).json({ error: 'User or school not found' });
     }
 
-    const safeUser = { ...user, password: undefined, passwordHash: undefined, mfaOtp: undefined, mfaExpiry: undefined };
+    const safeUser = _safeUser(user);
     _attachExtraRoleFields(safeUser, payload);
     safeUser.photoUrl = photo
       ? `/api/users/${user.id}/photo?schoolId=${encodeURIComponent(payload.schoolId)}`
@@ -2969,7 +2967,7 @@ async function _completeOrgLoginSession(req, res, user, school, identity) {
   const tokenPayload = await _buildTokenPayload(user, school.id, school);
   const token = sign({ ...tokenPayload, sessionId, absoluteExpiry });
 
-  const safeUser = { ...user, password: undefined };
+  const safeUser = _safeUser(user);
   _attachExtraRoleFields(safeUser, tokenPayload);
   const allRoles = Array.isArray(user.roles) && user.roles.length ? user.roles : [userRole];
   const mergedPerms = await _loadMergedPermissions(school.id, allRoles, user.id);
