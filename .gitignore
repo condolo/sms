@@ -27,6 +27,10 @@ build/
 .release-certs/
 release-cert.json
 
+# Video reel workspace and generated HyperFrames output
+reel/
+.hyperframes/
+
 # Local demo-school data export (contains personal records; never commit)
 backups/
 
