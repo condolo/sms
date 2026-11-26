@@ -21,6 +21,7 @@ const { provisionMemberships } = require('./utils/provision-memberships');
 const { provisionIdentities } = require('./utils/provision-identities');
 const { correlationIdMiddleware } = require('./utils/correlation-id');
 const { seedDemo }            = require('./scripts/seed-demo');
+const { closePool }           = require('./services/passwordHash');
 
 /* ── Monitoring: initialise BEFORE anything else ──────────────
    Registers uncaughtException + unhandledRejection handlers.
@@ -53,6 +54,8 @@ monitoring.init();
 
 const app  = express();
 const PORT = process.env.PORT || 3005;
+let server = null;
+let shuttingDown = false;
 
 /* ── Trust Render / Heroku / nginx reverse proxy ────────────────
    Without this, req.ip returns the proxy IP (10.x.x.x) instead
@@ -829,7 +832,7 @@ async function start() {
   // finance rights imply (see utils/finance-permission-backfill.js).
   await backfillFinanceSubPermissions().catch(err => console.error('[startup] finance sub-permission backfill failed:', err.message));
 
-  app.listen(PORT, () => {
+  server = app.listen(PORT, () => {
     console.log(`\n🎓 Msingi API running on port ${PORT}`);
     console.log(`   Local:   http://localhost:${PORT}`);
     console.log(`   Health:  http://localhost:${PORT}/api/health`);
@@ -1008,5 +1011,26 @@ async function start() {
     }
   });
 }
+
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[shutdown] ${signal} received; closing HTTP server and password workers`);
+  const force = setTimeout(() => process.exit(1), 10_000);
+  force.unref();
+  try {
+    await closePool();
+    if (server) await new Promise(resolve => server.close(resolve));
+    await require('mongoose').disconnect();
+    clearTimeout(force);
+    process.exit(0);
+  } catch (err) {
+    console.error('[shutdown] failed:', err.message);
+    process.exit(1);
+  }
+}
+
+process.on('SIGTERM', () => { shutdown('SIGTERM').catch(() => process.exit(1)); });
+process.on('SIGINT', () => { shutdown('SIGINT').catch(() => process.exit(1)); });
 
 start().catch(err => { console.error('Failed to start:', err); process.exit(1); });

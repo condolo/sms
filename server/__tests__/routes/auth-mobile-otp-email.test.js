@@ -67,13 +67,53 @@ jest.mock('../../services/securityService', () => ({
 jest.mock('../../services/audit', () => ({ log: jest.fn().mockResolvedValue(undefined) }));
 
 let mockAccounts = [];
+let mockChallenge = null;
+
+jest.mock('../../services/otpChallengeService', () => ({
+  LOGIN_OTP_TTL_MS: 10 * 60 * 1000,
+  LOGIN_OTP_MAX_ATTEMPTS: 5,
+  LOGIN_OTP_RESEND_MS: 60 * 1000,
+  LOGIN_OTP_MAX_PER_HOUR: 5,
+  claimEmailCode: jest.fn(async (email, accounts, { codeHash, expiresAt, sentAt }) => {
+    const now = Date.now();
+    if (mockChallenge?._id === email) {
+      const lastSent = mockChallenge.lastSentAt ? new Date(mockChallenge.lastSentAt).getTime() : 0;
+      const recent = (mockChallenge.sendTimes ?? []).filter(t => now - new Date(t).getTime() < 60 * 60 * 1000);
+      if ((lastSent && now - lastSent < 60 * 1000) || recent.length >= 5) return null;
+    }
+    mockChallenge = {
+      _id: email,
+      codeHash,
+      expiresAt,
+      accounts,
+      attempts: 0,
+      lastSentAt: sentAt,
+      sendTimes: [...(mockChallenge?._id === email ? mockChallenge.sendTimes ?? [] : []), sentAt],
+    };
+    return { ...mockChallenge };
+  }),
+  consumeEmailCode: jest.fn(async (email, codeHash) => {
+    if (!mockChallenge || mockChallenge._id !== email || mockChallenge.consumedAt) return null;
+    if (new Date(mockChallenge.expiresAt) <= new Date() || (mockChallenge.attempts ?? 0) >= 5) return null;
+    if (mockChallenge.codeHash !== codeHash) {
+      mockChallenge.attempts = (mockChallenge.attempts ?? 0) + 1;
+      return null;
+    }
+    mockChallenge.consumedAt = new Date();
+    mockChallenge.attempts = (mockChallenge.attempts ?? 0) + 1;
+    return { ...mockChallenge };
+  }),
+}));
 
 function mockFindAccount(filter) {
   if (!filter) return null;
   if (filter._id !== undefined) {
     return mockAccounts.find(a => String(a._id) === String(filter._id)) ?? null;
   }
-  return mockAccounts.find(a => a.id === filter.id && a.schoolId === filter.schoolId) ?? null;
+  if (filter.id !== undefined) {
+    return mockAccounts.find(a => a.id === filter.id && a.schoolId === filter.schoolId) ?? null;
+  }
+  return mockAccounts.find(a => a.schoolId === filter.schoolId) ?? null;
 }
 
 function mockApplyUpdate(account, update) {
@@ -118,8 +158,40 @@ jest.mock('../../utils/tenant-model', () => ({
     if (collection === 'users') {
       return {
         findOne: (filter) => mockChain(mockFindAccount({ ...filter, schoolId: ctx?.schoolId })),
+        findOneAndUpdate: (filter, update) => {
+          const account = mockFindAccount({ ...filter, schoolId: ctx?.schoolId });
+          if (!account) return { lean: () => Promise.resolve(null) };
+          if (filter.loginOtp && account.loginOtp !== filter.loginOtp) {
+            return { lean: () => Promise.resolve(null) };
+          }
+          if (filter.loginOtpExpiry && new Date(account.loginOtpExpiry) <= new Date(filter.loginOtpExpiry.$gt)) {
+            return { lean: () => Promise.resolve(null) };
+          }
+          if (filter.loginOtpAttempts && (account.loginOtpAttempts ?? 0) >= filter.loginOtpAttempts.$lt) {
+            return { lean: () => Promise.resolve(null) };
+          }
+          if (filter.$or && !filter.$or.some(part => {
+            if (part.loginOtpSentAt?.$exists === false) return !('loginOtpSentAt' in account);
+            if (part.loginOtpSentAt === null) return account.loginOtpSentAt == null;
+            if (part.loginOtpSentAt?.$lte) {
+              return account.loginOtpSentAt != null
+                && new Date(account.loginOtpSentAt) <= new Date(part.loginOtpSentAt.$lte);
+            }
+            return false;
+          })) {
+            return { lean: () => Promise.resolve(null) };
+          }
+          if (filter.$expr) {
+            const limit = filter.$expr.$lt[1];
+            const hourAgo = filter.$expr.$lt[0].$size.$filter.cond.$gte[1];
+            const recent = (account.loginOtpSends ?? []).filter(t => new Date(t) >= new Date(hourAgo));
+            if (recent.length >= limit) return { lean: () => Promise.resolve(null) };
+          }
+          mockApplyUpdate(account, update);
+          return { lean: () => Promise.resolve({ ...account }) };
+        },
         updateOne: jest.fn((filter, update) => {
-          mockApplyUpdate(mockFindAccount(filter), update);
+          mockApplyUpdate(mockFindAccount({ ...filter, schoolId: ctx?.schoolId }), update);
           return Promise.resolve({ modifiedCount: 1 });
         }),
       };
@@ -168,11 +240,21 @@ function seedCode(code = '123456', overrides = {}) {
     account.loginOtpAttempts = 0;
     Object.assign(account, overrides);
   }
+  mockChallenge = {
+    _id: 'parent@example.com',
+    codeHash: sha256(code),
+    expiresAt: new Date(overrides.loginOtpExpiry ?? Date.now() + 5 * 60 * 1000),
+    attempts: overrides.loginOtpAttempts ?? 0,
+    accounts: mockAccounts.map(account => ({ schoolId: account.schoolId, userId: account.id })),
+    lastSentAt: new Date(),
+    sendTimes: [new Date()],
+  };
 }
 
 beforeEach(() => {
   jest.clearAllMocks();
   mockAccounts = [];
+  mockChallenge = null;
 });
 
 /* ── Requesting the code ───────────────────────────────────────── */
@@ -209,6 +291,18 @@ describe('POST /api/auth/mobile/otp/request', () => {
       expect(ttl).toBeGreaterThan(9 * 60 * 1000);
       expect(ttl).toBeLessThanOrEqual(10 * 60 * 1000);
     }
+  });
+
+  test('ten rapid requests send only one code', async () => {
+    mockAccounts = [makeAccount({ id: 'usr_a', schoolId: 'sch_a' })];
+    const app = buildApp();
+
+    const responses = await Promise.all(Array.from({ length: 10 }, () =>
+      supertest(app).post('/api/auth/mobile/otp/request').send({ email: 'parent@example.com' })));
+
+    expect(responses.every(res => res.status === 200)).toBe(true);
+    expect(email.sendLoginOTP).toHaveBeenCalledTimes(1);
+    expect(mockAccounts[0].loginOtpSends).toHaveLength(1);
   });
 
   test('an address at one school is branded for that school', async () => {
@@ -293,6 +387,11 @@ describe('POST /api/auth/mobile/otp/request', () => {
       loginOtpSentAt: new Date(now - 5 * 60 * 1000).toISOString(),
       loginOtpSends: Array.from({ length: 5 }, (_, i) => new Date(now - (i + 1) * 60 * 1000).toISOString()),
     })];
+    mockChallenge = {
+      _id: 'parent@example.com',
+      lastSentAt: new Date(now - 5 * 60 * 1000),
+      sendTimes: Array.from({ length: 5 }, (_, i) => new Date(now - (i + 1) * 60 * 1000)),
+    };
 
     const res = await supertest(buildApp())
       .post('/api/auth/mobile/otp/request')
@@ -337,7 +436,7 @@ describe('POST /api/auth/mobile/otp/verify', () => {
     }
   });
 
-  test('a wrong code counts one attempt against every live copy', async () => {
+  test('a wrong code counts one attempt on the inbox challenge', async () => {
     mockAccounts = [
       makeAccount({ id: 'usr_a', schoolId: 'sch_a' }),
       makeAccount({ id: 'usr_b', schoolId: 'sch_b' }),
@@ -350,8 +449,9 @@ describe('POST /api/auth/mobile/otp/verify', () => {
 
     expect(res.status).toBe(401);
     expect(res.body.error.code).toBe('INVALID_OTP');
+    expect(mockChallenge.attempts).toBe(1);
+    expect(mockChallenge.consumedAt).toBeUndefined();
     for (const account of mockAccounts) {
-      expect(account.loginOtpAttempts).toBe(1);
       expect(account.loginOtp).toBe(sha256('123456')); // still usable
     }
   });
@@ -387,6 +487,20 @@ describe('POST /api/auth/mobile/otp/verify', () => {
 
     expect(res.status).toBe(401);
     expect(res.body.error.code).toBe('INVALID_OTP');
+  });
+
+  test('concurrent verifiers cannot replay the same one-time code', async () => {
+    mockAccounts = [makeAccount({ id: 'usr_a', schoolId: 'sch_a' })];
+    seedCode('123456');
+    const app = buildApp();
+
+    const [first, second] = await Promise.all([
+      supertest(app).post('/api/auth/mobile/otp/verify').send({ email: 'parent@example.com', code: '123456' }),
+      supertest(app).post('/api/auth/mobile/otp/verify').send({ email: 'parent@example.com', code: '123456' }),
+    ]);
+
+    expect([first.status, second.status].sort()).toEqual([200, 401]);
+    expect(mockAccounts[0].loginOtp).toBeUndefined();
   });
 
   test('an admin-only address gets the step-up, and the challenge names its school', async () => {

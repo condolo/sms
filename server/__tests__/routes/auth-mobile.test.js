@@ -62,6 +62,45 @@ jest.mock('../../services/securityService', () => ({
 
 jest.mock('../../services/audit', () => ({ log: jest.fn().mockResolvedValue(undefined) }));
 
+let mockUserDoc = null;
+let mockChallenge = null;
+
+jest.mock('../../services/otpChallengeService', () => ({
+  LOGIN_OTP_TTL_MS: 10 * 60 * 1000,
+  LOGIN_OTP_MAX_ATTEMPTS: 5,
+  LOGIN_OTP_RESEND_MS: 60 * 1000,
+  LOGIN_OTP_MAX_PER_HOUR: 5,
+  claimEmailCode: jest.fn(async (email, accounts, { codeHash, expiresAt, sentAt }) => {
+    const now = Date.now();
+    if (mockChallenge?._id === email) {
+      const lastSent = mockChallenge.lastSentAt ? new Date(mockChallenge.lastSentAt).getTime() : 0;
+      const recent = (mockChallenge.sendTimes ?? []).filter(t => now - new Date(t).getTime() < 60 * 60 * 1000);
+      if ((lastSent && now - lastSent < 60 * 1000) || recent.length >= 5) return null;
+    }
+    mockChallenge = {
+      _id: email,
+      codeHash,
+      expiresAt,
+      accounts,
+      attempts: 0,
+      lastSentAt: sentAt,
+      sendTimes: [...(mockChallenge?._id === email ? mockChallenge.sendTimes ?? [] : []), sentAt],
+    };
+    return { ...mockChallenge };
+  }),
+  consumeEmailCode: jest.fn(async (email, codeHash) => {
+    if (!mockChallenge || mockChallenge._id !== email || mockChallenge.consumedAt) return null;
+    if (new Date(mockChallenge.expiresAt) <= new Date() || (mockChallenge.attempts ?? 0) >= 5) return null;
+    if (mockChallenge.codeHash !== codeHash) {
+      mockChallenge.attempts = (mockChallenge.attempts ?? 0) + 1;
+      return null;
+    }
+    mockChallenge.consumedAt = new Date();
+    mockChallenge.attempts = (mockChallenge.attempts ?? 0) + 1;
+    return { ...mockChallenge };
+  }),
+}));
+
 /** Firebase is stubbed — these tests must never need a real service account. */
 jest.mock('../../utils/firebase', () => ({
   getFirebaseAdmin: jest.fn(() => null),
@@ -72,10 +111,8 @@ jest.mock('../../utils/firebase', () => ({
 const firebase = require('../../utils/firebase');
 const email    = require('../../utils/email');
 
-let mockUserDoc = null;
-
 /** Real Mongo update semantics, applied to the one mock document. */
-function _applyUpdate(doc, update) {
+function mockApplyUpdate(doc, update) {
   if (!doc) return;
   if (update.$set) for (const [k, v] of Object.entries(update.$set)) doc[k] = v;
   if (update.$inc) for (const [k, v] of Object.entries(update.$inc)) doc[k] = (doc[k] || 0) + v;
@@ -87,8 +124,16 @@ function mockAsDoc(doc) {
   return doc ? { ...doc, toObject: () => ({ ...doc }) } : null;
 }
 
+function mockSelectable(result) {
+  const q = {
+    select: () => q,
+    lean: () => Promise.resolve(result),
+  };
+  return q;
+}
+
 const mockUsersUpdateOne = jest.fn((filter, update) => {
-  _applyUpdate(mockUserDoc, update);
+  mockApplyUpdate(mockUserDoc, update);
   return Promise.resolve({ modifiedCount: 1 });
 });
 
@@ -102,16 +147,47 @@ jest.mock('../../utils/model', () => ({
           return Object.assign(Promise.resolve(result), { lean: () => Promise.resolve(mockUserDoc ? { ...mockUserDoc } : null) });
         }),
         updateOne: mockUsersUpdateOne,
+        findOneAndUpdate: (filter, update) => {
+          if (!mockUserDoc) return { lean: () => Promise.resolve(null) };
+          if (filter.mfaOtp && mockUserDoc.mfaOtp !== filter.mfaOtp) {
+            return { lean: () => Promise.resolve(null) };
+          }
+          if (filter.mfaExpiry?.$gt && new Date(mockUserDoc.mfaExpiry) <= new Date(filter.mfaExpiry.$gt)) {
+            return { lean: () => Promise.resolve(null) };
+          }
+          if (filter.isActive === true && mockUserDoc.isActive !== true) {
+            return { lean: () => Promise.resolve(null) };
+          }
+          if (filter.$or && !filter.$or.some(part => {
+            if (part.loginOtpSentAt?.$exists === false) return !('loginOtpSentAt' in mockUserDoc);
+            if (part.loginOtpSentAt === null) return mockUserDoc.loginOtpSentAt == null;
+            if (part.loginOtpSentAt?.$lte) {
+              return mockUserDoc.loginOtpSentAt != null
+                && new Date(mockUserDoc.loginOtpSentAt) <= new Date(part.loginOtpSentAt.$lte);
+            }
+            return false;
+          })) {
+            return { lean: () => Promise.resolve(null) };
+          }
+          if (filter.$expr?.$gt) {
+            const cutoff = filter.$expr.$gt[1];
+            if (new Date(mockUserDoc.mfaExpiry) <= new Date(cutoff)) {
+              return { lean: () => Promise.resolve(null) };
+            }
+          }
+          mockApplyUpdate(mockUserDoc, update);
+          return { lean: () => Promise.resolve({ ...mockUserDoc }) };
+        },
       };
     }
     if (collection === 'schools') {
-      return { findOne: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(mockSchool) }) };
+      return { findOne: jest.fn().mockReturnValue(mockSelectable(mockSchool)) };
     }
     if (collection === 'teachers') {
-      return { findOne: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) }) };
+      return { findOne: jest.fn().mockReturnValue(mockSelectable(null)) };
     }
     return {
-      findOne: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) }),
+      findOne: jest.fn().mockReturnValue(mockSelectable(null)),
       find: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([]) }),
       updateOne: jest.fn().mockResolvedValue({ modifiedCount: 0 }),
       deleteMany: jest.fn().mockResolvedValue({ deletedCount: 0 }),
@@ -152,6 +228,7 @@ function makeUser(overrides = {}) {
 beforeEach(() => {
   jest.clearAllMocks();
   mockUserDoc = makeUser();
+  mockChallenge = null;
   firebase.verifyIdToken.mockReset();
 });
 
@@ -227,6 +304,11 @@ describe('POST /api/auth/otp/request', () => {
       loginOtpSentAt: new Date(now - 5 * 60 * 1000).toISOString(), // past the 60s window
       loginOtpSends: Array.from({ length: 5 }, (_, i) => new Date(now - (i + 1) * 60 * 1000).toISOString()),
     });
+    mockChallenge = {
+      _id: 'kamau@example.com',
+      lastSentAt: new Date(now - 5 * 60 * 1000),
+      sendTimes: Array.from({ length: 5 }, (_, i) => new Date(now - (i + 1) * 60 * 1000)),
+    };
 
     const res = await supertest(buildApp()).post('/api/auth/otp/request').send({ email: 'kamau@example.com' });
     expect(res.status).toBe(200);
@@ -249,6 +331,15 @@ describe('POST /api/auth/otp/verify', () => {
       loginOtpAttempts: 0,
       ...overrides,
     });
+    mockChallenge = {
+      _id: mockUserDoc.email,
+      codeHash: sha256(code),
+      expiresAt: new Date(mockUserDoc.loginOtpExpiry),
+      attempts: mockUserDoc.loginOtpAttempts ?? 0,
+      accounts: [{ schoolId: mockUserDoc.schoolId, userId: mockUserDoc.id }],
+      lastSentAt: new Date(),
+      sendTimes: [new Date()],
+    };
   }
 
   test('a correct code returns a session token in the body and sets no cookies', async () => {
@@ -273,7 +364,7 @@ describe('POST /api/auth/otp/verify', () => {
 
     expect(res.status).toBe(401);
     expect(res.body.error.code).toBe('INVALID_OTP');
-    expect(mockUserDoc.loginOtpAttempts).toBe(1);
+    expect(mockChallenge.attempts).toBe(1);
     expect(mockUserDoc.loginOtp).toBe(sha256('123456'));
   });
 
@@ -285,12 +376,12 @@ describe('POST /api/auth/otp/verify', () => {
     expect(res.body.error.code).toBe('INVALID_OTP');
   });
 
-  test('an expired code is refused and cleared', async () => {
+  test('an expired code is refused without consuming the challenge', async () => {
     seedCode('123456', { loginOtpExpiry: new Date(Date.now() - 1000).toISOString() });
     const res = await supertest(buildApp()).post('/api/auth/otp/verify').send({ email: 'kamau@example.com', code: '123456' });
 
     expect(res.status).toBe(401);
-    expect(mockUserDoc.loginOtp).toBeUndefined();
+    expect(mockChallenge.consumedAt).toBeUndefined();
   });
 
   test('attempts are capped so a code cannot be brute-forced', async () => {

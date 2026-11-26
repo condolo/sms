@@ -21,6 +21,15 @@ const { issueCsrfCookie, clearCsrfCookie } = require('../utils/csrf');
 const passwordTicket = require('../utils/password-ticket');
 const { schoolLoginUrl } = require('../utils/school-url');
 const demo = require('../utils/demo');
+const { comparePassword, PasswordHashInfrastructureError } = require('../services/passwordHash');
+const {
+  LOGIN_OTP_TTL_MS,
+  LOGIN_OTP_MAX_ATTEMPTS,
+  LOGIN_OTP_RESEND_MS,
+  LOGIN_OTP_MAX_PER_HOUR,
+  claimEmailCode,
+  consumeEmailCode,
+} = require('../services/otpChallengeService');
 
 const router = express.Router();
 
@@ -171,44 +180,44 @@ async function _buildTokenPayload(user, schoolId, schoolDoc = null) {
   // function — a failure here must not block login, and most users (no
   // linked teacher record) get nothing added, keeping tokens lean.
   try {
-    const teacher = await tenantModel('teachers', { schoolId })
+    const teacherPromise = tenantModel('teachers', { schoolId })
       .findOne({ schoolId, $or: [{ userId: payload.userId }, { email: user.email }] })
-      .select('extraRoles departmentId').lean();
+      .select('extraRoles departmentId').lean()
+      .catch(err => {
+        console.error('[auth] _buildTokenPayload extraRoles/departmentId lookup failed (non-fatal):', err.message);
+        return null;
+      });
+    const schoolPromise = schoolDoc && Object.prototype.hasOwnProperty.call(schoolDoc, 'organizationId')
+      ? Promise.resolve(schoolDoc)
+      : _model('schools').findOne({ id: schoolId }).select('organizationId').lean().catch(() => null);
+
+    // These reads are independent. Running them serially added two network
+    // round trips to every successful password/OTP login.
+    const [teacher, school] = await Promise.all([teacherPromise, schoolPromise]);
     if (Array.isArray(teacher?.extraRoles) && teacher.extraRoles.length) {
       payload.extraRoles = teacher.extraRoles;
     }
     if (teacher?.departmentId) {
       payload.departmentId = teacher.departmentId;
     }
-  } catch (err) {
-    console.error('[auth] _buildTokenPayload extraRoles/departmentId lookup failed (non-fatal):', err.message);
-  }
+    if (user.identityId) {
+      payload.identityId = user.identityId;
+    }
 
-  // C8/MR-001 Phase 1 (ADR-0003 Decision 4) — additive. Only users with a
-  // shared credential (users.identityId set, C8/MR-001 Phase 0) carry these;
-  // a password/MFA change bumps identities.tokenVersion, invalidating every
-  // token across every school sharing that credential.
-  if (user.identityId) {
-    payload.identityId = user.identityId;
-    payload.itv = await getIdentityTokenVersion(user.identityId);
-  }
-
-  // C9 (D-004, Constitution §10 Stage 4) — orgId only when this school's
-  // organization has explicitly opted into multi-school (multiSchoolEnabled:
-  // true). Set directly from school.organizationId — NOT gated on a
-  // `memberships` doc existing for this user at this school. Found live
-  // (real-DB production validation, not a mock): a freshly-invited user
-  // never gets an inline Membership record for their OWN home school —
-  // only the one-time boot backfill (provisionMemberships()) creates those,
-  // so anyone invited after boot had payload.orgId silently never set,
-  // which broke _availableSchools (and therefore the School Switcher UI)
-  // for them even though _resolveIdentitySchools independently proved they
-  // have real multi-school access. membershipId stays best-effort metadata
-  // (audit-query filter only, see server/routes/audit.js — nothing
-  // authorization-relevant depends on it), looked up but never required.
-  // Never fatal — a lookup failure here must not block token issuance.
-  try {
-    const school = await _model('schools').findOne({ id: schoolId }).select('organizationId').lean();
+    // C9 (D-004, Constitution §10 Stage 4) — orgId only when this school's
+    // organization has explicitly opted into multi-school (multiSchoolEnabled:
+    // true). Set directly from school.organizationId — NOT gated on a
+    // `memberships` doc existing for this user at this school. Found live
+    // (real-DB production validation, not a mock): a freshly-invited user
+    // never gets an inline Membership record for their OWN home school —
+    // only the one-time boot backfill (provisionMemberships()) creates those,
+    // so anyone invited after boot had payload.orgId silently never set,
+    // which broke _availableSchools (and therefore the School Switcher UI)
+    // for them even though _resolveIdentitySchools independently proved they
+    // have real multi-school access. membershipId stays best-effort metadata
+    // (audit-query filter only, see server/routes/audit.js — nothing
+    // authorization-relevant depends on it), looked up but never required.
+    // Never fatal — a lookup failure here must not block token issuance.
     if (school?.organizationId) {
       const org = await _model('organizations').findOne({ id: school.organizationId }).select('multiSchoolEnabled').lean();
       if (org?.multiSchoolEnabled) {
@@ -220,7 +229,17 @@ async function _buildTokenPayload(user, schoolId, schoolDoc = null) {
       }
     }
   } catch (err) {
-    console.error('[auth] _buildTokenPayload multi-school lookup failed (non-fatal):', err.message);
+    console.error('[auth] _buildTokenPayload supplemental lookup failed (non-fatal):', err.message);
+  }
+
+  // Identity revocation is security-sensitive: never fabricate version zero
+  // and never omit the claim on a read failure. Retry once, then fail login.
+  if (user.identityId) {
+    try {
+      payload.itv = await getIdentityTokenVersion(user.identityId);
+    } catch {
+      payload.itv = await getIdentityTokenVersion(user.identityId);
+    }
   }
 
   return payload;
@@ -252,7 +271,7 @@ async function _attachPhotoUrl(safeUser, schoolId) {
   const uid = safeUser.id || safeUser._id?.toString();
   const photo = uid
     ? await tenantModel('user_photos', { schoolId })
-      .findOne({ userId: uid, schoolId }).lean().catch(() => null)
+      .findOne({ userId: uid, schoolId }).select('_id').lean().catch(() => null)
     : null;
   safeUser.photoUrl = photo
     ? `/api/users/${uid}/photo?schoolId=${encodeURIComponent(schoolId)}`
@@ -404,7 +423,7 @@ const SecurityService = require('../services/securityService');
    credentials themselves). Everything after tenant resolution lives
    here exactly once, so the two doors cannot drift on first-login,
    password-expiry, MFA, session, cookie or mobile-token behaviour. */
-async function _handleLogin(req, res) {
+async function _handleLogin(req, res, { preverifiedUser = null, identity = null } = {}) {
   try {
     // NOTE: renamed to userEmail to avoid shadowing the module-level `email` import
     // 'identifier' supports admission-number login for students; falls back to 'email' for staff
@@ -425,8 +444,10 @@ async function _handleLogin(req, res) {
     const School = _model('schools');
 
     // Find user regardless of isActive so we can give a clear pending message
-    // Students log in with admission number stored in `username` field; staff use email
-    const user = await User.findOne({
+    // Students log in with admission number stored in `username` field; staff use email.
+    // The school-less credentials door already proved the password and fetched
+    // the full tenant-scoped user; reuse it instead of paying for bcrypt twice.
+    const user = preverifiedUser || await User.findOne({
       $or: [
         { email: loginId,    schoolId: req.school.id },
         { username: loginId, schoolId: req.school.id },
@@ -470,14 +491,15 @@ async function _handleLogin(req, res) {
     // bug caught by this phase's own tests: `identity` alone can't
     // distinguish "never looked up" from "looked up, found nothing."
     const identityLookupAttempted = isIdentityCutoverEnabled() && !!user.identityId;
-    let identity = null;
-    if (identityLookupAttempted) {
+    if (identityLookupAttempted && !identity) {
       identity = await _model('identities').findOne({ id: user.identityId }).lean();
     }
 
-    const match = identityLookupAttempted
-      ? (identity?.passwordHash?.startsWith('$2') ? await bcrypt.compare(password, identity.passwordHash) : false)
-      : (user.password?.startsWith('$2') ? await bcrypt.compare(password, user.password) : false); // reject any account that lacks a bcrypt hash
+    const match = preverifiedUser
+      ? true
+      : identityLookupAttempted
+        ? (identity?.passwordHash?.startsWith('$2') ? await comparePassword(password, identity.passwordHash) : false)
+        : (user.password?.startsWith('$2') ? await comparePassword(password, user.password) : false); // reject any account that lacks a bcrypt hash
 
     if (!match) {
       const clientIp = req.headers['cf-connecting-ip'] || req.ip;
@@ -600,37 +622,34 @@ async function _handleLogin(req, res) {
       });
     }
 
-    // Update last login
-    await tenantModel('users', { schoolId: req.school.id }).updateOne({ _id: user._id }, { lastLogin: new Date().toISOString() });
-
     AuditService.log({ action: 'auth.login', actor: { userId: user.id, role: userRole, email: user.email }, schoolId: req.school.id, req });
 
-    // Create platform session record (device tracking, admin revocation, audit trail)
-    const { sessionId, absoluteExpiry } = await SessionService.createSession(
-      _userId, req.school.id, userRole,
-      req.headers['cf-connecting-ip'] || req.ip,
-      req.headers['user-agent'] || '',
-    );
-
-    const tokenPayload = await _buildTokenPayload(user, req.school.id, req.school);
+    const safeUser = { ...user, password: undefined };
+    const allRoles = Array.isArray(user.roles) && user.roles.length ? user.roles : [userRole];
+    const [, { sessionId, absoluteExpiry }, tokenPayload, , mergedPerms] = await Promise.all([
+      tenantModel('users', { schoolId: req.school.id }).updateOne(
+        { _id: user._id }, { lastLogin: new Date().toISOString() },
+      ),
+      SessionService.createSession(
+        _userId, req.school.id, userRole,
+        req.headers['cf-connecting-ip'] || req.ip,
+        req.headers['user-agent'] || '',
+      ),
+      _buildTokenPayload(user, req.school.id, req.school),
+      _attachPhotoUrl(safeUser, req.school.id),
+      _loadMergedPermissions(req.school.id, allRoles, user.id),
+    ]);
     const token = sign({ ...tokenPayload, sessionId, absoluteExpiry });
 
     // Check trial expiry and send reminder if needed
     _checkTrialAndNotify(req.school).catch(() => {});
 
-    const safeUser = { ...user, password: undefined };
     _attachExtraRoleFields(safeUser, tokenPayload);
-    await _attachPhotoUrl(safeUser, req.school.id);
+    if (mergedPerms !== null) safeUser.permissions = mergedPerms;
 
-    // Attach merged role permissions so the client sidebar can filter correctly.
-    // Merges across all roles the user holds (union of actions per module).
-    const allRoles = Array.isArray(user.roles) && user.roles.length ? user.roles : [userRole];
-    const mergedPerms = await _loadMergedPermissions(req.school.id, allRoles, user.id);
-    if (mergedPerms !== null) {
-      safeUser.permissions = mergedPerms;
-    }
-
-    const availableSchools = await _availableSchools(tokenPayload);
+    const availableSchools = _isMobileClient(req)
+      ? []
+      : await _availableSchools(tokenPayload);
 
     SecurityService.clearFail(req.school.id, loginId).catch(() => {});
     // The app presents platform: 'mobile' and gets the token in the body — no
@@ -688,16 +707,51 @@ async function _candidatePasswordMatches(candidate, password) {
   try {
     if (isIdentityCutoverEnabled() && candidate.identityId) {
       const identity = await _model('identities').findOne({ id: candidate.identityId }).lean();
-      return identity?.passwordHash?.startsWith('$2')
-        ? await bcrypt.compare(password, identity.passwordHash)
-        : false;
+      return {
+        match: identity?.passwordHash?.startsWith('$2')
+          ? await comparePassword(password, identity.passwordHash)
+          : false,
+        identity,
+      };
     }
-    return candidate.password?.startsWith('$2')
-      ? await bcrypt.compare(password, candidate.password)
-      : false;
-  } catch {
-    return false;
+    return {
+      match: candidate.password?.startsWith('$2')
+        ? await comparePassword(password, candidate.password)
+        : false,
+      identity: null,
+    };
+  } catch (err) {
+    if (err instanceof PasswordHashInfrastructureError) throw err;
+    return { match: false, identity: null };
   }
+}
+
+/** Load the full user and prove the credential snapshot still matches. */
+async function _loadVerifiedFullUser({ schoolId, candidate, identity, password }) {
+  const candidateId = candidate?.id || String(candidate?._id || '');
+  const fullUser = await tenantModel('users', { schoolId })
+    .findOne(_challengeUserFilter(candidateId)).lean();
+  if (!fullUser) return null;
+
+  let verifiedIdentity = identity ?? null;
+  if (isIdentityCutoverEnabled() && fullUser.identityId) {
+    const currentIdentity = await _model('identities').findOne({ id: fullUser.identityId }).lean();
+    if (!currentIdentity?.passwordHash?.startsWith('$2')
+      || currentIdentity.passwordHash !== identity?.passwordHash) {
+      if (!currentIdentity?.passwordHash?.startsWith('$2')
+        || !await comparePassword(password, currentIdentity.passwordHash)) {
+        return null;
+      }
+    }
+    verifiedIdentity = currentIdentity;
+  } else if (fullUser.identityId !== candidate?.identityId
+    || fullUser.password !== candidate?.password) {
+    if (!fullUser.password?.startsWith('$2') || !await comparePassword(password, fullUser.password)) {
+      return null;
+    }
+  }
+
+  return { fullUser, identity: verifiedIdentity };
 }
 
 router.post('/login-credentials', loginIpLimiter, async (req, res) => {
@@ -716,13 +770,14 @@ router.post('/login-credentials', loginIpLimiter, async (req, res) => {
     const candidates = await findLoginCandidates(loginId, projection);
 
     if (!candidates.length) {
-      await bcrypt.compare(password, TIMING_DUMMY_HASH).catch(() => false);
+      await comparePassword(password, TIMING_DUMMY_HASH).catch(() => false);
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
     const matches = [];
     for (const candidate of candidates) {
-      if (await _candidatePasswordMatches(candidate, password)) matches.push(candidate);
+      const result = await _candidatePasswordMatches(candidate, password);
+      if (result.match) matches.push({ candidate, identity: result.identity });
     }
 
     if (!matches.length) {
@@ -736,8 +791,8 @@ router.post('/login-credentials', loginIpLimiter, async (req, res) => {
     }
 
     /* The password proved, so a lockout is now the caller's own business. */
-    for (const match of matches) {
-      const retryAfter = await SecurityService.checkAccountLock(match.schoolId, loginId);
+    for (const { candidate } of matches) {
+      const retryAfter = await SecurityService.checkAccountLock(candidate.schoolId, loginId);
       if (retryAfter !== null) {
         return res.status(429).json({
           error: 'Too many failed login attempts. Please wait before trying again.',
@@ -749,12 +804,17 @@ router.post('/login-credentials', loginIpLimiter, async (req, res) => {
     const schools = [];
     const expiredDemo = [];
     const schoolByMatchId = new Map();
-    for (const match of matches) {
-      const school = await _findSchool({ id: match.schoolId });
-      if (!school || !school.isActive) continue;
+    const resolvedSchools = await Promise.all(matches.map(async ({ candidate }) => {
+      const school = await _findSchool({ id: candidate.schoolId });
+      return school ? { school, candidate } : null;
+    }));
+    for (const resolved of resolvedSchools) {
+      if (!resolved) continue;
+      const { school, candidate } = resolved;
+      if (!school.isActive) continue;
       if (demo.isExpired(school)) { expiredDemo.push(school); continue; }
       schools.push(school);
-      schoolByMatchId.set(school.id, match);
+      schoolByMatchId.set(school.id, candidate);
     }
 
     if (!schools.length) {
@@ -772,11 +832,19 @@ router.post('/login-credentials', loginIpLimiter, async (req, res) => {
          those are controls a silent session would bypass. */
       if (_isMobileClient(req)) {
         const signedIn = [];
+        let credentialValid = 0;
         for (const school of schools) {
           const candidate = schoolByMatchId.get(school.id);
-          const fullUser = await tenantModel('users', { schoolId: school.id })
-            .findOne({ id: candidate?.id, schoolId: school.id }).lean();
-          if (!fullUser || !fullUser.isActive) continue;
+          const verifiedUser = await _loadVerifiedFullUser({
+            schoolId: school.id,
+            candidate,
+            identity: matches.find(m => m.candidate === candidate)?.identity ?? null,
+            password,
+          });
+          if (!verifiedUser) continue;
+          credentialValid += 1;
+          const { fullUser } = verifiedUser;
+          if (!fullUser.isActive) continue;
           if (fullUser.mustChangePassword || fullUser.mustChangePwd) continue;
           if (_passwordAge(fullUser) >= PASSWORD_MAX_DAYS) continue;
           const role = fullUser.primaryRole || fullUser.role;
@@ -787,6 +855,10 @@ router.post('/login-credentials', loginIpLimiter, async (req, res) => {
             action: 'auth.login.credentials',
           });
           signedIn.push({ session, lastLogin });
+        }
+
+        if (credentialValid === 0) {
+          return res.status(401).json({ error: 'Invalid email or password' });
         }
 
         if (signedIn.length > 0) {
@@ -808,13 +880,28 @@ router.post('/login-credentials', loginIpLimiter, async (req, res) => {
       });
     }
 
-    /* Hand over to the canonical handler with the tenant resolved. It
-       re-reads the user scoped to this school and re-checks everything
-       (lock, password, expiry, MFA) before issuing the session. */
+    /* Hand over to the canonical handler with the tenant resolved. The
+       password is already proved; fetch the full tenant-scoped user once for
+       expiry/MFA/session fields and skip the duplicate bcrypt comparison. */
     req.school = schools[0];
-    return _handleLogin(req, res);
+    const verified = matches.find(({ candidate }) => candidate.schoolId === schools[0].id);
+    const verifiedUser = await _loadVerifiedFullUser({
+      schoolId: schools[0].id,
+      candidate: verified?.candidate,
+      identity: verified?.identity ?? null,
+      password,
+    });
+    if (!verifiedUser) return res.status(401).json({ error: 'Invalid email or password' });
+
+    return _handleLogin(req, res, {
+      preverifiedUser: verifiedUser.fullUser,
+      identity: verifiedUser.identity,
+    });
   } catch (err) {
     console.error('[auth/login-credentials]', err);
+    if (err instanceof PasswordHashInfrastructureError) {
+      return res.status(503).json({ error: 'Authentication is temporarily unavailable. Please try again.' });
+    }
     res.status(500).json({ error: 'Login failed' });
   }
 });
@@ -839,7 +926,7 @@ router.post('/verify-otp', otpLimiter, tenantMiddleware, async (req, res) => {
       : { id: userId, schoolId: req.school.id };
 
     const user = await User.findOne(userQ).lean();
-    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!user || !user.isActive) return res.status(401).json({ error: 'Incorrect code. Please check your email and try again.' });
 
     if (!user.mfaOtp || !user.mfaExpiry) {
       return res.status(400).json({ error: 'No pending OTP. Please sign in again.' });
@@ -853,11 +940,20 @@ router.post('/verify-otp', otpLimiter, tenantMiddleware, async (req, res) => {
       return res.status(401).json({ error: 'Incorrect code. Please check your email and try again.' });
     }
 
-    // OTP verified — clear it, issue JWT
-    await User.updateOne({ _id: user._id }, { $unset: { mfaOtp: 1, mfaExpiry: 1 }, lastLogin: new Date().toISOString() });
+    // Compare-and-consume: only the request that atomically clears the live
+    // hash may continue. A client timeout/retry can no longer spend the code
+    // and then race a second verifier into "used" while both issue sessions.
+    const consumed = await User.findOneAndUpdate(
+      { _id: user._id, isActive: true, mfaOtp: user.mfaOtp, ..._dateAfterExpr('mfaExpiry', new Date()) },
+      { $unset: { mfaOtp: 1, mfaExpiry: 1 }, $set: { lastLogin: new Date().toISOString() } },
+      { returnDocument: 'after' },
+    ).lean();
+    if (!consumed) return res.status(401).json({ error: 'Incorrect or already used code. Please check your email and try again.' });
 
-    const School = _model('schools');
-    const school = await School.findOne({ id: user.schoolId }).lean();
+    // tenantMiddleware already resolved a projected, session-safe school.
+    // Re-reading the full document here previously pulled multi-MB image
+    // payloads into every MFA response (measured 5–6s school reads).
+    const school = req.school;
 
     const _otpUserId   = user.id || user._id.toString();
     const _otpUserRole = user.primaryRole || user.role;
@@ -868,7 +964,7 @@ router.post('/verify-otp', otpLimiter, tenantMiddleware, async (req, res) => {
       req.headers['user-agent'] || '',
     );
 
-    const otpTokenPayload = await _buildTokenPayload(user, user.schoolId);
+    const otpTokenPayload = await _buildTokenPayload(user, user.schoolId, school);
     const token = sign({ ...otpTokenPayload, sessionId: otpSessionId, absoluteExpiry: otpAbsExpiry });
 
     // Attach merged role permissions so sidebar filters correctly (same as regular login)
@@ -879,7 +975,9 @@ router.post('/verify-otp', otpLimiter, tenantMiddleware, async (req, res) => {
     const otpMergedPerms = await _loadMergedPermissions(user.schoolId, otpAllRoles, user.id);
     if (otpMergedPerms !== null) safeUser.permissions = otpMergedPerms;
 
-    const otpAvailableSchools = await _availableSchools(otpTokenPayload);
+    const otpAvailableSchools = _isMobileClient(req)
+      ? []
+      : await _availableSchools(otpTokenPayload);
 
     _checkTrialAndNotify(school).catch(() => {});
     // Mobile clients (the app) get the token in the body and NO cookies — see
@@ -934,11 +1032,25 @@ router.post('/verify-otp', otpLimiter, tenantMiddleware, async (req, res) => {
 
 const { verifyIdToken: verifyFirebaseIdToken } = require('../utils/firebase');
 
-const LOGIN_OTP_TTL_MS = 10 * 60 * 1000;
-const LOGIN_OTP_MAX_ATTEMPTS = 5;
-const LOGIN_OTP_RESEND_MS = 60 * 1000;   // silent: no second email, identical answer
-const LOGIN_OTP_MAX_PER_HOUR = 5;        // silent: protects the parent's inbox
 const MFA_STEP_UP_TTL_MS = 5 * 60 * 1000;
+
+/** Compare either legacy ISO strings or BSON Dates without type-bracketing. */
+function _dateAfterExpr(field, cutoff) {
+  return {
+    $expr: {
+      $gt: [
+        {
+          $cond: [
+            { $eq: [{ $type: `$${field}` }, 'date'] },
+            `$${field}`,
+            { $dateFromString: { dateString: `$${field}`, onError: null, onNull: null } },
+          ],
+        },
+        cutoff,
+      ],
+    },
+  };
+}
 
 /* 150 per 15 min, NOT 20: an entire school sits behind one campus NAT IP, and
    the whole point of the app is that every parent uses it — a parents' meeting
@@ -1030,13 +1142,14 @@ async function _issueMobileSession(req, user, school, { deviceId = null, action 
   const role = user.primaryRole || user.role;
   const userId = user.id || user._id.toString();
 
-  const { sessionId, absoluteExpiry } = await SessionService.createSession(
-    userId, school.id, role,
-    req.headers['cf-connecting-ip'] || req.ip,
-    req.headers['user-agent'] || '',
-  );
-
-  const tokenPayload = await _buildTokenPayload(user, school.id, school);
+  const [{ sessionId, absoluteExpiry }, tokenPayload] = await Promise.all([
+    SessionService.createSession(
+      userId, school.id, role,
+      req.headers['cf-connecting-ip'] || req.ip,
+      req.headers['user-agent'] || '',
+    ),
+    _buildTokenPayload(user, school.id, school),
+  ]);
   const token = sign({
     ...tokenPayload,
     sessionId,
@@ -1067,6 +1180,30 @@ async function _issueMobileSession(req, user, school, { deviceId = null, action 
   return { token, user: safeUser, school, absoluteExpiry };
 }
 
+function _challengeUserFilter(userId) {
+  return /^[0-9a-f]{24}$/i.test(String(userId))
+    ? { $or: [{ id: userId }, { _id: new mongoose.Types.ObjectId(userId) }] }
+    : { id: userId };
+}
+
+async function _loadChallengeUsers(challenge) {
+  const users = await Promise.all((challenge.accounts || []).map(async (account) => {
+    const User = tenantModel('users', { schoolId: account.schoolId });
+    return User.findOne(_challengeUserFilter(account.userId)).lean();
+  }));
+  return users.filter(Boolean);
+}
+
+async function _clearChallengeUserCopies(challenge) {
+  await Promise.all((challenge.accounts || []).map(account =>
+    tenantModel('users', { schoolId: account.schoolId }).updateOne(
+      { ..._challengeUserFilter(account.userId), loginOtp: challenge.codeHash },
+      { $unset: {
+        loginOtp: 1, loginOtpExpiry: 1, loginOtpAttempts: 1, loginOtpSentAt: 1, loginOtpSends: 1,
+      } },
+    ).catch(() => {})));
+}
+
 /* POST /api/auth/otp/request — email a sign-in code (app only) */
 router.post('/otp/request', mobileAuthLimiter, tenantMiddleware, async (req, res) => {
   try {
@@ -1086,24 +1223,28 @@ router.post('/otp/request', mobileAuthLimiter, tenantMiddleware, async (req, res
       return res.json(ok);
     }
 
-    const lastSent = user.loginOtpSentAt ? new Date(user.loginOtpSentAt).getTime() : 0;
-    if (lastSent && Date.now() - lastSent < LOGIN_OTP_RESEND_MS) return res.json(ok);
-
     const recentSends = Array.isArray(user.loginOtpSends)
       ? user.loginOtpSends.filter(t => Date.now() - new Date(t).getTime() < 60 * 60 * 1000)
       : [];
-    if (recentSends.length >= LOGIN_OTP_MAX_PER_HOUR) {
-      console.warn(`[auth/otp] ${email_} hit the ${LOGIN_OTP_MAX_PER_HOUR}-codes-per-hour limit — not sending another.`);
-      return res.json(ok);
-    }
-
     const otp = _genOTP();
+    const codeHash = _hashOTP(otp);
+    const sentAt = new Date();
+    const expiresAt = new Date(sentAt.getTime() + LOGIN_OTP_TTL_MS);
+    const claimed = await claimEmailCode(
+      email_,
+      [{ schoolId: req.school.id, userId: user.id || String(user._id) }],
+      { codeHash, expiresAt, sentAt },
+    );
+    if (!claimed) return res.json(ok);
+
+    // Keep the per-user copy for older instances during a drained rollout.
+    // The inbox challenge above is authoritative for the new verify routes.
     await User.updateOne({ _id: user._id }, { $set: {
-      loginOtp: _hashOTP(otp),
-      loginOtpExpiry: new Date(Date.now() + LOGIN_OTP_TTL_MS).toISOString(),
+      loginOtp: codeHash,
+      loginOtpExpiry: expiresAt,
       loginOtpAttempts: 0,
-      loginOtpSentAt: new Date().toISOString(),
-      loginOtpSends: [...recentSends, new Date().toISOString()],
+      loginOtpSentAt: sentAt.toISOString(),
+      loginOtpSends: [...recentSends, sentAt.toISOString()],
     } });
 
     email.sendLoginOTP({
@@ -1146,29 +1287,17 @@ router.post('/otp/verify', mobileAuthLimiter, tenantMiddleware, async (req, res)
     // indistinguishable from a wrong code.
     const invalid = { success: false, error: { code: 'INVALID_OTP', message: 'That code isn’t right, or it has expired. Ask for a new one.' } };
 
-    const User = tenantModel('users', { schoolId: req.school.id });
-    const user = await User.findOne({ email: email_, schoolId: req.school.id });
+    const challenge = await consumeEmailCode(email_, _hashOTP(code), { schoolId: req.school.id });
+    if (!challenge) return res.status(401).json(invalid);
+
+    const account = (challenge.accounts || []).find(a => a.schoolId === req.school.id);
+    if (!account) return res.status(401).json(invalid);
+    const users = await _loadChallengeUsers({ ...challenge, accounts: [account] });
+    const user = users[0];
     if (!user || !user.isActive) return res.status(401).json(invalid);
 
-    if (!user.loginOtp || !user.loginOtpExpiry) return res.status(401).json(invalid);
-    if (new Date(user.loginOtpExpiry) < new Date()) {
-      await User.updateOne({ _id: user._id }, { $unset: { loginOtp: 1, loginOtpExpiry: 1 } });
-      return res.status(401).json(invalid);
-    }
-    if ((user.loginOtpAttempts ?? 0) >= LOGIN_OTP_MAX_ATTEMPTS) return res.status(401).json(invalid);
-
-    if (!_verifyOTP(code, user.loginOtp)) {
-      await User.updateOne({ _id: user._id }, { $inc: { loginOtpAttempts: 1 } });
-      return res.status(401).json(invalid);
-    }
-
-    // Consume the code BEFORE anything else that can fail, so it can never be
-    // replayed even if the step-up email or session creation throws.
-    await User.updateOne({ _id: user._id }, { $unset: {
-      loginOtp: 1, loginOtpExpiry: 1, loginOtpAttempts: 1, loginOtpSentAt: 1, loginOtpSends: 1,
-    } });
-
-    const fresh = { ...user.toObject(), loginOtp: undefined, loginOtpExpiry: undefined };
+    await _clearChallengeUserCopies(challenge);
+    const fresh = { ...user, loginOtp: undefined, loginOtpExpiry: undefined, loginOtpAttempts: undefined, loginOtpSentAt: undefined, loginOtpSends: undefined };
 
     if (await _stepUpIfRequired(req, res, fresh)) {
       AuditService.log({ action: 'auth.otp.step_up_required', actor: { userId: fresh.id, role: fresh.primaryRole || fresh.role, email: email_ }, schoolId: req.school.id, req });
@@ -1201,10 +1330,11 @@ router.post('/otp/verify', mobileAuthLimiter, tenantMiddleware, async (req, res)
    and types six digits once. The email is branded for the school when the
    address belongs to exactly one, and simply "Msingi" when it spans more.
 
-   The code is deliberately NOT accepted by the tenant-scoped /otp/verify:
-   that route only looks inside one school, while this one is defined by
-   the inbox. Verification spends the same loginOtp fields, so a code can
-   never be used twice through either door.
+   The same challenge is accepted by the tenant-scoped /otp/verify only when
+   that school is one of its account references. Consuming it there still
+   spends the one code for every school, so the caller receives only the
+   tenant session it explicitly chose. The school-less route is the one that
+   returns every linked school session.
    ══════════════════════════════════════════════════════════════ */
 
 router.post('/mobile/otp/request', mobileAuthLimiter, async (req, res) => {
@@ -1238,37 +1368,38 @@ router.post('/mobile/otp/request', mobileAuthLimiter, async (req, res) => {
     }
     if (!resolved.length) return res.json(ok);
 
-    /* The same inbox-level throttles the tenant route applies, now across
-       every copy of the address: one resend window and one hourly cap,
-       because it is still one person's inbox. */
     const now = Date.now();
     const recentSends = (account) => Array.isArray(account.loginOtpSends)
       ? account.loginOtpSends.filter(t => now - new Date(t).getTime() < 60 * 60 * 1000)
       : [];
-    const throttled = resolved.some(({ account }) => {
-      const lastSent = account.loginOtpSentAt ? new Date(account.loginOtpSentAt).getTime() : 0;
-      if (lastSent && now - lastSent < LOGIN_OTP_RESEND_MS) return true;
-      return recentSends(account).length >= LOGIN_OTP_MAX_PER_HOUR;
-    });
-    if (throttled) return res.json(ok);
 
     const otp = _genOTP();
     const codeHash = _hashOTP(otp);
-    const sentAt = new Date(now).toISOString();
-    const expiresAt = new Date(now + LOGIN_OTP_TTL_MS).toISOString();
+    const sentAt = new Date(now);
+    const sentAtIso = sentAt.toISOString();
+    const expiresAt = new Date(now + LOGIN_OTP_TTL_MS);
+    const challengeAccounts = resolved.map(({ account }) => ({
+      schoolId: account.schoolId,
+      userId: account.id || String(account._id),
+    }));
+    const claimed = await claimEmailCode(
+      email_,
+      challengeAccounts,
+      { codeHash, expiresAt, sentAt },
+    );
+    if (!claimed) return res.json(ok);
 
-    /* One hash, written to every matching account: the code is one code.
-       Verifying $unset's it everywhere at once. */
-    await Promise.all(resolved.map(({ account, school }) => {
-      const User = tenantModel('users', { schoolId: school.id });
-      return User.updateOne({ _id: account._id }, { $set: {
+    /* The inbox challenge is authoritative. These copies keep older instances
+       working during a drained rollout; partial copy writes cannot split a
+       successful login in the new verify route. */
+    await Promise.all(resolved.map(({ account, school }) =>
+      tenantModel('users', { schoolId: school.id }).updateOne({ _id: account._id }, { $set: {
         loginOtp: codeHash,
         loginOtpExpiry: expiresAt,
         loginOtpAttempts: 0,
-        loginOtpSentAt: sentAt,
-        loginOtpSends: [...recentSends(account), sentAt],
-      } });
-    }));
+        loginOtpSentAt: sentAtIso,
+        loginOtpSends: [...recentSends(account), sentAtIso],
+      } })));
 
     const names = [...new Set(resolved.map(r => r.school.name).filter(Boolean))];
     const primary = resolved[0].school;
@@ -1318,49 +1449,19 @@ router.post('/mobile/otp/verify', mobileAuthLimiter, async (req, res) => {
     // One failure shape: unknown address, wrong code, expired code, used code.
     const invalid = { success: false, error: { code: 'INVALID_OTP', message: 'That code isn’t right, or it has expired. Ask for a new one.' } };
 
-    const accounts = (await findAccountsByEmail(
-      email_,
-      'id schoolId email name role primaryRole isActive lastLogin loginOtp loginOtpExpiry loginOtpAttempts',
-    )).filter(account => account.isActive);
-
-    if (!accounts.length) return res.status(401).json(invalid);
-
-    const now = Date.now();
-    const matched = accounts.filter(account =>
-      account.loginOtp
-      && account.loginOtpExpiry
-      && new Date(account.loginOtpExpiry).getTime() >= now
-      && (account.loginOtpAttempts ?? 0) < LOGIN_OTP_MAX_ATTEMPTS
-      && _verifyOTP(code, account.loginOtp),
-    );
-
-    if (!matched.length) {
-      /* Count the attempt against every account whose code is still live —
-         the attacker sees one inbox, so the cap must be one cap. */
-      await Promise.all(accounts
-        .filter(account => account.loginOtp && account.loginOtpExpiry && new Date(account.loginOtpExpiry).getTime() >= now)
-        .map(account => tenantModel('users', { schoolId: account.schoolId })
-          .updateOne({ _id: account._id }, { $inc: { loginOtpAttempts: 1 } }).catch(() => {})));
-      return res.status(401).json(invalid);
-    }
-
-    /* Spend the code on every account it was written to BEFORE issuing any
-       session, so it can never be replayed even if a later step throws. */
-    await Promise.all(matched.map(account => tenantModel('users', { schoolId: account.schoolId })
-      .updateOne({ _id: account._id }, { $unset: {
-        loginOtp: 1, loginOtpExpiry: 1, loginOtpAttempts: 1, loginOtpSentAt: 1, loginOtpSends: 1,
-      } })));
+    const challenge = await consumeEmailCode(email_, _hashOTP(code));
+    if (!challenge) return res.status(401).json(invalid);
+    const matched = await _loadChallengeUsers(challenge);
+    if (!matched.length) return res.status(401).json(invalid);
+    await _clearChallengeUserCopies(challenge);
 
     const signedIn = [];
     const stepUp = [];
-    for (const account of matched) {
-      const school = await _findSchool({ id: account.schoolId });
+    for (const fullUser of matched) {
+      if (!fullUser.isActive) continue;
+      const school = await _findSchool({ id: fullUser.schoolId });
       if (!school || !school.isActive) continue;
       if (demo.isExpired(school)) continue;
-
-      const fullUser = await tenantModel('users', { schoolId: school.id })
-        .findOne({ id: account.id, schoolId: school.id }).lean();
-      if (!fullUser || !fullUser.isActive) continue;
 
       const role = fullUser.primaryRole || fullUser.role;
       const isDemoSchool = !!school.isDemo || school.slug === 'demo';
@@ -2312,8 +2413,8 @@ router.post('/change-password', authMiddleware, async (req, res) => {
     }
 
     const match = identityLookupAttempted
-      ? (identity?.passwordHash?.startsWith('$2') ? await bcrypt.compare(currentPassword, identity.passwordHash) : false)
-      : (user.password?.startsWith('$2') ? await bcrypt.compare(currentPassword, user.password) : false);
+      ? (identity?.passwordHash?.startsWith('$2') ? await comparePassword(currentPassword, identity.passwordHash) : false)
+      : (user.password?.startsWith('$2') ? await comparePassword(currentPassword, user.password) : false);
     if (!match) return res.status(401).json({ error: 'Current password incorrect' });
 
     const hashed = await bcrypt.hash(newPassword, 12);
@@ -2707,7 +2808,7 @@ router.post('/org-login', orgLoginLimiter, async (req, res) => {
     const Identities = _model('identities');
     const identity = await Identities.findOne({ orgId: org.id, email, status: 'active' }).lean();
     const match = identity?.passwordHash?.startsWith('$2')
-      ? await bcrypt.compare(password, identity.passwordHash)
+      ? await comparePassword(password, identity.passwordHash)
       : false;
 
     if (!match) {

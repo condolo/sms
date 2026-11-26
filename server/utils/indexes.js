@@ -264,7 +264,45 @@ const INDEXES = [
     indexes: [
       { key: { schoolId: 1, status: 1 },  name: 'teachers_school_status' },
       { key: { schoolId: 1, email: 1 },   name: 'teachers_school_email_str', unique: true, partialFilterExpression: { email: { $type: 'string' } } },
+      { key: { schoolId: 1, userId: 1 },  name: 'teachers_school_user', sparse: true },
       { key: { id: 1 },                   name: 'teachers_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── auth hot-path lookups ───────────────────────────────────────
+     These are read on every successful login (permissions, photo) or
+     every failed login (lock key). Generic {schoolId} indexes are not
+     selective enough once a school has real volume. */
+  {
+    col: 'role_permissions',
+    indexes: [
+      { key: { schoolId: 1, roleKey: 1 }, name: 'roleperms_school_role' },
+      { key: { schoolId: 1, userId: 1 },  name: 'roleperms_school_user', sparse: true },
+    ],
+  },
+  {
+    col: 'user_photos',
+    indexes: [
+      { key: { schoolId: 1, userId: 1 }, name: 'userphotos_school_user', sparse: true },
+    ],
+  },
+  {
+    col: 'login_failures',
+    indexes: [
+      { key: { key: 1 }, name: 'loginfail_key_unique', unique: true },
+    ],
+  },
+  {
+    col: 'otp_challenges',
+    indexes: [
+      { key: { expiresAt: 1 }, name: 'otp_challenges_expiry', expireAfterSeconds: 0 },
+    ],
+  },
+  {
+    col: 'email_failures',
+    indexes: [
+      { key: { scope: 1, hour: 1 }, name: 'emailfail_scope_hour' },
+      { key: { lastAt: 1 },         name: 'emailfail_lastat' },
     ],
   },
 
@@ -1088,6 +1126,7 @@ const INDEXES = [
     indexes: [
       { key: { organizationId: 1 }, name: 'schools_org', sparse: true },
       { key: { slug: 1 },           name: 'schools_slug', unique: true, sparse: true },
+      { key: { customDomain: 1 },   name: 'schools_custom_domain', sparse: true },
       { key: { referralPartnerId: 1 }, name: 'schools_referral_partner', sparse: true },
     ],
   },
@@ -1296,7 +1335,28 @@ const DROP_INDEXES = [
   // messages_recipients_date; dropping it removes a write-amplification tax
   // on every message insert for an index nothing can use.
   { col: 'messages', name: 'messages_inbox' },
+  // The first auth-hot-path index was sparse but not unique. Concurrent first
+  // failures could still insert duplicate rows, so replace it after dedupe.
+  { col: 'login_failures', name: 'loginfail_key' },
 ];
+
+async function _dedupeLoginFailures() {
+  const collection = _model('login_failures').collection;
+  const duplicates = await collection.aggregate([
+    { $sort: { updatedAt: -1 } },
+    { $group: {
+      _id: '$key',
+      keep: { $first: '$_id' },
+      ids: { $push: '$_id' },
+      count: { $sum: 1 },
+    } },
+    { $match: { count: { $gt: 1 } } },
+  ]).toArray();
+  for (const group of duplicates) {
+    await collection.deleteMany({ _id: { $in: group.ids, $ne: group.keep } });
+  }
+  return duplicates.length;
+}
 
 /**
  * Create all defined indexes.
@@ -1309,6 +1369,13 @@ async function ensureIndexes() {
   if (!isConnected()) {
     console.warn('[DB] Skipping index creation — no MongoDB connection (MONGODB_URI not set).');
     return results;
+  }
+
+  try {
+    const deduped = await _dedupeLoginFailures();
+    if (deduped) console.log(`[DB] Deduplicated ${deduped} login failure key(s) before unique-index creation.`);
+  } catch (err) {
+    results.errors.push({ col: 'login_failures', name: 'dedupe', message: err.message });
   }
 
   // Drop superseded indexes first — ignore "index not found" (already migrated)
@@ -1326,9 +1393,10 @@ async function ensureIndexes() {
 
   for (const { col, indexes } of INDEXES) {
     try {
-      const model = _model(col);      for (const { key, name, unique = false, sparse = false, partialFilterExpression, collation } of indexes) {
+      const model = _model(col);      for (const { key, name, unique = false, sparse = false, partialFilterExpression, collation, expireAfterSeconds } of indexes) {
         try {
           const opts = { name, unique, background: true };
+          if (expireAfterSeconds !== undefined) opts.expireAfterSeconds = expireAfterSeconds;
           // sparse and partialFilterExpression are mutually exclusive in MongoDB
           if (partialFilterExpression) opts.partialFilterExpression = partialFilterExpression;
           else if (sparse)             opts.sparse = true;

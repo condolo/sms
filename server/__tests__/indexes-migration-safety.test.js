@@ -33,6 +33,21 @@
 
 const { INDEXES, DROP_INDEXES } = require('../utils/indexes');
 
+describe('login_failures index — unique failure key', () => {
+  const entry = INDEXES.find(e => e.col === 'login_failures');
+
+  test('the failure key is unique so concurrent upserts cannot duplicate rows', () => {
+    const idx = entry.indexes.find(i => i.name === 'loginfail_key_unique');
+    expect(idx).toMatchObject({ key: { key: 1 }, unique: true });
+  });
+
+  test('the old non-unique index is dropped before the replacement is created', () => {
+    expect(DROP_INDEXES).toEqual(expect.arrayContaining([
+      { col: 'login_failures', name: 'loginfail_key' },
+    ]));
+  });
+});
+
 describe('report_card_draft_comments index — cycle migration safety', () => {
   const entry = INDEXES.find(e => e.col === 'report_card_draft_comments');
 
