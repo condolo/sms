@@ -180,16 +180,19 @@ async function _buildTokenPayload(user, schoolId, schoolDoc = null) {
   // function — a failure here must not block login, and most users (no
   // linked teacher record) get nothing added, keeping tokens lean.
   try {
-    const teacherPromise = tenantModel('teachers', { schoolId })
-      .findOne({ schoolId, $or: [{ userId: payload.userId }, { email: user.email }] })
-      .select('extraRoles departmentId').lean()
+    const teacherPromise = Promise.resolve()
+      .then(() => tenantModel('teachers', { schoolId })
+        .findOne({ schoolId, $or: [{ userId: payload.userId }, { email: user.email }] })
+        .select('extraRoles departmentId').lean())
       .catch(err => {
         console.error('[auth] _buildTokenPayload extraRoles/departmentId lookup failed (non-fatal):', err.message);
         return null;
       });
     const schoolPromise = schoolDoc && Object.prototype.hasOwnProperty.call(schoolDoc, 'organizationId')
       ? Promise.resolve(schoolDoc)
-      : _model('schools').findOne({ id: schoolId }).select('organizationId').lean().catch(() => null);
+      : Promise.resolve()
+        .then(() => _model('schools').findOne({ id: schoolId }).select('organizationId').lean())
+        .catch(() => null);
 
     // These reads are independent. Running them serially added two network
     // round trips to every successful password/OTP login.
@@ -199,9 +202,6 @@ async function _buildTokenPayload(user, schoolId, schoolDoc = null) {
     }
     if (teacher?.departmentId) {
       payload.departmentId = teacher.departmentId;
-    }
-    if (user.identityId) {
-      payload.identityId = user.identityId;
     }
 
     // C9 (D-004, Constitution §10 Stage 4) — orgId only when this school's
@@ -235,6 +235,7 @@ async function _buildTokenPayload(user, schoolId, schoolDoc = null) {
   // Identity revocation is security-sensitive: never fabricate version zero
   // and never omit the claim on a read failure. Retry once, then fail login.
   if (user.identityId) {
+    payload.identityId = user.identityId;
     try {
       payload.itv = await getIdentityTokenVersion(user.identityId);
     } catch {
@@ -271,7 +272,7 @@ async function _attachPhotoUrl(safeUser, schoolId) {
   const uid = safeUser.id || safeUser._id?.toString();
   const photo = uid
     ? await tenantModel('user_photos', { schoolId })
-      .findOne({ userId: uid, schoolId }).select('_id').lean().catch(() => null)
+      .findOne({ userId: uid, schoolId }).lean().catch(() => null)
     : null;
   safeUser.photoUrl = photo
     ? `/api/users/${uid}/photo?schoolId=${encodeURIComponent(schoolId)}`
