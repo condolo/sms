@@ -33,10 +33,17 @@ single and batched paths. Concurrency inside a batch is capped at four.
 `TeacherStudents.jsx` now chunks its classes into batches of 20 instead of
 issuing one HTTP request per class.
 
+A second batch removes an N+1 in `listCampaigns()`: campaign status and
+distinct-recipient stats are computed for the entire page with two
+aggregations, instead of one aggregation + one distinct query per campaign.
+
 Tests: `POST /api/classes/rosters/batch` describe block in
 `server/__tests__/routes/classes-streams-students-scope.test.js` (ordering,
 same 403 as the single route for out-of-scope classes, empty/oversized batch
-rejection). All pre-existing classes route tests still pass.
+rejection), plus the campaign stats batching test in
+`server/__tests__/outreach-service.test.js` (two aggregate calls for two
+campaigns, no per-campaign distinct calls). All pre-existing classes route
+tests still pass.
 
 ## 3. Pagination
 

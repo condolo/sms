@@ -82,6 +82,34 @@ describe('unsubscribe tokens', () => {
   });
 });
 
+describe('campaign stats batching', () => {
+  test('computes status and distinct-recipient stats for a whole page in two queries', async () => {
+    const statusRows = [
+      { _id: { campaignId: 'camp_1', status: 'sent' }, count: 2 },
+      { _id: { campaignId: 'camp_1', status: 'failed' }, count: 1 },
+      { _id: { campaignId: 'camp_2', status: 'queued' }, count: 3 },
+    ];
+    const recipientRows = [
+      { _id: 'camp_1', count: 2 },
+      { _id: 'camp_2', count: 1 },
+    ];
+    const sends = {
+      aggregate: jest.fn((pipeline) => ({
+        toArray: async () => (pipeline.filter(stage => stage.$group).length === 2 ? recipientRows : statusRows),
+      })),
+      distinct: jest.fn(),
+    };
+    platformModel.mockImplementation(name => (name === 'outreach_sends' ? sends : {}));
+
+    const stats = await outreach.campaignStatsBatch(['camp_1', 'camp_2']);
+
+    expect(sends.aggregate).toHaveBeenCalledTimes(2);
+    expect(sends.distinct).not.toHaveBeenCalled();
+    expect(stats.get('camp_1')).toMatchObject({ total: 3, recipients: 2, sent: 2, failed: 1 });
+    expect(stats.get('camp_2')).toMatchObject({ total: 3, recipients: 1, queued: 3 });
+  });
+});
+
 function setupSend({ suppressed = false, sentToday = 0, campaignStatus = 'running', leadStatus = 'new' } = {}) {
   const send = { id: 'send_1', campaignId: 'camp_1', leadId: 'lead_1', email: 'office@example.test', schoolName: 'Kivuli Academy', stepIndex: 0, status: 'queued' };
   const campaign = {

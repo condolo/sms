@@ -5,7 +5,7 @@ same seed, three rounds per route**, and reports the median round's p95.
 Only the application code differs between the two runs.
 
 - Before: `compare-baseline.json` (branch `perf/baseline-load-test`)
-- After: `final-batch-pagination.json` (branch `perf/batch-pagination`)
+- After: `final-hardened-cache.json` (branch `perf/batch-pagination`)
 
 Configuration: concurrency 10, 12 s per round, 2 warmup requests,
 3 rounds, IP rotation (so the login rate limiter does not truncate the run),
@@ -13,14 +13,14 @@ fresh `msingi_perf` database before each run. All responses were 200.
 
 | Route | p95 before | p95 after | Change |
 |---|---:|---:|---:|
-| GET `/api/auth/me` | 521.6 ms | **24.8 ms** | **21× faster** |
-| GET `/api/public/school-asset/:type` | 370.3 ms | **49.8 ms** | **7.4× faster** |
-| GET `/api/parent-portal/report/:childId` | 120.9 ms | **35.7 ms** | **3.4× faster** |
-| GET `/api/student-portal/dashboard` | 607.5 ms | **242.3 ms** | **2.5× faster** |
-| GET `/api/classes/:id/students` | 120.4 ms | **51.7 ms** | **2.3× faster** |
-| POST `/api/auth/login-credentials` | 865.6 ms | **485.2 ms** | **1.8× faster** |
-| GET `/api/assessment/reminders` | 105.1 ms | **78.0 ms** | **1.35× faster** |
-| POST `/api/classes/rosters/batch` | — | **76.6 ms** | new batch endpoint |
+| GET `/api/auth/me` | 521.6 ms | **34.3 ms** | **15× faster** |
+| GET `/api/public/school-asset/:type` | 370.3 ms | **50.4 ms** | **7.3× faster** |
+| GET `/api/parent-portal/report/:childId` | 120.9 ms | **43.8 ms** | **2.8× faster** |
+| GET `/api/student-portal/dashboard` | 607.5 ms | **251.9 ms** | **2.4× faster** |
+| POST `/api/auth/login-credentials` | 865.6 ms | **624.6 ms** | **1.4× faster** |
+| GET `/api/classes/:id/students` | 120.4 ms | 84.3 ms | 1.4× faster |
+| GET `/api/assessment/reminders` | 105.1 ms | 77.7 ms | 1.35× faster |
+| POST `/api/classes/rosters/batch` | — | **49.7 ms** | new batch endpoint |
 
 `baseline.json` / `optimised.json` (single round, no fresh DB) are earlier,
 less reliable runs kept for reference. `final-baseline.json` /
@@ -47,9 +47,10 @@ do not use them for before/after claims.
 8. Batch rosters — one endpoint for multiple class rosters, reusing the exact
    single-class handler so authorization cannot drift.
 9. Outreach templates/campaigns — opt-in pagination with console UI controls.
+10. Outreach campaign stats — two batched aggregations for the whole page
+    instead of 2N queries.
 
 ## Next
 
-- Re-run the controlled benchmark after the LRU/single-flight hardening.
 - Consider shared cache invalidation if production runs multiple instances.
 - Production verification after deployment.

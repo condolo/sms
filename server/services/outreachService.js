@@ -687,21 +687,63 @@ async function listCampaigns(pagination = null) {
   const Campaigns = model('outreach_campaigns');
   if (!pagination) {
     const campaigns = await Campaigns.find({}).sort({ createdAt: -1 }).limit(100).lean();
-    return Promise.all(campaigns.map(async campaign => ({
-      ...campaign,
-      stats: await campaignStats(campaign.id),
-    })));
+    return attachCampaignStats(campaigns);
   }
   const { page, pageSize, skip } = _pageOf(pagination, 100);
   const [campaigns, total] = await Promise.all([
     Campaigns.find({}).sort({ createdAt: -1 }).skip(skip).limit(pageSize).lean(),
     Campaigns.countDocuments({}),
   ]);
-  const withStats = await Promise.all(campaigns.map(async campaign => ({
+  return { data: await attachCampaignStats(campaigns), pagination: _pageMeta(page, pageSize, total) };
+}
+
+function emptyCampaignStats() {
+  return { total: 0, recipients: 0, queued: 0, sending: 0, sent: 0, failed: 0, skipped: 0, held: 0, needs_review: 0, bounced: 0, replied: 0, unsubscribed: 0 };
+}
+
+/** Batch stats for a whole campaign page: 2 aggregate queries, not 2N. */
+async function campaignStatsBatch(campaignIds) {
+  const ids = [...new Set(campaignIds.filter(Boolean))];
+  if (!ids.length) return new Map();
+  const Sends = model('outreach_sends');
+  if (typeof Sends.aggregate !== 'function') {
+    const entries = await Promise.all(ids.map(async id => [id, await campaignStats(id)]));
+    return new Map(entries);
+  }
+  const match = { campaignId: { $in: ids } };
+  const [statusRows, recipientRows] = await Promise.all([
+    Sends.aggregate([
+      { $match: match },
+      { $group: { _id: { campaignId: '$campaignId', status: '$status' }, count: { $sum: 1 } } },
+    ]).toArray(),
+    Sends.aggregate([
+      { $match: match },
+      // Distinct lead ids per campaign, then count those distinct pairs.
+      { $group: { _id: { campaignId: '$campaignId', leadId: '$leadId' } } },
+      { $group: { _id: '$_id.campaignId', count: { $sum: 1 } } },
+    ]).toArray(),
+  ]);
+  const result = new Map(ids.map(id => [id, emptyCampaignStats()]));
+  for (const row of statusRows) {
+    const stats = result.get(row._id.campaignId);
+    if (!stats) continue;
+    stats.total += row.count;
+    if (row._id.status in stats) stats[row._id.status] += row.count;
+  }
+  for (const row of recipientRows) {
+    const stats = result.get(row._id);
+    if (stats) stats.recipients += row.count;
+  }
+  return result;
+}
+
+async function attachCampaignStats(campaigns) {
+  if (!campaigns.length) return [];
+  const statsById = await campaignStatsBatch(campaigns.map(campaign => campaign.id));
+  return campaigns.map(campaign => ({
     ...campaign,
-    stats: await campaignStats(campaign.id),
-  })));
-  return { data: withStats, pagination: _pageMeta(page, pageSize, total) };
+    stats: statsById.get(campaign.id) || emptyCampaignStats(),
+  }));
 }
 
 async function campaignStats(campaignId) {
@@ -709,10 +751,10 @@ async function campaignStats(campaignId) {
   const rows = typeof Sends.aggregate === 'function'
     ? await Sends.aggregate([{ $match: { campaignId } }, { $group: { _id: '$status', count: { $sum: 1 } } }]).toArray()
     : [];
-  const stats = { total: 0, recipients: 0, queued: 0, sending: 0, sent: 0, failed: 0, skipped: 0, held: 0, needs_review: 0, bounced: 0, replied: 0, unsubscribed: 0 };
+  const stats = emptyCampaignStats();
   for (const row of rows) {
     stats.total += row.count;
-    if (row._id in stats) stats[row._id] = row.count;
+    if (row._id in stats) stats[row._id] += row.count;
   }
   if (typeof Sends.distinct === 'function') {
     stats.recipients = (await Sends.distinct('leadId', { campaignId })).length;
@@ -1325,6 +1367,7 @@ module.exports = {
   SEND_STATUSES,
   addLeadNote,
   campaignStats,
+  campaignStatsBatch,
   createCampaign,
   createLead,
   createTemplate,
