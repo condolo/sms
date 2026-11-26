@@ -58,6 +58,12 @@ const PLATFORM_COLLECTIONS = new Set([
   'referral_partners',    // platform growth program — an outside person, no schoolId concept
   'referral_conversions', // one per referred school, platform-wide by design
   'referral_payout_requests', // manual payout queue, platform-wide by design
+  'outreach_leads',       // prospect schools and decision-makers, platform-wide sales data
+  'outreach_templates',   // branded cold-email content, platform-wide
+  'outreach_campaigns',   // sales sequences, platform-wide
+  'outreach_sends',       // per-recipient delivery ledger, platform-wide
+  'outreach_suppressions',// do-not-contact registry, platform-wide
+  'outreach_reservations',// atomic cross-campaign recipient reservations
 ]);
 
 /* ── Tenant context ─────────────────────────────────────────────

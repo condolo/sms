@@ -31,7 +31,7 @@ beforeEach(() => {
 describe('enqueueJob', () => {
   test('inserts a job with the correct initial shape', async () => {
     const create = jest.fn().mockImplementation((doc) => Promise.resolve({ ...doc }));
-    _model.mockReturnValue({ create });
+    _model.mockReturnValue({ create, findOne: jest.fn().mockReturnValue({ select: jest.fn().mockResolvedValue(null) }), deleteMany: jest.fn().mockResolvedValue({ deletedCount: 0 }) });
 
     const id = await enqueueJob({ type: 'test_enqueue', payload: { foo: 'bar' } });
 
@@ -49,6 +49,24 @@ describe('enqueueJob', () => {
 
   test('throws if no type is given', async () => {
     await expect(enqueueJob({ payload: {} })).rejects.toThrow(/requires a type/);
+  });
+
+  test('returns the existing active job id for a duplicate dedupe key', async () => {
+    const create = jest.fn();
+    const findOne = jest.fn().mockReturnValue({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue({ id: 'job_existing' }) }) });
+    _model.mockReturnValue({ create, findOne });
+    await expect(enqueueJob({ type: 'dedupe_type', payload: {}, dedupeKey: 'outreach_send:send_1' })).resolves.toBe('job_existing');
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  test('replaces a terminal job with the same dedupe key', async () => {
+    const create = jest.fn().mockResolvedValue({ id: 'job_new' });
+    const findOne = jest.fn().mockReturnValue({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) }) });
+    const deleteMany = jest.fn().mockResolvedValue({ deletedCount: 1 });
+    _model.mockReturnValue({ create, findOne, deleteMany });
+    await expect(enqueueJob({ type: 'dedupe_type', payload: {}, dedupeKey: 'outreach_send:send_1' })).resolves.toBe('job_new');
+    expect(deleteMany).toHaveBeenCalledWith(expect.objectContaining({ dedupeKey: 'outreach_send:send_1' }));
+    expect(create).toHaveBeenCalled();
   });
 });
 

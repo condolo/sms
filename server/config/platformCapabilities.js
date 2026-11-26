@@ -38,6 +38,10 @@ const CAPABILITIES = [
   { key: 'onboarding.view',   group: 'Onboarding',  label: 'View demo requests and pending schools' },
   { key: 'onboarding.manage', group: 'Onboarding',  label: 'Approve/reject, extend demos, provision schools' },
 
+  { key: 'outreach.view',     group: 'Outreach',    label: 'View prospect leads, templates and campaigns' },
+  { key: 'outreach.manage',   group: 'Outreach',    label: 'Import/edit leads and manage templates and campaigns' },
+  { key: 'outreach.send',     group: 'Outreach',    label: 'Send test emails and launch outreach campaigns' },
+
   { key: 'schools.view',      group: 'Schools',     label: 'View schools and organizations' },
   { key: 'schools.manage',    group: 'Schools',     label: 'Create/edit schools, roles, entitlements' },
   { key: 'schools.delete',    group: 'Schools',     label: 'Delete schools and wipe data (destructive)' },
@@ -84,6 +88,11 @@ const TEMPLATES = {
     label: 'Onboarding',
     description: 'Process demo requests and pending school approvals; read tickets.',
     caps: ['onboarding.view', 'onboarding.manage', 'tickets.view', 'schools.view'],
+  },
+  sales: {
+    label: 'Sales / Outreach',
+    description: 'Work prospect leads, prepare templates and run controlled email campaigns.',
+    caps: ['outreach.view', 'outreach.manage', 'outreach.send', 'onboarding.view', 'schools.view'],
   },
   billing: {
     label: 'Billing',
@@ -146,6 +155,33 @@ const POLICY = [
   { method: 'POST',   pattern: '/schools/:id/approve',                  cap: 'onboarding.manage' },
   { method: 'POST',   pattern: '/schools/:id/reject',                   cap: 'onboarding.manage' },
   { method: 'POST',   pattern: '/schools/:id/extend-demo',              cap: 'onboarding.manage' },
+
+  /* Outreach — prospect-school sales workspace */
+  { method: 'GET',    pattern: '/outreach/config',                    cap: 'outreach.view' },
+  { method: 'GET',    pattern: '/outreach/leads/stats',               cap: 'outreach.view' },
+  { method: 'GET',    pattern: '/outreach/leads',                     cap: 'outreach.view' },
+  { method: 'POST',   pattern: '/outreach/leads',                     cap: 'outreach.manage' },
+  { method: 'POST',   pattern: '/outreach/leads/import',              cap: 'outreach.manage' },
+  { method: 'GET',    pattern: '/outreach/leads/:id',                 cap: 'outreach.view' },
+  { method: 'PATCH',  pattern: '/outreach/leads/:id',                 cap: 'outreach.manage' },
+  { method: 'POST',   pattern: '/outreach/leads/:id/notes',           cap: 'outreach.manage' },
+  { method: 'GET',    pattern: '/outreach/templates',                 cap: 'outreach.view' },
+  { method: 'POST',   pattern: '/outreach/templates',                 cap: 'outreach.manage' },
+  { method: 'GET',    pattern: '/outreach/templates/:id',             cap: 'outreach.view' },
+  { method: 'PATCH',  pattern: '/outreach/templates/:id',             cap: 'outreach.manage' },
+  { method: 'POST',   pattern: '/outreach/templates/:id/preview',     cap: 'outreach.view' },
+  { method: 'POST',   pattern: '/outreach/templates/:id/test',        cap: 'outreach.send' },
+  { method: 'GET',    pattern: '/outreach/campaigns',                 cap: 'outreach.view' },
+  { method: 'POST',   pattern: '/outreach/campaigns',                 cap: 'outreach.manage' },
+  { method: 'GET',    pattern: '/outreach/campaigns/:id',             cap: 'outreach.view' },
+  { method: 'POST',   pattern: '/outreach/campaigns/:id/launch',      cap: 'outreach.send' },
+  { method: 'POST',   pattern: '/outreach/campaigns/:id/pause',       cap: 'outreach.send' },
+  { method: 'POST',   pattern: '/outreach/campaigns/:id/resume',      cap: 'outreach.send' },
+  { method: 'POST',   pattern: '/outreach/campaigns/:id/cancel',      cap: 'outreach.send' },
+  { method: 'POST',   pattern: '/outreach/sends/:id/retry',           cap: 'outreach.send' },
+  { method: 'POST',   pattern: '/outreach/sends/:id/outcome',         cap: 'outreach.manage' },
+  { method: 'GET',    pattern: '/outreach/suppressions',              cap: 'outreach.view' },
+  { method: 'POST',   pattern: '/outreach/suppressions',              cap: 'outreach.manage' },
 
   /* Work queue — any authenticated operator sees only their own items */
   { method: 'GET',    pattern: '/my-work',                              cap: null },

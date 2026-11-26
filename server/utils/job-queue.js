@@ -29,6 +29,12 @@ const MAX_DELAY_MS         = parseInt(process.env.QUEUE_RETRY_MAX_MS  || '180000
 const BATCH_SIZE           = parseInt(process.env.QUEUE_BATCH_SIZE    || '10',      10);
 
 const _handlers = new Map();
+const _recoveryHooks = new Set();
+
+/** Register a domain recovery task that must run even when the queue is empty. */
+function registerRecoveryHook(hookFn) {
+  if (typeof hookFn === 'function') _recoveryHooks.add(hookFn);
+}
 
 /** Register the async handler for a job type. Throws to signal failure (triggers retry/dead-letter). */
 function registerHandler(type, handlerFn) {
@@ -45,23 +51,54 @@ function _backoff(attempts) {
 
 /** Enqueue a job. `runAt` (optional Date) delays the first attempt — e.g. the
     marks-editing workflow's 24h auto-relock; omit for "as soon as possible". */
-async function enqueueJob({ type, payload, maxAttempts = DEFAULT_MAX_ATTEMPTS, runAt } = {}) {
+async function enqueueJob({ type, payload, maxAttempts = DEFAULT_MAX_ATTEMPTS, runAt, dedupeKey } = {}) {
   if (!type) throw new Error('[job-queue] enqueueJob requires a type');
   const now = new Date();
   const QueueJobs = _model('queue_jobs');
-  const doc = await QueueJobs.create({
-    id: `job_${crypto.randomUUID()}`,
-    type,
-    payload: payload ?? null,
-    status: 'pending',
-    attempts: 0,
-    maxAttempts,
-    nextAttemptAt: runAt instanceof Date ? runAt : now,
-    lastError: null,
-    createdAt: now,
-    updatedAt: now,
-  });
-  return doc.id;
+  if (dedupeKey) {
+    const existing = await QueueJobs.findOne({
+      dedupeKey,
+      status: { $in: ['pending', 'processing'] },
+    }).select('id').lean();
+    if (existing) return existing.id;
+    await QueueJobs.deleteMany({ dedupeKey, status: { $in: ['completed', 'dead_letter'] } });
+  }
+  try {
+    const doc = await QueueJobs.create({
+      id: `job_${crypto.randomUUID()}`,
+      type,
+      payload: payload ?? null,
+      dedupeKey: dedupeKey || undefined,
+      status: 'pending',
+      attempts: 0,
+      maxAttempts,
+      nextAttemptAt: runAt instanceof Date ? runAt : now,
+      lastError: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    return doc.id;
+  } catch (error) {
+    if (dedupeKey && error?.code === 11000) {
+      const active = await QueueJobs.findOne({
+        dedupeKey,
+        status: { $in: ['pending', 'processing'] },
+      }).select('id').lean();
+      if (active) return active.id;
+    }
+    throw error;
+  }
+}
+
+/** Move jobs abandoned by a crashed worker into the dead-letter queue. */
+async function recoverStaleProcessingJobs({ staleMs = 20 * 60 * 1000 } = {}) {
+  const QueueJobs = _model('queue_jobs');
+  const cutoff = new Date(Date.now() - staleMs);
+  const result = await QueueJobs.updateMany(
+    { status: 'processing', updatedAt: { $lt: cutoff } },
+    { $set: { status: 'dead_letter', lastError: 'Worker lease expired; manual review required.', updatedAt: new Date() } },
+  );
+  return result.modifiedCount || 0;
 }
 
 /**
@@ -73,7 +110,9 @@ async function enqueueJob({ type, payload, maxAttempts = DEFAULT_MAX_ATTEMPTS, r
 async function processQueueOnce({ batchSize = BATCH_SIZE } = {}) {
   const QueueJobs = _model('queue_jobs');
   const now = new Date();
-  const stats = { claimed: 0, succeeded: 0, retried: 0, deadLettered: 0 };
+  const stats = { claimed: 0, succeeded: 0, retried: 0, deadLettered: 0, recovered: 0 };
+  stats.recovered = await recoverStaleProcessingJobs().catch(() => 0);
+  for (const hook of _recoveryHooks) await hook().catch(() => {});
 
   const candidates = await QueueJobs
     .find({ status: 'pending', nextAttemptAt: { $lte: now } })
@@ -160,4 +199,4 @@ function startQueueWorker() {
   console.log(`[job-queue] worker scheduled: ${expr}`);
 }
 
-module.exports = { enqueueJob, registerHandler, processQueueOnce, startQueueWorker };
+module.exports = { enqueueJob, registerHandler, registerRecoveryHook, processQueueOnce, startQueueWorker, recoverStaleProcessingJobs };

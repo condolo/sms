@@ -63,6 +63,8 @@ const {
   sendPlanExpiryReminder,
   sendSmartReminder,
   sendContactConfirmation,
+  outreachReady,
+  sendOutreach,
   invalidateSmtpCache,
 } = require('../utils/email');
 
@@ -187,5 +189,44 @@ describe('email failure log', () => {
     const logCall = mockUpdateOneCalls.find(c => c.filter.scope === '__platform__');
     expect(logCall).toBeDefined();
     expect(logCall.update.$set.via).toBe('platform');
+  });
+});
+
+describe('prospect outreach sender', () => {
+  const previousEnabled = process.env.OUTREACH_ENABLED;
+  const previousReplyTo = process.env.OUTREACH_REPLY_TO;
+
+  afterEach(() => {
+    if (previousEnabled === undefined) delete process.env.OUTREACH_ENABLED;
+    else process.env.OUTREACH_ENABLED = previousEnabled;
+    if (previousReplyTo === undefined) delete process.env.OUTREACH_REPLY_TO;
+    else process.env.OUTREACH_REPLY_TO = previousReplyTo;
+  });
+
+  test('is fail-closed until explicitly enabled with a monitored Reply-To', () => {
+    delete process.env.OUTREACH_ENABLED;
+    expect(outreachReady()).toBe(false);
+    process.env.OUTREACH_ENABLED = 'true';
+    delete process.env.OUTREACH_REPLY_TO;
+    expect(outreachReady()).toBe(false);
+    process.env.OUTREACH_REPLY_TO = 'not-an-email';
+    expect(outreachReady()).toBe(false);
+    process.env.OUTREACH_REPLY_TO = 'sales@example.com';
+    expect(outreachReady()).toBe(true);
+  });
+
+  test('sends HTML, plain text, human Reply-To and unsubscribe headers', async () => {
+    process.env.OUTREACH_ENABLED = 'true';
+    process.env.OUTREACH_REPLY_TO = 'sales@example.com';
+    const sent = await sendOutreach({
+      to: 'school@example.com', subject: 'Hello', html: '<p>Hello</p>', text: 'Hello',
+      fromName: 'Msingi Schools Team', headers: { 'List-Unsubscribe': '<https://example.com/unsubscribe>' },
+    });
+    expect(sent).toBe(true);
+    expect(lastMail().mailOpts).toEqual(expect.objectContaining({
+      from: '"Msingi Schools Team" <platform@example.com>',
+      replyTo: 'sales@example.com', text: 'Hello',
+      headers: { 'List-Unsubscribe': '<https://example.com/unsubscribe>' },
+    }));
   });
 });

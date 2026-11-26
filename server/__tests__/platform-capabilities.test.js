@@ -28,7 +28,7 @@ describe('capability registry', () => {
     }
     // sanity: templates we ship actually exist
     expect(Object.keys(caps.TEMPLATES)).toEqual(
-      expect.arrayContaining(['owner', 'support_agent', 'onboarding', 'billing', 'content', 'viewer', 'custom'])
+      expect.arrayContaining(['owner', 'support_agent', 'onboarding', 'sales', 'billing', 'content', 'viewer', 'custom'])
     );
   });
 
@@ -122,6 +122,14 @@ describe('requiredCapability() — the route policy table', () => {
     expect(caps.requiredCapability('POST', '/schools/sch_1/approve')).toBe('onboarding.manage');
   });
 
+  test('outreach: reads, edits and sends are separate capabilities', () => {
+    expect(caps.requiredCapability('GET', '/outreach/leads')).toBe('outreach.view');
+    expect(caps.requiredCapability('POST', '/outreach/leads/import')).toBe('outreach.manage');
+    expect(caps.requiredCapability('PATCH', '/outreach/leads/lead_1')).toBe('outreach.manage');
+    expect(caps.requiredCapability('POST', '/outreach/templates/otpl_1/test')).toBe('outreach.send');
+    expect(caps.requiredCapability('POST', '/outreach/campaigns/camp_1/launch')).toBe('outreach.send');
+  });
+
   test('a specific rule wins over a broader one on the same path', () => {
     // DELETE /schools/all is destructive → schools.delete, not schools.manage,
     // and must not be shadowed by the /schools/:id rule.
@@ -159,6 +167,15 @@ describe('template boundary — the intent of each shipped role', () => {
     expect(caps.hasCapability(c, 'schools.delete')).toBe(false);
     expect(caps.hasCapability(c, 'schools.manage')).toBe(false);
     expect(caps.hasCapability(c, 'operators.manage')).toBe(false);
+  });
+
+  test('sales can work outreach without school-destructive permissions', () => {
+    const sales = caps.resolveCapabilities({ tier: 'support', template: 'sales' });
+    expect(caps.hasCapability(sales, 'outreach.view')).toBe(true);
+    expect(caps.hasCapability(sales, 'outreach.manage')).toBe(true);
+    expect(caps.hasCapability(sales, 'outreach.send')).toBe(true);
+    expect(caps.hasCapability(sales, 'schools.delete')).toBe(false);
+    expect(caps.hasCapability(sales, 'impersonate')).toBe(false);
   });
 
   test('billing and content roles are narrowly scoped', () => {

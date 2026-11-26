@@ -38,6 +38,8 @@ const CLONE_DENY = new Set([
   'backup_logs', 'billing_snapshots', 'notification_digests', 'notifications',
   'messages', 'elearning_tokens', 'mpesa_transactions', 'mark_audit_log',
   'report_card_counters', 'demo_requests', 'tickets', 'user_photos',
+  'outreach_leads', 'outreach_templates', 'outreach_campaigns',
+  'outreach_sends', 'outreach_suppressions', 'outreach_reservations',
   'staff_documents',
   /* Device push tokens are credentials for a REAL handset. Cloning them into
      a demo tenant would hand a cloned school the ability to wake up real

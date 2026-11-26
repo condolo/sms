@@ -21,7 +21,10 @@ const fs = require('fs');
 const path = require('path');
 const { POLICY } = require('../../config/platformCapabilities');
 
-const PLATFORM_ROUTE_FILE = path.join(__dirname, '../../routes/platform.js');
+const PLATFORM_ROUTE_FILES = [
+  { file: path.join(__dirname, '../../routes/platform.js'), prefix: '' },
+  { file: path.join(__dirname, '../../routes/platform-outreach.js'), prefix: '/outreach' },
+];
 
 /* Routes registered BEFORE router.use(platformSession) — no session, so no
    capability applies. Declared here so the audit can tell "intentionally
@@ -44,11 +47,16 @@ const PUBLIC_ROUTES = new Set([
 ]);
 
 function registeredRoutes() {
-  const src = fs.readFileSync(PLATFORM_ROUTE_FILE, 'utf8');
   const out = [];
   const re = /router\.(get|post|put|patch|delete)\(\s*'([^']+)'/gi;
-  let m;
-  while ((m = re.exec(src)) !== null) out.push({ method: m[1].toUpperCase(), path: m[2] });
+  for (const { file, prefix } of PLATFORM_ROUTE_FILES) {
+    const src = fs.readFileSync(file, 'utf8');
+    let match;
+    while ((match = re.exec(src)) !== null) {
+      out.push({ method: match[1].toUpperCase(), path: `${prefix}${match[2]}` });
+    }
+    re.lastIndex = 0;
+  }
   return out;
 }
 
