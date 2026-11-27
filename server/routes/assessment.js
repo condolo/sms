@@ -24,7 +24,7 @@ const { rbac, hasExplicitSubGrant } = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
-const { ok, created, E } = require('../utils/response');
+const { ok, created, E, parsePagination, paginate } = require('../utils/response');
 const email              = require('../utils/email');
 const { mergeConfig, resolveCurrentPeriod } = require('./academic-config');
 const { aggregateAssessmentMarks, computeFinalScores } = require('../utils/academic-calc');
@@ -2839,6 +2839,13 @@ router.get('/reminders', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
     const { academicYearId, classId, subjectId } = req.query;
     const daysAhead = Number(req.query.days) || 7;
 
+    // Opt-in pagination. Existing callers send no page/limit and still get
+    // the complete flat array; clients that do send them get the same array
+    // plus standard pagination metadata.
+    const paged = Object.prototype.hasOwnProperty.call(req.query, 'page')
+      || Object.prototype.hasOwnProperty.call(req.query, 'limit');
+    const { page, limit, skip } = paged ? parsePagination(req.query) : { page: 1, limit: 0, skip: 0 };
+
     // UTC, not local midnight: a +03:00 school would otherwise read "yesterday"
     // and flip today's deadline to overdue a day early.
     const todayStr   = new Date().toISOString().slice(0, 10);
@@ -2876,8 +2883,30 @@ router.get('/reminders', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
         seen.add(key);
         return true;
       });
-      if (!targets.length) return _ok(res, []);
+      if (!targets.length) return _ok(res, [], paged ? paginate(page, limit, 0) : null);
     }
+
+    const targetClassIds = [...new Set([
+      ...(targets ? targets.map((t) => t.classId) : []),
+      ...(classId ? [classId] : []),
+    ].filter(Boolean))];
+    const targetSubjectIds = [...new Set([
+      ...(targets ? targets.map((t) => t.subjectId) : []),
+      ...(subjectId ? [subjectId] : []),
+    ].filter(Boolean))];
+
+    // Counts used to be fetched with one countDocuments() per schedule x
+    // target pair (50 schedules x 20 targets = 1000 sequential DB round
+    // trips — easily >10s while still returning 200). Fetch every count we
+    // need in two aggregations and join in memory instead.
+    const markMatchParts = [{ schoolId }, _yearFilterPart(academicYearId)]
+      .filter((part) => part && Object.keys(part).length);
+    if (targets) {
+      markMatchParts.push({ $or: targets.map((t) => ({ classId: t.classId, subjectId: t.subjectId })) });
+    }
+    if (classId)   markMatchParts.push({ classId });
+    if (subjectId) markMatchParts.push({ subjectId });
+    const markMatch = markMatchParts.length === 1 ? markMatchParts[0] : { $and: markMatchParts };
 
     const rosterCache = new Map();
     const rosterOf = async (id) => {
@@ -2887,17 +2916,21 @@ router.get('/reminders', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
       return rosterCache.get(id);
     };
 
-    // Names for the rows, so the app can show "Form 1A · Mathematics" and
-    // navigate to the right class/subject without a second round trip.
-    const targetClassIds = [...new Set([
-      ...(targets ? targets.map((t) => t.classId) : []),
-      ...(classId ? [classId] : []),
-    ].filter(Boolean))];
-    const targetSubjectIds = [...new Set([
-      ...(targets ? targets.map((t) => t.subjectId) : []),
-      ...(subjectId ? [subjectId] : []),
-    ].filter(Boolean))];
-    const [classDocs, subjectDocs] = await Promise.all([
+    const [markRows, classDocs, subjectDocs] = await Promise.all([
+      Marks.aggregate([
+        { $match: markMatch },
+        { $group: {
+            _id: {
+              termNumber:     '$termNumber',
+              assessmentType: '$assessmentType',
+              instance:       '$instance',
+              academicYearId: { $ifNull: ['$academicYearId', null] },
+              classId:        { $ifNull: ['$classId', null] },
+              subjectId:      { $ifNull: ['$subjectId', null] },
+            },
+            count: { $sum: 1 },
+        } },
+      ]),
       targetClassIds.length
         ? Classes.find({ schoolId, id: { $in: targetClassIds } }).select('id name').lean().catch(() => [])
         : [],
@@ -2905,6 +2938,28 @@ router.get('/reminders', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
         ? Subjects.find({ schoolId, id: { $in: targetSubjectIds } }).select('id name').lean().catch(() => [])
         : [],
     ]);
+
+    const baseKey = (termNumber, assessmentType, instance, academicYearId) =>
+      JSON.stringify([termNumber ?? null, assessmentType ?? null, instance ?? null, academicYearId ?? null]);
+    const groupsByBase = new Map();
+    for (const row of markRows) {
+      const key = baseKey(row._id.termNumber, row._id.assessmentType, row._id.instance, row._id.academicYearId);
+      if (!groupsByBase.has(key)) groupsByBase.set(key, []);
+      groupsByBase.get(key).push(row);
+    }
+    const enteredFor = (base, classFilter, subjectFilter) => {
+      const groups = groupsByBase.get(baseKey(base.termNumber, base.assessmentType, base.instance, base.academicYearId)) || [];
+      let total = 0;
+      for (const group of groups) {
+        if (classFilter && (group._id.classId ?? null) !== classFilter) continue;
+        if (subjectFilter && (group._id.subjectId ?? null) !== subjectFilter) continue;
+        total += group.count;
+      }
+      return total;
+    };
+
+    // Names for the rows, so the app can show "Form 1A · Mathematics" and
+    // navigate to the right class/subject without a second round trip.
     const classNameById  = Object.fromEntries(classDocs.map((c) => [c.id, c.name]));
     const subjectNameById = Object.fromEntries(subjectDocs.map((s) => [s.id, s.name]));
 
@@ -2932,7 +2987,7 @@ router.get('/reminders', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
       if (targets) {
         for (const t of targets) {
           const expected = await rosterOf(t.classId);
-          const entered  = await Marks.countDocuments({ ...base, classId: t.classId, subjectId: t.subjectId });
+          const entered  = enteredFor(base, t.classId, t.subjectId);
           const missing  = Math.max(0, expected - entered);
           const status   = statusFor(missing);
           if (!status) continue;
@@ -2961,10 +3016,9 @@ router.get('/reminders', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
       }
 
       // Oversight (admin/principal): one school-wide row per schedule.
-      const filter = { ...base };
-      if (classId)   filter.classId   = classId;
-      if (subjectId) filter.subjectId = subjectId;
-      const entered = await Marks.countDocuments(filter);
+      // With no class/subject filter, sum every group under this base —
+      // the old countDocuments(filter) did the same.
+      const entered = enteredFor(base, classId || null, subjectId || null);
       const status  = statusFor(null);
       if (!status) continue;
 
@@ -2997,6 +3051,9 @@ router.get('/reminders', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
       || (a.dateFrom === b.dateFrom ? 0 : a.dateFrom > b.dateFrom ? 1 : -1)
       || String(a.className ?? '').localeCompare(String(b.className ?? '')));
 
+    if (paged) {
+      return _ok(res, reminders.slice(skip, skip + limit), paginate(page, limit, reminders.length));
+    }
     return _ok(res, reminders);
   } catch (err) {
     console.error('[assessment/reminders GET]', err);

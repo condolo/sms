@@ -1,0 +1,76 @@
+# Cache, batch and pagination on the slow endpoints
+
+Three complementary techniques are now applied to the route families from
+the Live Analytics slow list. Each has focused tests and each is exercised
+by `scripts/perf-load-test.js`.
+
+## 1. Cache — `/api/public/school-asset/:type`
+
+`server/utils/school-asset-cache.js` caches the decoded image Buffer, MIME
+type and a content ETag in process. It is an **LRU** with both a 500-entry
+cap and a **64 MB byte budget**, lazy TTL expiry (5-minute hits, 30-second
+misses), **single-flight** loads, and generation-safe invalidation. Repeat
+reads use no MongoDB round trip and support `If-None-Match` → 304. Upload/
+delete routes invalidate the affected type immediately; an in-flight stale
+load cannot repopulate the cache after invalidation. Multi-instance
+invalidation still requires shared pub/sub (or a versioned key); other
+processes expire stale entries within 5 minutes.
+
+Tests: `server/__tests__/school-asset-cache.test.js` (hit/miss, stable and
+changing ETags, negative caching, invalidation, single-flight, stale-load
+race, LRU eviction) and `server/__tests__/school-asset-route.test.js`
+(200 → cache hit → 304 without another Mongo read; invalidation exposes a
+new asset immediately).
+
+## 2. Batch — `/api/classes/rosters/batch`
+
+`POST /api/classes/rosters/batch` accepts 1–20 class IDs and returns one
+result per class. It calls the **same handler** as `GET /api/classes/:id/students`
+with a capture response, so school ownership, scope narrowing, elective
+rules, homeroom fallback and status filtering cannot drift between the
+single and batched paths. Concurrency inside a batch is capped at four.
+
+`TeacherStudents.jsx` now chunks its classes into batches of 20 instead of
+issuing one HTTP request per class.
+
+A second batch removes an N+1 in `listCampaigns()`: campaign status and
+distinct-recipient stats are computed for the entire page with two
+aggregations, instead of one aggregation + one distinct query per campaign.
+
+Tests: `POST /api/classes/rosters/batch` describe block in
+`server/__tests__/routes/classes-streams-students-scope.test.js` (ordering,
+same 403 as the single route for out-of-scope classes, empty/oversized batch
+rejection), plus the campaign stats batching test in
+`server/__tests__/outreach-service.test.js` (two aggregate calls for two
+campaigns, no per-campaign distinct calls). All pre-existing classes route
+tests still pass.
+
+## 3. Pagination
+
+### Assessment reminders
+
+`GET /api/assessment/reminders` accepts optional `page`/`limit`. Existing
+callers send neither and still get the complete flat array; paged callers
+get the same array shape plus top-level `pagination: {page, limit, total,
+pages}`. `RemindersTab.jsx` pages at 20 rows with the shared `Pagination`
+component and resets to page 1 after a notify.
+
+Tests: `server/__tests__/routes/assessment-reminders-targets.test.js`
+(legacy shape unchanged, page slices and metadata, empty scope).
+
+### Outreach templates and campaigns
+
+`GET /api/platform/outreach/templates` and `/campaigns` accept optional
+`page`/`pageSize`. With no params they keep the legacy flat array. With
+params they return standard pagination metadata. Both console tabs have
+Previous/Next controls; the campaign create dialog still reads the
+unpaged template list.
+
+Tests: `server/__tests__/routes/platform-outreach-routes.test.js` (legacy
+and paged shapes for both endpoints, args forwarded to the service).
+
+## Why these are opt-in
+
+The React client, console scripts and existing tests all rely on flat arrays
+from these endpoints. Making pagination opt-in avoids a breaking API change
+while giving the slow screens bounded payloads.

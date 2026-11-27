@@ -22,6 +22,7 @@
 'use strict';
 
 const bcrypt = require('bcryptjs');
+const nativeBcrypt = require('@node-rs/bcrypt');
 
 const PASSWORD = 'CorrectHorse1!';
 const HASH = bcrypt.hashSync(PASSWORD, 4);
@@ -192,7 +193,7 @@ describe('POST /api/auth/login-credentials', () => {
     const user = makeUser();
     mockCandidates = [user];
     mockScopedUsers = { sch_a: user };
-    const compare = jest.spyOn(bcrypt, 'compare');
+    const compare = jest.spyOn(nativeBcrypt, 'compare');
 
     try {
       const res = await supertest(buildApp())
@@ -201,6 +202,7 @@ describe('POST /api/auth/login-credentials', () => {
 
       expect(res.status).toBe(200);
       expect(compare).toHaveBeenCalledTimes(1);
+      expect(SecurityService.checkAccountLock).toHaveBeenCalledTimes(1);
     } finally {
       compare.mockRestore();
     }
@@ -210,7 +212,7 @@ describe('POST /api/auth/login-credentials', () => {
     const user = makeUser();
     mockCandidates = [user];
     mockScopedUsers = { sch_a: makeUser({ password: bcrypt.hashSync(WRONG, 4) }) };
-    const compare = jest.spyOn(bcrypt, 'compare');
+    const compare = jest.spyOn(nativeBcrypt, 'compare');
 
     try {
       const res = await supertest(buildApp())

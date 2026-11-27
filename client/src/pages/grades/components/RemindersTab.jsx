@@ -7,6 +7,9 @@ import { AnimatePresence } from 'framer-motion';
 import { AlertTriangle, CheckCircle2, Loader2, Send, Calendar } from 'lucide-react';
 import { assessment as api } from '@/api/client.js';
 import { Skeleton, Toast, TypePill } from './GradesPrimitives.jsx';
+import Pagination from '@/components/ui/Pagination.jsx';
+
+const PAGE_SIZE = 20;
 
 const REMINDER_CONFIG = {
   overdue:  { label: 'Overdue',  bg: 'bg-red-50 border-red-200',         text: 'text-red-700',     Icon: AlertTriangle },
@@ -17,18 +20,21 @@ const REMINDER_CONFIG = {
 export default function RemindersTab() {
   const qc = useQueryClient();
   const [toast, setToast] = useState(null);
+  const [page, setPage] = useState(1);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ['assessment', 'reminders'],
-    queryFn:  () => api.reminders({ days: 14 }),
+    queryKey: ['assessment', 'reminders', page, PAGE_SIZE],
+    queryFn:  () => api.reminders({ days: 14, page, limit: PAGE_SIZE }),
     staleTime: 60_000,
   });
   const reminders = data?.data ?? [];
+  const pagination = data?.pagination ?? null;
 
   const { mutate: notify, isPending: notifying } = useMutation({
     mutationFn: () => api.notify({}),
     onSuccess:  () => {
       qc.invalidateQueries({ queryKey: ['assessment', 'reminders'] });
+      setPage(1);
       setToast({ msg: 'Notification sent to teachers.', type: 'success' });
     },
     onError: err => setToast({ msg: err?.message ?? 'Notification failed.', type: 'error' }),
@@ -48,12 +54,13 @@ export default function RemindersTab() {
 
       <div className="flex items-center justify-between">
         <div className="flex gap-3 text-xs text-slate-500">
+          <span className="font-medium text-slate-700">{pagination?.total ?? reminders.length} reminders · next 14 days</span>
+          <span>·</span>
           <span className="text-red-600 font-medium">{overdue} overdue</span>
           <span>·</span>
           <span className="text-emerald-600 font-medium">{open} open</span>
           <span>·</span>
           <span className="text-blue-600 font-medium">{upcoming} upcoming</span>
-          <span className="text-slate-400">— next 14 days</span>
         </div>
         <button onClick={() => notify()} disabled={notifying || reminders.length === 0}
           className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition">
@@ -82,7 +89,7 @@ export default function RemindersTab() {
             const cfg = REMINDER_CONFIG[r.status] ?? REMINDER_CONFIG.upcoming;
             const { Icon } = cfg;
             return (
-              <div key={r.scheduleId} className={`rounded-xl border p-4 ${cfg.bg}`}>
+              <div key={`${r.scheduleId}:${r.classId ?? ''}:${r.subjectId ?? ''}`} className={`rounded-xl border p-4 ${cfg.bg}`}>
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-start gap-3">
                     <Icon size={16} className={`mt-0.5 shrink-0 ${cfg.text}`} />
@@ -107,6 +114,14 @@ export default function RemindersTab() {
           })}
         </div>
       )}
+
+      <Pagination
+        page={page}
+        totalPages={pagination?.pages ?? 1}
+        total={pagination?.total ?? reminders.length}
+        limit={PAGE_SIZE}
+        onPage={setPage}
+      />
     </div>
   );
 }

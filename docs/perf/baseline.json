@@ -1,0 +1,205 @@
+{
+  "label": "baseline",
+  "capturedAt": "2026-11-26T18:21:43.670Z",
+  "environment": {
+    "node": "v22.22.2",
+    "platform": "win32",
+    "arch": "x64",
+    "baseUrl": "http://127.0.0.1:3005"
+  },
+  "config": {
+    "concurrency": 10,
+    "durationSec": 12,
+    "warmup": 2,
+    "timeoutMs": 30000
+  },
+  "discovered": {
+    "classId": "cls_demo_f1a",
+    "studentId": "std_demo_1",
+    "logoSeeded": false
+  },
+  "routes": [
+    {
+      "name": "auth-me",
+      "method": "GET",
+      "path": "/api/auth/me",
+      "requests": 430,
+      "concurrency": 10,
+      "durationSec": 12,
+      "warmup": 2,
+      "statusCounts": {
+        "200": 430
+      },
+      "okPct": 100,
+      "avgResponseBytes": 1001483,
+      "throughputRps": 35.8,
+      "latencyMs": {
+        "min": 39.3,
+        "p50": 166.5,
+        "p90": 267.2,
+        "p95": 288.4,
+        "p99": 328.8,
+        "max": 345.6,
+        "mean": 170.2
+      },
+      "topErrorCodes": [],
+      "topErrorMessages": []
+    },
+    {
+      "name": "login-credentials",
+      "method": "POST",
+      "path": "/api/auth/login-credentials",
+      "requests": 220,
+      "concurrency": 10,
+      "durationSec": 12,
+      "warmup": 2,
+      "statusCounts": {
+        "200": 220
+      },
+      "okPct": 100,
+      "avgResponseBytes": 2545,
+      "throughputRps": 18.3,
+      "latencyMs": {
+        "min": 222.7,
+        "p50": 431.4,
+        "p90": 585.1,
+        "p95": 638.4,
+        "p99": 737.4,
+        "max": 762.2,
+        "mean": 432.1
+      },
+      "topErrorCodes": [],
+      "topErrorMessages": []
+    },
+    {
+      "name": "student-dashboard",
+      "method": "GET",
+      "path": "/api/student-portal/dashboard",
+      "requests": 330,
+      "concurrency": 10,
+      "durationSec": 12,
+      "warmup": 2,
+      "statusCounts": {
+        "200": 330
+      },
+      "okPct": 100,
+      "avgResponseBytes": 3763,
+      "throughputRps": 27.5,
+      "latencyMs": {
+        "min": 216.9,
+        "p50": 304.5,
+        "p90": 389.4,
+        "p95": 581.7,
+        "p99": 930.4,
+        "max": 972.8,
+        "mean": 341.7
+      },
+      "topErrorCodes": [],
+      "topErrorMessages": []
+    },
+    {
+      "name": "assessment-reminders",
+      "method": "GET",
+      "path": "/api/assessment/reminders",
+      "requests": 1130,
+      "concurrency": 10,
+      "durationSec": 12,
+      "warmup": 2,
+      "statusCounts": {
+        "200": 1130
+      },
+      "okPct": 100,
+      "avgResponseBytes": 26,
+      "throughputRps": 94.2,
+      "latencyMs": {
+        "min": 36.2,
+        "p50": 63.4,
+        "p90": 182.4,
+        "p95": 249.2,
+        "p99": 399.9,
+        "max": 411.4,
+        "mean": 95.1
+      },
+      "topErrorCodes": [],
+      "topErrorMessages": []
+    },
+    {
+      "name": "class-students",
+      "method": "GET",
+      "path": "/api/classes/cls_demo_f1a/students",
+      "requests": 1500,
+      "concurrency": 10,
+      "durationSec": 12,
+      "warmup": 2,
+      "statusCounts": {
+        "200": 1500
+      },
+      "okPct": 100,
+      "avgResponseBytes": 1906,
+      "throughputRps": 125,
+      "latencyMs": {
+        "min": 37.6,
+        "p50": 62.5,
+        "p90": 98.8,
+        "p95": 118.4,
+        "p99": 188.9,
+        "max": 336,
+        "mean": 70.1
+      },
+      "topErrorCodes": [],
+      "topErrorMessages": []
+    },
+    {
+      "name": "parent-report",
+      "method": "GET",
+      "path": "/api/parent-portal/report/std_demo_1",
+      "requests": 1930,
+      "concurrency": 10,
+      "durationSec": 12,
+      "warmup": 2,
+      "statusCounts": {
+        "200": 1930
+      },
+      "okPct": 100,
+      "avgResponseBytes": 289,
+      "throughputRps": 160.8,
+      "latencyMs": {
+        "min": 34.1,
+        "p50": 50.7,
+        "p90": 73.5,
+        "p95": 88.1,
+        "p99": 151.9,
+        "max": 182,
+        "mean": 55.8
+      },
+      "topErrorCodes": [],
+      "topErrorMessages": []
+    },
+    {
+      "name": "school-asset",
+      "method": "GET",
+      "path": "/api/public/school-asset/logo?slug=sch_demo",
+      "requests": 620,
+      "concurrency": 10,
+      "durationSec": 12,
+      "warmup": 2,
+      "statusCounts": {
+        "200": 620
+      },
+      "okPct": 100,
+      "avgResponseBytes": 750000,
+      "throughputRps": 51.7,
+      "latencyMs": {
+        "min": 25,
+        "p50": 110.1,
+        "p90": 189.2,
+        "p95": 211.4,
+        "p99": 254.7,
+        "max": 603.4,
+        "mean": 115.1
+      },
+      "topErrorCodes": [],
+      "topErrorMessages": []
+    }
+  ]
+}

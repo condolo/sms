@@ -1,7 +1,7 @@
 'use strict';
 
 const { parentPort } = require('worker_threads');
-const bcrypt = require('bcryptjs');
+const bcrypt = require('@node-rs/bcrypt');
 
 parentPort.on('message', async ({ id, password, hash }) => {
   try {

@@ -22,26 +22,31 @@ export default function TeacherStudents() {
   });
   const myClasses = dashData?.data?.myClasses ?? [];
 
-  // Load roster for each class.
-  const rosterQueries = myClasses.map((cls) => ({
-    classId: cls.id,
-    className: cls.name,
-  }));
-
-  // We'll fetch rosters lazily via individual queries.
+  // Batch rosters into a few requests instead of one HTTP round trip per
+  // class. The server reuses the single-class handler, so access checks stay
+  // identical; we only chunk to respect its 20-class batch cap.
   const { data: allRosters } = useQuery({
     queryKey: ['teacher', 'all-rosters', myClasses.map((c) => c.id).join(',')],
     queryFn: async () => {
-      const results = await Promise.all(
-        myClasses.map(async (cls) => {
-          const res = await fetch(`/api/classes/${cls.id}/students?limit=500&status=active`, {
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
+      const ids = myClasses.map((c) => c.id);
+      const results = [];
+      for (let i = 0; i < ids.length; i += 20) {
+        const res = await fetch('/api/classes/rosters/batch', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ classIds: ids.slice(i, i + 20), status: 'active' }),
+        });
+        if (!res.ok) throw new Error(`Could not load class rosters (${res.status}).`);
+        const json = await res.json();
+        for (const row of json?.data ?? []) {
+          results.push({
+            classId: row.classId,
+            className: myClasses.find((c) => c.id === row.classId)?.name ?? '',
+            students: row.students ?? [],
           });
-          const json = await res.json();
-          return { classId: cls.id, className: cls.name, students: json?.data ?? [] };
-        }),
-      );
+        }
+      }
       return results;
     },
     enabled: myClasses.length > 0,

@@ -41,6 +41,58 @@ function chain(result) {
   return c;
 }
 
+function matches(doc, filter = {}) {
+  for (const [field, cond] of Object.entries(filter)) {
+    if (field === '$or') {
+      if (!cond.some((sub) => matches(doc, sub))) return false;
+      continue;
+    }
+    if (field === '$and') {
+      if (!cond.every((sub) => matches(doc, sub))) return false;
+      continue;
+    }
+    const value = doc[field];
+    if (cond && typeof cond === 'object' && !Array.isArray(cond)) {
+      if ('$in' in cond && !cond.$in.includes(value)) return false;
+      if ('$exists' in cond && (cond.$exists === false ? field in doc : !(field in doc))) return false;
+      if (!('$in' in cond) && !('$exists' in cond) && value !== cond) return false;
+    } else if (value !== cond && !(cond === null && (value === undefined || value === null))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// The reminders handler now counts marks with a single $match + $group
+// aggregation instead of one countDocuments() per schedule x target pair.
+// Implement just those two stages against the seeded array so the tests
+// still verify the real row-level contract.
+function runAggregate(seed, pipeline) {
+  let docs = [...seed];
+  for (const stage of pipeline) {
+    if (stage.$match) docs = docs.filter((d) => matches(d, stage.$match));
+    if (stage.$group) {
+      const grouped = new Map();
+      for (const d of docs) {
+        const key = {};
+        for (const [field, expr] of Object.entries(stage.$group._id)) {
+          if (typeof expr === 'string') key[field] = d[expr.slice(1)] ?? null;
+          else if (expr && expr.$ifNull) {
+            const src = expr.$ifNull[0];
+            key[field] = d[src.slice(1)] ?? expr.$ifNull[1];
+          }
+        }
+        const k = JSON.stringify(key);
+        const row = grouped.get(k) || { _id: key, count: 0 };
+        row.count += 1;
+        grouped.set(k, row);
+      }
+      docs = [...grouped.values()];
+    }
+  }
+  return docs;
+}
+
 function mockCollection(seed = []) {
   return {
     find: jest.fn(() => chain(seed)),
@@ -48,6 +100,7 @@ function mockCollection(seed = []) {
     countDocuments: jest.fn((filter = {}) => Promise.resolve(
       seed.filter((d) => Object.entries(filter).every(([k, v]) => d[k] === v)).length,
     )),
+    aggregate: jest.fn((pipeline = []) => Promise.resolve(runAggregate(seed, pipeline))),
   };
 }
 
@@ -189,5 +242,38 @@ describe('GET /api/assessment/reminders — oversight roles', () => {
       missingCount: null,
       expectedCount: null,
     });
+  });
+});
+
+describe('GET /api/assessment/reminders — opt-in pagination', () => {
+  test('without page/limit keeps the legacy flat array and adds no pagination block', async () => {
+    const res = await supertest(buildApp()).get('/api/assessment/reminders').query({ days: 14 });
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(2);
+    expect(res.body.pagination).toBeUndefined();
+  });
+
+  test('page + limit return one slice plus standard pagination metadata', async () => {
+    const first = await supertest(buildApp()).get('/api/assessment/reminders')
+      .query({ days: 14, page: 1, limit: 1 });
+    expect(first.status).toBe(200);
+    expect(first.body.data).toHaveLength(1);
+    expect(first.body.pagination).toMatchObject({ page: 1, limit: 1, total: 2, pages: 2 });
+
+    const second = await supertest(buildApp()).get('/api/assessment/reminders')
+      .query({ days: 14, page: 2, limit: 1 });
+    expect(second.status).toBe(200);
+    expect(second.body.data).toHaveLength(1);
+    expect(second.body.pagination).toMatchObject({ page: 2, limit: 1, total: 2, pages: 2 });
+    expect(second.body.data[0].classId).not.toBe(first.body.data[0].classId);
+  });
+
+  test('an empty teacher scope paginates cleanly instead of returning an unshaped array', async () => {
+    mockAssignments = [];
+    const res = await supertest(buildApp()).get('/api/assessment/reminders')
+      .query({ days: 14, page: 1, limit: 10 });
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([]);
+    expect(res.body.pagination).toMatchObject({ page: 1, limit: 10, total: 0, pages: 1 });
   });
 });

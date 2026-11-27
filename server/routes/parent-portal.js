@@ -1215,12 +1215,21 @@ router.get('/report/:childId', authMiddleware, PLAN, async (req, res) => {
 
     const Reports  = tenantModel('report_card_snapshots', tenantContext(req));
     const Subjects = tenantModel('subjects', tenantContext(req));
+    const Students = tenantModel('students', tenantContext(req));
+    const Streams  = tenantModel('streams', tenantContext(req));
+    const Teachers = tenantModel('teachers', tenantContext(req));
+    const Years    = tenantModel('academic_years', tenantContext(req));
 
-    const cards = await Reports.find({ schoolId, studentId: childId, status: 'published', superseded: { $ne: true } })
-      .sort({ publishedAt: -1 })
-      .limit(6)
-      .select('id academicYear termName termNumber totalScore averageScore gpa rankings publishedAt subjects classTeacherRemark principalRemark reportLabel cycle')
-      .lean();
+    // These three used to run one after the other; none depends on another.
+    const [cards, student, academicYears] = await Promise.all([
+      Reports.find({ schoolId, studentId: childId, status: 'published', superseded: { $ne: true } })
+        .sort({ publishedAt: -1 })
+        .limit(6)
+        .select('id academicYear termName termNumber totalScore averageScore gpa rankings publishedAt subjects classTeacherRemark principalRemark reportLabel cycle')
+        .lean(),
+      Students.findOne({ id: childId, schoolId }).select('firstName lastName className classId streamId').lean(),
+      Years.find({ schoolId }).lean(),
+    ]);
 
     const latest = cards[0] || null;
 
@@ -1229,9 +1238,14 @@ router.get('/report/:childId', authMiddleware, PLAN, async (req, res) => {
     // snapshot IS the record, never provisional assessment_marks.
     const snapshotSubjects = latest?.subjects || {};
     const ids = Object.keys(snapshotSubjects);
-    const subjectDocs = ids.length
-      ? await Subjects.find({ id: { $in: ids }, schoolId }).select('id name code').lean()
-      : [];
+    // Subject names and the student's stream are both known now and do not
+    // depend on each other, so fetch them together.
+    const [subjectDocs, streamDoc] = await Promise.all([
+      ids.length ? Subjects.find({ id: { $in: ids }, schoolId }).select('id name code').lean() : [],
+      student?.streamId
+        ? Streams.findOne({ id: student.streamId, schoolId }).select('formTeacherId assistantFormTeacherId').lean().catch(() => null)
+        : null,
+    ]);
     const nameOf = Object.fromEntries(subjectDocs.map(s => [s.id, s.name]));
 
     const subjects = ids
@@ -1295,28 +1309,20 @@ router.get('/report/:childId', authMiddleware, PLAN, async (req, res) => {
       .map(rc => ({ label: `${rc.academicYear || ''} T${rc.termNumber ?? ''}`.trim(), average: rc.averageScore ?? null }))
       .filter(t => t.average != null);
 
-    const student = await tenantModel('students', tenantContext(req))
-      .findOne({ id: childId, schoolId }).select('firstName lastName className classId streamId').lean();
-
     // Form/assistant teacher lives on the STUDENT'S STREAM, not the class
     // (classes.formTeacherId is a legacy, never-written field — fixed
     // while adding assistant/co-homeroom support, 2026-10-29).
     let classTeacher = null;
     let assistantClassTeacher = null;
-    if (student?.streamId) {
-      const streamDoc = await tenantModel('streams', tenantContext(req))
-        .findOne({ id: student.streamId, schoolId }).select('formTeacherId assistantFormTeacherId').lean().catch(() => null);
-      const homeroomTeacherIds = [streamDoc?.formTeacherId, streamDoc?.assistantFormTeacherId].filter(Boolean);
-      if (homeroomTeacherIds.length) {
-        const ts = await tenantModel('teachers', tenantContext(req))
-          .find({ id: { $in: homeroomTeacherIds }, schoolId }).select('id firstName lastName title').lean().catch(() => []);
-        const nameById = Object.fromEntries(ts.map(t => [t.id, `${t.title ? `${t.title} ` : ''}${t.firstName} ${t.lastName}`.trim()]));
-        classTeacher          = nameById[streamDoc?.formTeacherId] ?? null;
-        assistantClassTeacher = nameById[streamDoc?.assistantFormTeacherId] ?? null;
-      }
+    const homeroomTeacherIds = [streamDoc?.formTeacherId, streamDoc?.assistantFormTeacherId].filter(Boolean);
+    if (homeroomTeacherIds.length) {
+      const ts = await Teachers
+        .find({ id: { $in: homeroomTeacherIds }, schoolId }).select('id firstName lastName title').lean().catch(() => []);
+      const nameById = Object.fromEntries(ts.map(t => [t.id, `${t.title ? `${t.title} ` : ''}${t.firstName} ${t.lastName}`.trim()]));
+      classTeacher          = nameById[streamDoc?.formTeacherId] ?? null;
+      assistantClassTeacher = nameById[streamDoc?.assistantFormTeacherId] ?? null;
     }
 
-    const academicYears = await tenantModel('academic_years', tenantContext(req)).find({ schoolId }).lean();
     const { year: currentYearDoc, term: currentTermDoc, termNumber: currentTermNumber } = resolveCurrentPeriod(academicYears);
 
     return ok(res, {

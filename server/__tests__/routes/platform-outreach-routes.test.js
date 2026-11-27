@@ -132,4 +132,45 @@ describe('platform outreach routes', () => {
     expect(owner.status).toBe(200);
     expect(mockOutreach.updateOutreachSettings).toHaveBeenCalled();
   });
+
+  describe('opt-in pagination for templates and campaigns', () => {
+    const cookie = () => `platform_token=${tokenFor('op_sales')}`;
+    const meta = { page: 2, limit: 2, total: 5, pages: 3 };
+
+    test('templates keep the legacy flat array when no page params are sent', async () => {
+      mockOutreach.listTemplates.mockResolvedValueOnce([{ id: 'otpl_1' }]);
+      const res = await supertest(app).get('/api/platform/outreach/templates').set('Cookie', cookie());
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual([{ id: 'otpl_1' }]);
+      expect(res.body.pagination).toBeUndefined();
+      expect(mockOutreach.listTemplates).toHaveBeenCalledWith(null);
+    });
+
+    test('templates forward page/pageSize and expose pagination', async () => {
+      mockOutreach.listTemplates.mockResolvedValueOnce({ data: [{ id: 'otpl_2' }], pagination: meta });
+      const res = await supertest(app).get('/api/platform/outreach/templates?page=2&pageSize=2').set('Cookie', cookie());
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual([{ id: 'otpl_2' }]);
+      expect(res.body.pagination).toEqual(meta);
+      expect(mockOutreach.listTemplates).toHaveBeenCalledWith(expect.objectContaining({ page: '2', pageSize: '2' }));
+    });
+
+    test('campaigns keep the legacy flat array when no page params are sent', async () => {
+      mockOutreach.listCampaigns.mockResolvedValueOnce([{ id: 'camp_1' }]);
+      const res = await supertest(app).get('/api/platform/outreach/campaigns').set('Cookie', cookie());
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual([{ id: 'camp_1' }]);
+      expect(res.body.pagination).toBeUndefined();
+      expect(mockOutreach.listCampaigns).toHaveBeenCalledWith(null);
+    });
+
+    test('campaigns forward page/pageSize and expose pagination', async () => {
+      mockOutreach.listCampaigns.mockResolvedValueOnce({ data: [{ id: 'camp_2' }], pagination: meta });
+      const res = await supertest(app).get('/api/platform/outreach/campaigns?page=2&pageSize=2').set('Cookie', cookie());
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual([{ id: 'camp_2' }]);
+      expect(res.body.pagination).toEqual(meta);
+      expect(mockOutreach.listCampaigns).toHaveBeenCalledWith(expect.objectContaining({ page: '2', pageSize: '2' }));
+    });
+  });
 });
