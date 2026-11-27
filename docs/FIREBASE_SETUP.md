@@ -21,7 +21,10 @@ A new Admin SDK service-account private key was generated in Firebase Console �
 Project settings → Service accounts, using the Msingi Google account.
 
 - Key file (local, secret — never commit):
-  `C:\Users\hp\Downloads\msingi-app-firebase-adminsdk-fbsvc-096fc14a7a.json`
+  `C:\Users\hp\Downloads\msingi-app-firebase-adminsdk-fbsvc-b070800e4c.json`
+  SHA-256 `419AEDCEBEFDE2CF45C509DAAC4CA399ADC037AA4C0FB119E2519E3F1A3AFC8A`.
+  A fresh key was generated on 27 Nov 2026 at 20:01; the earlier
+  `...096fc14a7a.json` key is superseded.
 - Ready-to-paste base64 for the environment variable:
   `C:\Users\hp\AppData\Local\Temp\opencode\FIREBASE_SERVICE_ACCOUNT_BASE64.txt`
 
