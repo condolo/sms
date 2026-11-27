@@ -19,6 +19,7 @@
     "test:auth:breakdown": "node scripts/auth-login-breakdown.js",
     "test:auth:load-breakdown": "node scripts/auth-login-load-breakdown.js",
     "test:perf": "node scripts/perf-load-test.js",
+    "test:live:perf": "node scripts/live-perf-smoke.js",
     "e2e:council": "node scripts/e2e-council.js",
     "e2e:council:ui": "cd client && npx vite build && cd .. && node scripts/e2e-council-ui.js",
     "test:watch": "jest --watch --runInBand",

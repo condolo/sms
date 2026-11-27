@@ -1,0 +1,185 @@
+{
+  "label": "live-smoke",
+  "capturedAt": "2026-11-27T06:53:20.573Z",
+  "baseUrl": "https://msingi.io",
+  "config": {
+    "requests": 10,
+    "loginRequests": 5,
+    "concurrency": 2,
+    "warmup": 1
+  },
+  "health": {
+    "status": "ok",
+    "version": "4.28.0",
+    "timestamp": "2026-11-27T06:50:52.735Z",
+    "db": "connected"
+  },
+  "discovered": {
+    "classId": "cls_demo_f1a",
+    "studentId": "std_demo_1"
+  },
+  "routes": [
+    {
+      "name": "health",
+      "method": "GET",
+      "path": "/api/health",
+      "requests": 10,
+      "statusCounts": {
+        "200": 10
+      },
+      "okPct": 100,
+      "avgBytes": 90,
+      "latencyMs": {
+        "min": 289.4,
+        "p50": 312,
+        "p95": 422.8,
+        "max": 422.8,
+        "mean": 342.4
+      }
+    },
+    {
+      "name": "auth-me",
+      "method": "GET",
+      "path": "/api/auth/me",
+      "requests": 10,
+      "statusCounts": {
+        "200": 10
+      },
+      "okPct": 100,
+      "avgBytes": 495968,
+      "latencyMs": {
+        "min": 1352.1,
+        "p50": 1662.1,
+        "p95": 2369.4,
+        "max": 2369.4,
+        "mean": 1685.1
+      }
+    },
+    {
+      "name": "login-credentials",
+      "method": "POST",
+      "path": "/api/auth/login-credentials",
+      "requests": 5,
+      "statusCounts": {
+        "200": 5
+      },
+      "okPct": 100,
+      "avgBytes": 8411,
+      "latencyMs": {
+        "min": 3081.9,
+        "p50": 3549.9,
+        "p95": 3738.7,
+        "max": 3738.7,
+        "mean": 3464.1
+      }
+    },
+    {
+      "name": "student-dashboard",
+      "method": "GET",
+      "path": "/api/student-portal/dashboard",
+      "requests": 10,
+      "statusCounts": {
+        "200": 10
+      },
+      "okPct": 100,
+      "avgBytes": 4472,
+      "latencyMs": {
+        "min": 4901.8,
+        "p50": 5866.2,
+        "p95": 7544.8,
+        "max": 7544.8,
+        "mean": 5965.1
+      }
+    },
+    {
+      "name": "assessment-reminders",
+      "method": "GET",
+      "path": "/api/assessment/reminders",
+      "requests": 10,
+      "statusCounts": {
+        "200": 10
+      },
+      "okPct": 100,
+      "avgBytes": 8705,
+      "latencyMs": {
+        "min": 7423.2,
+        "p50": 7518.5,
+        "p95": 7719.3,
+        "max": 7719.3,
+        "mean": 7538.5
+      }
+    },
+    {
+      "name": "class-students",
+      "method": "GET",
+      "path": "/api/classes/cls_demo_f1a/students",
+      "requests": 10,
+      "statusCounts": {
+        "200": 10
+      },
+      "okPct": 100,
+      "avgBytes": 5640,
+      "latencyMs": {
+        "min": 1011.2,
+        "p50": 1042.2,
+        "p95": 1067.2,
+        "max": 1067.2,
+        "mean": 1040.2
+      }
+    },
+    {
+      "name": "parent-report",
+      "method": "GET",
+      "path": "/api/parent-portal/report/std_demo_1",
+      "requests": 10,
+      "statusCounts": {
+        "200": 10
+      },
+      "okPct": 100,
+      "avgBytes": 3470,
+      "latencyMs": {
+        "min": 1714.7,
+        "p50": 1751.6,
+        "p95": 2272.7,
+        "max": 2272.7,
+        "mean": 1807.5
+      }
+    },
+    {
+      "name": "school-asset",
+      "method": "GET",
+      "path": "/api/public/school-asset/logo?slug=sch_demo",
+      "requests": 10,
+      "statusCounts": {
+        "200": 10
+      },
+      "okPct": 100,
+      "avgBytes": 21585,
+      "latencyMs": {
+        "min": 795.5,
+        "p50": 875.4,
+        "p95": 1182,
+        "max": 1182,
+        "mean": 931.7
+      }
+    },
+    {
+      "name": "class-rosters-batch",
+      "method": "POST",
+      "path": "/api/classes/rosters/batch",
+      "requests": 10,
+      "statusCounts": {
+        "404": 10
+      },
+      "okPct": 100,
+      "avgBytes": 165,
+      "latencyMs": {
+        "min": 293.9,
+        "p50": 301.2,
+        "p95": 331.5,
+        "max": 331.5,
+        "mean": 311.8
+      }
+    }
+  ]
+}
