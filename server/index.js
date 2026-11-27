@@ -22,6 +22,7 @@ const { provisionIdentities } = require('./utils/provision-identities');
 const { correlationIdMiddleware } = require('./utils/correlation-id');
 const { seedDemo }            = require('./scripts/seed-demo');
 const { closePool, warmPool }  = require('./services/passwordHash');
+const buildInfo                = require('./utils/build-info');
 
 /* ── Monitoring: initialise BEFORE anything else ──────────────
    Registers uncaughtException + unhandledRejection handlers.
@@ -68,6 +69,16 @@ app.set('trust proxy', 1);
    so AuditService.log() can attach it to every audit entry a single
    request produces. See server/utils/correlation-id.js.            */
 app.use(correlationIdMiddleware);
+
+/* ── Build identity ─────────────────────────────────────────────
+   Every API response carries the running commit so a rolling deploy can
+   be verified from the outside without guessing from feature probes. */
+app.use((_req, res, next) => {
+  res.setHeader('X-Msingi-Commit', buildInfo.commit);
+  res.setHeader('X-Msingi-Version', buildInfo.version);
+  if (buildInfo.deployedAt) res.setHeader('X-Msingi-Deployed-At', buildInfo.deployedAt);
+  next();
+});
 
 /* ── Block sensitive path access ────────────────────────────── */
 app.use((req, res, next) => {
@@ -434,7 +445,11 @@ app.post('/api/announcements/:id/dismiss', authMiddleware, async (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    version: require('../package.json').version,
+    version: buildInfo.version,
+    commit: buildInfo.commit,
+    deployedAt: buildInfo.deployedAt,
+    node: buildInfo.node,
+    uptimeSec: Math.round(process.uptime()),
     timestamp: new Date().toISOString(),
     db: require('./config/db').isConnected() ? 'connected' : 'disconnected'
   });
