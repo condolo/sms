@@ -51,6 +51,8 @@ async function _kgClassIds(schoolId, classIds) {
   return out;
 }
 
+const { studentClassProblems } = require('../utils/mark-students');
+
 const router = express.Router();
 const PLAN   = planGate('grades');
 const MODGATE = moduleGate('grades');
@@ -1194,6 +1196,14 @@ router.post('/marks', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), a
     const markStudent = await tenantModel('students', tenantContext(req))
       .findOne({ schoolId, id: d.studentId }).select('streamId').lean();
 
+    // Guard: the student exists here and is (or was) in this class.
+    const [studentProblem] = await studentClassProblems(tenantContext(req), schoolId, [{ studentId: d.studentId, classId: d.classId }]);
+    if (studentProblem) {
+      return studentProblem.problem === 'not_found'
+        ? _err(res, 'This student is not in this school.', 400)
+        : _err(res, 'This student is not in this class, now or in an earlier year, so marks cannot be entered for them here.', 400);
+    }
+
     // Guard: curriculum integrity — this subject must actually be part of
     // this class's curriculum (class_subjects), compulsory or elective,
     // before anything else is checked. Applies to EVERY role including
@@ -1373,6 +1383,18 @@ router.post('/marks/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
     const bulkStudentDocs = await tenantModel('students', tenantContext(req))
       .find({ schoolId, id: { $in: bulkStudentIds } }).select('id streamId').lean();
     const streamByStudent = Object.fromEntries(bulkStudentDocs.map(s => [s.id, s.streamId ?? null]));
+
+    // Guard: every student exists here and is (or was) in the mark's class.
+    // The whole batch is refused, as for the curriculum check, naming the students.
+    const studentProblems = await studentClassProblems(tenantContext(req), schoolId, [...new Map(marks.map(d => [`${d.studentId}|${d.classId}`, { studentId: d.studentId, classId: d.classId }])).values()]);
+    if (studentProblems.length) {
+      const missing = studentProblems.filter(p => p.problem === 'not_found').map(p => p.studentId);
+      const moved   = studentProblems.filter(p => p.problem === 'other_class').map(p => p.studentId);
+      const parts = [];
+      if (missing.length) parts.push(`not in this school: ${missing.slice(0, 10).join(', ')}${missing.length > 10 ? ` and ${missing.length - 10} more` : ''}`);
+      if (moved.length) parts.push(`not in this class, now or in an earlier year: ${moved.slice(0, 10).join(', ')}${moved.length > 10 ? ` and ${moved.length - 10} more` : ''}`);
+      return _err(res, `Nothing was saved. Students ${parts.join('; ')}. Reload the class list and try again.`, 400);
+    }
 
     // Guard: subject-teacher scoping (RC6) — unconditional (see subject-scope.js);
     // one query for every distinct {classId, subjectId, streamId} triple in

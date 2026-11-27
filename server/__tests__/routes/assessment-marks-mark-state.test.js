@@ -13,6 +13,8 @@
    All DB calls are mocked — no MongoDB required.
    ============================================================ */
 
+// Student-in-class check (v5.291.0) is covered by mark-students.test.js; stubbed here.
+jest.mock("../../utils/mark-students", () => ({ studentClassProblems: async () => [] }));
 jest.mock('../../middleware/auth', () => ({
   authMiddleware: (req, _res, next) => {
     req.jwtUser = { userId: 'usr_teacher_001', schoolId: 'school_test_001', role: 'teacher', roles: ['teacher'] };

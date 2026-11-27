@@ -17,6 +17,8 @@
 
 const SCHOOL = 'sch_1';
 
+// Student-in-class check (v5.291.0) is covered by mark-students.test.js; stubbed here.
+jest.mock("../../utils/mark-students", () => ({ studentClassProblems: async () => [] }));
 jest.mock('../../middleware/auth', () => ({
   authMiddleware: (req, _res, next) => { req.jwtUser = { userId: 'usr_admin', schoolId: SCHOOL, role: 'admin', roles: ['admin'] }; next(); },
 }));

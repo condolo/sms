@@ -426,6 +426,8 @@ Weights are fully configurable by the school admin. The system enforces that the
 
 > **Note:** MT and ET can only be entered by admins and deputies by default. Your admin can enable teacher exam entry in Configuration.
 
+> **Only the class's students (v5.291.0):** marks are saved only for students of that class: in it now, in it in an earlier year, or already holding marks in it. If a save says a student is "not in this class" or "not in this school", nothing in that save was stored; the class list on screen is out of date. Reload and enter the marks again.
+
 ### How Marks Are Calculated
 
 **Multiple instances** (e.g. CA1 + CA2) are **averaged**, then the weight is applied:

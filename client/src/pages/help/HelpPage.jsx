@@ -750,6 +750,10 @@ const SECTIONS = [
         a: "No. Only report cards for the current academic year send messages or emails. Parents can still open published past report cards in the parent portal, and the current term's report stays the one shown first.",
       },
       {
+        q: 'Saving marks says a student is "not in this class". What do I do?',
+        a: "Marks are saved only for students of that class: students in it now, students who were in it in an earlier year, or students who already have marks in it. The message appears when the class list on your screen is out of date (for example, a student was moved or removed while you were entering marks). Nothing in that save was stored. Reload the page, check the class list, and enter the marks again.",
+      },
+      {
         q: "Why can't I find a subject in the Markbook for a Kindergarten class?",
         a: "A class with a Kindergarten template is marked only with competency indicators, and only for the subjects in its template. Any other subject the class takes is not listed in the Markbook, because it would have no indicators and would never appear on the Kindergarten report card. Scores can't be entered for these classes either. To mark the subject, an administrator adds it to the template in Exams & Assessment → Kindergarten Templates; it then appears in the Markbook with indicator entry.",
       },

@@ -6,6 +6,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.291.0] - 2026-11-26 - fix(marks): a mark must belong to a student of that class
+
+Found while testing v5.290.0: the server saved a mark for a student id that doesn't exist.
+
+### Fixed
+- **`POST /assessment/marks` and `/marks/bulk` accepted any student id for any class.** A typo or a stale id created a mark for nobody, or for a pupil of another class. A mark is now saved only for a student of this school who is in that class now, was in it in an earlier year (class history), or already has marks in it (so a correction after a move still works). Student status isn't checked, so a withdrawn student's marks can still be corrected.
+- A batch with any such student saves nothing and names the students ("Reload the class list and try again").
+
+No data migration. Existing marks are not changed: a check of the live data found 21 marks at one school, and 5 at an old test school, for students whose records no longer exist; they are left as they are. Imports are not covered by this change.
+
+Files: new `server/utils/mark-students.js` (`studentClassProblems`); `assessment.js` (both mark routes); tests `utils/mark-students.test.js`, `routes/assessment-marks-student-in-class.test.js` (older mark-route tests stub the check).
+
+---
+
 ## [v5.290.0] - 2026-11-26 - fix(kindergarten): the Markbook offers only the template's subjects for a Kindergarten class
 
 Reported by a school: in a Kindergarten class, subjects left out of the Kindergarten template (e.g. Christian Religious Education) opened in the Markbook as a numeric score grid, and anything typed there would never appear on the Kindergarten report card.

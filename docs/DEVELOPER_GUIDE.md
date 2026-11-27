@@ -7902,6 +7902,12 @@ A class that resolves to an `rc_templates` doc (`resolveRcTemplate`: explicit `c
 
 Not changed: existing numeric marks in template classes are kept (one school had 20 from before its template covered those subjects); imports (`import-export.js`) are not guarded. Tests: `server/__tests__/routes/assessment-kg-class-refuses-scores.test.js`.
 
+### Marks must belong to a student of the class (v5.291.0, 2026-11-26)
+
+`server/utils/mark-students.js` → `studentClassProblems(ctx, schoolId, [{studentId, classId}])` returns `[{studentId, classId, problem: 'not_found' | 'other_class'}]`. A student is looked up by `id` or legacy `_id`, in this school only. Accepted when `student.classId` matches the mark's class by either the class's `id` or `_id`; otherwise when `student_class_history` or existing `assessment_marks` have that student in that class (any of its id forms). Status is deliberately not checked (corrections for withdrawn students).
+
+`POST /assessment/marks` calls it right after resolving the student's stream (400 "This student is not in this school." / "…not in this class, now or in an earlier year…"). `POST /marks/bulk` calls it once per distinct student/class pair and refuses the whole batch, naming up to 10 students per problem, before any scope check or write. Older mark-route test files stub the module (`jest.mock('../../utils/mark-students', …)`) because their mocks hold no students; the rule's own tests use `fixtures/fake-tenant-db`. Not covered: `import-export.js`.
+
 ### Past results and class history (v5.278.0)
 
 **`server/routes/past-results.js`** (mounted at `/api/past-results`):
