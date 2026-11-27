@@ -99,7 +99,10 @@ async function sendToTokens({ tokens, title, body, data }) {
     : undefined;
 
   try {
-    const res = await admin.messaging().sendEachForMulticast({
+    const messaging = typeof admin.messaging === 'function'
+      ? admin.messaging()
+      : require('firebase-admin/messaging').getMessaging(admin);
+    const res = await messaging.sendEachForMulticast({
       tokens: list,
       notification: { title, body },
       data: stringData,

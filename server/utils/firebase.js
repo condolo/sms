@@ -69,7 +69,7 @@ function getFirebaseAdmin() {
   try {
     const existing = admin.apps?.length ? admin.app() : null;
     _app = existing || admin.initializeApp({
-      credential: credential ? admin.credential.cert(credential) : admin.credential.applicationDefault(),
+      credential: credential ? admin.cert(credential) : admin.applicationDefault(),
     });
     return _app;
   } catch (err) {
@@ -86,7 +86,8 @@ async function verifyIdToken(idToken) {
     err.code = 'GOOGLE_NOT_CONFIGURED';
     throw err;
   }
-  return admin.auth().verifyIdToken(idToken);
+  const { getAuth } = require('firebase-admin/auth');
+  return getAuth(admin).verifyIdToken(idToken);
 }
 
 module.exports = { getFirebaseAdmin, isFirebaseConfigured, verifyIdToken };
